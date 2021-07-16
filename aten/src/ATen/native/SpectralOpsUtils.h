@@ -3,6 +3,7 @@
 #include <string>
 #include <stdexcept>
 #include <sstream>
+#include <ATen/native/DispatchStub.h>
 
 namespace at { namespace native {
 
@@ -61,5 +62,19 @@ inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
     AT_ERROR(ss.str());
   }
 }
+
+using fft_fill_with_conjugate_symmetry_fn =
+    void (*)(ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef half_sizes,
+             IntArrayRef in_strides, const void* in_data,
+             IntArrayRef out_strides, void* out_data);
+DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_symmetry_stub);
+
+// In real-to-complex transform, cuFFT and MKL only fill half of the values
+// due to conjugate symmetry. This function fills in the other half of the full
+// fft by using the Hermitian symmetry in the signal.
+// self should be the shape of the full signal and dims.back() should be the
+// one-sided dimension.
+// See NOTE [ Fourier Transform Conjugate Symmetry ]
+TORCH_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
 
 }} // at::native

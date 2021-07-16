@@ -51,6 +51,7 @@ class IDEEPSafeEnqueueBlobsOp final : public IDEEPOperator {
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE(
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         OutputSize() == size + 1,
         "Expected " + caffe2::to_string(size + 1) + ", " +
             " got: " + caffe2::to_string(size));
@@ -64,10 +65,14 @@ class IDEEPSafeEnqueueBlobsOp final : public IDEEPOperator {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CreateBlobsQueue, IDEEPCreateBlobsQueueOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IDEEPCreateBlobsQueueOp);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(SafeEnqueueBlobs, IDEEPSafeEnqueueBlobsOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IDEEPSafeEnqueueBlobsOp);
 
 } // namespace

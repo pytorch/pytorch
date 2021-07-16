@@ -65,12 +65,17 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 // cusolver related headers are only supported on cuda now
 #ifdef CUDART_VERSION
 
-#define TORCH_CUSOLVER_CHECK(EXPR)                              \
-  do {                                                          \
-    cusolverStatus_t __err = EXPR;                              \
-    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,               \
-                "cusolver error: ", __err,                      \
-                ", when calling `" #EXPR "`");                  \
+namespace at { namespace cuda { namespace solver {
+const char* cusolverGetErrorMessage(cusolverStatus_t status);
+}}} // namespace at::cuda::solver
+
+#define TORCH_CUSOLVER_CHECK(EXPR)                                \
+  do {                                                            \
+    cusolverStatus_t __err = EXPR;                                \
+    TORCH_CHECK(__err == CUSOLVER_STATUS_SUCCESS,                 \
+                "cusolver error: ",                               \
+                at::cuda::solver::cusolverGetErrorMessage(__err), \
+                ", when calling `" #EXPR "`");                    \
   } while (0)
 
 #else
@@ -78,11 +83,6 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 #endif
 
 #define AT_CUDA_CHECK(EXPR) C10_CUDA_CHECK(EXPR)
-
-// This should be used directly after every kernel launch to ensure
-// the launch happened correctly and provide an early, close-to-source
-// diagnostic if it didn't.
-#define TORCH_CUDA_KERNEL_LAUNCH_CHECK() AT_CUDA_CHECK(cudaGetLastError())
 
 // For CUDA Driver API
 //

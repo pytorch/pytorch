@@ -33,10 +33,7 @@ class Runtime final {
   Runtime& operator=(Runtime&&) = default;
   ~Runtime() = default;
 
-  inline VkInstance instance() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(instance_);
-    return instance_.get();
-  }
+  VkInstance instance() const;
 
   typedef std::function<bool (const Adapter&)> Selector;
   Adapter select(const Selector& selector);
@@ -44,8 +41,8 @@ class Runtime final {
  private:
   class Debug final {
    public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+    explicit Debug(VkInstance);
+    void operator()(VkDebugReportCallbackEXT) const;
 
    private:
     VkInstance instance_;
@@ -58,6 +55,15 @@ class Runtime final {
 };
 
 Runtime* runtime();
+
+//
+// Impl
+//
+
+inline VkInstance Runtime::instance() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(instance_);
+  return instance_.get();
+}
 
 } // namespace api
 } // namespace vulkan

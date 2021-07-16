@@ -44,9 +44,11 @@ OpSchema::Cost CostInferenceForSparseLengths(
 
 // registering 5 input gradient with main output
 // gradient of SparseLengthsWeightedSum
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
     .NumInputs(5)
     .NumOutputs(2);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient,
     AbstractLengthsWithMainInputGradientOp<
@@ -59,9 +61,11 @@ REGISTER_CPU_OPERATOR(
         true /*GradientNeedIndices*/>);
 
 // registering 4 input version
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumGradient)
     .NumInputs(4)
     .NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumGradient,
     AbstractLengthsGradientOp<
@@ -73,9 +77,11 @@ REGISTER_CPU_OPERATOR(
 
 // registering 3 input version
 // gradient of SparseLengthsSum
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientSumGradient)
     .NumInputs(3)
     .NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientSumGradient,
     AbstractLengthsGradientOp<
@@ -85,7 +91,9 @@ REGISTER_CPU_OPERATOR(
         SumReducerDef::template ReducerGradient<float, CPUContext>,
         true /*GradientNeedIndices*/>);
 // gradient of LengthsSum
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsIndicesInGradientSumGradient).NumInputs(3).NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LengthsIndicesInGradientSumGradient,
     AbstractLengthsGradientOp<
@@ -97,9 +105,11 @@ REGISTER_CPU_OPERATOR(
 
 // registering 3 input version
 // gradient of SparseLengthsMean
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientMeanGradient)
     .NumInputs(3)
     .NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsIndicesInGradientMeanGradient,
     AbstractLengthsGradientOp<
@@ -109,9 +119,11 @@ REGISTER_CPU_OPERATOR(
         MeanReducerDef::template ReducerGradient<float, CPUContext>,
         true /*GradientNeedIndices*/>);
 // gradient of LengthsMean
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LengthsIndicesInGradientMeanGradient)
     .NumInputs(3)
     .NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LengthsIndicesInGradientMeanGradient,
     AbstractLengthsGradientOp<
@@ -123,6 +135,7 @@ REGISTER_CPU_OPERATOR(
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kLengthsMaxExtra = R"DOC(
 The *LengthsMax* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the maximum value in each of the segments of *DATA*, where segments are defined by their lengths.
 For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [max([2,4]), max([3,1,2]), max([10])] = [4,3,10]$.
@@ -174,6 +187,7 @@ OUTPUT:
 
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kLengthsMeanExtra = R"DOC(
 The *LengthsMean* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the mean value in each of the segments of *DATA*, where segments are defined by their lengths.
 For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [mean([2,4]), mean([3,1,2]), mean([10])] = [3,2,10]$.
@@ -225,6 +239,7 @@ OUTPUT:
 
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kLengthsSumExtra = R"DOC(
 The *LengthsSum* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the sum in each of the segments of *DATA*, where segments are defined by their lengths.
 For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [sum([2,4]), sum([3,1,2]), sum([10])] = [6,6,10]$.
@@ -276,6 +291,7 @@ OUTPUT:
 
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kLengthsWeightedSumExtra = R"DOC(
 The *LengthsWeightedSum* op takes three inputs *DATA*, *LENGTHS*, and *SCALARS*, and produces a single output *OUTPUT*. The op finds the weighted sum in each of the segments of *DATA*, where segments are defined by their lengths. Before calculating the sums, the input *DATA* is weighted by the contents of *SCALARS*.
 For example, if $DATA = [2,4,3,1,2,10]$, $SCALARS = [8, 2, 1, 4, 1, 0.6]$, and $LENGTHS = [2,3,1]$, then $OUTPUT = [sum([8*2,2*4]), sum([1*3,4*1,1*2]), sum([0.6*10])] = [24,9,6]$.
@@ -402,10 +418,12 @@ constexpr bool equal(
   REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(                                 \
       segment_name, gradient_name, __VA_ARGS__)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentRangeSum,
     SortedSegmentRangeSumGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, SumRangeReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentRangeLogSumExp,
     SortedSegmentRangeLogSumExpGradient,
@@ -414,6 +432,7 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         LogSumExpRangeReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentRangeLogMeanExp,
     SortedSegmentRangeLogMeanExpGradient,
@@ -422,67 +441,82 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         LogMeanExpRangeReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentRangeMean,
     SortedSegmentRangeMeanGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, MeanRangeReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentRangeMax,
     SortedSegmentRangeMaxGradient,
     AbstractSortedSegmentRangeDef<float, int, CPUContext, MaxRangeReducerDef>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentSum,
     SortedSegmentSumGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, SumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseSortedSegmentSum,
     SparseSortedSegmentSumGradient,
     AbstractSparseSortedSegmentDef<float, int, CPUContext, SumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     UnsortedSegmentSum,
     UnsortedSegmentSumGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, SumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseUnsortedSegmentSum,
     SparseUnsortedSegmentSumGradient,
     AbstractSparseUnsortedSegmentDef<float, int, CPUContext, SumReducerDef>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     LengthsSum,
     LengthsSumGradient,
     AbstractLengthsDef<float, int, CPUContext, SumReducerDef, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentMean,
     SortedSegmentMeanGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseSortedSegmentMean,
     SparseSortedSegmentMeanGradient,
     AbstractSparseSortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     UnsortedSegmentMean,
     UnsortedSegmentMeanGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseUnsortedSegmentMean,
     SparseUnsortedSegmentMeanGradient,
     AbstractSparseUnsortedSegmentDef<float, int, CPUContext, MeanReducerDef>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     LengthsMean,
     LengthsMeanGradient,
     AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     ReduceFrontWeightedSum,
     ReduceFrontWeightedSumGradient,
     AbstractReduceFrontDef<float, CPUContext, WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SortedSegmentWeightedSum,
     SortedSegmentWeightedSumGradient,
     AbstractSortedSegmentDef<float, int, CPUContext, WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseSortedSegmentWeightedSum,
     SparseSortedSegmentWeightedSumGradient,
@@ -491,10 +525,12 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     UnsortedSegmentWeightedSum,
     UnsortedSegmentWeightedSumGradient,
     AbstractUnsortedSegmentDef<float, int, CPUContext, WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     SparseUnsortedSegmentWeightedSum,
     SparseUnsortedSegmentWeightedSumGradient,
@@ -503,6 +539,7 @@ REGISTER_SEGMENT_DEF(
         int,
         CPUContext,
         WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_SEGMENT_DEF(
     LengthsWeightedSum,
     LengthsWeightedSumGradient,
@@ -523,9 +560,11 @@ REGISTER_SEGMENT_DEF(
       .NumInputs(__VA_ARGS__::WithMainInputBackwardOp::kNumInputs)   \
       .NumOutputs(1, INT_MAX)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_GRADIENT_WITH_MAIN_INPUT(
     LengthsWeightedSumWithMainInputGradient,
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,clang-diagnostic-unused-function)
 REGISTER_GRADIENT_WITH_MAIN_INPUT(
     SparseLengthsWeightedSumWithMainInputGradient,
     AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
@@ -574,6 +613,7 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
   REGISTER_SEGMENT_DEF_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(               \
       segment_name, gradient_name, __VA_ARGS__)
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
     LengthsMax,
     LengthsMaxWithMainInputAndForwardOutputGradient,

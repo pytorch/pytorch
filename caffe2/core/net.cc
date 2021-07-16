@@ -12,6 +12,7 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     caffe2_override_executor,
     "",
@@ -19,6 +20,7 @@ C10_DEFINE_string(
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     NetRegistry,
     NetBase,
@@ -231,6 +233,7 @@ std::vector<float> NetBase::TEST_Benchmark(
   }
   auto millis = timer.MilliSeconds();
   LOG(INFO) << "Main runs finished. Milliseconds per iter: "
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
             << millis / main_runs
             << ". Iters per second: " << 1000.0 * main_runs / millis;
 
@@ -238,6 +241,7 @@ std::vector<float> NetBase::TEST_Benchmark(
     LOG(INFO) << "Net does not support per-op benchmark; "
                  "to run it, switch to a simple net type";
   }
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return std::vector<float>{millis / main_runs};
 }
 

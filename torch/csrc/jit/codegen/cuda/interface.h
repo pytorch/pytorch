@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 
 /*
  * This file contains APIs for cuda fuser;
@@ -22,7 +23,7 @@ TORCH_API std::atomic<bool>& getCudaFusionGuardMode();
 struct CudaFuserInterface {
   void (*fn_compile_n_)(Node*) = nullptr;
   void (*fn_run_n_s_)(const Node*, Stack&) = nullptr;
-  void (*fn_fuse_graph)(std::shared_ptr<Graph>&) = nullptr;
+  void (*fn_fuse_graph_)(std::shared_ptr<Graph>&) = nullptr;
   bool (*fn_can_fuse_n_)(const Node*) = nullptr;
 };
 

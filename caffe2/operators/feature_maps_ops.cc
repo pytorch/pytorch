@@ -41,9 +41,11 @@ const std::string doc = R"DOC(
   https://our.intern.facebook.com/intern/dex/caffe2/sparse-operations/
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeDenseFeatureTensors,
     MergeDenseFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeDenseFeatureTensors)
     .SetDoc(
         "Merge given multi-feature dense tensors  into one "
@@ -58,9 +60,11 @@ OPERATOR_SCHEMA(MergeDenseFeatureTensors)
     .Output(2, "out_values", ".values")
     .Arg("feature_ids", "feature ids");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleScalarFeatureTensors,
     MergeSingleScalarFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleScalarFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with scalar features into one "
@@ -95,9 +99,11 @@ class GetMergeSingleScalarFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleScalarFeatureTensorsGradient,
     MergeSingleScalarFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleScalarFeatureTensorsGradient)
     .SetDoc(
         "Explode multi-feature tensor of scalar features into one or more"
@@ -108,15 +114,18 @@ OPERATOR_SCHEMA(MergeSingleScalarFeatureTensorsGradient)
     .Input(0, "in1_presence", ".presence")
     .Input(1, ".values_grad", ".values_grad")
     .Output(0, "in1_grad", "_grad of inputs");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeSingleScalarFeatureTensors,
     GetMergeSingleScalarFeatureTensorsGradient);
 
 // ##########################################################
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleListFeatureTensors,
     MergeSingleListFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleListFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with list features into one "
@@ -154,9 +163,11 @@ class GetMergeSingleListFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleListFeatureTensorsGradient,
     MergeSingleListOrMapFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleListFeatureTensorsGradient)
     .SetDoc(
         "Explode multi-feature tensors with list features into "
@@ -168,15 +179,18 @@ OPERATOR_SCHEMA(MergeSingleListFeatureTensorsGradient)
     .Input(1, "in1_presence", ".presence")
     .Input(2, "out_values_values", ".values.values_grad")
     .Output(0, "out1_values", ".values_grad");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeSingleListFeatureTensors,
     GetMergeSingleListFeatureTensorsGradient);
 
 // ##########################################################
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleMapFeatureTensors,
     MergeSingleMapFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleMapFeatureTensors)
     .SetDoc(
         "Merge given single-feature tensors with map features into one "
@@ -216,9 +230,11 @@ class GetMergeSingleMapFeatureTensorsGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeSingleMapFeatureTensorsGradient,
     MergeSingleListOrMapFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeSingleMapFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with map features into "
@@ -230,15 +246,18 @@ OPERATOR_SCHEMA(MergeSingleMapFeatureTensorsGradient)
     .Input(1, "in1_presence", ".presence")
     .Input(2, "out_values_values_grad", ".values.values_grad")
     .Output(0, "in1_values_grad", ".values_grad");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeSingleMapFeatureTensors,
     GetMergeSingleMapFeatureTensorsGradient);
 
 // ##########################################################
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiScalarFeatureTensors,
     MergeMultiScalarFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiScalarFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with scalar features into one." +
@@ -276,9 +295,11 @@ class GetMergeMultiScalarFeatureTensorsGradient : public GradientMakerBase {
   const int kNumTensorsPerInput = 3;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiScalarFeatureTensorsGradient,
     MergeMultiScalarFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiScalarFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with scalar features into many." +
@@ -288,18 +309,22 @@ OPERATOR_SCHEMA(MergeMultiScalarFeatureTensorsGradient)
     .Input(0, "in1_lengths", ".lengths")
     .Input(1, "out_values_grad", ".values_grad")
     .Output(0, "in1_values_grad", ".values_grad");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeMultiScalarFeatureTensors,
     GetMergeMultiScalarFeatureTensorsGradient);
 
 // ##########################################################
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiListFeatureTensors,
     MergeMultiListFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiListFeatureTensorsGradient,
     MergeMultiListOrMapFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiListFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with list features into one." + doc)
@@ -313,6 +338,7 @@ OPERATOR_SCHEMA(MergeMultiListFeatureTensors)
     .Output(1, "out_keys", ".keys")
     .Output(2, "out_values_lengths", ".values.lengths")
     .Output(3, "out_values_values", ".values.values");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiListFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with list features "
@@ -350,15 +376,18 @@ class GetMergeMultiListFeatureTensorsGradient : public GradientMakerBase {
   const int kNumTensorsPerInput = 4;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeMultiListFeatureTensors,
     GetMergeMultiListFeatureTensorsGradient);
 
 // ##########################################################
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiMapFeatureTensors,
     MergeMultiMapFeatureTensorsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiMapFeatureTensors)
     .SetDoc(
         "Merge given multi-feature tensors with map features into one." + doc)
@@ -400,9 +429,11 @@ class GetMergeMultiMapFeatureTensorsGradient : public GradientMakerBase {
   const int kNumTensorsPerInput = 5;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MergeMultiMapFeatureTensorsGradient,
     MergeMultiListOrMapFeatureTensorsGradientOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeMultiMapFeatureTensorsGradient)
     .SetDoc(
         "Explode given multi-feature tensors with map features "
@@ -414,6 +445,7 @@ OPERATOR_SCHEMA(MergeMultiMapFeatureTensorsGradient)
     .Input(1, "in1_values_lengths", ".values.lengths")
     .Input(2, "out_values_values_grad", ".values.values_grad")
     .Output(0, "in1_values_values_grad", ".values.values_grad");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(
     MergeMultiMapFeatureTensors,
     GetMergeMultiMapFeatureTensorsGradient);

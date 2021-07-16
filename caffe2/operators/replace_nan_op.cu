@@ -29,6 +29,7 @@ void ReplaceNaNOp<CUDAContext>::ReplaceNaN(
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(value, size, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 REGISTER_CUDA_OPERATOR(ReplaceNaN, ReplaceNaNOp<CUDAContext>);
 } // namespace caffe2

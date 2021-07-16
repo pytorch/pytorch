@@ -1,9 +1,8 @@
-import unittest
 import sys
 import os
 import contextlib
 import subprocess
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 
 @contextlib.contextmanager
@@ -16,7 +15,7 @@ def _jit_disabled():
         os.environ["PYTORCH_JIT"] = cur_env
 
 
-class TestJitDisabled(unittest.TestCase):
+class TestJitDisabled(TestCase):
     """
     These tests are separate from the rest of the JIT tests because we need
     run a new subprocess and `import torch` with the correct environment
@@ -91,4 +90,4 @@ print("Didn't throw exception")
         self.compare_enabled_disabled(_program_string)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

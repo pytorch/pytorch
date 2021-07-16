@@ -23,16 +23,19 @@ void pytorch_q8dwconv_ukernel_up8x9_per_channel__neon(
         quantization_params[restrict static 1]) {
   const uint8x8_t va_zero_point =
       vld1_dup_u8((const uint8_t*)&quantization_params->neon.input_zero_point);
+#ifdef __aarch64__
   const int16x8_t voutput_zero_point =
       vld1q_dup_s16(&quantization_params->neon.output_zero_point);
   const uint8x8_t voutput_min =
       vld1_dup_u8(&quantization_params->neon.output_min);
   const uint8x8_t voutput_max =
       vld1_dup_u8(&quantization_params->neon.output_max);
+#else
   const float32x4_t vfmin = vdupq_n_f32(quantization_params->neon.vfmin);
   const float32x4_t vfmax = vdupq_n_f32(quantization_params->neon.vfmax);
   const float32x4_t vfmagic = vdupq_n_f32(quantization_params->neon.vfmagic);
   const int32x4_t vimagic = vdupq_n_s32(quantization_params->neon.vimagic);
+#endif
 
 #ifdef __aarch64__
   /* Larger number of registers on AArch64 make it possible to process few

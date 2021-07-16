@@ -6,7 +6,7 @@ operators that haven't been standardized yet, or custom `torch.autograd.Function
 are specific to a network.
 
 To bridge this gap, we provide an experimental operator in ONNX that allows you to directly access PyTorch's tensor functions using the ATen library.
-[ATen](https://github.com/zdevito/aten) is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/caffe2/caffe2/tree/master/caffe2/contrib/aten)
+[ATen](https://github.com/pytorch/pytorch/tree/master/aten) is the underlying C++ library that PyTorch uses to do tensor operations. Caffe2 has an [ATen operator](https://github.com/pytorch/pytorch/tree/master/caffe2/contrib/aten)
 that can run these tensor functions in a Caffe2 network after importing them through ONNX.
 
 This guide explains how to configure Caffe2 and modify your PyTorch program to use
@@ -61,8 +61,8 @@ We can add a `symbolic` method to it like so:
 
 The function `graph.at` adds a new ATen op the computation graph.
 You can call any ATen function using this facility. To do so,
-first identify a function in ATen you want to call in [Functions.h](https://github.com/zdevito/ATen/blob/master/doc/Functions.h),
-[Tensor.h](https://github.com/zdevito/ATen/blob/master/doc/Tensor.h), or [Type.h](https://github.com/zdevito/ATen/blob/master/doc/Type.h).
+first identify a function in ATen you want to call in Functions.h,
+Tensor.h, or Type.h.
 
 As an example, we might want to call the `pow` operator:
 
@@ -86,9 +86,9 @@ To call methods of ATen's `Type` objects, you provide an additional string attri
 that determines the type. For instance, `ones` creates a new constant tensor of all ones:
 ```
 class Type {
-	...
-	virtual Tensor ones(IntArrayRef size) const;
-	...
+  ...
+  virtual Tensor ones(IntArrayRef size) const;
+  ...
 };
 ```
 

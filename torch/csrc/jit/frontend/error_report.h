@@ -11,7 +11,7 @@ struct Call {
   SourceRange caller_range;
 };
 
-struct CAFFE2_API ErrorReport : public std::exception {
+struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
   explicit ErrorReport(SourceRange r);
@@ -20,7 +20,7 @@ struct CAFFE2_API ErrorReport : public std::exception {
 
   const char* what() const noexcept override;
 
-  struct CAFFE2_API CallStack {
+  struct TORCH_API CallStack {
     // These functions are used to report why a function was being compiled
     // (i.e. what was the call stack of user functions at compilation time that
     // led to this error)

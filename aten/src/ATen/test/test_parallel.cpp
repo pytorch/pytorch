@@ -5,14 +5,28 @@
 #include <ATen/Parallel.h>
 
 #include <iostream>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
 
+struct NumThreadsGuard {
+  int old_num_threads_;
+  NumThreadsGuard(int nthreads) {
+    old_num_threads_ = at::get_num_threads();
+    at::set_num_threads(nthreads);
+  }
+
+  ~NumThreadsGuard() {
+    at::set_num_threads(old_num_threads_);
+  }
+};
+
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, TestParallel) {
   manual_seed(123);
-  set_num_threads(1);
+  NumThreadsGuard guard(1);
 
   Tensor a = rand({1, 3});
   a[0][0] = 1;
@@ -25,6 +39,7 @@ TEST(TestParallel, TestParallel) {
   ASSERT_TRUE(a.sum(0).equal(as));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, NestedParallel) {
   Tensor a = ones({1024, 1024});
   auto expected = a.sum();
@@ -36,8 +51,34 @@ TEST(TestParallel, NestedParallel) {
   });
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TestParallel, NestedParallelThreadId) {
+  // check that thread id within a nested parallel block is accurate
+  at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+      // Nested parallel regions execute on a single thread
+      ASSERT_EQ(begin, 0);
+      ASSERT_EQ(end, 10);
+
+      // Thread id reflects inner parallel region
+      ASSERT_EQ(at::get_thread_num(), 0);
+    });
+  });
+
+  at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+    auto num_threads =
+      at::parallel_reduce(0, 10, 1, 0, [&](int64_t begin, int64_t end, int ident) {
+        // Thread id + 1 should always be 1
+        return at::get_thread_num() + 1;
+      }, std::plus<>{});
+    ASSERT_EQ(num_threads, 1);
+  });
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, Exceptions) {
   // parallel case
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
     at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
       throw std::runtime_error("exception");
@@ -45,6 +86,7 @@ TEST(TestParallel, Exceptions) {
     std::runtime_error);
 
   // non-parallel case
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(
     at::parallel_for(0, 1, 1000, [&](int64_t begin, int64_t end) {
       throw std::runtime_error("exception");
@@ -52,6 +94,7 @@ TEST(TestParallel, Exceptions) {
     std::runtime_error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, IntraOpLaunchFuture) {
   int v1 = 0;
   int v2 = 0;

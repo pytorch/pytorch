@@ -54,14 +54,14 @@ bool _use_cudnn_ctc_loss(
     // we don't know that input_lengths and target_lengths have the same size
     // (they should, but we didn't check yet)
     int64_t max_input_length = log_probs.size(0);
-    for (size_t b = 0; b < input_lengths.size(); b++) {
-      use_cudnn &= (input_lengths[b] == max_input_length);
+    for (const auto input_length : input_lengths) {
+      use_cudnn &= ((input_length == max_input_length) ? 1 : 0);
     }
     for (size_t b = 0; b < target_lengths.size(); b++) {
       // target length < 256 is documented, but we see illegal memory accesses
       // when target lengths > input lengths for CuDNN
       use_cudnn &=
-          (target_lengths[b] <= 256) & (target_lengths[b] <= input_lengths[b]);
+          (target_lengths[b] < 256) & (target_lengths[b] <= input_lengths[b]);
     }
   }
   return use_cudnn;

@@ -17,15 +17,17 @@ instancenorm_configs_short = op_bench.cross_product_configs(
 
 class InstanceNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dims):
-        self.X = (torch.rand(*dims) - 0.5) * 256
         num_channels = dims[1]
-        self.weight = torch.rand(num_channels, dtype=torch.float)
-        self.bias = torch.rand(num_channels, dtype=torch.float)
-        self.eps = 1e-5
+        self.inputs = {
+            "input": (torch.rand(*dims) - 0.5) * 256,
+            "weight": torch.rand(num_channels, dtype=torch.float),
+            "bias": torch.rand(num_channels, dtype=torch.float),
+            "eps": 1e-5
+        }
 
-    def forward(self):
+    def forward(self, input, weight, bias, eps: float):
         return F.instance_norm(
-            self.X, weight=self.weight, bias=self.bias, eps=self.eps)
+            input, weight=weight, bias=bias, eps=eps)
 
 
 op_bench.generate_pt_test(instancenorm_configs_short, InstanceNormBenchmark)

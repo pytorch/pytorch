@@ -49,7 +49,7 @@ class ConstTensorView {
 // anchors: predefined anchors, size(A, 4)
 // Return: all_anchors_vec: (H * W, A * 4)
 // Need to reshape to (H * W * A, 4) to match the format in python
-CAFFE2_API ERMatXf ComputeAllAnchors(
+TORCH_API ERMatXf ComputeAllAnchors(
     const TensorCPU& anchors,
     int height,
     int width,
@@ -59,7 +59,7 @@ CAFFE2_API ERMatXf ComputeAllAnchors(
 // spatial location, only computes anchors for the already sorted and filtered
 // positions after NMS is applied to avoid unnecessary computation.
 // `order` is a raveled array of sorted indices in (A, H, W) format.
-CAFFE2_API ERArrXXf ComputeSortedAnchors(
+TORCH_API ERArrXXf ComputeSortedAnchors(
     const Eigen::Map<const ERArrXXf>& anchors,
     int height,
     int width,

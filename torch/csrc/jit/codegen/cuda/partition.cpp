@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 
@@ -19,7 +21,7 @@ static c10::optional<c10::Device> getDevice(const Value* value) {
     // not tensor type, return false as the op is not outputing scalar.
     return c10::nullopt;
   }
-  return value->type()->expect<TensorType>()->device();
+  return value->type()->expectRef<TensorType>().device();
 }
 
 static c10::optional<c10::Device> getDevice(const Node* node) {
@@ -212,7 +214,7 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
       };
 
   // case 1. We check shared inputs to `producer` & `consumer`;
-  for (int i = 0; i < static_cast<int>(producer->inputs().size()); i++) {
+  for (const auto i : c10::irange(producer->inputs().size())) {
     auto n_input = producer->input(i);
     auto n_input_type = n_input->type()->cast<TensorType>();
     if (n_input_type != nullptr && n_input_type->sizes().sizes()) {
@@ -248,7 +250,7 @@ bool createTrickyBroadcast(const Node* consumer, const Node* producer) {
 
   // case 2. We check input to `consumer` that is also the output from
   // `producer`
-  for (int i = 0; i < static_cast<int>(producer->outputs().size()); i++) {
+  for (const auto i : c10::irange(producer->outputs().size())) {
     auto n_output = producer->output(i);
     auto n_output_type = n_output->type()->cast<TensorType>();
     if (n_output_type != nullptr && n_output_type->sizes().sizes()) {

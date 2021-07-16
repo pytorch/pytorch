@@ -1,13 +1,13 @@
 #ifndef CAFFE2_UTILS_PROTO_WRAP_H_
 #define CAFFE2_UTILS_PROTO_WRAP_H_
 
-#include "caffe2/core/common.h"
+#include <c10/util/Logging.h>
 
 namespace caffe2 {
 
 // A wrapper function to shut down protobuf library (this is needed in ASAN
 // testing and valgrind cases to avoid protobuf appearing to "leak" memory).
-CAFFE2_API void ShutdownProtobufLibrary();
+TORCH_API void ShutdownProtobufLibrary();
 
 } // namespace caffe2
 

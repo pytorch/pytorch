@@ -1,9 +1,12 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -27,6 +30,7 @@ int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
     if (index != -1 && index != cur_index) {
       return -1;
     }
+    // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     index = cur_index;
   }
   return index;
@@ -40,52 +44,49 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-function"
 void debugPrint(const TensorTypePtr& type) {
-  printf("\nsizes:");
+  std::stringstream sizes_s;
   if (auto sizes = type->symbolic_sizes().sizes()) {
-    // for (const auto& shape_symbol : sizes.value()) {
-    int rank = static_cast<int>(sizes->size());
-    for (int i = 0; i < rank; i++) {
-      const auto& shape_symbol = sizes.value()[i];
+    for (const auto& shape_symbol : *sizes) {
       if (shape_symbol.is_static()) {
-        printf("%ld, ", shape_symbol.static_size());
+        sizes_s << shape_symbol.static_size() << ", ";
       } else {
-        printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
+        sizes_s << "s(" << *reinterpret_cast<const int64_t*>(&shape_symbol)
+                << "), ";
       }
     }
   } else {
-    printf("no size available\n");
+    sizes_s << "no size available";
   }
+  std::cout << "sizes:" << sizes_s.str() << std::endl;
   if (const auto& stride_properties = type->stride_properties().sizes()) {
-    int rank = static_cast<int>(stride_properties->size());
-    printf("\nstride: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_.value());
+    std::stringstream stride_s;
+    std::stringstream index_s;
+    std::stringstream contig_s;
+
+    for (const auto& stride_property : *stride_properties) {
+      if (stride_property.has_value() && stride_property->stride_.has_value()) {
+        stride_s << *stride_property->stride_ << ", ";
       } else {
-        printf("?, ");
+        stride_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->stride_index_.has_value()) {
+        index_s << *stride_property->stride_index_ << ", ";
+      } else {
+        index_s << "?, ";
+      }
+      if (stride_property.has_value() &&
+          stride_property->contiguous_.has_value()) {
+        contig_s << *stride_property->contiguous_ << ", ";
+      } else {
+        contig_s << "?, ";
       }
     }
-    printf("\nstride index: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        printf("%ld, ", (*stride_properties)[i]->stride_index_.value());
-      } else {
-        printf("?, ");
-      }
-    }
-    printf("\ncontiguous: ");
-    for (int i = 0; i < rank; i++) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->contiguous_.has_value()) {
-        printf("%d, ", (*stride_properties)[i]->contiguous_.value());
-      } else {
-        printf("?, ");
-      }
-    }
+    std::cout << "stride: " << stride_s.str() << std::endl;
+    std::cout << "stride index: " << index_s.str() << std::endl;
+    std::cout << "contiguous: " << contig_s.str() << std::endl;
   } else {
-    printf("no stride properties available\n");
+    std::cout << "no stride properties available" << std::endl;
   }
 }
 #pragma clang diagnostic pop
@@ -132,10 +133,11 @@ at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
   const int rank = static_cast<int>(stride_properties->size());
 
   // stores axes with stride_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<int> ordered_axes;
 
   // TODO: this does not support broadcast yet;
-  for (int i = 0; i < rank; i++) {
+  for (const auto i : c10::irange(rank)) {
     if ((*stride_properties)[i].has_value() &&
         (*stride_properties)[i]->stride_index_.has_value()) {
       ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
@@ -169,6 +171,7 @@ at::DimVector inversePermutation(
   int rank = static_cast<int>(permuted.size());
 
   if (!reduction_axes.empty()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int red_rank = rank - static_cast<int>(reduction_axes.size());
 
     // see [ NOTE - reduction in graph ] part 1.
@@ -191,13 +194,13 @@ at::DimVector inversePermutation(
     }
 
     at::DimVector permutation(red_rank, -1);
-    for (int i = 0; i < red_rank; i++) {
+    for (const auto i : c10::irange(red_rank)) {
       permutation[adjusted_permutation[i]] = i;
     }
     return permutation;
   } else {
     at::DimVector permutation(rank, -1);
-    for (int i = 0; i < rank; i++) {
+    for (const auto i : c10::irange(rank)) {
       permutation[permuted[i]] = i;
     }
     return permutation;
@@ -212,7 +215,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   std::stringstream encoded_inputs;
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      auto input_tensor = input.toTensor();
+      auto& input_tensor = input.toTensor();
 
       encoded_inputs << ";";
       auto sep = "";
@@ -261,6 +264,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   return ret;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion>&& fusion)
     : fusion_(std::move(fusion)) {
   FUSER_PERF_SCOPE("FusionExecutorCache::FusionExecutorCache");
@@ -278,6 +282,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     evictCache(id_lookup_ret.evict_id);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const size_t unique_id = id_lookup_ret.id;
   const int device_index = getCommonDeviceCUDA(inputs);
   TORCH_CHECK(device_index >= 0, "device is not coherent for fusion inputs");
@@ -366,6 +371,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
         auto tv_entries =
             ir_utils::filterByType<TensorView>(outputsOfReduction);
 
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<TensorView*> tvOutputsOfReduction(
             tv_entries.begin(), tv_entries.end());
 
@@ -409,20 +415,20 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
 
 bool GraphCache::requiresPermutation() {
   const size_t input_rank = input_permutation_.size();
-  for (size_t i = 0; i < input_rank; i++) {
+  for (const auto i : c10::irange(input_rank)) {
     if (input_permutation_[i] != (long)i) {
       return true;
     }
   }
   // Check if output agrees
   const size_t pw_output_rank = pw_output_permutation_.size();
-  for (size_t i = 0; i < pw_output_rank; i++) {
+  for (const auto i : c10::irange(pw_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         pw_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   const size_t reduction_output_rank = reduction_output_permutation_.size();
-  for (size_t i = 0; i < reduction_output_rank; i++) {
+  for (const auto i : c10::irange(reduction_output_rank)) {
     TORCH_INTERNAL_ASSERT(
         reduction_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
@@ -455,9 +461,11 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
       int rank = static_cast<int>(type->dim().value());
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::ShapeSymbol> permuted_vec_ss;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-      for (int i = 0; i < rank; i++) {
+      for (const auto i : c10::irange(rank)) {
         permuted_vec_ss.emplace_back(
             vec_shape_symbol[this->input_permutation_[i]]);
         // permutation doesn't change contiguity info, nor does it change
@@ -465,7 +473,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
         if (vec_optional_stride[i].has_value()) {
           c10::optional<size_t> index = vec_optional_stride[i]->stride_index_;
           if (index.has_value()) {
-            for (int j = 0; j < rank; j++) {
+            for (const auto j : c10::irange(rank)) {
               // follow the permutation to resolve the new stride_index;
               if (this->input_permutation_[j] == (long)index.value()) {
                 index = j;
@@ -506,7 +514,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
           std::vector<int64_t> adjusted_reduction_axes;
           for (const auto dim : dims_list->vec()) {
             // adjust reduction axis to be the permuted axis;
-            for (size_t j = 0; j < input_permutation_.size(); j++) {
+            for (const auto j : c10::irange(input_permutation_.size())) {
               // follow the permutation to resolve the new reduction axes;
               if (input_permutation_[j] == dim) {
                 adjusted_reduction_axes.emplace_back(j);
@@ -527,6 +535,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::GraphCache");
   TORCH_INTERNAL_ASSERT(
@@ -553,7 +562,7 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
         // TODO: I think merge cannot handle broadcast - Go verify it later;
         // TODO: Since we are only handling permutation here, we should just
         //       merge the stride_index_;
-        acc_type = acc_type->merge(input_type);
+        acc_type = acc_type->merge(*input_type);
       } else {
         acc_type = input_type;
       }
@@ -570,9 +579,11 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing
   if (requiresPermutation()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<IValue> permuted_inputs;
     permuted_inputs.reserve(inputs.size());
     for (const auto& input : inputs) {
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (input.isTensor()) {
         permuted_inputs.emplace_back(
             input.toTensor().permute(input_permutation_));
@@ -581,6 +592,7 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
       }
     }
     auto outputs = fusion_executor_cache_->runFusionWithInputs(permuted_inputs);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {

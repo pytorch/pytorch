@@ -25,7 +25,7 @@ namespace cuda {
 //
 //! \sa IrTransformPrinter
 //!
-class TORCH_CUDA_API IrMathPrinter : public IrPrinter {
+class TORCH_CUDA_CU_API IrMathPrinter : public IrPrinter {
  public:
   IrMathPrinter(std::ostream& os) : IrPrinter(os) {}
 
@@ -41,7 +41,7 @@ class TORCH_CUDA_API IrMathPrinter : public IrPrinter {
 //!
 //! \sa IrMathPrinter
 //!
-class TORCH_CUDA_API IrTransformPrinter : public IrPrinter {
+class TORCH_CUDA_CU_API IrTransformPrinter : public IrPrinter {
  public:
   IrTransformPrinter(std::ostream& os) : IrPrinter(os) {}
 

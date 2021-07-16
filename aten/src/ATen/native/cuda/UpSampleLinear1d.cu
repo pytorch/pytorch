@@ -15,9 +15,7 @@ namespace native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame(
     const int n,
     const accscalar_t rwidth,
@@ -64,9 +62,7 @@ __global__ void upsample_linear1d_out_frame(
 
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
+C10_LAUNCH_BOUNDS_1(512)
 __global__ void upsample_linear1d_out_frame_backward(
     const int n,
     const accscalar_t rwidth,
@@ -104,8 +100,8 @@ __global__ void upsample_linear1d_out_frame_backward(
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const scalar_t d2val = odata[n][c][w2];
-        gpuAtomicAdd(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
-        gpuAtomicAdd(
+        gpuAtomicAddNoReturn(&idata[n][c][w1], static_cast<scalar_t>(w0lambda * d2val));
+        gpuAtomicAddNoReturn(
             &idata[n][c][w1 + w1p], static_cast<scalar_t>(w1lambda * d2val));
       }
     }
@@ -113,18 +109,13 @@ __global__ void upsample_linear1d_out_frame_backward(
 }
 
 static void upsample_linear1d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
     c10::optional<double> scales) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
-  checkAllSameGPU("upsample_linear1d_out_cuda", {input_arg, output_arg});
-
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
+  checkAllSameGPU(__func__, {input_arg, output_arg});
 
   int output_width = output_size[0];
 
@@ -132,17 +123,13 @@ static void upsample_linear1d_out_cuda_template(
   int channels = input.size(1);
   int input_width = input.size(2);
 
-  upsample_1d_shape_check(
-      input, Tensor(), nbatch, channels, input_width, output_width);
-
-  output.resize_({input.size(0), input.size(1), output_width});
   output.zero_();
 
   AT_ASSERT(input_width > 0 && output_width > 0);
 
   const int num_kernels = output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = 512;
+      //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -160,12 +147,12 @@ static void upsample_linear1d_out_cuda_template(
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 static void upsample_linear1d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
@@ -173,18 +160,7 @@ static void upsample_linear1d_backward_out_cuda_template(
     c10::optional<double> scales) {
   TensorArg grad_output_arg{grad_output_, "grad_output_", 1},
       grad_input_arg{grad_input, "grad_input", 2};
-  checkAllSameGPU(
-      "upsample_linear1d_backward_out_cuda", {grad_output_arg, grad_input_arg});
-
-  TORCH_CHECK(
-      output_size.size() == 1,
-      "It is expected output_size equals to 1, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 3,
-      "It is expected input_size equals to 3, but got size ",
-      input_size.size());
+  checkAllSameGPU(__func__, {grad_output_arg, grad_input_arg});
 
   int output_width = output_size[0];
 
@@ -192,17 +168,13 @@ static void upsample_linear1d_backward_out_cuda_template(
   int channels = input_size[1];
   int input_width = input_size[2];
 
-  upsample_1d_shape_check(
-      Tensor(), grad_output_, nbatch, channels, input_width, output_width);
-
   Tensor grad_output = grad_output_.contiguous();
 
-  grad_input.resize_({nbatch, channels, input_width});
   grad_input.zero_();
 
   const int num_kernels = output_width;
-  const int num_threads =
-      at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  const int num_threads = 512;
+      //at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -220,94 +192,35 @@ static void upsample_linear1d_backward_out_cuda_template(
                num_threads,
                0,
                stream>>>(num_kernels, rwidth, align_corners, idata, odata);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 } // namespace
 
-Tensor& upsample_linear1d_out_cuda(
-    Tensor& output,
+TORCH_IMPL_FUNC(upsample_linear1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales) {
-  upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners, scales);
-  return output;
+    c10::optional<double> scales,
+    const Tensor& output
+) {
+  upsample_linear1d_out_cuda_template(output, input, output_size, align_corners, scales);
 }
 
-Tensor upsample_linear1d_cuda(
-    const Tensor& input,
-    IntArrayRef output_size,
-    bool align_corners,
-    c10::optional<double> scales) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_linear1d_out_cuda_template(
-      output, input, output_size, align_corners, scales);
-  return output;
-}
-
-Tensor& upsample_linear1d_backward_out_cuda(
-    Tensor& grad_input,
+TORCH_IMPL_FUNC(upsample_linear1d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    const Tensor& grad_input
+) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
   globalContext().alertNotDeterministic("upsample_linear1d_backward_out_cuda");
   upsample_linear1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales);
-  return grad_input;
-}
-
-Tensor upsample_linear1d_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<double> scales) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_linear1d_backward_cuda");
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, align_corners, scales);
-  return grad_input;
-}
-
-using at::native::upsample::compute_output_size;
-using at::native::upsample_cuda::get_scale_value;
-
-Tensor upsample_linear1d_cuda(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  upsample_linear1d_out_cuda_template(output, input, osize, align_corners, scale_w);
-  return output;
-}
-
-Tensor upsample_linear1d_backward_cuda(
-    const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("upsample_linear1d_backward_cuda");
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_w = get_scale_value(scale_factors, 0);
-  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_linear1d_backward_out_cuda_template(
-      grad_input, grad_output, osize, input_size, align_corners, scale_w);
-  return grad_input;
 }
 
 } // namespace native

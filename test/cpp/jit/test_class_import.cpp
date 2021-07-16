@@ -45,6 +45,7 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, Basic) {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
@@ -80,6 +81,7 @@ TEST(ClassImportTest, Basic) {
   ASSERT_FALSE(c);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, ScriptObject) {
   Module m1("m1");
   Module m2("m2");
@@ -97,6 +99,7 @@ TEST(ClassImportTest, ScriptObject) {
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();
@@ -114,6 +117,7 @@ def __init__(self, x):
     return x
 )JIT";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, ClassDerive) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
@@ -142,6 +146,7 @@ class FooBar1234(Module):
     return (self.f).top()
 )JIT";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, CustomClass) {
   auto cu1 = std::make_shared<CompilationUnit>();
   std::vector<at::IValue> constantTable;

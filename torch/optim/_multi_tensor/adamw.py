@@ -1,7 +1,7 @@
 import math
 import torch
 from ..optimizer import Optimizer
-
+from collections import defaultdict
 
 class AdamW(Optimizer):
     r"""Implements AdamW algorithm.
@@ -9,7 +9,7 @@ class AdamW(Optimizer):
     The original Adam algorithm was proposed in `Adam: A Method for Stochastic Optimization`_.
     The AdamW variant was proposed in `Decoupled Weight Decay Regularization`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-3)
@@ -55,7 +55,7 @@ class AdamW(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -110,8 +110,8 @@ class AdamW(Optimizer):
 
             beta1, beta2 = group['betas']
 
-            bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
-            bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
+            bias_correction1 = [1 - beta1 ** state['step'] for state in states]
+            bias_correction2 = [1 - beta2 ** state['step'] for state in states]
 
             #
             # Decay the first and second moment running average coefficient
@@ -141,3 +141,26 @@ class AdamW(Optimizer):
             torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
+
+    # TODO: refactor to a base class once foreach ops are in a good shape.
+    def zero_grad(self, set_to_none: bool = False):
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is not None:
+                    if set_to_none:
+                        p.grad = None
+                    else:
+                        if p.grad.grad_fn is not None:
+                            p.grad.detach_()
+                        else:
+                            p.grad.requires_grad_(False)
+
+                        if p.grad.is_sparse:
+                            p.grad.zero_()
+                        else:
+                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
+
+            for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._foreach_zero_(grads)

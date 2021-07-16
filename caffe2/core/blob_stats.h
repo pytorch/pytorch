@@ -41,6 +41,6 @@ namespace BlobStat {
  * Return size in bytes of the blob, if available for a blob of given type.
  * If not available, return 0.
  */
-CAFFE2_API size_t sizeBytes(const Blob& blob);
+TORCH_API size_t sizeBytes(const Blob& blob);
 }
 }

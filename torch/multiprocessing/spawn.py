@@ -6,7 +6,7 @@ import signal
 import sys
 import warnings
 
-from . import _prctl_pr_set_pdeathsig
+from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
 class ProcessException(Exception):
@@ -66,24 +66,8 @@ def _wrap(fn, i, args, error_queue):
         sys.exit(1)
 
 
-# Multiprocessing contexts are introduced at Python 3.4
-_supports_context = sys.version_info >= (3, 4)
-
-
-def _python_version_check():
-    if not _supports_context:
-        raise RuntimeError("Requires python 3.4 or higher to use "
-                           "torch.multiprocessing.spawn and "
-                           "torch.multiprocessing.ProcessContext helper "
-                           "to launch multiple processes. If you are using "
-                           "this for distributed training and have a lower "
-                           "version of python, please use "
-                           "torch.distributed.launch instead.")
-
-
 class ProcessContext:
     def __init__(self, processes, error_queues):
-        _python_version_check()
         self.error_queues = error_queues
         self.processes = processes
         self.sentinels = {
@@ -104,7 +88,7 @@ class ProcessContext:
         Returns ``True`` if all processes have been joined successfully,
         ``False`` if there are more processes that need to be joined.
 
-        Arguments:
+        Args:
             timeout (float): Wait this long before giving up on waiting.
         """
         # Ensure this function can be called even when we're done.
@@ -169,7 +153,7 @@ class ProcessContext:
 class SpawnContext(ProcessContext):
     def __init__(self, processes, error_queues):
         warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super(SpawnContext, self).__init__(self, processes, error_queues)
+        super(SpawnContext, self).__init__(processes, error_queues)
     pass
 
 
@@ -182,7 +166,6 @@ class SpawnContext(ProcessContext):
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
 def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
-    _python_version_check()
     mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
@@ -215,7 +198,7 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     child process, it is forwarded and its traceback is included in
     the exception raised in the parent process.
 
-    Arguments:
+    Args:
         fn (function): Function is called as the entrypoint of the
             spawned process. This function must be defined at the top
             level of a module so it can be pickled and spawned. This
@@ -242,6 +225,6 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
     if start_method != 'spawn':
         msg = ('This method only supports start_method=spawn (got: %s).\n'
                'To use a different start_method use:\n\t\t'
-               ' torch.multiprocessing.start_process(...)' % start_method)
+               ' torch.multiprocessing.start_processes(...)' % start_method)
         warnings.warn(msg)
     return start_processes(fn, args, nprocs, join, daemon, start_method='spawn')

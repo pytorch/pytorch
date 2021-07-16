@@ -3,7 +3,7 @@
 
 
 
-from caffe2.python import core, workspace, dyndep
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 

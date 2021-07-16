@@ -50,10 +50,15 @@ class Caffe2BenchmarkBase(object):
             Return:
                 C2 tensor of dtype
         """
+        return self.feed_tensor(benchmark_utils.numpy_random(dtype, *shapes), device)
+
+    def feed_tensor(self, tensor, device='cpu'):
+        """ Similar to tensor, but can supply any data compatible with FeedBlob
+        """
         blob_name = 'blob_' + str(Caffe2BenchmarkBase.tensor_index)
         dev = self._device_option(device)
         with core.DeviceScope(dev):
-            workspace.FeedBlob(blob_name, benchmark_utils.numpy_random(dtype, *shapes))
+            workspace.FeedBlob(blob_name, tensor)
         Caffe2BenchmarkBase.tensor_index += 1
         return blob_name
 
@@ -93,6 +98,10 @@ class Caffe2BenchmarkBase(object):
             Caffe2BenchmarkBase.test_index += 1
         return name
 
+    def extract_inputs_tuple(self):
+        # add a dummy function here to match the interface of TorchBenchmarkBase
+        pass
+
 
 class Caffe2OperatorTestCase(object):
     """ This class includes all the information needed to benchmark an operator.
@@ -107,7 +116,7 @@ class Caffe2OperatorTestCase(object):
         self.test_config = test_config
         self.framework = "Caffe2"
 
-    def run_forward(self, num_runs, print_per_iter=False, cubda_sync=False):
+    def run_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """ Run the forward path of an operator in a loop
         """
         with core.DeviceScope(self.op_bench.dev):
@@ -115,7 +124,7 @@ class Caffe2OperatorTestCase(object):
         if not workspace.RunOperatorMultiple(op, num_runs):
             raise ValueError("Unable to run operator test case: {}".format(self.test_name))
 
-    def run_backward(self, num_runs):
+    def run_backward(self, num_runs, print_per_iter=False):
         """ Run the backward path of an operator in a loop
         """
         with core.DeviceScope(self.op_bench.dev):

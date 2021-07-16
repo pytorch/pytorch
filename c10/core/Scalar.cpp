@@ -3,7 +3,9 @@
 namespace c10 {
 
 Scalar Scalar::operator-() const {
-  TORCH_CHECK(!isBoolean(), "torch boolean negative, the `-` operator, is not suppported.");
+  TORCH_CHECK(
+      !isBoolean(),
+      "torch boolean negative, the `-` operator, is not supported.");
   if (isFloatingPoint()) {
     return Scalar(-v.d);
   } else if (isComplex()) {
@@ -21,4 +23,14 @@ Scalar Scalar::conj() const {
   }
 }
 
-}  // namespace c10
+Scalar Scalar::log() const {
+  if (isComplex()) {
+    return std::log(v.z);
+  } else if (isFloatingPoint()) {
+    return std::log(v.d);
+  } else {
+    return std::log(v.i);
+  }
+}
+
+} // namespace c10

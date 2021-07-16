@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import unittest
 
@@ -14,6 +9,7 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import datetime
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -23,7 +19,7 @@ GLOW_MATMUL_RTOL = 0
 
 class FCTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_clip(self, seed):
         np.random.seed(seed)
         m, n, k = 8, 8, 8
@@ -48,7 +44,7 @@ class FCTest(serial.SerializedTestCase):
         )
         workspace.GlobalInit(
             ['caffe2', '--caffe2_log_level=0', '--glow_global_fp16=1',
-             '--glow_clip_fp16'])
+             '--glow_clip_fp16', '--glow_global_fp16_constants=1'])
         workspace.SwitchWorkspace("glow_test_ws", True)
         workspace.ResetWorkspace()
         W0 = np.full((n, k), 65536.0, dtype)
@@ -82,7 +78,7 @@ class FCTest(serial.SerializedTestCase):
         n=st.integers(4, 50),
         seed=st.integers(0, 65534)
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_fc_exercise(self, m, k, n, seed):
         """ Test that the matmul engine is working, this doesn't test
             precision
@@ -147,7 +143,7 @@ class FCTest(serial.SerializedTestCase):
                 assert(0)
 
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_fc_numeric_cases(self, seed):
         """ Test numerics, use examples found from the unit test.
             Use Fp16FCAcc16NNPI as a reference.
@@ -190,8 +186,7 @@ class FCTest(serial.SerializedTestCase):
                         0.0680542, 0.4255371, -0.42895508, -0.4128418,
                         -0.47973633, 0.33251953,
                         0.27807617, 0.3701172]], dtype=np.float32)
-        b0 = [0.47851562]
-        b0 = np.array(b0, dtype=np.float32)
+        b0 = np.array([0.47851562], dtype=np.float32)
 
         workspace.FeedBlob("W0", W0)
         workspace.FeedBlob("b0", b0)
@@ -256,7 +251,6 @@ class FCTest(serial.SerializedTestCase):
                     "m": m,
                     "k": k,
                     "n": n,
-                    "X": X0,
                     "W0": W0,
                     "b0": b0,
                     "Y_glow": Y_glow,
@@ -272,7 +266,7 @@ class FCTest(serial.SerializedTestCase):
         seed=st.integers(0, 65534),
         use_packed=st.integers(0, 2)
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_fc_num0(self, seed, m, k, n, use_packed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.

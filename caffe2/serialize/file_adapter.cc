@@ -22,6 +22,7 @@ size_t FileAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
   return istream_adapter_->read(pos, buf, n, what);
 }
 
+// NOLINTNEXTLINE(modernize-use-equals-default)
 FileAdapter::~FileAdapter() {}
 
 } // namespace serialize

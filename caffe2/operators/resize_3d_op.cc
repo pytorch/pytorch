@@ -55,8 +55,11 @@ bool ResizeNearest3DOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
 
   CAFFE_ENFORCE_EQ(InputSize(), 1);
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_frames = input_frames * temporal_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_height = input_height * height_scale_;
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   int output_width = input_width * width_scale_;
   auto* Y = Output(
       0,
@@ -123,12 +126,15 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
     for (int c = 0; c < num_channels; ++c) {
       for (int f = 0; f < input_frames; ++f) {
         const int out_f =
+          // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           std::min((int)(f / temporal_scale_), output_frames - 1);
         for (int y = 0; y < input_height; ++y) {
           const int out_y =
+              // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
               std::min((int)(y / height_scale_), (output_height - 1));
           for (int x = 0; x < input_width; ++x) {
             const int out_x =
+                // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
                 std::min((int)(x / width_scale_), (output_width - 1));
             dXdata[(out_f * output_height + out_y) * output_width + out_x] +=
               dYdata[(f * input_height + y) * input_width + x];
@@ -154,18 +160,22 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDevice() {
       CAFFE_THROW("Unknown Storage order: ", order_);
   }
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResizeNearest3D, ResizeNearest3DOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     ResizeNearest3DGradient,
     ResizeNearest3DGradientOp<float, CPUContext>);
 
 #ifdef CAFFE2_USE_MKLDNN
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ResizeNearest3D,
     IDEEPFallbackOp<ResizeNearest3DOp<float, CPUContext>>);
 #endif
 
 // Input: X, output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResizeNearest3D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -186,6 +196,7 @@ Assumptions:
     .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(ResizeNearest3DGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -203,6 +214,7 @@ class GetResizeNearest3DGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ResizeNearest3D, GetResizeNearest3DGradient);
 
 } // namespace caffe2

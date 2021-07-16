@@ -53,6 +53,7 @@ SmartTensorPrinter::SmartTensorPrinter(
     : tensorPrinter_(tensor_name, file_name, limit) {}
 
 void SmartTensorPrinter::Print(const Tensor& tensor) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProxyPrinter printer;
 
   printer.tensor = &tensor;

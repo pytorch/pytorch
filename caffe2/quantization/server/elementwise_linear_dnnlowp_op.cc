@@ -20,6 +20,7 @@ namespace caffe2 {
 
 using namespace dnnlowp;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 ElementwiseLinearDNNLowPOp<T>::ElementwiseLinearDNNLowPOp(
     const OperatorDef& operator_def,
@@ -119,10 +120,12 @@ bool ElementwiseLinearDNNLowPOp<T>::GetQuantizationParameters_() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     ElementwiseLinear,
     DNNLOWP,
     ElementwiseLinearDNNLowPOp<uint8_t>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ElementwiseLinear,
     DNNLOWP,

@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 namespace torch {
@@ -262,7 +264,7 @@ BestEffortReplay::BestEffortReplay(
         std::vector<IterDomain*>(t_inps.size(), nullptr);
 
     // Map t_expr inputs to replay domain directly
-    for (size_t t_i = 0; t_i < t_inps.size(); t_i++) {
+    for (const auto t_i : c10::irange(t_inps.size())) {
       // There might not be a mapping, that could be okay.
       auto it = id_map_.find(t_inps[t_i]);
       if (it != id_map_.end())
@@ -381,7 +383,7 @@ BestEffortReplay::BestEffortReplay(
     }
 
     // Add outputs to map.
-    for (size_t i = 0; i < t_expr->outputs().size(); i++) {
+    for (const auto i : c10::irange(t_expr->outputs().size())) {
       auto t_out = t_expr->output(i);
       auto r_out = r_expr->output(i);
       if (t_out->getValType() == ValType::IterDomain &&
@@ -419,7 +421,7 @@ int BestEffortReplay::findFirstMismatchedID(
 
   BestEffortReplay ber(td2->domain(), td1->domain(), id_map);
 
-  for (size_t i = 0; i < td1->domain().size(); i++) {
+  for (const auto i : c10::irange(td1->domain().size())) {
     if (ber.getReplay().find(td1->axis(i)) == ber.getReplay().end()) {
       return i;
     }

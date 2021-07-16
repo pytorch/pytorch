@@ -6,9 +6,11 @@
 #include <torch/csrc/python_headers.h>
 #include <THC/THC.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THCPStream : THPStream{
   at::cuda::CUDAStream cuda_stream;
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THCPStreamClass;
 
 void THCPStream_init(PyObject *module);

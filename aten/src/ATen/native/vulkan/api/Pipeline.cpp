@@ -100,38 +100,31 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
       descriptor.shader_module,
       "Invalid Vulkan shader module!");
 
-  constexpr uint32_t x_offset = 0u;
-  constexpr uint32_t x_size = sizeof(Shader::WorkGroup::width);
-  constexpr uint32_t y_offset = x_offset + x_size;
-  constexpr uint32_t y_size = sizeof(Shader::WorkGroup::height);
-  constexpr uint32_t z_offset = y_offset + y_size;
-  constexpr uint32_t z_size = sizeof(Shader::WorkGroup::depth);
-
   constexpr VkSpecializationMapEntry specialization_map_entires[3]{
     // X
     {
-      1u,
-      x_offset,
-      x_size,
+      0u,
+      offsetof(Shader::WorkGroup, data[0u]),
+      sizeof(Shader::WorkGroup::data[0u]),
     },
     // Y
     {
-      2u,
-      y_offset,
-      y_size,
+      1u,
+      offsetof(Shader::WorkGroup, data[1u]),
+      sizeof(Shader::WorkGroup::data[1u]),
     },
     // Z
     {
-      3u,
-      z_offset,
-      z_size,
+      2u,
+      offsetof(Shader::WorkGroup, data[2u]),
+      sizeof(Shader::WorkGroup::data[2u]),
     },
   };
 
   const VkSpecializationInfo specialization_info{
     3u,
     specialization_map_entires,
-    sizeof(Shader::WorkGroup),
+    sizeof(descriptor.local_work_group),
     &descriptor.local_work_group,
   };
 
@@ -174,6 +167,10 @@ typename Pipeline::Factory::Handle Pipeline::Factory::operator()(
 
 Pipeline::Cache::Cache(Factory factory)
   : cache_(std::move(factory)) {
+}
+
+void Pipeline::Cache::purge() {
+  cache_.purge();
 }
 
 } // namespace api

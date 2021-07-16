@@ -4,7 +4,6 @@
 
 
 from caffe2.python import model_helper, workspace, core, rnn_cell
-from caffe2.proto import caffe2_pb2
 from future.utils import viewitems
 import numpy as np
 

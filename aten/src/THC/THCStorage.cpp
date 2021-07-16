@@ -32,7 +32,7 @@ void THCStorage_resizeBytes(
     THError("Trying to resize storage that is not resizable");
 
   if (size_bytes == 0) {
-    self->set_data_ptr(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
+    self->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
     self->set_nbytes(0);
   } else {
     at::DataPtr data = self->allocator()->allocate(size_bytes);
@@ -50,7 +50,7 @@ void THCStorage_resizeBytes(
     }
 
     // Destructively overwrite data_ptr
-    self->set_data_ptr(std::move(data));
+    self->set_data_ptr_noswap(std::move(data));
     self->set_nbytes(size_bytes);
   }
 }

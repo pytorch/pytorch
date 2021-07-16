@@ -5,7 +5,7 @@
 
 import numpy as np
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python import core, dyndep, utils, workspace
+from caffe2.python import core, utils
 from hypothesis import given, settings
 import hypothesis.strategies as st
 

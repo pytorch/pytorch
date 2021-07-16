@@ -18,9 +18,31 @@ def sum(model, blob_in, blob_out, **kwargs):
     return model.net.Sum(blob_in, blob_out, **kwargs)
 
 
+def reduce_sum(model, blob_in, blob_out, **kwargs):
+    """ReduceSum"""
+    return model.net.ReduceSum(blob_in, blob_out, **kwargs)
+
+
+def sub(model, blob_in, blob_out, **kwargs):
+    """Subtract"""
+    return model.net.Sub(blob_in, blob_out, **kwargs)
+
+
+def mat_mul(model, blob_in, blob_out, **kwargs):
+    """Matrix multiplication"""
+    return model.net.MatMul(blob_in, blob_out, **kwargs)
+
+
+def arg_min(model, blob_in, blob_out, **kwargs):
+    """ArgMin"""
+    return model.net.ArgMin(blob_in, blob_out, **kwargs)
+
 def batch_mat_mul(model, blob_in, blob_out,
                   enable_tensor_core=False, **kwargs):
     if enable_tensor_core:
         kwargs['engine'] = 'TENSORCORE'
 
     return model.net.BatchMatMul(blob_in, blob_out, **kwargs)
+
+def sparse_lengths_sum_4bit_rowwise_sparse(model, blob_in, blob_out, **kwargs):
+    return model.net.SparseLengthsSum4BitRowwiseSparse(blob_in, blob_out, **kwargs)

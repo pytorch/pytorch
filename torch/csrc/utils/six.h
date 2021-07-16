@@ -23,11 +23,7 @@ inline bool isTuple(pybind11::handle input) {
   if (PyTuple_Check(input.ptr())) {
     return true;
   }
-#if PY_MAJOR_VERSION == 2
-  return isStructSeq(input);
-#else
   return false;
-#endif
 }
 
 inline bool isTuple(PyObject* obj) {
@@ -40,12 +36,8 @@ inline bool isTuple(PyObject* obj) {
 // But on Python 2, structseq is not a subtype of tuple, so we need to manually create a
 // new tuple object from structseq.
 inline THPObjectPtr maybeAsTuple(PyStructSequence *obj) {
-#if PY_MAJOR_VERSION == 2
-  return THPObjectPtr(torch::utils::structseq_slice(obj, 0, Py_SIZE(obj)));
-#else
   Py_INCREF(obj);
   return THPObjectPtr((PyObject *)obj);
-#endif
 }
 
 inline THPObjectPtr maybeAsTuple(PyObject *obj) {

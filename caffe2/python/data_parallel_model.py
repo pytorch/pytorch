@@ -1056,7 +1056,7 @@ def _AllReduce(devices, model, net, param, use_nccl=False, control_input=None):
         """Create a Sum op for 2 or more blobs on different devices.
         Saves the result on the first device.
 
-        Arguments:
+        Args:
         dev_indices -- a list of device indices, which can be translated into
                        CUDA identifiers with model._devices
         """

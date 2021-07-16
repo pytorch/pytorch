@@ -18,7 +18,7 @@ function cleanup {
 function assert_git_not_dirty() {
     # TODO: we should add an option to `build_amd.py` that reverts the repo to
     #       an unmodified state.
-    if ([[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]]) ; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *xla* ]] ; then
         git_status=$(git status --porcelain)
         if [[ $git_status ]]; then
             echo "Build left local git repository checkout dirty"
@@ -50,7 +50,7 @@ function get_exit_code() {
 }
 
 function file_diff_from_base() {
-  # The fetch may fail on Docker hosts, but it's not always necessary.
+  # The fetch may fail on Docker hosts, this fetch is necessary for GHA
   set +e
   git fetch origin master --quiet
   set -e
@@ -66,7 +66,12 @@ function get_bazel() {
   chmod +x tools/bazel
 }
 
-TORCHVISION_COMMIT=e70c91a9ff9b8a20e05c133aec6ec3ed538c32fb
+function install_monkeytype {
+  # Install MonkeyType
+  pip_install MonkeyType
+}
+
+TORCHVISION_COMMIT=8a2dc6f22ac4389ccba8859aa1e1cb14f1ee53db
 
 function install_torchvision() {
   # Check out torch/vision at Jun 11 2020 commit
@@ -80,4 +85,8 @@ function checkout_install_torchvision() {
   git checkout "$TORCHVISION_COMMIT"
   time python setup.py install
   popd
+}
+
+function clone_pytorch_xla() {
+  git clone --recursive https://github.com/pytorch/xla.git
 }

@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeadCodeElim, BasicElim) {
   caffe2::NetDef net;
   {
@@ -20,6 +21,7 @@ TEST(DeadCodeElim, BasicElim) {
   EXPECT_EQ(optimized_net.op().size(), 0);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeadCodeElim, BasicNoElim) {
   caffe2::NetDef net;
   {
@@ -37,6 +39,7 @@ TEST(DeadCodeElim, BasicNoElim) {
   EXPECT_EQ(optimized_net.op().size(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DeadCodeElim, PartiallyUsedNoElim) {
   caffe2::NetDef net;
   {

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -16,6 +17,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local Fusion* ACTIVE_FUSION = nullptr;
 
 FusionGuard::FusionGuard(Fusion* fusion) {

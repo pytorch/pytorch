@@ -69,7 +69,9 @@ class CAFFE2_CUDA_API ThreadLocalCUDAObjects {
   // CUDAContext::SwitchToDevice
   void SetCurrentStreamId(DeviceIndex gpu, StreamId stream_id) {
     // TODO: use current device id from thread local instead of passing gpu in
-    c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    if (stream_id != -1) {
+      c10::cuda::setCurrentCUDAStream(GetCUDAStream(gpu, stream_id));
+    }
   }
 
   // Retrieves the CUDAStream corresponding to a logical stream ID, ensuring

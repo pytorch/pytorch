@@ -7,7 +7,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 import onnx
 import onnx.defs
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
+from onnx.helper import make_node, make_graph, make_tensor_value_info, make_model
 from onnx.backend.base import namedtupledict
 from caffe2.python.models.download import ModelDownloader
 import caffe2.python.onnx.backend as c2
@@ -16,7 +16,6 @@ from caffe2.python.trt.transform import convert_onnx_model_to_trt_op, transform_
 from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
-import json
 import time
 import unittest
 import tarfile
@@ -278,5 +277,3 @@ class TensorRTTransformTest(TestCase):
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
-
-

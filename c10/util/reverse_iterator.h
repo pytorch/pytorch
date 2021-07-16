@@ -86,8 +86,7 @@ class reverse_iterator
   constexpr reverse_iterator(const reverse_iterator& __x)
       : current(__x.current) {}
 
-  constexpr reverse_iterator& operator=(
-      const reverse_iterator& rhs) noexcept {
+  constexpr reverse_iterator& operator=(const reverse_iterator& rhs) noexcept {
     current = rhs.current;
     return current;
   }

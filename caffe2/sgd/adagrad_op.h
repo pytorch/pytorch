@@ -257,7 +257,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     } else {
       num_rows_processed = kernel_i64_(
           n,
@@ -268,7 +270,9 @@ class SparseAdagradOp final : public Operator<CPUContext> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          /*counter=*/nullptr,
+          /*counter_halflife=*/0);
     }
     if (num_rows_processed < n) {
       CAFFE_ENFORCE_GE(
@@ -367,10 +371,13 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         epsilon_(this->template GetSingleArgument<float>("epsilon", 1e-5f)),
         weight_decay_(
-            this->template GetSingleArgument<float>("weight_decay", 0.f)) {
+            this->template GetSingleArgument<float>("weight_decay", 0.f)),
+        counter_halflife_(
+            this->template GetSingleArgument<int64_t>("counter_halflife", -1)) {
     VLOG(1) << "gradient optimization operator in use: "
             << "RowWiseSparseAdagradOp"
-            << " weight_decay_=" << weight_decay_;
+            << " weight_decay_=" << weight_decay_
+            << " counter_halflife=" << counter_halflife_;
   }
 
   bool RunOnDevice() override {
@@ -393,6 +400,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
     const auto* indices = Input(INDICES).template data<SIndex>();
     const auto* gradIn = Input(GRAD).template data<float>();
+    const auto* count = counter_halflife_ == -1
+        ? nullptr
+        : Input(COUNTER).template data<double>();
 
     auto n = Input(INDICES).numel();
     if (n == 0) {
@@ -454,7 +464,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int32_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          (counter_halflife_ > 0) ? count : nullptr,
+          counter_halflife_);
     } else {
       num_rows_processed = kernel_i64_(
           n,
@@ -465,7 +477,9 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
           reinterpret_cast<const std::int64_t*>(indices),
           epsilon_,
           lr[0],
-          weight_decay_);
+          weight_decay_,
+          (counter_halflife_ > 0) ? count : nullptr,
+          counter_halflife_);
     }
 
     if (num_rows_processed < n) {
@@ -492,8 +506,11 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
 
     for (auto i = 0; i < n; ++i) {
       auto idx = indices[i];
+      float freq = (count[idx] > 0 && counter_halflife_ > 0)
+          ? counter_halflife_ / count[idx]
+          : 1.0;
       if (block_size == 1) {
-        float gi = std::fma(weight_decay_, param[idx], gradIn[i]);
+        float gi = std::fma(weight_decay_ * freq, param[idx], gradIn[i]);
         float hi = moment[idx] = moment[idx] + gi * gi;
         param[idx] = param[idx] + lr[0] * gi / (std::sqrt(hi) + epsilon_);
       } else {
@@ -526,13 +543,13 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
         float* h = moment + idx;
         float hs = 0.;
         for (auto j = 0; j < block_size; ++j) {
-          float gj = std::fma(weight_decay_, w[j], g[j]);
+          float gj = std::fma(weight_decay_ * freq, w[j], g[j]);
           hs += gj * gj;
         }
         float hi = h[0] = h[0] + hs / block_size;
         float step = lr[0] / (std::sqrt(hi) + epsilon_);
         for (auto j = 0; j < block_size; ++j) {
-          float gj = std::fma(weight_decay_, w[j], g[j]);
+          float gj = std::fma(weight_decay_ * freq, w[j], g[j]);
           w[j] = w[j] + gj * step;
         }
       }
@@ -544,13 +561,14 @@ class RowWiseSparseAdagradOp final : public Operator<Context> {
  protected:
   float epsilon_;
   const float weight_decay_;
+  const int64_t counter_halflife_;
 #if defined(USE_FBGEMM) && !defined(__NVCC__)
   fbgemm::SparseAdaGradSignature<std::int32_t>::Type kernel_i32_;
   fbgemm::SparseAdaGradSignature<std::int64_t>::Type kernel_i64_;
   std::int64_t last_block_size_{-1};
 #endif
 
-  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR);
+  INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, COUNTER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
 };
 } // namespace caffe2

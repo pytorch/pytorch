@@ -1,5 +1,6 @@
 #include <c10/macros/Macros.h>
 
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #if !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -97,6 +98,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 
   for (auto& kernel : options.kernels) {
     registrars_.emplace_back(
+      // NOLINTNEXTLINE(performance-move-const-arg)
       Dispatcher::singleton().registerImpl(op_name, kernel.dispatch_key, std::move(kernel.func), std::move(kernel.cpp_signature), std::move(kernel.inferred_function_schema), "registered by RegisterOperators")
     );
   }
@@ -105,6 +107,7 @@ void RegisterOperators::registerOp_(Options&& options) {
 RegisterOperators::RegisterOperators() = default;
 RegisterOperators::~RegisterOperators() = default;
 RegisterOperators::RegisterOperators(RegisterOperators&&) noexcept = default;
+// NOLINTNEXTLINE(bugprone-exception-escape)
 RegisterOperators& RegisterOperators::operator=(RegisterOperators&&) noexcept = default;
 
 } // namespace c10

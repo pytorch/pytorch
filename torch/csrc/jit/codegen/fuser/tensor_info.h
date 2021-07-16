@@ -19,6 +19,7 @@ struct TORCH_API TensorInfo {
 
   void* data;
 #pragma GCC diagnostic ignored "-Wpedantic"
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   uint32_t sizes_strides[0];
 #pragma GCC diagnostic pop
 };

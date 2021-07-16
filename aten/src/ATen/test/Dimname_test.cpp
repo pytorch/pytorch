@@ -8,6 +8,7 @@ using at::NameType;
 using at::Symbol;
 using at::Dimname;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, isValidIdentifier) {
   ASSERT_TRUE(Dimname::isValidName("a"));
   ASSERT_TRUE(Dimname::isValidName("batch"));
@@ -29,18 +30,22 @@ TEST(DimnameTest, isValidIdentifier) {
   ASSERT_FALSE(Dimname::isValidName("01"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, wildcardName) {
   Dimname wildcard = Dimname::wildcard();
   ASSERT_EQ(wildcard.type(), NameType::WILDCARD);
   ASSERT_EQ(wildcard.symbol(), Symbol::dimname("*"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, createNormalName) {
   auto foo = Symbol::dimname("foo");
   auto dimname = Dimname::fromSymbol(foo);
   ASSERT_EQ(dimname.type(), NameType::BASIC);
   ASSERT_EQ(dimname.symbol(), foo);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("inva.lid")), c10::Error);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_THROW(Dimname::fromSymbol(Symbol::dimname("1invalid")), c10::Error);
 }
 
@@ -62,6 +67,7 @@ static void check_unify_and_match(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DimnameTest, unifyAndMatch) {
   check_unify_and_match("a", "a", "a");
   check_unify_and_match("a", "*", "a");

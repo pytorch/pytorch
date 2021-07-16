@@ -77,6 +77,7 @@ install_centos() {
     glog-devel \
     hiredis-devel \
     libstdc++-devel \
+    libsndfile-devel \
     make \
     opencv-devel \
     sudo \

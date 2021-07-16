@@ -8,7 +8,7 @@
 namespace caffe2 {
 namespace gloo {
 
-class CAFFE2_API StoreHandlerWrapper : public ::gloo::rendezvous::Store {
+class TORCH_API StoreHandlerWrapper : public ::gloo::rendezvous::Store {
  public:
   explicit StoreHandlerWrapper(StoreHandler& handler) : handler_(handler) {}
 

@@ -4,20 +4,19 @@
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-DEFINE_TRIGGER(block_codegen_created);
 std::string blockDtypeCppString(const Dtype& dtype) {
   switch (dtype.scalar_type()) {
     case ScalarType::Bool:
       return "1";
     case ScalarType::Half:
       return "2";
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ScalarType::Char:
       return "1";
     case ScalarType::Byte:
@@ -358,15 +357,17 @@ void BlockCodeGen::Initialize() {
   stmt_v->accept(printer_.get());
 
   GRAPH_DEBUG("Generated Block code: ", oss_.str(), "\n");
-
-  USE_TRIGGER(block_codegen_created);
 }
 
 void BlockCodeGen::call(const std::vector<CallArg>& args) {
   throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
 }
+void BlockCodeGen::call_raw(const std::vector<void*>& args) {
+  throw std::runtime_error("BlockCodeGen: Cannot call Block code ");
+}
 
 BlockCodeGen::~BlockCodeGen() = default;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
 
 } // namespace tensorexpr

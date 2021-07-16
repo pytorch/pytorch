@@ -28,6 +28,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
     CAFFE_ENFORCE(!mask.empty(), "mask can't be empty");
     auto biggest = *std::max_element(mask.begin(), mask.end());
     dense_.assign(std::min(kMaxDenseSize, biggest + 1), -1);
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < mask.size(); i++) {
       int64_t id = mask[i];
       CAFFE_ENFORCE_GE(id, 0, "Only positive IDs are allowed.");
@@ -57,6 +58,7 @@ class SparseToDenseMaskBase : public Operator<Context> {
         return iter->second;
       }
     } else {
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       return (id >= dense_.size()) ? -1 : dense_[id];
     }
   }
@@ -137,6 +139,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     // TODO: consider unrolling CopyItems to make elemental types copy faster
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(sparse_values.dtype()));
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < cols * rows; i++) {
       context_.CopyItemsSameDevice(
           default_value.dtype(),

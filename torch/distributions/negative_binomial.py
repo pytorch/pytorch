@@ -77,8 +77,10 @@ class NegativeBinomial(Distribution):
 
     @lazy_property
     def _gamma(self):
+        # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=torch.exp(-self.logits))
+                                         rate=torch.exp(-self.logits),
+                                         validate_args=False)
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():

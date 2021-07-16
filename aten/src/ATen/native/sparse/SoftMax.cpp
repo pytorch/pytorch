@@ -1,10 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
+#include <ATen/SparseTensorUtils.h>
+#include <c10/util/accumulate.h>
+
 #include <map>
 
 namespace at {
@@ -17,12 +19,7 @@ int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
      `sizes` is a vector of sparse tensor dimensions.
      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
    */
-  auto dim = sizes.size();
-  int64_t nvalues = 1;
-  for (auto i=sparse_dim; i<dim; i++) {
-    nvalues *= sizes[i];
-  }
-  return nvalues;
+  return c10::multiply_integers(sizes.begin() + sparse_dim, sizes.end());
 }
 
 std::vector<int64_t> get_offsets(const Tensor& indices, const IntArrayRef& sizes, const int64_t dim) {
@@ -130,10 +127,10 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
         pool_index += stride * indices_row[i];
       }
     }
-    while (pool_index >= pools.size()) {
-      pools.emplace_back();  // create empty pool
+    if(pools.size() <= pool_index){
+      pools.resize(pool_index + 1);
     }
-    pools[pool_index].push_back(i);
+    pools.at(pool_index).push_back(i);
   }
 
   return pools;
@@ -468,7 +465,6 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         /* Compute tmp = - sum_j output_j * grad_j */
         for (int64_t i : pool_indices) {
           auto out_values_row = out_values_accessor[i];
-          auto values_row = values_accessor[i];
           auto low = std::lower_bound(grad_offsets.begin(), grad_offsets.end(), out_offsets[i]);
           auto j = low - grad_offsets.begin();
 
@@ -635,7 +631,7 @@ Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, c10::option
   namedinference::propagate_names(result, input_);
   return result;
 }
-  
+
 Tensor _sparse_log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::_sparse_log_softmax(self, dimname_to_position(self, dim), dtype);
 }

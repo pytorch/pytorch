@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 
@@ -27,7 +26,6 @@ Tensor embedding_backward_cuda_kernel(
     const Tensor &count,
     int64_t num_weights,
     int padding_idx = -1,
-    bool scale_grad_by_freq = false,
     bool mode_mean = false,
     const Tensor &offset2bag = Tensor(),
     const Tensor &bag_size = Tensor(),

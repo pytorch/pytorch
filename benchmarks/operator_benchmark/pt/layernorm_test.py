@@ -19,14 +19,17 @@ layernorm_configs_short = op_bench.cross_product_configs(
 
 class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, dims):
-        self.X = (torch.rand(*dims) - 0.5) * 256
-        self.weight = torch.rand(*self.X.size()[1:], dtype=torch.float)
-        self.bias = torch.rand(*self.X.size()[1:], dtype=torch.float)
-        self.eps = 1e-5
+        input = (torch.rand(*dims) - 0.5) * 256
+        self.inputs = {
+            "input": input,
+            "weight": torch.rand(*input.size()[1:], dtype=torch.float),
+            "bias": torch.rand(*input.size()[1:], dtype=torch.float),
+            "eps": 1e-5
+        }
 
-    def forward(self):
+    def forward(self, input, weight, bias, eps: float):
         return F.layer_norm(
-            self.X, self.X.size()[1:], weight=self.weight, bias=self.bias, eps=self.eps)
+            input, input.size()[1:], weight=weight, bias=bias, eps=eps)
 
 
 op_bench.generate_pt_test(layernorm_configs_short, LayerNormBenchmark)

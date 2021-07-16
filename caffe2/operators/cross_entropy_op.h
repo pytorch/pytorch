@@ -125,7 +125,7 @@ class WeightedSigmoidCrossEntropyWithLogitsGradientOp final
 };
 
 template <typename T, class Context>
-class CAFFE2_API CrossEntropyOp final : public Operator<Context> {
+class TORCH_API CrossEntropyOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(CrossEntropyOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -140,7 +140,7 @@ class CAFFE2_API CrossEntropyOp final : public Operator<Context> {
 };
 
 template <typename T, class Context>
-class CAFFE2_API CrossEntropyGradientOp final : public Operator<Context> {
+class TORCH_API CrossEntropyGradientOp final : public Operator<Context> {
  public:
   USE_SIMPLE_CTOR_DTOR(CrossEntropyGradientOp);
   USE_OPERATOR_CONTEXT_FUNCTIONS;

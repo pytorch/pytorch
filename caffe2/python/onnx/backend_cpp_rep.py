@@ -49,4 +49,3 @@ class Caffe2CppRep(BackendRep):
             # single input
             output_values = self.__core.run([inputs])
         return namedtupledict('Outputs', self.__external_outputs)(*output_values)
-

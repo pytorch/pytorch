@@ -13,6 +13,8 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
   PRODUCER_INFO = 0,
   MOBILE_RUNTIME_INFO,
   PROFILER_STATE,
+  INFERENCE_CONTEXT, // for inference usage
+  PARAM_COMMS_INFO,
 
   TEST_INFO, // used only in tests
   TEST_INFO_2, // used only in tests
@@ -21,7 +23,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
 class C10_API DebugInfoBase {
  public:
   DebugInfoBase() {}
-  virtual ~DebugInfoBase() {}
+  virtual ~DebugInfoBase() = default;
 };
 
 // Thread local debug information is propagated across the forward
@@ -32,7 +34,7 @@ class C10_API DebugInfoBase {
 // profiling, etc)
 class C10_API ThreadLocalDebugInfo {
  public:
-  static std::shared_ptr<DebugInfoBase> get(DebugInfoKind kind);
+  static DebugInfoBase* get(DebugInfoKind kind);
 
   // Get current ThreadLocalDebugInfo
   static std::shared_ptr<ThreadLocalDebugInfo> current();
@@ -66,11 +68,9 @@ class C10_API ThreadLocalDebugInfo {
 // Users can access the values through the ThreadLocalDebugInfo::get() call;
 class C10_API DebugInfoGuard {
  public:
-  DebugInfoGuard(
-      DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  DebugInfoGuard(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
 
-  explicit DebugInfoGuard(
-      std::shared_ptr<ThreadLocalDebugInfo> info);
+  explicit DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info);
 
   ~DebugInfoGuard();
 

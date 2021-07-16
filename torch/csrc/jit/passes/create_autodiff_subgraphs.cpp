@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
@@ -100,6 +101,7 @@ class SubgraphSlicer {
         any_changed = false;
         for (auto it = workblock.end()->reverseIterator();
              it != workblock.begin()->reverseIterator();) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool changed;
           std::tie(it, changed) = scanNode(*it);
           any_changed |= changed;
@@ -270,7 +272,9 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   AliasDb db(graph);
+  GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
+  GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
   return diff_nodes;
 }
 } // namespace jit

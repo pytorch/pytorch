@@ -21,7 +21,7 @@ bootstrap() {
     if ! [ -x "$(command -v ios-deploy)" ]; then
         echo 'Error: ios-deploy is not installed.'
         exit 1
-    fi 
+    fi
     ios-deploy -c -t 1
     if [ "$?" -ne "0" ]; then
         echo 'Error: No device connected. Please connect your device via USB then re-run the script'
@@ -33,18 +33,18 @@ bootstrap() {
     XCODE_PROJ_PATH="./TestApp.xcodeproj"
     XCODE_TARGET="TestApp"
     XCODE_BUILD="./build"
-    if [ ! -f "./.config" ]; then 
+    if [ ! -f "./.config" ]; then
         touch .config
         echo "" >> .config
     else
         source .config
     fi
-    if [ -z "${TEAM_ID}" ]; then 
+    if [ -z "${TEAM_ID}" ]; then
         reply=$(bash -c 'read -r -p "Team Id:" tmp; echo $tmp')
         TEAM_ID="${reply}"
         echo "TEAM_ID=${TEAM_ID}" >> .config
     fi
-    if [ -z "${PROFILE}" ]; then 
+    if [ -z "${PROFILE}" ]; then
         reply=$(bash -c 'read -r -p "Provisioning Profile:" tmp; echo $tmp')
         PROFILE="${reply}"
         echo "PROFILE=${PROFILE}" >> .config
@@ -52,7 +52,7 @@ bootstrap() {
     if [ -d "${XCODE_BUILD}" ]; then
         echo "found the old XCode build, remove it"
         rm -rf "${XCODE_BUILD}"
-    fi 
+    fi
     cd "${BENCHMARK_DIR}"
     echo "Generating model"
     python trace_model.py
@@ -62,7 +62,7 @@ bootstrap() {
     if ! [ -x "$(command -v xcodebuild)" ]; then
         echo 'Error: xcodebuild is not installed.'
         exit 1
-    fi 
+    fi
     echo "Running xcodebuild"
     xcodebuild clean build  -project ${XCODE_PROJ_PATH}  \
                             -target ${XCODE_TARGET}  \
@@ -78,7 +78,7 @@ while [[ $# -gt 1 ]]
 do
 option="$1"
 value="$2"
-case $option in 
+case $option in
     "" | "-h" | "--help")
     help
     exit 0
@@ -92,12 +92,12 @@ case $option in
     shift
     ;;
     *)
-    echo "unknown options" >& 2 
+    echo "unknown options" >& 2
     help
     exit 1
     ;;
 esac
-shift 
+shift
 done
 
 bootstrap

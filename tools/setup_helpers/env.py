@@ -3,6 +3,7 @@ import platform
 import struct
 import sys
 from itertools import chain
+from typing import Iterable, List, Optional, cast
 
 
 IS_WINDOWS = (platform.system() == 'Windows')
@@ -17,19 +18,19 @@ IS_64BIT = (struct.calcsize("P") == 8)
 BUILD_DIR = 'build'
 
 
-def check_env_flag(name, default=''):
+def check_env_flag(name: str, default: str = '') -> bool:
     return os.getenv(name, default).upper() in ['ON', '1', 'YES', 'TRUE', 'Y']
 
 
-def check_negative_env_flag(name, default=''):
+def check_negative_env_flag(name: str, default: str = '') -> bool:
     return os.getenv(name, default).upper() in ['OFF', '0', 'NO', 'FALSE', 'N']
 
 
-def gather_paths(env_vars):
+def gather_paths(env_vars: Iterable[str]) -> List[str]:
     return list(chain(*(os.getenv(v, '').split(os.pathsep) for v in env_vars)))
 
 
-def lib_paths_from_base(base_path):
+def lib_paths_from_base(base_path: str) -> List[str]:
     return [os.path.join(base_path, s) for s in ['lib/x64', 'lib', 'lib64']]
 
 
@@ -43,13 +44,13 @@ class BuildType(object):
     is ``None``, then the build type will be inferred from ``CMakeCache.txt``. If ``CMakeCache.txt`` does not exist,
     os.environ['CMAKE_BUILD_TYPE'] will be used.
 
-    Arguments:
+    Args:
       cmake_build_type_env (str): The value of os.environ['CMAKE_BUILD_TYPE']. If None, the actual build type will be
         inferred.
 
     """
 
-    def __init__(self, cmake_build_type_env=None):
+    def __init__(self, cmake_build_type_env: Optional[str] = None) -> None:
         if cmake_build_type_env is not None:
             self.build_type_string = cmake_build_type_env
             return
@@ -63,19 +64,19 @@ class BuildType(object):
             # Normally it is anti-pattern to determine build type from CMAKE_BUILD_TYPE because it is not used for
             # multi-configuration build tools, such as Visual Studio and XCode. But since we always communicate with
             # CMake using CMAKE_BUILD_TYPE from our Python scripts, this is OK here.
-            self.build_type_string = cmake_cache_vars['CMAKE_BUILD_TYPE']
+            self.build_type_string = cast(str, cmake_cache_vars['CMAKE_BUILD_TYPE'])
         else:
             self.build_type_string = os.environ.get('CMAKE_BUILD_TYPE', 'Release')
 
-    def is_debug(self):
+    def is_debug(self) -> bool:
         "Checks Debug build."
         return self.build_type_string == 'Debug'
 
-    def is_rel_with_deb_info(self):
+    def is_rel_with_deb_info(self) -> bool:
         "Checks RelWithDebInfo build."
         return self.build_type_string == 'RelWithDebInfo'
 
-    def is_release(self):
+    def is_release(self) -> bool:
         "Checks Release build."
         return self.build_type_string == 'Release'
 

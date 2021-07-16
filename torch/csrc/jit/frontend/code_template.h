@@ -15,7 +15,9 @@ namespace jit {
 // in the top level environment, and then recurses into a parent
 // environment if the key is not found.)
 struct TemplateEnv {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv() : parent(nullptr) {}
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
 
   using string_list = std::vector<std::string>;
@@ -106,7 +108,9 @@ struct CodeTemplate {
       char c = template_text[pos];
       if (c == '$') {
         std::stringstream kss;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool comma_before;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         bool comma_after;
         size_t new_pos = parseKey(pos, kss, comma_before, comma_after);
         std::string k = kss.str();

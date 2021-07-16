@@ -34,18 +34,19 @@ struct Resolver;
 
 using ResolverPtr = std::shared_ptr<Resolver>;
 struct Self {
-  virtual ~Self() {}
+  virtual ~Self() = default;
   virtual std::shared_ptr<SugaredValue> makeSugared(Value* v) const = 0;
   virtual ClassTypePtr getClassType() const = 0;
 };
 
 // A CompilationUnit is a list of named Functions
-// with helper methods to iterate the list, or invoke the function.
-// Classes have a CompilationUnit holding the class methods
-// and Modules also have a CompilationUnit holding the Functions that
+// with helper methods to iterate the list or invoke the function.
+// Classes have a CompilationUnit holding the class methods,
+// and Modules have a CompilationUnit holding the Functions that
 // are used to implement their Methods
 
 struct TORCH_API CompilationUnit {
+  enum class FunctionType { Method, Hook, PreHook };
   // constructor that takes a set of functions to compile using the native
   // resolver
   explicit CompilationUnit(const std::string& source);
@@ -85,7 +86,7 @@ struct TORCH_API CompilationUnit {
   }
 
   // for historic reasons, these are defined in ir_emitter.cpp
-  // Returns the list of Function's just defined.
+  // Returns the list of Functions just defined.
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Property>& properties,
@@ -99,8 +100,17 @@ struct TORCH_API CompilationUnit {
       // see [name mangling]
       bool shouldMangle = false);
 
+  void define_hooks(
+      const c10::optional<c10::QualifiedName>& prefix,
+      const std::vector<Def>& hookDefs,
+      const std::vector<ResolverPtr>& hookResolvers,
+      const std::vector<Def>& preHookDefs,
+      const std::vector<ResolverPtr>& preHookResolvers,
+      const Self* self,
+      bool shouldMangle = false);
+
   // same as above but parse the definitions from source
-  // Returns the list of Function's just defined.
+  // Returns the list of Functions just defined.
   std::vector<Function*> define(
       // prefix namespace to put all the defined functions into
       const c10::optional<c10::QualifiedName>& prefix,
@@ -210,7 +220,7 @@ struct TORCH_API CompilationUnit {
   // have isolation.
   void _clear_python_cu() {
     // Delete all the associated class methods
-    for (auto type : classes_) {
+    for (const auto& type : classes_) {
       if (auto cls = type->cast<ClassType>()) {
         for (auto method : cls->methods()) {
           // Tombstone the method in the compilation unit.
@@ -220,6 +230,24 @@ struct TORCH_API CompilationUnit {
           functions_[it->second] = nullptr;
           // Erase in our big lookup table
           dict_.erase(it);
+        }
+        // Classes can have multiple pointers to the same hook,
+        // need to make sure to not delete it twice
+        std::unordered_set<Function*> hooks_to_delete;
+        for (const auto& hook : cls->getForwardHooks()) {
+          hooks_to_delete.insert(hook);
+        }
+        for (const auto& pre_hook : cls->getForwardPreHooks()) {
+          hooks_to_delete.insert(pre_hook);
+        }
+        for (const auto& hook : hooks_to_delete) {
+          // Tombstone the hook in the compilation unit.
+          auto it = dict_.find(hook->qualname());
+          if (it != dict_.end()) {
+            functions_[it->second] = nullptr;
+            // Erase in our big lookup table
+            dict_.erase(it);
+          }
         }
       }
     }
@@ -263,7 +291,8 @@ struct TORCH_API CompilationUnit {
       const ResolverPtr& resolver,
       const Self* self,
       const std::unordered_map<std::string, Function*>& function_table,
-      bool shouldMangle = false) const;
+      bool shouldMangle = false,
+      FunctionType type = FunctionType::Method) const;
 
   // Define a property on \p self.
   struct PropertyPair;

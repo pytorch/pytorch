@@ -26,7 +26,7 @@ using at::UndefinedTensorImpl;
  *
  * NB: See TensorImpl for documentation on these methods.
  */
-class CAFFE2_API Tensor final {
+class TORCH_API Tensor final {
  private:
   enum Unsafe { IDoWantAliasing };
   Tensor(const Tensor& other, Unsafe _) : impl_(other.getIntrusivePtr()) {}
@@ -225,6 +225,11 @@ class CAFFE2_API Tensor final {
   template <typename... Ts>
   void Resize(Ts... dim_source) const {
     impl_.get()->Resize(dim_source...);
+  }
+
+  template <typename T>
+  void Resize(const std::vector<T>& dim_source) const {
+    impl_.get()->Resize(ArrayRef<T>(dim_source));
   }
 
   /**
@@ -494,7 +499,9 @@ class CAFFE2_API Tensor final {
         i, static_cast<int>(impl_->dim()), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
 #endif
-    auto s = impl_->size(i);
+    // Avoid TensorImpl::size() because it is a virtual call that
+    // supports out-of-range indexing like Python.
+    auto s = impl_->sizes()[i];
     CAFFE_ENFORCE_LT_WITH_CALLER(s, std::numeric_limits<int>::max());
     return static_cast<int>(s);
   }
@@ -530,10 +537,10 @@ class CAFFE2_API Tensor final {
  * this will not do anything if the
  * Tensor already has correct size and data type
  */
-CAFFE2_API void
+TORCH_API void
 ReinitializeTensor(Tensor* t, at::IntArrayRef dims, at::TensorOptions options);
 
-CAFFE2_API void ReinitializeAndCopyFrom(
+TORCH_API void ReinitializeAndCopyFrom(
     Tensor* t,
     at::TensorOptions options,
     const Tensor& src,
@@ -564,7 +571,7 @@ void TensorVectorResize(
     DeviceType type);
 
 // Tensor factory function
-CAFFE2_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
+TORCH_API Tensor empty(at::IntArrayRef dims, at::TensorOptions options);
 
 /**
  * @brief Creates a CPU tensor, and fills its contents with the given values.
@@ -585,7 +592,7 @@ Tensor TensorCPUFromValues(at::IntArrayRef dims, at::ArrayRef<T> values) {
 vector<int64_t>
 GetTensorInfo(const void* c, size_t* capacity, DeviceOption* device);
 
-class CAFFE2_API TensorPrinter {
+class TORCH_API TensorPrinter {
  public:
   explicit TensorPrinter(
       const std::string& tensor_name = "",

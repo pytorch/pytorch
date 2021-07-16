@@ -15,12 +15,13 @@
 #include <thrust/functional.h>
 
 template <typename Dtype>
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
     int64_t nthreads,
     THCDeviceTensor<Dtype, 4> input,
     THCDeviceTensor<THCIndex_t, 3> target,
     THCDeviceTensor<Dtype, 3> output,
-    Dtype *weights,
+    Dtype* weights,
     int64_t ignore_index) {
   int64_t batch_size = input.getSize(0);
   int64_t H = input.getSize(2);
@@ -44,12 +45,13 @@ __global__ void SpatialClassNLLCriterion_updateOutput_no_reduce_kernel(
 }
 
 template <typename Dtype>
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
     int64_t nthreads,
     THCDeviceTensor<THCIndex_t, 3> target,
     THCDeviceTensor<Dtype, 3> gradOutput,
     THCDeviceTensor<Dtype, 4> gradInput,
-    Dtype *weights,
+    Dtype* weights,
     int64_t ignore_index) {
   int64_t batch_size = target.getSize(0);
   int64_t H = target.getSize(1);
@@ -71,22 +73,19 @@ __global__ void SpatialClassNLLCriterion_updateGradInput_no_reduce_kernel(
 }
 
 template <typename T, typename AccumT>
-#if defined(__HIP_PLATFORM_HCC__)
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
-          T *output,
-          T *total_weight,
-          T *input,
-          THCIndex_t *target,
-          T *weights,
-          int size_average,
-          int batch_size,
-          int n_classes,
-          int map_nelem,
-          int blocks_per_sample,
-          int64_t ignore_index)
-{
+    T* output,
+    T* total_weight,
+    T* input,
+    THCIndex_t* target,
+    T* weights,
+    int size_average,
+    int batch_size,
+    int n_classes,
+    int map_nelem,
+    int blocks_per_sample,
+    int64_t ignore_index) {
   __shared__ AccumT partial_sums[CUDA_NUM_THREADS];
 
   int i, t;
@@ -135,20 +134,20 @@ __global__ void cunn_SpatialClassNLLCriterion_sizeAverage_kernel(
   }
 }
 
-template<typename T>
+template <typename T>
+C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
-          T *gradInput,
-          T *gradOutput,
-          THCIndex_t *target,
-          T *weights,
-          T *total_weight,
-          int size_average,
-          int batch_size,
-          int n_classes,
-          int map_nelem,
-          int blocks_per_sample,
-          int64_t ignore_index)
-{
+    T* gradInput,
+    T* gradOutput,
+    THCIndex_t* target,
+    T* weights,
+    T* total_weight,
+    int size_average,
+    int batch_size,
+    int n_classes,
+    int map_nelem,
+    int blocks_per_sample,
+    int64_t ignore_index) {
   if (*total_weight <= 0)
     return;
 

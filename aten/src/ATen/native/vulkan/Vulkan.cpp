@@ -1,13 +1,7 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <cstring>
-#include <functional>
-#include <iostream>
-#include <numeric>
-
+#include <ATen/Utils.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <ATen/Utils.h>
 
 #ifdef USE_VULKAN_WRAPPER
 #include <vulkan_wrapper.h>
@@ -24,6 +18,14 @@
 #else
 #include <ATen/native/vulkan/spv.h>
 #endif
+
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <numeric>
+#include <stdio.h>
+#include <unistd.h>
+
 
 #define VK_CHECK(f)                                                \
   {                                                                \
@@ -779,17 +781,17 @@ void ComputeUnit::createComputePipeline(
   {
     uint32_t offset = 0;
     size_t size = sizeof(WorkGroupSize::x);
-    spMapEntries[0].constantID = 1;
+    spMapEntries[0].constantID = 0;
     spMapEntries[0].offset = offset;
     spMapEntries[0].size = size;
     offset += size;
     size = sizeof(WorkGroupSize::y);
-    spMapEntries[1].constantID = 2;
+    spMapEntries[1].constantID = 1;
     spMapEntries[1].offset = offset;
     spMapEntries[1].size = size;
     offset += size;
     size = sizeof(WorkGroupSize::z);
-    spMapEntries[2].constantID = 3;
+    spMapEntries[2].constantID = 2;
     spMapEntries[2].offset = offset;
     spMapEntries[2].size = size;
   }
@@ -1038,12 +1040,6 @@ ComputeUnit& ComputeUnitFactory::get(
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   const auto device = context().device();
-  struct ConstBlock {
-    int32_t w;
-    int32_t h;
-  };
-  const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1065,7 +1061,6 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
 
   image.bindStorageImage(descrSet, 0);
   buffer.bind(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
 
   auto& computeUnit = context().computeUnitFactory().get(
@@ -1097,12 +1092,6 @@ void copy_image_to_buffer(
   TORCH_INTERNAL_ASSERT(
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
-  struct ConstBlock {
-    int32_t w;
-    int32_t h;
-  };
-  const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   const VkDescriptorSetLayoutBinding bindings[] = {
@@ -1125,7 +1114,6 @@ void copy_image_to_buffer(
 
   image.bindShaderRead(descrSet, 0);
   buffer.bind(descrSet, 1);
-  constBuffer.bind(descrSet, 2);
 
   const WorkGroupSize workGroupSize{8, 8, 1};
   auto& computeUnit = context().computeUnitFactory().get(
@@ -1183,7 +1171,7 @@ class VulkanTensor::Impl final {
   explicit Impl(std::vector<int64_t> sizes)
       : sizes_(std::move(sizes)),
         strides_(std::vector<int64_t>(sizes_.size())),
-        numel_(prod_intlist(sizes_)) {
+        numel_(c10::multiply_integers(sizes_)) {
     TORCH_CHECK(
         initVulkanContextOnce(), "Vulkan Failed to create Vulkan Context");
   }
@@ -1286,7 +1274,7 @@ class VulkanTensor::Impl final {
 
   VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
     const auto d = sizes.size();
-    const auto numel = prod_intlist(sizes);
+    const auto numel = c10::multiply_integers(sizes);
     VkDeviceSize bufferSize{sizeof(float) * numel};
     // alignment to be able to copy between image and buffer
     if (d == 4) {

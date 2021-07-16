@@ -23,8 +23,9 @@ namespace cuda {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_CU_API Bool : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Bool() = default;
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
@@ -61,10 +62,11 @@ class TORCH_CUDA_API Bool : public Val {
  * Float32. This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Float : public Val {
+class TORCH_CUDA_CU_API Float : public Val {
  public:
   using ScalarType = double;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Float() = default;
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
@@ -101,8 +103,9 @@ class TORCH_CUDA_API Float : public Val {
  * This value can be a symbolic value (defined after the kernel
  * is compiled) or a constant value (inlined into the kernel definition).
  */
-class TORCH_CUDA_API Half : public Val {
+class TORCH_CUDA_CU_API Half : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Half() = default;
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
@@ -136,10 +139,11 @@ class TORCH_CUDA_API Half : public Val {
 
 // An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 // inlined literal in the kernel.
-class TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
+  // NOLINTNEXTLINE(modernize-use-override)
   ~Int() = default;
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
@@ -200,8 +204,9 @@ class TVDomainGuard;
 // that should be const, const. Gave this a try but expanded really quickly.
 // getComputeAtAxis not being const because it can return a TV that some expect
 // to be non-const is the biggest headache.
-class TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_CU_API TensorView : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-use-override)
   ~TensorView() = default;
 
   TensorView(const TensorView& other) = delete;
@@ -352,9 +357,9 @@ class TORCH_CUDA_API TensorView : public Val {
 
   void setMemoryType(MemoryType mt);
 
-  friend TORCH_CUDA_API TransformReplay;
-  friend TORCH_CUDA_API OptOutMutator;
-  friend TORCH_CUDA_API LoopNestGenerator;
+  friend TORCH_CUDA_CU_API TransformReplay;
+  friend TORCH_CUDA_CU_API OptOutMutator;
+  friend TORCH_CUDA_CU_API LoopNestGenerator;
   friend ComputeAt;
   friend void IrFixComputeAt(Fusion*);
   friend void adjustMemoryTypes(Fusion* fusion);

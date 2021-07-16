@@ -6,6 +6,7 @@
 
 namespace torch {
 namespace jit {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EliminateDeadCodeTest, Basic) {
   auto graph = std::make_shared<Graph>();
 

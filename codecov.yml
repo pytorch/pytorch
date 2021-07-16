@@ -3,21 +3,28 @@ coverage:
     project:
       default:
         threshold: 1%
+    patch: off
+
 codecov:
   notify:
-    after_n_builds: 2
+    # Code coverage is collected by 6 configs: codecov_test[12], onnx[12] and windows_test[2]
+    after_n_builds: 6
 comment:
   layout: "diff"
   behavior: once
   require_changes: true
   require_base: yes
   require_head: yes
-  after_n_builds: 2
+  after_n_builds: 6
   branches:
     - "master"
+# Disable inline comments that this code is not covered
+github_checks:
+    annotations: false
 fixes:
   - "/opt/conda/lib/python3.8/site-packages/::project/"
   - "C:/Users/circleci/project/build/win_tmp/build/::project/"
 ignore:
   - "caffe2"
   - "third_party"
+  - "test"

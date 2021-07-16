@@ -32,8 +32,6 @@ class MobileDebugInfo : public c10::DebugInfoBase {
     op_idx_ = op_idx;
   }
 
-  virtual ~MobileDebugInfo() {}
-
  private:
   std::string model_name_;
   std::string method_name_;

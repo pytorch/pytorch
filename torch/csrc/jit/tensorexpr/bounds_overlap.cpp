@@ -78,6 +78,10 @@ Bound flattenBounds(const IndexBounds& a) {
 }
 
 OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
+  if (a.empty() && b.empty()) {
+    return ContainedOrEqual;
+  }
+
   // All accesses to a buf must have the same dimensionality.
 
   if (a.size() != b.size()) {

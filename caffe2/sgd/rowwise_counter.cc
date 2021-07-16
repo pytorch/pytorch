@@ -2,7 +2,9 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RowWiseCounter, RowWiseCounterOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseCounter)
     .NumInputs(4)
     .NumOutputs(2)
@@ -21,5 +23,6 @@ OPERATOR_SCHEMA(RowWiseCounter)
     .Output(1, "output_update_counter", "Output update counter")
     .Arg("counter_halflife", "Default -1: off");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RowWiseCounter);
 } // namespace caffe2

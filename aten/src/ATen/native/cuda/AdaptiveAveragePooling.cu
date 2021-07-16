@@ -200,7 +200,7 @@ namespace {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             // atomic add since different threads could update same variable
-            gpuAtomicAdd(&(ptr_gradInput[iw]), grad_delta);
+            gpuAtomicAddNoReturn(&(ptr_gradInput[iw]), grad_delta);
           }
           ptr_gradInput += isizeW; // next input line
         }
@@ -432,7 +432,7 @@ namespace {
   {
     TensorArg input_arg{ input, "input", 1 },
               output_arg{ output, "output", 2 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d", {input_arg, output_arg});
+    checkAllSameGPU(__func__, {input_arg, output_arg});
 
     for (int64_t i = 0; i < input.ndimension(); i++) {
       TORCH_CHECK(input.size(i) > 0,
@@ -520,6 +520,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 istrideB, istrideC, istrideH, istrideW);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -562,6 +563,7 @@ namespace {
                 input_data, output_data,
                 isizeH, isizeW, osizeH, osizeW,
                 istrideD, istrideH, istrideW);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -571,7 +573,6 @@ namespace {
           false,
           "Unsupported memory format. Supports only ChannelsLast, Contiguous");
     }
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 
   void adaptive_avg_pool2d_backward_out_cuda_template(
@@ -582,8 +583,7 @@ namespace {
     TensorArg grad_input_arg{ gradInput, "gradInput", 1 },
               grad_output_arg{ gradOutput_, "gradOutput_", 2 },
               input_arg{ input, "input", 3 };
-    checkAllSameGPU("cudnn_adaptive_avg_pooling2d_out",
-                    {grad_input_arg, grad_output_arg, input_arg});
+    checkAllSameGPU(__func__, {grad_input_arg, grad_output_arg, input_arg});
 
     switch (input.suggest_memory_format()) {
       case at::MemoryFormat::ChannelsLast: {
@@ -665,6 +665,7 @@ namespace {
                 sizeB, sizeC, isizeH, isizeW, osizeH, osizeW,
                 kernel_stride_C, kernel_size_C,
                 ostrideB, ostrideC, ostrideH, ostrideW);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
             }
           );
         break;
@@ -701,6 +702,7 @@ namespace {
                 atomic_adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
               else
               {
@@ -708,6 +710,7 @@ namespace {
                 adaptive_average_gradinput <<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>> (
                   gradInput_data, gradOutput_data,
                   isizeH, isizeW, osizeH, osizeW);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
               }
             }
           );
@@ -719,7 +722,6 @@ namespace {
           "Unsupported memory format. Supports only ChannelsLast, Contiguous");
 
     }
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 
 } // namespace

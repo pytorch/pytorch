@@ -18,6 +18,7 @@ int PaddedBufferBase::Index(const std::vector<int>& indices) const {
 
 PaddedBufferBase::PaddedBufferBase(
     const std::vector<int>& dims,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::string& name)
     : dims_(dims), name_(name), strides_(dims.size()) {
   for (int i = (int)dims.size() - 1; i >= 0; --i) {

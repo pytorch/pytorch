@@ -14,6 +14,7 @@ class IDEEPFullyConnectedOp final : public IDEEPOperator {
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)),
         training_mode_(OperatorBase::GetSingleArgument<int>("training_mode", 0)) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPFullyConnectedOp() override {}
 
   bool RunOnDevice() override {
@@ -89,6 +90,7 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         axis_(OperatorBase::GetSingleArgument<int32_t>("axis", 1)),
         axis_w_(OperatorBase::GetSingleArgument<int32_t>("axis_w", 1)) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPFullyConnectedGradientOp() override {}
 
   bool RunOnDevice() override {
@@ -137,7 +139,9 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(FC, IDEEPFullyConnectedOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(FCGradient, IDEEPFullyConnectedGradientOp);
 
 } // namespace

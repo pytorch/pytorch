@@ -137,7 +137,7 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       sizes_({(int64_t)values.size()}), \
       scalar_type_(at::k##S), \
       type_(TensorDataContainerType::Tensor) { \
-    at::AutoNonVariableTypeMode non_var_type_mode(true); \
+    at::AutoDispatchBelowAutograd mode; \
     if (scalar_type_ == at::kBool) { \
       tensor_ = at::tensor(values, at::TensorOptions().device(at::kCPU)); \
     } else { \
@@ -212,7 +212,7 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
     }
 
     if (is_scalar()) {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      at::AutoDispatchBelowAutograd mode;
       return at::scalar_tensor(scalar_, options);
     } else if (is_init_list()) {
       // NOTE: Here we explicitly choose to initialize the tensor on CPU first,
@@ -222,7 +222,7 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
       // filling each element of it (which involves `N` CUDA kernel launches where
       // `N` is the number of the elements in the tensor).
       at::Tensor tensor = ([&]() {
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
+        at::AutoDispatchBelowAutograd mode;
         return at::empty(sizes_, options.device(at::kCPU));
       })();
       fill_tensor(tensor);

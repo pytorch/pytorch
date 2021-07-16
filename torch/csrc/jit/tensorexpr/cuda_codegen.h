@@ -71,14 +71,17 @@ class CudaAnalysis : public IRVisitor {
 // execution parameters, then if those params differ from the max mask each dim.
 class GPUMetaVarRewriter : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
-    gpu_block_vars_ = {new Var("blockIdx.x", kInt),
-                       new Var("blockIdx.y", kInt),
-                       new Var("blockIdx.z", kInt)};
-    gpu_thread_vars_ = {new Var("threadIdx.x", kInt),
-                        new Var("threadIdx.y", kInt),
-                        new Var("threadIdx.z", kInt)};
+    gpu_block_vars_ = {
+        new Var("blockIdx.x", kInt),
+        new Var("blockIdx.y", kInt),
+        new Var("blockIdx.z", kInt)};
+    gpu_thread_vars_ = {
+        new Var("threadIdx.x", kInt),
+        new Var("threadIdx.y", kInt),
+        new Var("threadIdx.z", kInt)};
 
     current_block_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
     current_thread_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
@@ -105,6 +108,7 @@ class GPUMetaVarRewriter : public IRMutator {
 
  private:
   // When processing a block, stores the contents of each sub-segment.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   class Segment {
    public:
     void reset(bool mask) {
@@ -169,9 +173,13 @@ class CudaPrinter : public IRPrinter {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
 
+  void visit(const ExternalCall* v) override;
+
   const Var* rand_func() const {
     return rand_func_;
   }
+
+  std::string dtypeToCppString(const Dtype& dtype) override;
 
   using IRPrinter::name_manager;
   using IRPrinter::visit;
@@ -179,13 +187,16 @@ class CudaPrinter : public IRPrinter {
  private:
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
+
+  void print_flat_alloc(const Allocate* alloc);
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
 // when real arguments are provided.
-class TORCH_CUDA_API CudaCodeGen : public CodeGen {
+class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(Stmt* stmt, Ts... ts)
       : CodeGen(
             stmt,
@@ -194,6 +205,7 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
     Initialize();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CudaCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
@@ -205,6 +217,7 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
 
   ~CudaCodeGen() override;
 
+  void call_raw(const std::vector<void*>& args) override;
   void call(const std::vector<CallArg>& args) override;
 
   template <typename... Ts>
@@ -212,12 +225,24 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
     call(std::vector<CallArg>({CallArg(ts)...}));
   }
 
+  at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) override;
+
   const std::vector<const Expr*>& gpu_block_extents() const {
     return cuda_analysis_->gpu_block_extents();
   }
 
   const std::vector<const Expr*>& gpu_thread_extents() const {
     return cuda_analysis_->gpu_thread_extents();
+  }
+
+  std::string getCodeText(const std::string& attr = "") override {
+    return oss_.str();
   }
 
  private:
