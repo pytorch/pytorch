@@ -1,3 +1,4 @@
+from torch.testing._internal.jit_utils import JitTestCase
 import ctypes
 import io
 import os
@@ -7,7 +8,6 @@ import unittest
 import torch
 import torch._C
 from torch.testing import FileCheck
-from torch.testing._internal.jit_utils import JitTestCase
 from torch.jit.mobile import _load_for_lite_interpreter
 from pathlib import Path
 
