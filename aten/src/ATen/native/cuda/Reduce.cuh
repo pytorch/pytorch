@@ -78,7 +78,7 @@ struct ReduceConfig {
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
     , num_outputs(num_outputs) {}
-	int element_size_bytes;
+  int element_size_bytes;
   int num_inputs;
   int num_outputs;
   int step_input = 1;
