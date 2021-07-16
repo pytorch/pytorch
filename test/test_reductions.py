@@ -1870,6 +1870,7 @@ class TestReductions(TestCase):
 
         nan = float('nan')
         check(torch.median, nan, [], nan)
+        check(torch.median, [], [], nan)
         check(torch.nanmedian, nan, [], nan)
         check(torch.median, nan, [0], [nan, 0])
         check(torch.nanmedian, nan, [0], [nan, 0])
