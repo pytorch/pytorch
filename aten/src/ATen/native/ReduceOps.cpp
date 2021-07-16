@@ -77,14 +77,12 @@ void check_allany_for_meta(
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  this->dim = 1000000;
-  // this->dim = maybe_wrap_dim(dim, self.dim());
+  this->dim = maybe_wrap_dim(dim, self.dim());
   check_allany_for_meta(*this, "all", self, this->dim, keepdim);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  this->dim = 1000000;
-  // this->dim = maybe_wrap_dim(dim, self.dim());
+  this->dim = maybe_wrap_dim(dim, self.dim());
   check_allany_for_meta(*this, "any", self, this->dim, keepdim);
 }
 
