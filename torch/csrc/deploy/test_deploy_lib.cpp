@@ -57,7 +57,8 @@ bool raise_exception() {
 }
 
 bool check_initial_state() {
-  bool bv = bar.v == 14; // unless we reference bar it is unspecified whether it should have been constructed
+  bool bv = bar.v == 14; // unless we reference bar it is unspecified whether it
+                         // should have been constructed
   return bv && first == 1 && second == 2 && bss_local == 0 && third == 3 &&
       bar_constructed == 1 && foo_constructed == 1 && bar_destructed == 0;
 }

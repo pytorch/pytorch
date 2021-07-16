@@ -176,7 +176,11 @@ Interpreter::Interpreter(InterpreterManager* manager)
 
   write_tmp_lib(dst, lib_start, lib_end);
   fclose(dst);
-  handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY | RTLD_DEEPBIND);
+  int flags = RTLD_LOCAL | RTLD_LAZY;
+#ifndef FBCODE_CAFFE2
+  flags |= RTLD_DEEPBIND;
+#endif
+  handle_ = dlopen(library_name, flags);
   if (!handle_) {
     throw std::runtime_error(dlerror());
   }
