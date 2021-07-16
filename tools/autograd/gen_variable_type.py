@@ -225,7 +225,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # See https://github.com/pytorch/pytorch/issues/60426 for more information
     '_embedding_bag', '_embedding_bag_forward_only',
     'q_per_channel_scales', 'q_per_channel_zero_points',
-    'lu_unpack', '_cudnn_rnn_backward', '_fused_moving_avg_obs_fq_helper',
+    'lu_unpack', '_cudnn_rnn_backward',
 
     # The below failed StorageImpl use_count check but we skip tensor_impl check
     # just in case
