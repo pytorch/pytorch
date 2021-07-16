@@ -198,12 +198,11 @@ def main() -> None:
 
     if not exists:
         msg = (
-            "Could not find 'clang-tidy' binary\n"
+            "Could not find '.clang-tidy-bin/clang-tidy'\n"
             "You can install it by running:\n"
             "   python3 tools/linter/install/clang_tidy.py"
         )
-        print(msg)
-        raise RuntimeError("Could not find clang-tidy binary")
+        raise RuntimeError(msg)
 
     return_code = run(options)
     if return_code != 0:
