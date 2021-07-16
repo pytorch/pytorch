@@ -725,7 +725,7 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 class TestAssertClose(TestCase):
     def test_mismatching_types_subclasses(self):
-        actual = torch.empty(())
+        actual = torch.rand(())
         expected = torch.nn.Parameter(actual)
 
         for fn in assert_close_with_inputs(actual, expected):
