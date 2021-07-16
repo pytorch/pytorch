@@ -84,10 +84,6 @@ DEFAULTS = {
 }
 
 
-def default_input_files() -> List[str]:
-    pass
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="clang-tidy wrapper script")
     parser.add_argument(
