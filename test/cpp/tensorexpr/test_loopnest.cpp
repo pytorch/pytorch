@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include <test/cpp/tensorexpr/padded_buffer.h>
+#include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -5261,6 +5262,118 @@ TEST(LoopNest, DistributeLoopOverInnerLoops) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(LoopNest, DistributeLoopAndParentsWithoutAnyPivot) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int m = 0; m < 50; m++) {
+  //   for (int i = 0; i < 20; i++) {
+  //     A[m,i] = 0;
+  //     for (int j = 0; j < 100; j++) {
+  //       A[m,i] = A[m,i] + i * j;
+  //     }
+  //     B[m,i] = A[m,i];
+  //     for (int k = 0; k < 50; k++) {
+  //       B[m,i] = B[m,i] + i * k;
+  //     }
+  //   }
+  // }
+  BufHandle a_buf("A", {100, 100}, kInt);
+  BufHandle b_buf("B", {100, 100}, kInt);
+  VarHandle m("m", kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  auto initA = Store::make(a_buf, {m, i}, 0);
+  auto forJ = For::make(
+      j,
+      0,
+      100,
+      Store::make(
+          a_buf,
+          {m, i},
+          Add::make(Load::make(a_buf, {m, i}), Mul::make(i, j))));
+  auto initB = Store::make(b_buf, {m, i}, Load::make(a_buf, {m, i}));
+  auto forK = For::make(
+      k,
+      0,
+      50,
+      Store::make(
+          b_buf,
+          {m, i},
+          Add::make(Load::make(b_buf, {m, i}), Mul::make(i, k))));
+  auto forI = For::make(i, 0, 20, Block::make({initA, forJ, initB, forK}));
+
+  {
+    // Check the case of distributing loop and its parents over all the
+    // statements in the loop.
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: A[m, i] = 0
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[m, i] =
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: B[m, i] = A[m, i]
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[m, i] =
+# CHECK-NOT: for (
+        )IR";
+
+    auto newForI = dynamic_cast<For*>(Stmt::clone(forI));
+    auto forM = For::make(m, 0, 50, newForI);
+    auto par = Block::make({forM});
+    LoopNest nest(par, {a_buf.node(), b_buf.node()});
+    auto newLoops = LoopNest::distributeLoopAndParents(newForI);
+
+    std::ostringstream oss;
+    oss << *par;
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // The first loop after distribution must be same as the original For.
+    ASSERT_EQ(newLoops.front(), forM);
+  }
+
+  {
+    // Check the case of distributing loop and its parents over all the inner
+    // loops.
+    const std::string& verification_pattern =
+        R"IR(
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: A[m, i] = 0
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[m, i] =
+# CHECK: for (int m
+# CHECK-NEXT: for (int i
+# CHECK-NEXT: B[m, i] = A[m, i]
+# CHECK-NEXT: for (int k
+# CHECK-NEXT: B[m, i] =
+# CHECK-NOT: for (
+        )IR";
+
+    auto newForI = dynamic_cast<For*>(Stmt::clone(forI));
+    auto forM = For::make(m, 0, 50, newForI);
+    auto par = Block::make({forM});
+    LoopNest nest(par, {a_buf.node(), b_buf.node()});
+    auto newLoops = LoopNest::distributeLoopAndParentsOverInnerLoops(newForI);
+
+    std::ostringstream oss;
+    oss << *par;
+    torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+    // The first loop after distribution must be same as the original For.
+    ASSERT_EQ(newLoops.front(), forM);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopNest, fuseLoopsSimple) {
   KernelScope kernel_scope;
 
@@ -6364,14 +6477,14 @@ TEST(LoopNest, reorderNestedLoops3D) {
   auto forI = For::make(i, 0, 20, forJ);
   auto par = Block::make({forI});
 
-  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 1, 0});
+  auto reordered = LoopNest::reorder({forI, forJ, forK}, {2, 0, 1});
 
   ASSERT_EQ(reordered[0], forK);
-  ASSERT_EQ(reordered[1], forJ);
-  ASSERT_EQ(reordered[2], forI);
-  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forJ, forI}));
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_EQ(reordered[2], forJ);
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forI, forJ}));
   ASSERT_EQ(forK->get_parent(), par);
-  ASSERT_EQ(store->get_parent(), forI->body());
+  ASSERT_EQ(store->get_parent(), forJ->body());
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6403,13 +6516,13 @@ TEST(LoopNest, reorderNestedLoops4D) {
   auto forI = For::make(i, 0, 20, forJ);
   auto par = Block::make({forI});
 
-  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 3, 0, 1});
+  auto reordered = LoopNest::reorder({forI, forJ, forK, forL}, {2, 0, 3, 1});
 
   ASSERT_EQ(reordered[0], forK);
-  ASSERT_EQ(reordered[1], forL);
-  ASSERT_EQ(reordered[2], forI);
+  ASSERT_EQ(reordered[1], forI);
+  ASSERT_EQ(reordered[2], forL);
   ASSERT_EQ(reordered[3], forJ);
-  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forL, forI, forJ}));
+  ASSERT_TRUE(LoopNest::areLoopsPerfectlyNested({forK, forI, forL, forJ}));
   ASSERT_EQ(forK->get_parent(), par);
   ASSERT_EQ(store->get_parent(), forJ->body());
 }
@@ -6543,24 +6656,22 @@ TEST(LoopNest, compressBufferSimple) {
   //     B[i,j] = A[i,j] + A[i, j+1]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ1 = For::make(j, 0, 200, Store::make(aBuf, {i, j}, sin(i * j)));
   auto forJ2 = For::make(
       j,
       0,
       199,
       Store::make(
-          b_buf,
+          bBuf,
           {i, j},
-          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+          Add::make(Load::make(aBuf, {i, j}), Load::make(aBuf, {i, j + 1}))));
   auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   std::ostringstream oss;
   oss << *par;
@@ -6574,9 +6685,9 @@ TEST(LoopNest, compressBufferSimple) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6590,21 +6701,19 @@ TEST(LoopNest, compressBufferMultipleDims) {
   //     B[i,j] = A[i,j] + A[i,j]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto store1 = Store::make(a_buf, {i, j}, sin(i * j));
+  auto store1 = Store::make(aBuf, {i, j}, sin(i * j));
   auto store2 = Store::make(
-      b_buf,
+      bBuf,
       {i, j},
-      Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j})));
+      Add::make(Load::make(aBuf, {i, j}), Load::make(aBuf, {i, j})));
   auto forJ = For::make(j, 0, 200, Block::make({store1, store2}));
   auto forI = For::make(i, 0, 100, forJ);
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   std::ostringstream oss;
   oss << *par;
@@ -6617,9 +6726,9 @@ TEST(LoopNest, compressBufferMultipleDims) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6637,27 +6746,22 @@ TEST(LoopNest, compressBufferMultipleDims2) {
   //     }
   //   }
   // }
-  Buf* A =
-      new Buf("A", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
-  Buf* B =
-      new Buf("B", {new IntImm(100), new IntImm(200), new IntImm(300)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200, 300}, kInt);
+  BufHandle bBuf("B", {100, 200, 300}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle k("k", kInt);
-  auto store1 = Store::make(a_buf, {i, j, k}, sin(i * j * k));
+  auto store1 = Store::make(aBuf, {i, j, k}, sin(i * j * k));
   auto forK1 = For::make(k, 0, 300, store1);
   auto store2 = Store::make(
-      b_buf,
+      bBuf,
       {i, j, k},
-      Add::make(
-          Load::make(a_buf, {i, j, k}), Load::make(a_buf, {i, j, k + 1})));
+      Add::make(Load::make(aBuf, {i, j, k}), Load::make(aBuf, {i, j, k + 1})));
   auto forK2 = For::make(k, 0, 299, store2);
   auto forJ = For::make(j, 0, 200, Block::make({forK1, forK2}));
   auto forI = For::make(i, 0, 100, forJ);
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   std::ostringstream oss;
   oss << *par;
@@ -6672,10 +6776,10 @@ TEST(LoopNest, compressBufferMultipleDims2) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 3);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(2))->value(), 300);
+  ASSERT_EQ(aBuf.node()->ndim(), 3);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(2), 300);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6691,24 +6795,22 @@ TEST(LoopNest, compressBufferDifferentOrderIndices) {
   //     B[i, j] = A[j, i] + A[j+1, 0]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {j, i}, sin(i * j)));
+  auto forJ1 = For::make(j, 0, 200, Store::make(aBuf, {j, i}, sin(i * j)));
   auto forJ2 = For::make(
       j,
       0,
       99,
       Store::make(
-          b_buf,
+          bBuf,
           {i, j},
-          Add::make(Load::make(a_buf, {j, i}), Load::make(a_buf, {j + 1, i}))));
+          Add::make(Load::make(aBuf, {j, i}), Load::make(aBuf, {j + 1, i}))));
   auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   std::ostringstream oss;
   oss << *par;
@@ -6722,9 +6824,9 @@ TEST(LoopNest, compressBufferDifferentOrderIndices) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 1);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 100);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 1);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6740,27 +6842,25 @@ TEST(LoopNest, compressBufferVariableBounds) {
   //     B[i,j] = A[i,j] + A[i, j+1]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   VarHandle M("M", kInt);
   VarHandle N("N", kInt);
-  auto forJ1 = For::make(j, 0, N, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ1 = For::make(j, 0, N, Store::make(aBuf, {i, j}, sin(i * j)));
   auto forJ2 = For::make(
       j,
       0,
       N - 1,
       Store::make(
-          b_buf,
+          bBuf,
           {i, j},
-          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+          Add::make(Load::make(aBuf, {i, j}), Load::make(aBuf, {i, j + 1}))));
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   auto forI = For::make(i, 0, M, Block::make({forJ1, forJ2}));
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   std::ostringstream oss;
   oss << *par;
@@ -6774,9 +6874,9 @@ TEST(LoopNest, compressBufferVariableBounds) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 1);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6794,25 +6894,23 @@ TEST(LoopNest, compressBufferNoCommonParentLoops) {
   //     B[i,j] = A[i,j] + A[i, j+1]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(100), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i, j}, sin(i * j)));
+  auto forJ1 = For::make(j, 0, 200, Store::make(aBuf, {i, j}, sin(i * j)));
   auto forJ2 = For::make(
       j,
       0,
       199,
       Store::make(
-          b_buf,
+          bBuf,
           {i, j},
-          Add::make(Load::make(a_buf, {i, j}), Load::make(a_buf, {i, j + 1}))));
+          Add::make(Load::make(aBuf, {i, j}), Load::make(aBuf, {i, j + 1}))));
   auto forI1 = For::make(i, 0, 100, forJ1);
   auto forI2 = For::make(i, 0, 100, forJ2);
   auto par = Block::make({forI1, forI2});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   // There should be no change in the buffer or code.
   std::ostringstream oss;
@@ -6828,9 +6926,9 @@ TEST(LoopNest, compressBufferNoCommonParentLoops) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 100);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 100);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -6846,26 +6944,23 @@ TEST(LoopNest, compressBufferIndicesMixed) {
   //     B[i,j] = A[i + j, j] + A[i + j, j+1]
   //   }
   // }
-  Buf* A = new Buf("A", {new IntImm(300), new IntImm(200)}, kInt);
-  Buf* B = new Buf("B", {new IntImm(100), new IntImm(200)}, kInt);
-  BufHandle a_buf(A);
-  BufHandle b_buf(B);
+  BufHandle aBuf("A", {300, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
-  auto forJ1 = For::make(j, 0, 200, Store::make(a_buf, {i + j, j}, sin(i * j)));
+  auto forJ1 = For::make(j, 0, 200, Store::make(aBuf, {i + j, j}, sin(i * j)));
   auto forJ2 = For::make(
       j,
       0,
       199,
       Store::make(
-          b_buf,
+          bBuf,
           {i, j},
           Add::make(
-              Load::make(a_buf, {i + j, j}),
-              Load::make(a_buf, {i + j, j + 1}))));
+              Load::make(aBuf, {i + j, j}), Load::make(aBuf, {i + j, j + 1}))));
   auto forI = For::make(i, 0, 100, Block::make({forJ1, forJ2}));
   auto par = Block::make({forI});
-  LoopNest::compressBuffer(A, par);
+  LoopNest::compressBuffer(aBuf.node(), par);
 
   // There should be no change in the buffer or code.
   std::ostringstream oss;
@@ -6880,9 +6975,76 @@ TEST(LoopNest, compressBufferIndicesMixed) {
       )IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  ASSERT_EQ(A->ndim(), 2);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(0))->value(), 300);
-  ASSERT_EQ(dynamic_cast<const IntImm*>(A->dim(1))->value(), 200);
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 300);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
+}
+
+TEST(LoopNest, compressMultipleBuffers) {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  // for (int i = 0; i < 100; ++i) {
+  //   for (int j = 0; j < 200; ++j) {
+  //     A[i,j] = sin(i*j)
+  //   }
+  //   for (int k = 0; k < 199; ++k) {
+  //     B[i,k] = A[i,k] + A[i, k+1]
+  //   }
+  //   for (int m = 0; m < 50; ++m) {
+  //     C[i,m] = B[i,m]
+  //   }
+  // }
+  BufHandle aBuf("A", {100, 200}, kInt);
+  BufHandle bBuf("B", {100, 200}, kInt);
+  BufHandle cBuf("C", {100, 200}, kInt);
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  VarHandle k("k", kInt);
+  VarHandle m("m", kInt);
+  auto forJ = For::make(j, 0, 200, Store::make(aBuf, {i, j}, sin(i * j)));
+  auto forK = For::make(
+      k,
+      0,
+      199,
+      Store::make(
+          bBuf,
+          {i, k},
+          Add::make(Load::make(aBuf, {i, k}), Load::make(aBuf, {i, k + 1}))));
+  auto forM =
+      For::make(m, 0, 50, Store::make(cBuf, {i, m}, Load::make(bBuf, {i, m})));
+  auto forI = For::make(i, 0, 100, Block::make({forJ, forK, forM}));
+  auto par = Block::make({forI});
+
+  // This should compress all buffers A, B, and C as follows:
+  //   A[100, 200] -> A[1, 200]
+  //   B[100, 200] -> B[1, 200]
+  //   C[100, 200] -> C[1, 1]
+  LoopNest::compressAllBuffers(par);
+
+  std::ostringstream oss;
+  oss << *par;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT: for (int j
+# CHECK-NEXT: A[0, j] =
+# CHECK: for (int k
+# CHECK-NEXT: B[0, k] = (A[0, k]) + (A[0, k + 1])
+# CHECK: for (int m
+# CHECK-NEXT: C[0, 0] = B[0, m]
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  ASSERT_EQ(aBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, aBuf.node()->dim(1), 200);
+  ASSERT_EQ(bBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, bBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, bBuf.node()->dim(1), 200);
+  ASSERT_EQ(cBuf.node()->ndim(), 2);
+  IS_IMM_WITH_VAL(Int, cBuf.node()->dim(0), 1);
+  IS_IMM_WITH_VAL(Int, cBuf.node()->dim(1), 1);
 }
 
 } // namespace jit
