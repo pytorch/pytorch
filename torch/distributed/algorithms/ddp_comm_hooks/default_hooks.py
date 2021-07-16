@@ -98,20 +98,13 @@ def hook_then_optimizer(
         fut = hook(hook_state, bucket)
 
         def optimizer_step(fut):
-            # torch.cuda.synchronize(device=dist.get_rank())
             gradient_tensors = bucket.get_per_parameter_tensors()
             model_params = bucket.get_model_params_for_bucket()
-            # optimizer_state.functional_optimizer = optimizer_state.functional_optim_cls(
-            #     model_params,
-            #     *optimizer_state.functional_optim_args,
-            # )
             for grad_tensor, model_param in zip(gradient_tensors, model_params):
-                assert model_param.shape == grad_tensor.shape
                 optimizer_state.functional_optimizer.step_param(
                     model_param,
                     grad_tensor,
                 )
-            # optimizer_state.functional_optimizer.step(gradient_tensors)
             return [bucket.get_tensor()]
         return fut.then(optimizer_step)
 
