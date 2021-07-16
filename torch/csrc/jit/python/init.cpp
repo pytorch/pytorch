@@ -1111,14 +1111,12 @@ void initJITBindings(PyObject* module) {
 
   // Used by torch.Package to coordinate deserialization of storages across
   // ScriptModules and eager modules
-  py::class_<
-      DeserializationStorageContext,
-      std::shared_ptr<DeserializationStorageContext>>(
-      m, "DeserializationStorageContext")
+  py::class_<StorageContext, std::shared_ptr<StorageContext>>(
+      m, "StorageContext")
       .def(py::init<>())
       .def(
           "get_storage",
-          [](DeserializationStorageContext& self,
+          [](StorageContext& self,
              const std::string& name,
              py::object data_type_obj) {
             c10::Storage storage = self.getStorage(name);
@@ -1134,12 +1132,12 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "add_storage",
-          [](DeserializationStorageContext& self,
+          [](StorageContext& self,
              const std::string& name,
              const at::Tensor& tensor) {
-            return self.addStorage(name, tensor.storage());
+            self.addStorage(name, tensor.storage());
           })
-      .def("has_storage", &DeserializationStorageContext::hasStorage);
+      .def("has_storage", &StorageContext::hasStorage);
 
   m.def(
       "_jit_get_operation",

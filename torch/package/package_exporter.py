@@ -195,6 +195,7 @@ class PackageExporter:
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
+        self.serialized_storages: Set[str] = set()
 
         # A graph tracking all the modules and pickle objects added to this
         # package and the dependencies between them.
@@ -203,7 +204,6 @@ class PackageExporter:
         # - Nodes may contain metadata that describe how to write the thing to the zipfile.
         self.dependency_graph = DiGraph()
         self.script_module_serializer = torch._C.ScriptModuleSerializer(self.zip_file)
-        self.storage_context = self.script_module_serializer.storage_context()
 
         # These are OrderedDicts for compatibility with RemovableHandle.
         # Generic OrderedDict type annotations are not present until 3.7.
@@ -771,19 +771,20 @@ class PackageExporter:
     def _persistent_id(self, obj):
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
+            name = f".data/{obj_key}.storage"
 
-            # serialize storage if not already written
-            storage_present = self.storage_context.has_storage(obj)
-            storage_id = self.storage_context.get_or_add_storage(obj)
-            if not storage_present:
-                if obj.device.type != "cpu":
-                    obj = obj.cpu()
-                num_bytes = obj.size() * obj.element_size()
-                self.zip_file.write_record(
-                    f".data/{storage_id}.storage", obj.data_ptr(), num_bytes
-                )
-            return ("storage", storage_type, storage_id, location, obj.size())
+            if name not in self.serialized_storages:
+                # check to see if storage was previously serialized
+                serialized_files = self.zip_file.get_all_written_records()
+                if name not in serialized_files:
+                    if obj.device.type != "cpu":
+                        obj = obj.cpu()
+                    num_bytes = obj.size() * obj.element_size()
+                    self.zip_file.write_record(name, obj.data_ptr(), num_bytes)
+                self.serialized_storages.add(name)
+            return ("storage", storage_type, obj_key, location, obj.size())
 
         if hasattr(obj, "__reduce_package__"):
             if _gate_torchscript_serialization and isinstance(

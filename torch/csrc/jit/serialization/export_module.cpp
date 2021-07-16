@@ -443,7 +443,7 @@ void ScriptModuleSerializer::serialize(
         /*archive_name=*/"constants",
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/",
-        /*use_storage_context=*/true);
+        /*tensor_cdata_naming_scheme=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
     writeMobileMetadata(module, extra_files);
@@ -465,13 +465,11 @@ void ScriptModuleSerializer::writeArchive(
     const std::string& archive_name,
     const std::string& archive_dir,
     const std::string& tensor_dir,
-    bool use_storage_context) {
+    bool tensor_cdata_naming_scheme) {
   std::vector<char> data;
   // Vector to capture the run-time class types during pickling the IValues
   std::vector<c10::ClassTypePtr> memoizedClassTypes;
   std::vector<std::string> tensor_names;
-  // tensors that are already serialized in use_storage_context
-  std::unordered_set<std::string> serialized_tensors;
   Pickler data_pickle(
       [&](const char* buf, size_t size) {
         data.insert(data.end(), buf, buf + size);
@@ -483,19 +481,12 @@ void ScriptModuleSerializer::writeArchive(
       &memoizedClassTypes,
       [&](const at::Tensor& tensor) {
         // returns a string to use in picker.cpp as storage obj key
-        if (use_storage_context) {
-          bool already_serialized =
-              storage_context_.hasStorage(tensor.storage());
-          std::string tensor_name =
-              std::to_string(
-                  storage_context_.getOrAddStorage(tensor.storage())) +
-              ".storage";
-          if (already_serialized) {
-            // this case is hit when storage has been serialized already
-            // from a torch.package context
-            serialized_tensors.insert(tensor_name);
-          }
-          tensor_names.push_back(tensor_name);
+        if (tensor_cdata_naming_scheme) {
+          std::string string_id =
+              std::to_string(reinterpret_cast<std::intptr_t>(
+                  tensor.storage().unsafeGetStorageImpl()));
+          tensor_names.push_back(string_id + ".storage");
+          storage_context_.addStorage(string_id, tensor.storage());
         } else {
           tensor_names.push_back(std::to_string(tensor_names.size()));
         }
@@ -509,18 +500,20 @@ void ScriptModuleSerializer::writeArchive(
   std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
+  const std::vector<std::string>& pre_serialized_files =
+      writer_.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {
     WriteableTensorData writable_td = getWriteableTensorData(td);
-    std::string tensor_name = tensor_names[i++];
-    if (use_storage_context && serialized_tensors.count(tensor_name)) {
+    std::string fname = tensor_dir + tensor_names[i++];
+    if (tensor_cdata_naming_scheme &&
+        std::find(
+            pre_serialized_files.begin(), pre_serialized_files.end(), fname) !=
+            pre_serialized_files.end()) {
       // storage has been serialzed already, skip
       continue;
     }
-    writer_.writeRecord(
-        tensor_dir + tensor_name,
-        writable_td.data(),
-        writable_td.sizeInBytes());
+    writer_.writeRecord(fname, writable_td.data(), writable_td.sizeInBytes());
   }
 
   std::string fname = archive_dir + archive_name + ".pkl";
@@ -659,7 +652,7 @@ void ScriptModuleSerializer::writeByteCode(
       /*archive_name=*/"bytecode",
       /*archive_dir=*/"",
       /*tensor_dir=*/"constants/",
-      /*use_storage_context=*/true);
+      /*tensor_cdata_naming_scheme=*/true);
 
   auto debug_info_telements = Tup(std::move(debug_info_elements));
 
@@ -769,7 +762,7 @@ void ScriptModuleSerializer::serialize_unified_format(
       "data",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*use_storage_context=*/true);
+      /*tensor_cdata_naming_scheme=*/true);
   // Then we serialize all code info.
   convertTypes(module.type());
   // The tensor constants from the code are written to a separate archive
@@ -781,14 +774,10 @@ void ScriptModuleSerializer::serialize_unified_format(
       "constants",
       archive_dir,
       /*tensor_dir=*/".data/",
-      /*use_storage_context=*/true);
+      /*tensor_cdata_naming_scheme=*/true);
 
   // Note: writeFiles() call needs to be made in addition to calling this
   // function to have the code actually saved (tensors are saved)
-}
-
-SerializationStorageContext& ScriptModuleSerializer::storage_context() {
-  return storage_context_;
 }
 
 void ExportModule(
