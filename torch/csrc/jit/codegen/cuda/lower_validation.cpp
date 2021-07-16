@@ -509,7 +509,7 @@ void validateParallelize(Fusion* fusion) {
         }
         // When the producer axis is a broadcast, it is not really
         // parallelized unless thread-predicated
-        if (parallel_bcast_doms.none()) {
+        if (producer_axis->isBroadcast() && parallel_bcast_doms.none()) {
           continue;
         }
         // No constraint on the consumer tensor when the producer
