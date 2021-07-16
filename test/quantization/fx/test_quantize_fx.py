@@ -4711,7 +4711,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         eager_out = eager(data[0][0])
         graph_out = graph(data[0][0])
-        self.assertEqual(eager_out, graph_out)
+        # Eager Mode QAT and FX Graph Mode QAT now differ in numerics
+        # because FX Graph Mode QAT uses same fake_quant instances for
+        # input and output of CopyNode
+        if quant_type != QuantType.QAT:
+            self.assertEqual(eager_out, graph_out)
 
     @override_qengines
     def test_resnet_base(self):
