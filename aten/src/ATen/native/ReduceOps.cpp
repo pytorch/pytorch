@@ -145,9 +145,12 @@ TORCH_META_FUNC2(sum, dim_IntList)
     dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
   }
 
-  auto shape = get_reduction_shape(self, dim, keepdim);
+  DimVector dims(dim);
+  maybe_wrap_dims(dims, self.dim());
+
+  auto shape = get_reduction_shape(self, dims, keepdim);
   set_output(shape, self.options().dtype(dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
 }
 
 } // namespace meta
