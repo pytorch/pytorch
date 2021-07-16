@@ -84,6 +84,9 @@ ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
+# Set AMD gpu targets to build for
+ENV PYTORCH_ROCM_ARCH "gfx900;gfx906"
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
