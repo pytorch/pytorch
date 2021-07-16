@@ -9,125 +9,80 @@ namespace jit {
 
 namespace {
 
-c10::optional<IntAttr::ValueType> getConstantInt(Node& node, size_t pos) {
-  auto n = node.inputs().at(pos)->node();
-  if (n->kind() == prim::Constant &&
-      n->kindOf(attr::value) == AttributeKind::i) {
-    return n->i(attr::value);
-  }
-
-  return {};
-}
-
-c10::optional<IntAttr::ValueType> normalizeArithNode(Node& node) {
+/**
+ * Check whether the arithmetic node is binary, and return a constant int value
+ * if there exists one.
+ *
+ * @pre node is integer arithmetic.
+ * @post if there's one constant in two oprands, then the second operand is
+ *       constant.
+ */
+c10::optional<int64_t> checkArithNode(Node& node) {
   if (node.inputs().size() != 2) {
     return {};
   }
+  if (node.input(0)->type() != IntType::get() ||
+      node.input(1)->type() != IntType::get()) {
+    return false;
+  }
 
   if (node.kind() == aten::mul || node.kind() == aten::add) {
-    if (auto i = getConstantInt(node, 0)) {
+    if (auto i = constant_as<int64_t>(node.input(0))) {
       node.permuteInputs({1, 0});
       return i;
     }
   }
 
-  return getConstantInt(node, 1);
+  return constant_as<int64_t>(node.input(1));
 }
-
-bool tryReduceArith(Node& node);
 
 /**
  * Remove a mul/floordiv node if it is multiplication or division by 1.
  *
- * @pre node is either aten::mul or aten::floordiv
- * @return true only if the input IR node is successfully replaced.
+ * @pre node is either aten::mul, aten::floordiv or aten::div
  */
-bool tryReduceMulAndDiv(Node& node) {
-  auto constant = normalizeArithNode(node);
+bool trySimplifyMulOrDiv(Node& node) {
+  auto constant = checkArithNode(node);
   if (!constant || *constant != 1) {
     return false;
   }
 
-  const auto uses = node.output()->uses();
-  for (const auto& u : uses) {
-    if (tryReduceArith(*u.user)) {
-      u.user->destroy();
-    }
-  }
-
-  node.output()->replaceAllUsesWith(node.inputs().at(0));
+  node.output()->replaceAllUsesWith(node.inputs()[0]);
   return true;
 }
 
 /**
- * Merge an add/sub node with its users. If there exists a mul/floordiv node by
- * 1, we firstly run tryReduceMulAndDiv() to bring all subsequent IR nodes as
- * direct IR user node. If all updated user nodes are add/sub node with
- * constants, we will merge the constant parts together, and replace all uses of
- * the input node.
+ * Simplify an add/sub node with its input node, i.e. merge the constant parts
+ * together.
  *
  * @pre node is either aten::add or aten::sub
- * @return true only if the input IR node is successfully replaced with its
- * parent.
  */
-bool tryReduceAddAndSub(Node& node) {
-  auto constant = normalizeArithNode(node);
+bool trySimplifyAddOrSub(Node& node) {
+  auto constant = checkArithNode(node);
   if (!constant) {
     return false;
   }
 
-  if (*constant == 0) {
-    node.output()->replaceAllUsesWith(node.inputs().at(0));
-    return true;
-  }
-
-  std::vector<Node*> mulAndDivToRemove;
-  for (const auto& u : node.output()->uses()) {
-    if (u.user->kind() == aten::mul || u.user->kind() == aten::floordiv) {
-      mulAndDivToRemove.push_back(u.user);
-    }
-  }
-
-  for (auto n : mulAndDivToRemove) {
-    if (tryReduceMulAndDiv(*n)) {
-      n->destroy();
-    } else {
-      return false;
-    }
-  }
-
-  std::vector<std::pair<Node*, IntAttr::ValueType>> addAndSubToMerge;
-  for (const auto& u : node.output()->uses()) {
-    if (u.user->kind() != aten::add && u.user->kind() != aten::sub) {
-      return false;
-    }
-
-    if (auto i = normalizeArithNode(*u.user)) {
-      addAndSubToMerge.emplace_back(u.user, *i);
-    } else {
-      return false;
-    }
-  }
-
-  for (const auto& u : addAndSubToMerge) {
-    WithInsertPoint g(&node);
-    auto user = u.first;
-    auto delta = user->kind() == node.kind() ? *constant : -*constant;
-    user->replaceInput(1, node.owningGraph()->insertConstant(u.second + delta));
-  }
-  node.output()->replaceAllUsesWith(node.inputs().at(0));
-
-  return true;
-}
-
-bool tryReduceArith(Node& node) {
-  if (node.kind() == aten::add || node.kind() == aten::sub) {
-    return tryReduceAddAndSub(node);
-  } else if (node.kind() == aten::mul || node.kind() == aten::floordiv) {
-    return tryReduceMulAndDiv(node);
-  } else {
+  auto& dep = *node.inputs()[0]->node();
+  if (dep.kind() != aten::add && dep.kind() != aten::sub) {
     return false;
   }
+
+  auto delta = checkArithNode(dep);
+  if (!delta) {
+    return false;
+  }
+  auto merged =
+      dep.kind() == node.kind() ? *constant + *delta : *constant - *delta;
+
+  if (merged == 0) {
+    node.output()->replaceAllUsesWith(dep.inputs()[0]);
+  } else {
+    WithInsertPoint g(&node);
+    node.replaceInput(0, dep.inputs()[0]);
+    node.replaceInput(1, node.owningGraph()->insertConstant(merged));
+  }
+  return true;
 }
 
 } // namespace
@@ -260,8 +215,12 @@ struct PeepholeOptimizeNonTensorImpl {
           default:
             break;
         }
-      } else if (tryReduceArith(*node)) {
-        changed = true;
+      } else if (
+          node->kind() == aten::mul || node->kind() == aten::floordiv ||
+          node->kind() == aten::div) {
+        changed |= trySimplifyMulOrDiv(*node);
+      } else if (node->kind() == aten::add || node->kind() == aten::sub) {
+        changed |= trySimplifyAddOrSub(*node);
       }
     }
     return changed;
