@@ -10,20 +10,18 @@ namespace jit {
 namespace {
 
 /**
- * Check whether the arithmetic node is binary, and return a constant int value
- * if there exists one.
+ * Check whether the arithmetic node is binary between integers, and return a
+ * constant int value if there exists one.
  *
  * @pre node is integer arithmetic.
  * @post if there's one constant in two oprands, then the second operand is
  *       constant.
  */
 c10::optional<int64_t> checkArithNode(Node& node) {
-  if (node.inputs().size() != 2) {
-    return {};
-  }
-  if (node.input(0)->type() != IntType::get() ||
+  if (node.inputs().size() != 2 ||
+      node.input(0)->type() != IntType::get() ||
       node.input(1)->type() != IntType::get()) {
-    return false;
+    return {};
   }
 
   if (node.kind() == aten::mul || node.kind() == aten::add) {
