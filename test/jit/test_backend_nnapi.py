@@ -1,14 +1,11 @@
-from torch.testing._internal.jit_utils import JitTestCase
-import ctypes
 import os
 import sys
 import unittest
 
 import torch
 import torch._C
-from typing import Tuple
 from pathlib import Path
-from test_nnapi import TestNNAPI, nhwc
+from test_nnapi import TestNNAPI
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -17,7 +14,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
-    TEST_WITH_ASAN
 )
 
 # Make the helper files in test/ importable
