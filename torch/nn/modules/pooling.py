@@ -95,8 +95,7 @@ class MaxPool2d(_MaxPoolNd):
     planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
-    output :math:`(N, C, H_{out}, W_{out})` or with input size :math:`(C, H, W)`,
-    output :math:`(C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
+    output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
     can be precisely described as:
 
     .. math::
@@ -130,11 +129,8 @@ class MaxPool2d(_MaxPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})` or
-
-        - Input: :math:`(C, H_{in}, W_{in})`
-        - Output: :math:`(C, H_{out}, W_{out})` where,
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})` where,
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
