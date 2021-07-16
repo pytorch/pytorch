@@ -77,7 +77,7 @@ inline Tensor pad(const Tensor& input,
         TORCH_CHECK(false, "NotImplementedError");
       }
     } else {
-      TORCH_CHECK(false, "Only 3D, 4D, 5D padding with non-constant padding are supported for now");
+      TORCH_CHECK(false, "Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now");
     }
   }
 }
