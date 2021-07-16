@@ -525,7 +525,7 @@ class Module:
 
         buffer: torch.Tensor = getattr(mod, buffer_name)
 
-        if buffer not in mod._buffers.values():
+        if buffer_name not in mod._buffers:
             raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer

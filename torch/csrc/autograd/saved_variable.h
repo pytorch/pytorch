@@ -2,6 +2,7 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/forward_grad.h>
+#include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <ATen/ATen.h>
 
@@ -37,8 +38,7 @@ class TORCH_API SavedVariable {
   /// circular reference.
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
-  // Temporarily a no op
-  void register_hooks();
+  void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
 
   void reset_data() {
     return data_.reset();
@@ -70,6 +70,8 @@ class TORCH_API SavedVariable {
   // time is unused.
   std::weak_ptr<Node> weak_grad_fn_;
   c10::VariableVersion version_counter_;
+
+  std::unique_ptr<SavedVariableHooks> hooks_;
 
   uint32_t saved_version_ = 0;
   uint32_t output_nr_ = 0;
