@@ -32,6 +32,16 @@ constexpr size_t NVRTC_KERNEL_ARG_LIMIT = 128;
 
 namespace {
 
+bool usedOnlyInDtype(Value* v) {
+  const auto& uses = v->uses();
+  if (uses.empty()) {
+    return false;
+  }
+  return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+    return u.user->matches("prim::dtype(Tensor a) -> int");
+  });
+}
+
 Value* broadcastSizes(at::ArrayRef<Value*> sizes) {
   AT_ASSERT(!sizes.empty());
   Graph* graph = sizes[0]->owningGraph();
@@ -783,10 +793,18 @@ struct CudaGraphFuser {
     }
   }
 
-  bool usedOnlyInSize(Value* v) {
+  bool usedInDtype(Value* v) {
+    const auto& uses = v->uses();
+    return std::any_of(uses.begin(), uses.end(), [](const Use& u) {
+      return u.user->matches("prim::dtype(Tensor a) -> int");
+    });
+  }
+
+  bool usedOnlyInDtypeAndSize(Value* v) {
     const auto& uses = v->uses();
     return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-      return u.user->matches("aten::size(Tensor self) -> int[]");
+      return u.user->matches("prim::dtype(Tensor a) -> int") ||
+          u.user->matches("aten::size(Tensor self) -> int[]");
     });
   }
 
@@ -817,7 +835,7 @@ struct CudaGraphFuser {
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
     for (size_t i = 0; i < outputs.size(); ++i) {
-      if (usedOnlyInSize(outputs[i]))
+      if (usedOnlyInDtypeAndSize(outputs[i]))
         continue;
       if (soutputs[i]->type()->isSubtypeOf(TensorType::get())) {
         shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
@@ -944,15 +962,27 @@ struct CudaGraphFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
+      if (usedOnlyInDtypeAndSize(output) && shape_of.count(soutput) > 0) {
+        bool has_dtype = usedInDtype(output);
         auto uses = output->uses();
         for (Use u : uses) {
-          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
-          u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
-          u.user->destroy();
+          if (u.user->matches("aten::size(Tensor self) -> int[]")) {
+            u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
+            u.user->destroy();
+          } else if (u.user->matches("prim::dtype(Tensor a) -> int")) {
+            continue;
+          } else {
+            AT_ASSERT(
+                false,
+                "unrecognized consumer should not trigger removeOutputsUsedOnlyInSize");
+          }
         }
-        fusion_group->eraseOutput(i);
-        subgraph->eraseOutput(i);
+        // We only wipe the output when there's no more dtype consumer.
+        // This is to be removed by `removeOutputUsedOnlyInDtype`
+        if (!has_dtype) {
+          fusion_group->eraseOutput(i);
+          subgraph->eraseOutput(i);
+        }
       }
     }
     GRAPH_DEBUG("after build shape expression and re-wiring: ", *graph_);
@@ -1018,10 +1048,12 @@ struct CudaGraphFuser {
     //  it = scanNodeForChunks(*it);
     //}
 
+    GRAPH_DEBUG("before removeOutputsUsedOnlyInSize", *graph_);
     // Remove outputs that have been added only because we need their size
     for (Node* n : block_->nodes()) {
       removeOutputsUsedOnlyInSize(n);
     }
+    GRAPH_DEBUG("after removeOutputsUsedOnlyInSize", *graph_);
 
     for (Node* node : block_->nodes()) {
       for (Block* sub_block : node->blocks()) {
@@ -1562,6 +1594,124 @@ void alterBatchNormImpls(Block* block) {
   }
 }
 
+// We absorb `prim::dtype` node into CudaFusion structure. The structure below
+//
+// %1 = prim::CudaFusionGuard(...)
+// %2, %3 = prim::If(...)
+//   block0():
+//     %4, %5 = prim::CudaFusionGroup(...)
+//     -> (%4, %5)
+//   block1():
+//     %6, %7 = prim::FallbackGraph(...)
+//     -> (%6, %7)
+// %4 = prim::dtype(%3)
+//   ... (uses %2, %4, but never reference to %3 any more)
+//
+// is updated to:
+//
+// %1 = prim::CudaFusionGuard(...)
+// %2, %3 = prim::If(...)
+//   block0():
+//     %4 = prim::CudaFusionGroup(...)  # %5 is also removed from subgraph
+//     %8 = prim::Constant[value=...]()
+//     -> (%4, %8)
+//   block1():
+//     %6, %7 = prim::FallbackGraph(...)
+//     %9 = prim::dtype(%7)
+//     -> (%6, %9)
+// # %4 = prim::dtype(%3) is removed. All reference to %4 is replaced with %3
+//   ... (uses %2, %4, but never reference to %3 any more)
+void removeOutputUsedOnlyInDtype(Node* fusion_node) {
+  auto fusion_block = fusion_node->owningBlock();
+  TORCH_INTERNAL_ASSERT(
+      fusion_block->owningNode() &&
+          fusion_block->owningNode()->kind() == prim::If,
+      "CudaFusionGroup should be inside `prim::CudaFusionGuard` / `prim::If`");
+
+  auto if_node = fusion_block->owningNode();
+  auto fusion_node_graph = fusion_node->g(attr::Subgraph);
+  auto fallback_block = if_node->blocks()[1];
+
+  bool updated = false;
+  // Iterating in this order is crucial for correctness (i has to reflect the
+  // current true index of outputs[i])!
+  for (int64_t i = static_cast<int64_t>(if_node->outputs().size()) - 1; i >= 0;
+       --i) {
+    auto output = if_node->outputs()[i];
+    // output only used in dtype, we eliminate the output and rely on
+    // profiled/static scalar type inference to save on memory IO.
+    if (usedOnlyInDtype(output)) {
+      updated = true;
+      {
+        // update fusion_block to output profiled scalar type
+        auto fusion_output = fusion_block->outputs()[i];
+        auto tensor_type = fusion_output->type()->cast<TensorType>();
+        TORCH_INTERNAL_ASSERT(
+            tensor_type, "non tensor fed to dtype is not supported");
+        auto scalar_type = tensor_type->scalarType();
+        TORCH_INTERNAL_ASSERT(
+            scalar_type.has_value(),
+            "ScalarType should be static for Tensors in fusion for amp optimization");
+        auto type_const =
+            fusion_block->owningGraph()->insertConstant(IValue(scalar_type));
+        type_const->setType(IntType::get());
+        type_const->node()->moveBefore(fusion_block->return_node());
+        fusion_block->replaceOutput(i, type_const);
+
+        // remove the dangling output tensor in CudaFusionGroup
+        fusion_node->eraseOutput(i);
+        fusion_node_graph->eraseOutput(i);
+      }
+
+      {
+        // update fallback_block to output dtype instead of tensor
+        auto tensor_output = fallback_block->outputs()[i];
+        auto dtype_node = fallback_block->owningGraph()->create(
+            prim::dtype, tensor_output, 1);
+        dtype_node->output()->setType(IntType::get());
+        fallback_block->appendNode(dtype_node);
+        fallback_block->replaceOutput(i, dtype_node->output());
+      }
+
+      // we just shot-cut the `dtype` node since we are already outputing dtype
+      auto uses = output->uses();
+      for (Use u : uses) {
+        AT_ASSERT(u.user->matches("prim::dtype(Tensor a) -> int"));
+        u.user->output()->replaceAllUsesWith(output);
+        u.user->destroy();
+      }
+      output->setType(IntType::get());
+    }
+  }
+
+  if (updated) {
+    fusion_node->g_(attr::Subgraph, fusion_node_graph);
+  }
+}
+
+// For output tensors in fusion group that is only used by dtype node, with
+// CudaFusionGuard, we can short-cut it with constant dtype directly instead to
+// save IO memory bandwidth.
+// The reason that we do it after we insert the guard, instead of doing it along
+// during graph fusion/partitioning, is that we needed to handle the fallback
+// differently, since fallback is not inside CudaFusionGuard, and hence doesn't
+// have the dtype as a constant.
+void removeOutputUsedOnlyInDtype(Block* block) {
+  std::vector<Node*> fusions;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      removeOutputUsedOnlyInDtype(b);
+    }
+    if (n->kind() == prim::CudaFusionGroup) {
+      fusions.push_back(n);
+    }
+  }
+  for (Node* fusion : fusions) {
+    // remove index & reserve from outputs;
+    removeOutputUsedOnlyInDtype(fusion);
+  }
+}
+
 void RemoveProfileIValue(Node* profile_ivalue) {
   for (const auto& use : profile_ivalue->output()->uses()) {
     if (use.user->kind() == prim::Constant) {
@@ -1722,6 +1872,9 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   removeFusionWithMissingProfilingInformation(graph->block());
   GRAPH_DEBUG("After remove missing profiling: ", *graph);
 
+  // optimization targeting AMP
+  removeOutputUsedOnlyInDtype(graph->block());
+  GRAPH_DEBUG("After removeOutputUsedOnlyInDtype: ", *graph);
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
