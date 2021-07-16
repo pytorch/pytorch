@@ -133,6 +133,7 @@ class BasePruner(abc.ABC):
                                                  param(module.mask),
                                                  unsafe=True)
 
+            assert isinstance(module.parametrizations, ModuleDict)
             if isinstance(module, nn.Linear):
                 self.activation_handles.append(module.register_forward_hook(
                     LinearActivationReconstruction(module.parametrizations.weight[0])
