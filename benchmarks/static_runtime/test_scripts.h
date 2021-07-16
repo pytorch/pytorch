@@ -438,6 +438,11 @@ const auto full_like_script = R"JIT(
       return (b.clone())
 )JIT";
 
+const auto linear_script = R"JIT(
+  def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
+      return torch.linear(inp, weights, bias).clone()
+)JIT";
+
 // dict of tuple of list
 const auto nested_output_script_0 = R"JIT(
   def forward(self, a, b):
