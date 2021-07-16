@@ -303,6 +303,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1.
 
+        enable_onnx_checker (bool, default True): [DEPRECATED. Backend logic is working as it's True.]
+            If True the onnx model checker will be run to ensure the exported model is a valid ONNX
+            model. If it is an invalid ONNX model, an exception will be thrown out and the onnx
+            model file will still be generated.
         use_external_data_format (bool, default False): If True, then some of the model
             parameters are stored in external data files and not in the ONNX model file itself.
             Models larger than 2GB cannot be exported in one file because of size limits imposed
@@ -319,7 +323,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         input_names, output_names, operator_export_type, opset_version,
                         _retain_param_name, do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
-                        custom_opsets, use_external_data_format)
+                        custom_opsets, enable_onnx_checker, use_external_data_format)
 
 
 def export_to_pretty_string(*args, **kwargs):

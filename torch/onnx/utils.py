@@ -81,6 +81,10 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
+    if enable_onnx_checker is not None:
+        warnings.warn("`enable_onnx_checker' is DEPRECATED. Please stop using it."
+                      "The code now will work as it is True so that the onnx model checker "
+                      "will be run to ensure the exported model is a valid ONNX model.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
