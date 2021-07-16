@@ -548,8 +548,9 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   auto output = at::zeros(output_size, i1.options());
 
   // Three conditionals are necessary since this function is meant to work for both
-  // forward and backward, which changes the dimensions of the inputs.
-  if (output.numel() != 0 && i1.numel() != 0 && i2.numel() != 0) {
+  // forward and backward, which changes the dimensions of the inputs. The output
+  // will have 0 dim even if a single input has zero dim.
+  if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
     if (! sumdim[unroll_dim]) {
       for (const auto k : c10::irange(unroll_size)) {
         Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
