@@ -1885,6 +1885,7 @@ except RuntimeError as e:
             np.int16: torch.int16,
             np.int8: torch.int8,
             np.uint8: torch.uint8,
+            np.bool_: torch.bool,
         }
 
         for dt, tt in dtypes.items():

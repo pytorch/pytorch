@@ -23,7 +23,7 @@ def default_convert(data):
     if HAS_NUMPY:
         if isinstance(data, np.ndarray):
             return data
-        elif isinstance(data, np.number):
+        elif isinstance(data, (np.bool_, np.number)):
             return torch.as_tensor(data)
     if isinstance(data, torch.Tensor):
         return data
@@ -50,7 +50,7 @@ def default_collate(batch):
     if HAS_NUMPY:
         if isinstance(elem, np.ndarray):
             return default_collate([torch.as_tensor(b) for b in batch])
-        elif isinstance(elem, np.number):
+        elif isinstance(elem, (np.bool_, np.number)):
             return torch.as_tensor(batch)
     if isinstance(elem, torch.Tensor):
         out = None
