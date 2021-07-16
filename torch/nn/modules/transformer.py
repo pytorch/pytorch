@@ -326,16 +326,16 @@ class TransformerEncoderLayer(Module):
 
         x = src
         if self.norm_first:
-            x = x + self.mha(self.norm1(x))
+            x = x + self.mha(self.norm1(x), src_mask, src_key_padding_mask)
             x = x + self.ff(self.norm2(x))
         else:
-            x = self.norm1(x + self.mha(x))
+            x = self.norm1(x + self.mha(x, src_mask, src_key_padding_mask))
             x = self.norm2(x + self.ff(x))
 
         return x
 
     # self-attention block
-    def mha(self, x: Tensor, attn_mask: Optional[Tensor] = None, key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def mha(self, x: Tensor, attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
         x = self.self_attn(x, x, x,
                            attn_mask=attn_mask,
                            key_padding_mask=key_padding_mask,
