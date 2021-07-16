@@ -32,7 +32,7 @@ from torch.testing._internal.common_utils import \
      make_symmetric_pd_matrices,
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN,
+     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
@@ -1316,6 +1316,8 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     test_cases = (((S,), (S, M), (M,), 1, 1, False),
                   ((S,), (S, M), (M,), 0.2, 0.6, False),
                   )
@@ -1327,22 +1329,14 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
                                  )
 
     cases = test_cases + test_cases_with_broadcast
-    sample_inputs = []
-    for input_args in cases:
-        args = (make_tensor(input_args[0], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[1], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[2], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad))
-        alpha, beta = input_args[3], input_args[4]
-        broadcasts_input = input_args[5]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha),
-                                         broadcasts_input=broadcasts_input))
-    return tuple(sample_inputs)
+
+    def generator():
+        # addmv performs: beta * M + alpha * (mat @ vec)
+        for M, mat, vec, beta, alpha, broadcasts_input in cases:
+            yield SampleInput(make_arg(M), args=(make_arg(mat), make_arg(vec)),
+                              kwargs=dict(beta=beta, alpha=alpha), broadcasts_input=broadcasts_input)
+
+    return list(generator())
 
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1),
@@ -2656,8 +2650,6 @@ class SpectralFuncInfo(OpInfo):
         decorators += [
             skipCPUIfNoFFT,
             skipCUDAIfRocm,
-            # gradgrad is quite slow
-            DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
         ]
 
         super().__init__(name=name,
@@ -4928,13 +4920,6 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            supports_inplace_autograd=False,
            supports_forward_ad=True,
-           skips=(
-               # issue may fix: https://github.com/pytorch/pytorch/issues/55589
-               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               SkipInfo('TestCommon', 'test_out', dtypes=(torch.float32,)),
-               # Reference: https://github.com/pytorch/pytorch/issues/55589
-               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
-           ),
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
            dtypes=floating_types(),
@@ -7074,6 +7059,34 @@ op_db: List[OpInfo] = [
                        #            ~~~~~~~~~~~~~~~ <--- HERE
                        SkipInfo('TestJit', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
+    # A separate OpInfo entry for special.polygamma is needed to reorder the arguments
+    # for the alias. See the discussion here: https://github.com/pytorch/pytorch/pull/59691#discussion_r650261939
+    UnaryUfuncInfo('special.polygamma',
+                   op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
+                   variant_test_name='special_polygamma_n_0',
+                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
+                   supports_forward_ad=True,
+                   sample_inputs_func=sample_inputs_polygamma,
+                   skips=(
+                       # Probably related to the way the function is
+                       # scripted for JIT tests (or maybe not).
+                       # RuntimeError:
+                       # Arguments for call are not valid.
+                       # The following variants are available:
+                       #   aten::polygamma(int n, Tensor self) -> (Tensor):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       #   aten::polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> (Tensor(a!)):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       # The original call is:
+                       #   File "<string>", line 3
+                       # def the_method(i0):
+                       #     return torch.polygamma(i0, 1)
+                       #            ~~~~~~~~~~~~~~~ <--- HERE
+                       SkipInfo('TestJit', 'test_variant_consistency_jit'),),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
@@ -7435,10 +7448,8 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            ),
     OpInfo('xlogy',
-           dtypes=all_types_and(torch.bool),
-           dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-           supports_inplace_autograd=True,
+           aliases=('special.xlogy',),
+           dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_xlogy),

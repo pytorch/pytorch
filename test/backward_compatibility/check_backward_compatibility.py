@@ -101,6 +101,8 @@ allow_list = [
     ("aten::gelu", datetime.date(2021, 9, 1)),
     ("aten::gelu_backward", datetime.date(2021, 9, 1)),
     ("aten::_view_as_real_physical", datetime.date(2021, 8, 1)),
+    ("aten::_bmm", datetime.date(2021, 7, 14)),
+    ("aten::_bmm.out", datetime.date(2021, 7, 14)),
 ]
 
 def allow_listed(schema, allow_list):

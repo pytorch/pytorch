@@ -130,48 +130,14 @@ def _dump_DDP_relevant_env_vars():
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, state_dict, *inputs):
-        # set_materialize_grads(False) will ensure that None gradients stay as
-        # None and are not filled with zeros.
-        ctx.set_materialize_grads(False)
+    def forward(ctx, reducer, *inputs):
         ctx.reducer = reducer
-        ctx.state_dict = state_dict
-        ctx.inputs = inputs
         return inputs
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        state_dict = ctx.state_dict
-
-        grad_enabled = state_dict['grad_enabled']
-        require_backward_grad_sync = state_dict['require_backward_grad_sync']
-        static_graph_training = ctx.state_dict['static_graph']
-        if grad_enabled and require_backward_grad_sync:
-            if static_graph_training or not state_dict['find_unused']:
-                ctx.reducer.prepare_for_backward([])
-            else:
-                # First type of unused params: parameters that did not participate
-                # in computing model outputs. These are found by the below call to
-                # prepare_for_backward.
-                # Second type of unused params: params that won't get gradient
-                # because outputs they produced do not get used in computing loss
-                # for this call to backward. Due to this passthrough autograd
-                # function, autograd hooks for these parameters are now triggered
-                # with undefined gradient to maintain parity with local training.
-                # DDP takes care of undefined grads in this case to ensure the .grad
-                # field of the param is not touched.
-                ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
-
-        # Note that we enqueue delay allreduce after prepare_for_backward in
-        # static graph training as prepare_for_backward sets the
-        # num_backwards_call counter in the reducer.
-        static_graph_first_bwd = (
-            static_graph_training and ctx.reducer._static_graph_first_bwd()
-        )
-        if static_graph_first_bwd:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-
-        return (None, None, *grad_outputs)
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return (None, *grad_outputs)
 
 
 class _DDPJoinHook(_JoinHook):
@@ -635,6 +601,7 @@ class DistributedDataParallel(Module, _Joinable):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -867,11 +834,10 @@ class DistributedDataParallel(Module, _Joinable):
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
-            grad_enabled = torch.is_grad_enabled()
-            will_run_grad_reduction = grad_enabled and self.require_backward_grad_sync
-            if will_run_grad_reduction:
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
-            self.reducer.prepare_for_forward(will_run_grad_reduction)
+                self.num_iterations += 1
+                self.reducer.prepare_for_forward()
 
             # Notify the join context that this process has not joined, if
             # needed
@@ -888,7 +854,7 @@ class DistributedDataParallel(Module, _Joinable):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if grad_enabled and self.reducer._rebuild_buckets():
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
 
             if self.require_forward_param_sync:
@@ -904,50 +870,38 @@ class DistributedDataParallel(Module, _Joinable):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            self.require_forward_param_sync = (
-                grad_enabled and self.require_backward_grad_sync
-            )
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.require_forward_param_sync = True
+                # We'll return the output object verbatim since it is a freeform
+                # object. We need to find any tensors in this object, though,
+                # because we need to figure out which parameters were used during
+                # this forward pass, to ensure we short circuit reduction for any
+                # unused parameters. Only if `find_unused_parameters` is set.
+                if self.find_unused_parameters and not self.static_graph:
+                    # Do not need to populate this for static graph.
+                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                else:
+                    self.reducer.prepare_for_backward([])
+            else:
+                self.require_forward_param_sync = False
 
-            if not grad_enabled:
-                # Don't need to run through DDPSink as there will be no backward
-                # pass.
-                return output
-
-            state_dict = {
-                'static_graph': self.static_graph,
-                'find_unused': self.find_unused_parameters,
-                'grad_enabled': grad_enabled,
-                'require_backward_grad_sync': self.require_backward_grad_sync,
-            }
-            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
-                output
-            )
-            # Note: DDPSink helps to ensure that prepare_for_backward is called
-            # immediately before the backwards pass, to support a variety of
-            # features such as: enqueue delay allreduce for static graph, support
-            # multiple calls to backwards with retain_graph=True, and support
-            # finding all parameters that will not receive gradient.
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
-            # Do not touch tensors that have no grad_fn, which can cause issues
-            # such as https://github.com/pytorch/pytorch/issues/60733
-            for i, output in enumerate(output_tensor_list):
-                if torch.is_tensor(output) and output.grad_fn is None:
-                    output_placeholders[i] = output
-
+        # TODO. Right now we add this sink for static_graph training only. once
+        # this feature is stable, we will add this sink for all cases. E.g.
+        # This sink can help capture more accuracte backward start time as well.
+        if self.static_graph and self.num_iterations == 1:
+            # Need to grab list of tensors from user output in order to pass
+            # to custom autograd function.
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(output)
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
-                state_dict,
-                *output_tensor_list,
+                *output_tensor_list
             )
-            for i in range(len(output_placeholders)):
-                if output_placeholders[i] is None:
-                    output_placeholders[i] = passthrough_tensor_list[i]
 
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                output_placeholders, treespec, output_is_rref
+                passthrough_tensor_list, treespec, output_is_rref
             )
-            return output
+        return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -1235,21 +1189,23 @@ class DistributedDataParallel(Module, _Joinable):
 
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Averages gradient tensors across workers and defined as:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future``:
+            hook (callable): Callable with the following signature:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
                              a Future indicating completion of any async work (ex: allreduce).
-                             If the hook doesn't perform any communication, it can also
-                             just return a completed Future. The Future should hold the
+                             If the hook doesn't perform any communication, it still
+                             must return a completed Future. The Future should hold the
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
+                             Note that the future's return type must be a list with a
+                             tensor as its single element.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of ``c10d.ProcessGroup.work``.
-                             ``get_future`` is currently supported for MPI and also supported for most
+                             Future associated with the completion of ``c10d.ProcessGroup.Work``.
+                             ``get_future`` is currently supported for NCCL and also supported for most
                              operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
@@ -1261,8 +1217,8 @@ class DistributedDataParallel(Module, _Joinable):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a result that has the same
-            shape with the tensors inside grad bucket.
+            The Future object that hook returns should contain a list that contains a
+            single tensor that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             DDP communication hook does not support single-process multiple-device mode.
