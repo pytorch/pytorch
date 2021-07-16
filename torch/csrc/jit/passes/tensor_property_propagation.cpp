@@ -80,6 +80,8 @@ static OperatorMap<ArgumentCreator>&  getArgumentCreatorMap() {
     {"aten::addmm.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
     {"aten::matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
     {"aten::cat.out(Tensor[] tensors, int dim, *, Tensor(a!) out) -> Tensor(a!)", defaultArgumentCreator},
+    //
+    {"aten::neg(Tensor self) -> Tensor", defaultArgumentCreator}
   };
 
   return ops;

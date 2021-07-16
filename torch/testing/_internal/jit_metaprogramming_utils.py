@@ -308,6 +308,7 @@ def create_script_fn(self, method_name, func_type):
         self.assertExportImport(fn.graph, tensors)
         output = fn(*tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
+        script_fn.graph = fn.graph
         script_fn.last_graph = fn.graph_for(*tensors)  # type: ignore[attr-defined]
         return output
     return script_fn
@@ -336,6 +337,7 @@ def create_traced_fn(self, fn):
         output = traced(*inputs_tensors)
         # skip type annotate function attributes for now, see: https://github.com/python/mypy/issues/2087
         traced_fn.last_graph = traced.graph_for(*inputs_tensors)  # type: ignore[attr-defined]
+        traced_fn.graph = traced.graph
         return output
     return traced_fn
 

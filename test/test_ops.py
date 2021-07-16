@@ -445,24 +445,34 @@ class TestCommon(JitCommonTestCase):
                     # use inputs to figure out tensors 
                     
                     # TODO copy a graph
-                    scripted_graph = scripted_fn.graph.copy()
-                    traced_graph_inputs = list(traced_fn.graph.inputs())
-                    scripted_graph_inputs = list(scripted_graph.inputs())
+                    print ("before checking check_dtype_propagation!")
+                    if True or op.check_dtype_propagation:
+                        print ("@@@checking check_dtype_propagation!")
+                        print(type(script_fn).__name__)
+                        scripted_graph = script_fn.graph.copy()
+                        traced_graph_inputs = list(traced_fn.graph.inputs())
+                        scripted_graph_inputs = list(scripted_graph.inputs())
 
-                    self.assertEqual(len(traced_graph_inputs), len(scripted_graph_inputs))
-                    # set input types
-                    for i in range(len(traced_graph_inputs)):
-                        scripted_graph_inputs[i].type().setType(traced_graph_inputs[i].type().setType())
+                        self.assertEqual(len(traced_graph_inputs), len(scripted_graph_inputs))
+                        # set input types
+                        for i in range(len(traced_graph_inputs)):
+                            scripted_graph_inputs[i].setType(traced_graph_inputs[i].type())
 
-                    torch._C._jit_pass_constant_propagation(scripted_graph)
-                    #torch._C._jit_pass_propagate_shapes_on_graph(scripted_graph)
-                    torch._C._jit_pass_propagate_tensor_property_on_graph(scripted_graph)
+                        print(scripted_graph)
 
-                    traced_graph_outputs = list(traced_fn.graph.outputs())
-                    scripted_graph_outputs = list(scripted_graph.outputs())
-                    for i in range(len(scripted_graph_outputs)):
-                        if scripted_graph_outputs[i].type().kind() == "Tensor":
-                            self.assertEqual(scripted_graph_outputs[i].type().scalarType(), traced_fn.graph.outputs[i].type().scalarType())
+                        torch._C._jit_pass_constant_propagation(scripted_graph)
+                        #torch._C._jit_pass_propagate_shapes_on_graph(scripted_graph)
+                        torch._C._jit_pass_propagate_tensor_property_on_graph(scripted_graph)
+
+                        print(scripted_graph)
+
+                        traced_graph_outputs = list(traced_fn.graph.outputs())
+                        scripted_graph_outputs = list(scripted_graph.outputs())
+                        for i in range(len(scripted_graph_outputs)):
+                            print(scripted_graph_outputs[i].type().kind())
+                            if scripted_graph_outputs[i].type().kind() == "Tensor":
+                                print("comparing types!")
+                                self.assertEqual(scripted_graph_outputs[i].type().scalarType(), traced_fn.graph.outputs[i].type().scalarType())
 
                     # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample
                     if dtype is torch.float32:

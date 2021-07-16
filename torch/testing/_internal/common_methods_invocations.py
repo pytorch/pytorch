@@ -295,6 +295,8 @@ class OpInfo(object):
 
         self.supports_sparse = supports_sparse
 
+        self.check_dtype_propagation = check_dtype_propagation
+
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
