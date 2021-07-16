@@ -213,6 +213,7 @@ class OpInfo(object):
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_autograd=True,  # support for autograd
+                 check_dtype_propagation=False,  # support for autograd
                  supports_gradgrad=True,  # support second order gradients (this value is ignored if supports_autograd=False)
                  supports_inplace_autograd=None,  # whether the operation supports inplace autograd
                                                   # defaults to supports_autograd's value
@@ -3931,6 +3932,7 @@ foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('sinh'),
 
     ForeachUnaryFuncInfo('neg',
+                         check_dtype_propagation=True,
                          dtypes=all_types_and_complex(),
                          dtypesIfCPU=all_types_and_complex(),
                          dtypesIfCUDA=all_types_and_complex(),
