@@ -275,11 +275,6 @@
   dispatch:
     CPU, CUDA: view_as_real
 
-- func: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
-  variants: function
-  dispatch:
-    CPU, CUDA: _view_as_real_physical
-
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
@@ -336,6 +331,14 @@
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
+
+- func: resolve_neg(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+
+- func: _neg_view(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _neg_view
 
 - func: acos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -414,6 +417,16 @@
   variants: function
   dispatch:
     CPU: add_relu_out
+
+- func: _add_relu.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_relu
+
+- func: _add_relu_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: add_relu_
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -2311,6 +2324,11 @@
   manual_cpp_binding: True
 
 - func: is_conj(Tensor self) -> bool
+  variants: function, method
+  device_guard: False
+  manual_cpp_binding: True
+
+- func: is_neg(Tensor self) -> bool
   variants: function, method
   device_guard: False
   manual_cpp_binding: True
@@ -6435,14 +6453,14 @@
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: index_select_out_cpu_
-    CUDA: index_select_out_cuda
+    CPU, QuantizedCPU: index_select_out_cpu_
+    CUDA, QuantizedCUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: index_select_cpu_
-    CUDA: index_select_cuda
+    CPU, QuantizedCPU: index_select_cpu_
+    CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
@@ -9875,6 +9893,10 @@
   variants: function
 
 - func: special_log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   python_module: special
   variants: function
 

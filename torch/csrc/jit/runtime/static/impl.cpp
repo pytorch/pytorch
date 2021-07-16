@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
@@ -19,6 +20,36 @@
 
 namespace torch {
 namespace jit {
+
+// graph must be frozen or canEnableStaticRuntime would return false if there's
+// any prim::CallMethod op left in the graph
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  bool has_blocks = false;
+  for (auto* node : graph->block()->nodes()) {
+    if (node->blocks().size() > 0) {
+      has_blocks = true;
+      VLOG(1) << "Found nested sub-blocks in graph at node: "
+              << PrintNode(node);
+    }
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    // check if can get op from Node
+    const Operator* op = node->maybeOperator();
+    if (!op && !nativeOpIsRegistered(node->kind())) {
+      can_support = false;
+      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+    }
+  }
+  if (has_blocks) {
+    LOG(WARNING)
+        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
+    can_support = false;
+  }
+  return can_support;
+}
 
 namespace {
 
@@ -43,20 +74,6 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
-}
-
-bool CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  // check for sub-blocks
-  bool can_support = true;
-  for (auto* node : graph->block()->nodes()) {
-    for (Block* sub_block : node->blocks()) {
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-      can_support = false;
-    }
-  }
-
-  return can_support;
 }
 
 // remove unused input 0 from graph
@@ -463,8 +480,7 @@ GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  // TODO: call CheckGraphEligibility before trying to enable static runtime
-  TORCH_CHECK(CheckGraphEligibility(graph));
+  TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
 }
 
@@ -1363,6 +1379,7 @@ ProcessedNode::ProcessedNode(
 }
 
 void ProcessedNode::run() {
+  DCHECK(verify_outputs_not_overlapping_with_immutable_inputs());
   if (fn_) {
     fn_(this);
   } else if (native_fn_) {
@@ -1383,6 +1400,31 @@ void ProcessedNode::run() {
       Output(i) = std::move(stack[i]);
     }
   }
+}
+
+bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
+    const {
+  auto schema = node()->maybeSchema();
+  if (!schema || schema->is_mutable()) {
+    return true;
+  }
+  for (const IValue* in : inputs_) {
+    if (!in->isTensor()) {
+      continue;
+    }
+    const auto& in_t = in->toTensor();
+    for (const IValue& out : outputs_) {
+      if (!out.isTensor()) {
+        continue;
+      }
+      const auto& out_t = out.toTensor();
+      at::MemOverlapStatus status = at::get_overlap_status(in_t, out_t);
+      if (status != at::MemOverlapStatus::NO) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace jit
