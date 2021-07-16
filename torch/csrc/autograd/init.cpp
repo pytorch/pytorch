@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -269,8 +270,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
     }))
     .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
-        s.register_hooks();
-     });
+        // Because we use a py::object, pybind will increment the refcount of the hook functions for us
+        s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
+    });
 
   Py_RETURN_TRUE;
 }
