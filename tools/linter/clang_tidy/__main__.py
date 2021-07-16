@@ -77,7 +77,6 @@ DEFAULTS = {
     "paths": ["torch/csrc/"],
     "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
-    "parallel": True,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",
     "disable-progress-bar": False,
@@ -145,19 +144,6 @@ def parse_args() -> argparse.Namespace:
         "Otherwise, fixes are output to ctidy-fixes.yml"
     )
     parser.add_argument(
-        "-k",
-        "--keep-going",
-        action="store_true",
-        help="Don't error on compiler errors (clang-diagnostic-error)",
-    )
-    parser.add_argument(
-        "-j",
-        "--parallel",
-        action="store_true",
-        default=DEFAULTS["parallel"],
-        help="Run clang tidy in parallel per-file",
-    )
-    parser.add_argument(
         "--print-include-paths",
         action="store_true",
         help="Print the search paths used for include directives",
@@ -198,17 +184,16 @@ def main() -> None:
 
     if not exists:
         msg = (
-            "Could not find '.clang-tidy-bin/clang-tidy'\n"
-            "You can install it by running:\n"
-            "   python3 tools/linter/install/clang_tidy.py"
+            f"Could not find '{options.clang_tidy_exe}'\n"
+            + "We provide a custom build of clang-tidy that has additional checks.\n"
+            + "You can install it by running:\n"
+            + "$ python3 tools/linter/install/clang_tidy.py"
         )
         raise RuntimeError(msg)
 
     return_code = run(options)
     if return_code != 0:
         raise RuntimeError("Your code is not clang-tidy clean!")
-
-    print("Passed clang-tidy!")
 
 
 if __name__ == "__main__":
