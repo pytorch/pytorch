@@ -5,7 +5,8 @@ import torch.onnx
 from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
+                                 skipIfUnsupportedMaxOpsetVersion)
 import caffe2.python.onnx.backend as backend
 from verify import verify
 
@@ -635,7 +636,7 @@ class TestUtilityFuns(TestCase):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.triu(x)
+                return torch.erfc(x)
 
         x = torch.randn(2, 3, 4)
         _set_opset_version(self.opset_version)
@@ -643,8 +644,7 @@ class TestUtilityFuns(TestCase):
                                             operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2]})
         iter = graph.nodes()
-        assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "aten::triu"
+        assert next(iter).kind() == "aten::erfc"
 
     def test_custom_op_fallthrough(self):
         # Test custom op
@@ -731,7 +731,7 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::dequantize"
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
-    @skipIfUnsupportedOpsetVersion([11, 12, 13])
+    @skipIfUnsupportedMaxOpsetVersion(10)
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
@@ -836,6 +836,7 @@ class TestUtilityFuns(TestCase):
         x = torch.tensor([1, 2])
         verify(MyModel(), x, backend, do_constant_folding=False)
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -857,6 +858,7 @@ class TestUtilityFuns(TestCase):
 
         assert len(list(graph.nodes())) == 1
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_fuse_resnet18(self):
         model = torchvision.models.resnet18(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
@@ -917,20 +919,10 @@ TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=13))
 
-# opset 11 tests
-TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=11))
-
-# opset 12 tests
-TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=12))
-
-# opset 13 tests
-TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
-                                           (TestCase,),
-                                           dict(TestUtilityFuns.__dict__, opset_version=13))
+# opset 14 tests
+TestUtilityFuns_opset14 = type(str("TestUtilityFuns_opset14"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=14))
 
 
 if __name__ == "__main__":
