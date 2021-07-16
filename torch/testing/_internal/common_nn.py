@@ -1247,16 +1247,6 @@ def fractional_max_pool3d_test(test_case):
             cpp_var_map={'random_samples': random_samples},
             fullname='FractionalMaxPool3d_asymsize')
 
-def single_batch_reference_fn(input, parameters, module):
-    """Reference function for modules supporting no batch dimensions.
-
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
-    """
-    single_batch_input = input.unsqueeze(0)
-    with freeze_rng_state():
-        return module(single_batch_input).squeeze(0)
-
 
 def single_batch_reference_fn(input, parameters, module):
     """Reference function for modules supporting no batch dimensions.
