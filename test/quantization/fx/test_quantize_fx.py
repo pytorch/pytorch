@@ -4802,7 +4802,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 
-if __name__ == '__main__':
+if __name__ == '__main__':    
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"
                        "instead.")
