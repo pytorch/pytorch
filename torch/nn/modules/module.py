@@ -1223,7 +1223,7 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        destination[prefix + '__module_name__'] = self.name
+        destination[prefix + '__module_name__'] = self.__dict__['__module_name__']
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
