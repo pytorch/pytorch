@@ -18,8 +18,6 @@ TORCH_META_FUNC(glu) (
 
   // size output to half of input
   const int64_t selfSize = nIn / 2;
-  auto newSizes = self.sizes().vec();
-  newSizes[wrap_dim] = selfSize;
   Tensor firstHalf = self.narrow(wrap_dim, 0, selfSize);
   Tensor secondHalf = self.narrow(wrap_dim, selfSize, selfSize);
   build_borrowing_binary_op(maybe_get_output(), firstHalf, secondHalf);
