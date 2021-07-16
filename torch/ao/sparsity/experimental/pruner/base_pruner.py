@@ -138,11 +138,11 @@ class BasePruner(abc.ABC):
             assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
             if isinstance(module, nn.Linear):
                 self.activation_handles.append(module.register_forward_hook(
-                    LinearActivationReconstruction(module.parametrizations.weight[0])
+                    LinearActivationReconstruction(module.parametrizations.weight[0])  # type: ignore[index]
                 ))
             elif isinstance(module, nn.Conv2d):
                 self.activation_handles.append(module.register_forward_hook(
-                    Conv2dActivationReconstruction(module.parametrizations.weight[0])
+                    Conv2dActivationReconstruction(module.parametrizations.weight[0])  # type: ignore[index]
                 ))
             else:
                 raise NotImplementedError("This module type is not supported yet.")
