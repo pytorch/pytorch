@@ -12,6 +12,8 @@
 namespace torch {
 namespace jit {
 
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph);
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -404,6 +406,8 @@ class ProcessedNode {
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
   }
+
+  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
 
  private:
   Node* node_;
