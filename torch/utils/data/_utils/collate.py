@@ -6,7 +6,6 @@ static methods.
 """
 
 import collections
-import re
 try:
     import numpy as np
     HAS_NUMPY = True
