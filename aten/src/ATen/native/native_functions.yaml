@@ -1355,6 +1355,10 @@
   dispatch:
     CUDA: cudnn_convolution_relu
 
+- func: cudnn_convolution_relu.out(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: cudnn_convolution_relu_out
+
 - func: cudnn_convolution_add_relu(Tensor self, Tensor weight, Tensor z, Scalar? alpha, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_add_relu
