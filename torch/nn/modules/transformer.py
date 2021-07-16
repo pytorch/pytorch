@@ -324,29 +324,28 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        # self-attention block
-        def mha(x):
-            x = self.self_attn(x, x, x,
-                               attn_mask=src_mask,
-                               key_padding_mask=src_key_padding_mask,
-                               need_weights=False)[0]
-            return self.dropout1(x)
-
-        # feed forward block
-        def ff(x):
-            x = self.linear2(self.dropout(self.activation(self.linear1(x))))
-            return self.dropout2(x)
-
         x = src
         if self.norm_first:
-            x = x + mha(self.norm1(x))
-            x = x + ff(self.norm2(x))
+            x = x + self.mha(self.norm1(x))
+            x = x + self.ff(self.norm2(x))
         else:
-            x = self.norm1(x + mha(x))
-            x = self.norm2(x + ff(x))
+            x = self.norm1(x + self.mha(x))
+            x = self.norm2(x + self.ff(x))
 
         return x
 
+    # self-attention block
+    def mha(self, x: Tensor, attn_mask: Optional[Tensor] = None, key_padding_mask: Optional[Tensor] = None) -> Tensor:
+        x = self.self_attn(x, x, x,
+                           attn_mask=attn_mask,
+                           key_padding_mask=key_padding_mask,
+                           need_weights=False)[0]
+        return self.dropout1(x)
+
+    # feed forward block
+    def ff(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout2(x)
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
