@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import re
+import sys
 from typing import List
 
 
@@ -83,6 +84,10 @@ DEFAULTS = {
 }
 
 
+def default_input_files() -> List[str]:
+    pass
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="clang-tidy wrapper script")
     parser.add_argument(
@@ -132,16 +137,18 @@ def parse_args() -> argparse.Namespace:
         help="Only show the command to be executed, without running it",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Don't print output")
     parser.add_argument(
         "--config-file",
         default=DEFAULTS["config-file"],
         help="Path to a clang-tidy config file. Defaults to '.clang-tidy'.",
     )
     parser.add_argument(
-        "--export-fixes", action="store_true",
+        "--export-fixes",
+        action="store_true",
         help="Export fixes to a yaml file"
         "If used with --parallel, fixes are output to ctidy-fixes-<filename>.yml."
-        "Otherwise, fixes are output to ctidy-fixes.yml"
+        "Otherwise, fixes are output to ctidy-fixes.yml",
     )
     parser.add_argument(
         "--print-include-paths",
@@ -191,9 +198,8 @@ def main() -> None:
         )
         raise RuntimeError(msg)
 
-    return_code = run(options)
-    if return_code != 0:
-        raise RuntimeError("Your code is not clang-tidy clean!")
+    result, _ = run(options)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
