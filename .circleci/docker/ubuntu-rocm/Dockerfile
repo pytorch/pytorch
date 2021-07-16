@@ -6,6 +6,9 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
+# Set AMD gpu targets to build for
+ENV PYTORCH_ROCM_ARCH "gfx900;gfx906"
+
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
 ADD ./common/install_base.sh install_base.sh
@@ -83,9 +86,6 @@ RUN rm install_ninja.sh
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
-
-# Set AMD gpu targets to build for
-ENV PYTORCH_ROCM_ARCH "gfx900;gfx906"
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
