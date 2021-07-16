@@ -507,7 +507,8 @@ Tensor& cudnn_convolution_relu_out(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups,
-    Tensor& output) {
+    Tensor& output_t
+    ) {
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -554,11 +555,12 @@ Tensor cudnn_convolution_relu(
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
       /*memory_format=*/at::MemoryFormat::Contiguous);
-  return cudnn_convolution_relu_out(
+  at::native::cudnn_convolution_relu_out(
     input_t, weight_t, bias_t, stride, padding, dilation, groups, output_t);
+  return output_t;
 }
 
-Tensor cudnn_convolution_add_relu_out(
+Tensor& cudnn_convolution_add_relu_out(
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& z_t,
@@ -568,7 +570,8 @@ Tensor cudnn_convolution_add_relu_out(
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups,
-    Tensor& output) {
+    Tensor& output_t
+    ) {
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -620,7 +623,8 @@ Tensor cudnn_convolution_add_relu(
       /*pin_memory=*/c10::nullopt,
       /*memory_format=*/at::MemoryFormat::Contiguous);
 
-  return cudnn_convolution_add_relu_out(input_t, weight_t, z_t, alpha, bias_t, stride, padding, dilation, groups, output_t);
+  at::native::cudnn_convolution_add_relu_out(input_t, weight_t, z_t, alpha, bias_t, stride, padding, dilation, groups, output_t);
+  return output_t;
 }
 }}
 
