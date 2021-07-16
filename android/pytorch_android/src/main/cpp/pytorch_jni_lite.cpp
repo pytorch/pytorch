@@ -134,7 +134,6 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
         torch::jit::_load_for_mobile(torch::make_unique<MemoryReadAdapter>(
             assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
-    module_.eval();
     deviceType_ = deviceJniCodeToDeviceType(device);
   }
 #endif
