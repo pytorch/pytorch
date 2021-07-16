@@ -35,5 +35,4 @@ if not (IS_IN_CI and torch.cuda.is_available()):
 
 
 if __name__ == "__main__":
-    print("running_tests")
     run_tests()

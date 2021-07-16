@@ -169,8 +169,8 @@ def _faulty_tensorpipe_init_backend_handler(
         world_size,
         group,
         rpc_backend_options,
-        {"worker0": {torch.device : torch.device}},  # reverse_device_map
-        [torch.device],  # devices
+        {},  # reverse_device_map
+        [],  # devices
         rpc_backend_options.num_worker_threads,  # num_send_recv_threads
         timedelta(seconds=rpc_backend_options.rpc_timeout),
         rpc_backend_options.messages_to_fail,

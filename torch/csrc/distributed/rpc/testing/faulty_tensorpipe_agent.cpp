@@ -33,7 +33,7 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
           std::move(opts),
           std::move(reverseDeviceMaps),
           std::move(devices),
-          nullptr),
+          std::move(cb)),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) 
