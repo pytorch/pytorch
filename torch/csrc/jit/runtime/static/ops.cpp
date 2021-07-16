@@ -153,6 +153,29 @@ at::Tensor& to_copy_out(
   at::native::copy_(out, self, non_blocking);
   return out;
 }
+
+Tensor& linear_out(
+    Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt) {
+  TORCH_CHECK(!input.is_mkldnn());
+
+  auto bias = bias_opt.has_value()
+      ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+
+  if (input.dim() == 2 && bias->defined()) {
+    // Fused op is marginally faster.
+    return at::cpu::addmm_out(output, *bias, input, weight.t());
+  }
+  at::native::matmul_out(input, weight.t(), output);
+  if (bias->defined()) {
+    at::cpu::add_(output, *bias);
+  }
+  return output;
+}
+
 } // namespace native
 } // namespace at
 
@@ -1511,6 +1534,28 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
     auto& out_t = p_node->Output(0).toTensor();
     at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
     at::native::fill_out(out_t, in1_s);
+  };
+});
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+
+  return [](ProcessedNode* p_node) {
+    const auto& in0_t = p_node->Input(0).toTensor();
+    const auto& in1_t = p_node->Input(1).toTensor();
+    auto in2_t = p_node->Input(2).toOptional<at::Tensor>();
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(in0_t);
+    }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::linear_out(out_t, in0_t, in1_t, in2_t);
   };
 });
 

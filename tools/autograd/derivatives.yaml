@@ -249,10 +249,6 @@
   self: grad
   result: self_t
 
-- name: alias_to_shape(Tensor(a) self, int[] sizes, int[] strides) -> Tensor(a)
-  self: grad.reshape(self.sizes())
-  result: self_t
-
 - name: angle(Tensor self) -> Tensor
   self: angle_backward(grad, self)
   result: handle_r_to_c(result.scalar_type(), angle_backward(self_t, self_p))
@@ -326,11 +322,6 @@
   self: grad.bmm(mat2.transpose(1, 2).conj())
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
-
-- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
-  self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
-  mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
-  result: at::_bmm(self_t, mat2_p, deterministic) + at::_bmm(self_p, mat2_t, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
@@ -1149,6 +1140,9 @@
 #     as_variable(baseType->reshape(self)),
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
+
+- name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+  self: grad.reshape(self.sizes())
 
 - name: round(Tensor self) -> Tensor
   self: zeros_like(grad)

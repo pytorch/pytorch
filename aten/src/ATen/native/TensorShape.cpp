@@ -1030,10 +1030,6 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-Tensor alias_to_shape(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
-  return alias_with_sizes_and_strides(self, sizes, strides);
-}
-
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -1044,20 +1040,31 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  //
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
   //     for `as_strided` is not as efficient as that of `view` (since the
   //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    // Instead of delegating to .view() which repeats some of the above work
-    // directly return an alias.
-    return self.alias_to_shape(IntArrayRef(shape), IntArrayRef(stride.value()));
+    return self._reshape_alias(shape, stride.value());
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {

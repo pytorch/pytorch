@@ -33,7 +33,6 @@ VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
     'alias': 'self',
-    'alias_to_shape': 'self',
     'as_strided': 'self',
     'diagonal': 'self',
     'expand': 'self',
@@ -59,6 +58,7 @@ VIEW_FUNCTIONS = {
     # discrete anyways.
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
+    '_reshape_alias': 'self',
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
