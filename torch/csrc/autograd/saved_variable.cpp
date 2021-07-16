@@ -153,7 +153,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
-void SavedVariable::register_hooks() {
+void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
   if (!data_.defined()) {
     if (!was_default_constructed_) {
       TORCH_CHECK(false,
@@ -167,14 +167,18 @@ void SavedVariable::register_hooks() {
         "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
+  TORCH_CHECK(!hooks_,
+    "Calling register_hooks on a saved tensor whose hooks have already been set. "
+    "Hint: only one pair of hooks is allowed at a time.");
+  hooks_ = std::move(hooks);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* ERR_BACKWARD_TWICE =
     "Trying to backward through the graph a second time (or directly access saved "
-    "variables after they have already been freed). Saved intermediate values "
+    "tensors after they have already been freed). Saved intermediate values "
     "of the graph are freed when you call .backward() or autograd.grad(). Specify "
     "retain_graph=True if you need to backward through the graph a second time or "
-    "if you need to access saved variables after calling backward.";
+    "if you need to access saved tensors after calling backward.";
 
 }} // namespace torch::autograd
