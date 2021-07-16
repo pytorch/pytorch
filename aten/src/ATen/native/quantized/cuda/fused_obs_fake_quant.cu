@@ -262,7 +262,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     }
   }
   auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
-  return std::make_tuple(x.alias(), mask);
+  return std::make_tuple(x.clone(), mask);
 }
 } // namespace native
 } // namespace at
