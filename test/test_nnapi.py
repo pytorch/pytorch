@@ -32,6 +32,9 @@ class TestNNAPI(TestCase):
         else:
             self.can_run_nnapi = False
 
+    def call_convert_to_nnapi(self, traced_module, args):
+        return convert_model_to_nnapi(traced_module, args)
+
     def check(
         self,
         module,
@@ -49,7 +52,7 @@ class TestNNAPI(TestCase):
                 args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
-            nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
+            nnapi_module = self.call_convert_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
                 return
