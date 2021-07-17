@@ -155,25 +155,25 @@ __global__ void upsample_bilinear2d_backward_out_frame(
     const scalar_t d2val = odata[index];
     fastAtomicAdd(
         idata,
-        idx_2d(nc, height1, width1, h1, w1),
+        idx_2d(nc, h1, w1, height1, width1),
         i_numel,
         static_cast<scalar_t>(h0lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_2d(nc, height1, width1, h1, w1 + w1p),
+        idx_2d(nc, h1, w1 + w1p, height1, width1),
         i_numel,
         static_cast<scalar_t>(h0lambda * w1lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_2d(nc, height1, width1, h1 + h1p, w1),
+        idx_2d(nc, h1 + h1p, w1, height1, width1),
         i_numel,
         static_cast<scalar_t>(h1lambda * w0lambda * d2val),
         true);
     fastAtomicAdd(
         idata,
-        idx_2d(nc, height1, width1, h1 + h1p, w1 + w1p),
+        idx_2d(nc, h1 + h1p, w1 + w1p, height1, width1),
         i_numel,
         static_cast<scalar_t>(h1lambda * w1lambda * d2val),
         true);
