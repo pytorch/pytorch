@@ -643,6 +643,28 @@ TEST(StaticRuntime, IndividualOps_FullLike) {
   testStaticRuntime(full_like_script, args, args2);
 }
 
+TEST(StaticRuntime, Linear) {
+  auto input = at::randn({1, 2});
+  auto weights = at::randn({1, 2});
+  auto bias = at::randn({1, 1});
+
+  std::vector<IValue> args{input, weights, bias};
+  std::vector<IValue> args_no_bias{input, weights, c10::nullopt};
+
+  auto input2 = at::randn({2, 3});
+  auto weights2 = at::randn({2, 3});
+  auto bias2 = at::randn({2, 2});
+
+  std::vector<IValue> args2{input2, weights2, bias2};
+  std::vector<IValue> args2_no_bias{input2, weights2, c10::nullopt};
+
+  testStaticRuntime(linear_script, args);
+  testStaticRuntime(linear_script, args_no_bias);
+
+  testStaticRuntime(linear_script, args, args2);
+  testStaticRuntime(linear_script, args, args2_no_bias);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});
