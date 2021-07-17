@@ -3860,7 +3860,6 @@ class MvlGammaInfo(UnaryUfuncInfo):
             dtypes=all_types(),
             dtypesIfCUDA=all_types_and(torch.half),
             sample_inputs_func=sample_inputs_mvlgamma,
-            supports_out=False,
             safe_casts_outputs=True,
             skips=skips,
             sample_kwargs=sample_kwargs)

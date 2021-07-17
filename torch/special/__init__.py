@@ -645,7 +645,7 @@ Example::
 
 multigammaln = _add_docstr(_special.special_multigammaln,
                            r"""
-multigammaln(input, p) -> Tensor
+multigammaln(input, p, *, out=None) -> Tensor
 
 Computes the `multivariate log-gamma function
 <https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
@@ -661,6 +661,9 @@ All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error wo
 Args:
     input (Tensor): the tensor to compute the multivariate log-gamma function
     p (int): the number of dimensions
+
+Keyword args:
+    {out}
 
 Example::
 

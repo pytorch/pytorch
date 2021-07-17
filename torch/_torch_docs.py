@@ -6604,7 +6604,7 @@ Example::
 
 add_docstr(torch.mvlgamma,
            r"""
-mvlgamma(input, p) -> Tensor
+mvlgamma(input, p, *, out=None) -> Tensor
 
 Alias for :func:`torch.special.multigammaln`.
 """)

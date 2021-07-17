@@ -3075,6 +3075,10 @@
   dispatch:
     CompositeExplicitAutograd: mv_out
 
+- func: mvlgamma.out(Tensor self, int p, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: mvlgamma_out
+
 - func: mvlgamma(Tensor self, int p) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -9938,6 +9942,10 @@
   variants: function
 
 - func: special_multigammaln(Tensor self, int p) -> Tensor
+  python_module: special
+  variants: function
+
+- func: special_multigammaln.out(Tensor self, int p, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
   variants: function
 
