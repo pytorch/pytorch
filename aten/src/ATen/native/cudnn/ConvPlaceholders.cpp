@@ -104,6 +104,18 @@ Tensor cudnn_convolution_relu(
   AT_ERROR("cudnn_convolution_relu: ATen not compiled with cuDNN support");
 }
 
+Tensor& cudnn_convolution_relu_out(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    Tensor& output_t) {
+  AT_ERROR("cudnn_convolution_relu_out: ATen not compiled with cuDNN support");
+}
+
 Tensor cudnn_convolution_add_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
@@ -115,6 +127,20 @@ Tensor cudnn_convolution_add_relu(
     IntArrayRef dilation,
     int64_t groups) {
   AT_ERROR("cudnn_convolution_add_relu: ATen not compiled with cuDNN support");
+}
+
+Tensor& cudnn_convolution_add_relu_out(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    Tensor& output_t) {
+  AT_ERROR("cudnn_convolution_add_relu_out: ATen not compiled with cuDNN support");
 }
 
 #endif  // AT_CUDNN_ENABLED

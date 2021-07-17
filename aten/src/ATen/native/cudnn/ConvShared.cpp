@@ -499,27 +499,19 @@ Tensor cudnn_convolution_transpose_backward_weight(
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
-Tensor cudnn_convolution_relu(
+Tensor& cudnn_convolution_relu_out(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
-    int64_t groups) {
-  // FuseFrozenConvAddRelu performs some tensor shape checking
-  auto output_t = at::native::empty_cuda(
-      conv_output_size(
-          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-      /*dtype=*/input_t.scalar_type(),
-      /*layout=*/c10::nullopt,
-      /*device=*/kCUDA,
-      /*pin_memory=*/c10::nullopt,
-      /*memory_format=*/at::MemoryFormat::Contiguous);
+    int64_t groups,
+    Tensor& output_t
+    ) {
   if (output_t.numel() == 0) {
     return output_t;
   }
-
   raw_cudnn_convolution_add_relu_out(
       output_t,
       input_t,
@@ -546,11 +538,9 @@ Tensor cudnn_convolution_relu(
   return output_t;
 }
 
-Tensor cudnn_convolution_add_relu(
+Tensor cudnn_convolution_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const Tensor& z_t,
-    const c10::optional<Scalar>& alpha,
     const c10::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -565,6 +555,23 @@ Tensor cudnn_convolution_add_relu(
       /*device=*/kCUDA,
       /*pin_memory=*/c10::nullopt,
       /*memory_format=*/at::MemoryFormat::Contiguous);
+  at::native::cudnn_convolution_relu_out(
+    input_t, weight_t, bias_t, stride, padding, dilation, groups, output_t);
+  return output_t;
+}
+
+Tensor& cudnn_convolution_add_relu_out(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    Tensor& output_t
+    ) {
   if (output_t.numel() == 0) {
     return output_t;
   }
@@ -592,6 +599,31 @@ Tensor cudnn_convolution_add_relu(
       input_t.dim() == 4 // enable allow_tf32 for conv2d
   );
 
+  return output_t;
+}
+
+
+Tensor cudnn_convolution_add_relu(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const Tensor& z_t,
+    const c10::optional<Scalar>& alpha,
+    const c10::optional<Tensor>& bias_t,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups) {
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  auto output_t = at::native::empty_cuda(
+      conv_output_size(
+          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
+      /*dtype=*/input_t.scalar_type(),
+      /*layout=*/c10::nullopt,
+      /*device=*/kCUDA,
+      /*pin_memory=*/c10::nullopt,
+      /*memory_format=*/at::MemoryFormat::Contiguous);
+
+  at::native::cudnn_convolution_add_relu_out(input_t, weight_t, z_t, alpha, bias_t, stride, padding, dilation, groups, output_t);
   return output_t;
 }
 }}
