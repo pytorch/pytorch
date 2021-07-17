@@ -189,7 +189,9 @@ class C10_API Scalar {
 
 struct OptionalScalarRef {
   OptionalScalarRef() : scalar_(nullptr) {}
-  OptionalScalarRef(const Scalar* scalar) : scalar_(scalar) {}
+  OptionalScalarRef(const Scalar* scalar) : scalar_(scalar) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(scalar_);
+  }
 
   bool has_value() const {
     return scalar_ != nullptr;
