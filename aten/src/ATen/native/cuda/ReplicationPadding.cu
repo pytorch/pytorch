@@ -107,7 +107,7 @@ __global__ void replication_pad_forward_kernel2d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel2d(
-    PackedTensorAccessor64<scalar_t, 4> gradInput,
+    scalar_t* gradInput,
     PackedTensorAccessor64<scalar_t, 4> gradOutput,
     int padT, int padB, int padL, int padR,
     int channel, int height, int width, size_t gi_numel,
@@ -127,12 +127,12 @@ __global__ void replication_pad_backward_kernel2d(
   int oStartX = imax(0, padL);
   int oStartY = imax(0, padT);
 
-  int inputPointX = imin(imax(padL, outputPointX), gradInput.size(3) + padL - 1) - oStartX + iStartX;
-  int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
+  int inputPointX = imin(imax(padL, outputPointX), width + padL - 1) - oStartX + iStartX;
+  int inputPointY = imin(imax(padT, outputPointY), height + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
   fastAtomicAdd(
-    gradInput.data(),
+    gradInput,
     idx_2d(batch * channel + plane, inputPointY, inputPointX, height, width),
     gi_numel,
     valueToCopy,
@@ -264,18 +264,14 @@ void replication_pad2d_backward_out_cuda_template(
   if (gradInput.numel() == 0) {
     return;
   }
-  gradInput.zero_();
+  at::Tensor gradInput_c = gradInput.is_contiguous() ? gradInput : at::empty(gradInput.sizes(), gradInput.options());
+  gradInput_c.zero_();
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad2d_backward_cuda", [&] {
-
-        auto gradInput_ = gradInput;
-        auto gradOutput_ = gradOutput;
-        if (numInputDims == 3) {
-          gradInput_ = gradInput.unsqueeze(0);
-          gradOutput_ = gradOutput.unsqueeze(0);
-        }
-        auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
+        at::Tensor gradInput_ = numInputDims == 3 ? gradInput_c.unsqueeze(0) : gradInput_c;
+        at::Tensor gradOutput_ = numInputDims == 3 ? gradOutput.unsqueeze(0) : gradOutput;
+        auto devGradInput = gradInput_.data_ptr<scalar_t>();
         auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
 
         int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
@@ -299,6 +295,10 @@ void replication_pad2d_backward_out_cuda_template(
         }
       }
   );
+
+  if (!gradInput.is_contiguous()) {
+    gradInput.copy_(gradInput_c);
+  }
 }
 
 static inline void shapeCheck3d(
