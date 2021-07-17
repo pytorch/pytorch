@@ -587,13 +587,16 @@ class optional : private OptionalBase<T> {
   constexpr bool initialized() const noexcept {
     return OptionalBase<T>::initialized();
   }
-  typename std::remove_const<T>::type* dataptr() {
-    return std::addressof(OptionalBase<T>::storage_.value_);
-  }
-  constexpr const T* dataptr() const {
-    return detail_::static_addressof(OptionalBase<T>::storage_.value_);
-  }
 
+  public:
+    typename std::remove_const<T>::type* dataptr() {
+      return std::addressof(OptionalBase<T>::storage_.value_);
+    }
+    constexpr const T* dataptr() const {
+      return detail_::static_addressof(OptionalBase<T>::storage_.value_);
+    }
+
+  private:
   constexpr const T& contained_val() const& {
     return OptionalBase<T>::storage_.value_;
   }

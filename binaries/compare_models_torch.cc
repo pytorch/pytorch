@@ -50,7 +50,7 @@ C10_DEFINE_string(
 C10_DEFINE_bool(
     no_inputs,
     false,
-    "Whether the model has any input. Will ignore other input arugments if true");
+    "Whether the model has any input. Will ignore other input arguments if true");
 C10_DEFINE_bool(
     use_caching_allocator,
     false,

@@ -32,4 +32,5 @@ Scalar Scalar::log() const {
     return std::log(v.i);
   }
 }
+
 } // namespace c10
