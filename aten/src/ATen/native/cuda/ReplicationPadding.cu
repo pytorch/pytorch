@@ -51,7 +51,7 @@ __global__ void replication_pad_forward_kernel1d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel1d(
-    PackedTensorAccessor64<scalar_t, 3> gradInput,
+    scalar_t* gradInput,
     PackedTensorAccessor64<scalar_t, 3> gradOutput,
     int padL, int padR, int channel, int height, size_t gi_numel, int y_shift, int z_shift) {
 
@@ -66,11 +66,11 @@ __global__ void replication_pad_backward_kernel1d(
   int iStartX = imax(0, -padL);
   int oStartX = imax(0, padL);
 
-  int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
+  int inputPointX = imin(imax(padL, outputPointX), height + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
   fastAtomicAdd(
-    gradInput.data(),
+    gradInput,
     idx_1d(batch, plane, inputPointX, channel, height),
     gi_numel,
     valueToCopy,
@@ -554,18 +554,17 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
   if (gradInput.numel() == 0) {
     return;
   }
-  gradInput.zero_();
+
+  at::Tensor gradInput_c = gradInput.is_contiguous() ? gradInput : at::empty(gradInput.sizes(), gradInput.options());
+  gradInput_c.zero_();
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
 
-      auto gradInput_ = gradInput;
-      auto gradOutput_ = gradOutput;
-      if (numInputDims == 2) {
-        gradInput_ = gradInput.unsqueeze(0);
-        gradOutput_ = gradOutput.unsqueeze(0);
-      }
-      auto devGradInput = gradInput_.packed_accessor64<scalar_t, 3>();
+      at::Tensor gradInput_ = numInputDims == 2 ? gradInput_c.unsqueeze(0) : gradInput_c;
+      at::Tensor gradOutput_ = numInputDims == 2 ? gradOutput.unsqueeze(0) : gradOutput;
+
+      auto devGradInput = gradInput_.data_ptr<scalar_t>();
       auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 3>();
 
       int64_t outputPlaneSize = devGradOutput.size(2);
@@ -587,6 +586,10 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_cuda) (
         }
       }
   });
+
+  if (!gradInput.is_contiguous()) {
+    gradInput.copy_(gradInput_c);
+  }
 }
 
 TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
