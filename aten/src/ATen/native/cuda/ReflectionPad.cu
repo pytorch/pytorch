@@ -238,6 +238,7 @@ __global__ void reflection_pad3d_backward_out_kernel(
     PackedTensorAccessor64<scalar_t, 5> grad_input,
     PackedTensorAccessor64<scalar_t, 5> grad_output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
+    int64_t channels, int64_t depth, int64_t height, int64_t width, int64_t gi_numel,
     int64_t y_shift, int64_t z_shift
 ) {
   parallel_reflection_pad3d(
@@ -258,8 +259,13 @@ __global__ void reflection_pad3d_backward_out_kernel(
           int64_t input_y,
           int64_t input_x) {
         auto value_to_add = grad_output[batch][plane][output_z][output_y][output_x];
-        auto target = &grad_input[batch][plane][input_z][input_y][input_x];
-        gpuAtomicAddNoReturn(target, value_to_add);
+        fastAtomicAdd(
+          grad_input.data(),
+          idx_3d(batch, plane, input_z, input_y, input_x, channels, depth, height, width),
+          static_cast<size_t>(gi_numel),
+          value_to_add,
+          true
+        );
       });
 }
 
@@ -630,7 +636,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
   if (grad_input.numel() == 0) {
     return;
   }
-  grad_input.zero_();
+  at::Tensor grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(grad_input.sizes(), grad_input.options());
+  grad_input_c.zero_();
 
   int64_t pad_left = padding[0];
   int64_t pad_top = padding[2];
@@ -638,13 +645,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "reflection_pad3d_backward_out_cuda", [&] {
-        auto grad_input_ = grad_input;
-        auto grad_output_ = grad_output;
-        if (input.dim() == 4) {
-          // non-batch mode
-          grad_input_ = grad_input.unsqueeze(0);
-          grad_output_ = grad_output.unsqueeze(0);
-        }
+        at::Tensor grad_input_ = input.dim() == 4 ? grad_input_c.unsqueeze(0) : grad_input_c;
+        at::Tensor grad_output_ = input.dim() == 4 ? grad_output.unsqueeze(0) : grad_output;
 
         auto grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>();
         auto grad_output_packed = grad_output_.packed_accessor64<scalar_t, 5>();
@@ -666,11 +668,17 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
             reflection_pad3d_backward_out_kernel<<<
                 grid_size, block_size,0, at::cuda::getCurrentCUDAStream()>>>(
                 grad_input_packed, grad_output_packed, pad_left, pad_top, pad_front,
+                grad_input_.size(1), grad_input_.size(2), grad_input_.size(3), grad_input_.size(4), grad_input_.numel(),
                 block_y, block_z);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
         }
       });
+
+  if (!grad_input.is_contiguous()) {
+    grad_input.copy_(grad_input_c);
+  }
+
 }
 
 } // namespace native
