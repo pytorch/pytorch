@@ -335,12 +335,10 @@ jobs:
       - name: Run clang-tidy
         run: |
           cd "${GITHUB_WORKSPACE}"
+          # The Docker image has our custom build, so we don't need to install it
           python3 -m tools.linter.clang_tidy \
-            --diff-file pr.diff \
-            --parallel \
-            --verbose \
-            "$@" >"${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-          cat "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+            --clang-tidy-exe "$(which clang-tidy)" \
+            --diff-file pr.diff 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
       - name: Annotate output
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
