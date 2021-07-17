@@ -21,6 +21,22 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
   return torch::special_gammaln_out(result, self);
 }
 
+/// Computes the nth derivative of the digamma function on the input.
+/// See https:://pytorch.org/docs/master/special.html#torch.special.polygamma.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::polygamma(2, t);
+/// ```
+inline Tensor polygamma(int64_t n, const Tensor& self) {
+  return torch::special_polygamma(n, self);
+}
+
+inline Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
+  return torch::special_polygamma_out(result, n, self);
+}
+
 /// Computes the logarithmic derivative of the gamma function on input
 /// See https://pytorch.org/docs/master/special.html#torch.special.psi
 ///
