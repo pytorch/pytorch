@@ -178,7 +178,7 @@ __global__ void replication_pad_forward_kernel3d(
 
 template <typename scalar_t>
 __global__ void replication_pad_backward_kernel3d(
-    PackedTensorAccessor64<scalar_t, 5> gradInput,
+    scalar_t* gradInput,
     PackedTensorAccessor64<scalar_t, 5> gradOutput,
     int pfront, int pback, int ptop, int pbottom, int pleft, int pright,
     int channel, int depth, int height, int width, size_t gi_numel,
@@ -204,16 +204,13 @@ __global__ void replication_pad_backward_kernel3d(
   int oStartY = imax(0, ptop);
   int oStartZ = imax(0, pfront);
 
-  int inputPointX = imin(imax(pleft, outputPointX),
-      gradInput.size(4) + pleft - 1) - oStartX + iStartX;
-  int inputPointY = imin(imax(ptop, outputPointY),
-      gradInput.size(3) + ptop - 1) - oStartY + iStartY;
-  int inputPointZ = imin(imax(pfront, outputPointZ),
-      gradInput.size(2) + pfront - 1) - oStartZ + iStartZ;
+  int inputPointX = imin(imax(pleft, outputPointX), width + pleft - 1) - oStartX + iStartX;
+  int inputPointY = imin(imax(ptop, outputPointY), height + ptop - 1) - oStartY + iStartY;
+  int inputPointZ = imin(imax(pfront, outputPointZ), depth + pfront - 1) - oStartZ + iStartZ;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
   fastAtomicAdd(
-    gradInput.data(),
+    gradInput,
     idx_3d(batch, plane, inputPointZ, inputPointY, inputPointX, channel, depth, height, width),
     gi_numel,
     valueToCopy,
@@ -432,17 +429,14 @@ void replication_pad3d_backward_out_cuda_template(
   if (gradInput.numel() == 0) {
     return;
   }
-  gradInput.zero_();
+  at::Tensor gradInput_c = gradInput.is_contiguous() ? gradInput : at::empty(gradInput.sizes(), gradInput.options());
+  gradInput_c.zero_();
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad3d_backward_cuda", [&] {
-      auto gradInput_ = gradInput;
-      auto gradOutput_ = gradOutput;
-      if (numInputDims == 4) {
-        gradInput_ = gradInput.unsqueeze(0);
-        gradOutput_ = gradOutput.unsqueeze(0);
-      }
-      auto devGradInput = gradInput_.packed_accessor64<scalar_t, 5>();
+      at::Tensor gradInput_ = numInputDims == 4 ? gradInput_c.unsqueeze(0) : gradInput_c;
+      at::Tensor gradOutput_ = numInputDims == 4 ? gradOutput.unsqueeze(0) : gradOutput;
+      auto devGradInput = gradInput_.data_ptr<scalar_t>();
       auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 5>();
 
       int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3) * devGradOutput.size(4);
@@ -466,6 +460,9 @@ void replication_pad3d_backward_out_cuda_template(
       }
     }
   );
+  if (!gradInput.is_contiguous()) {
+    gradInput.copy_(gradInput_c);
+  }
 }
 } // namespace
 
