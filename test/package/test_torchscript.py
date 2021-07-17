@@ -486,6 +486,36 @@ class PackageScriptModuleTest(PackageTestCase):
             torch.allclose(loaded_mod_1.tensor, loaded_mod_1.sub_mod_1.tensor)
         )
 
+    def test_tensor_sharing_pickle(self):
+        """Test that saving a ScriptModule and a separately saving a tensor
+        object causes no issues.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = torch.ones(2, 3)
+
+            def forward(self):
+                return self.foo
+
+        scripted_m = torch.jit.script(M())
+        original_tensor = torch.ones(0)
+
+        f = BytesIO()
+        with torch.package.PackageExporter(f) as exporter:
+            exporter.save_pickle("model", "model.pkl", scripted_m)
+            exporter.save_pickle("model", "input.pkl", original_tensor)
+
+        f.seek(0)
+        # Should be able to load correctly
+        importer = PackageImporter(f)
+        loaded_m = importer.load_pickle("model", "model.pkl")
+        loaded_tensor = importer.load_pickle("model", "input.pkl")
+
+        self.assertEqual(scripted_m.foo, loaded_m.foo)
+        self.assertEqual(original_tensor, loaded_tensor)
+
     def test_saving_and_scripting_packaged_mod(self):
         """
         Test scripting a module loaded from a package
