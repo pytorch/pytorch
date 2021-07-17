@@ -42,6 +42,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
 }
 
 Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
               ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
