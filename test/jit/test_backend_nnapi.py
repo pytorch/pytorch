@@ -54,7 +54,7 @@ class TestNnapiBackend(TestNNAPI):
 
         # Disable execution tests, only test lowering modules
         # TODO: Re-enable execution tests after the Nnapi delegate is complete
-        self.can_run_nnapi = False
+        super().set_can_run_nnapi(False)
 
     # Override
     def call_convert_to_nnapi(self, traced_module, args):
