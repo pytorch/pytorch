@@ -90,7 +90,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301
+#if (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301) || defined(__CUDA_BF16_TYPES_EXIST__)
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif

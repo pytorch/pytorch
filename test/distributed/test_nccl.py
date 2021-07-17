@@ -22,7 +22,7 @@ if not TEST_CUDA:
     TestCase = object  # noqa: F811
 
 
-datatypes = [torch.float, torch.bfloat16] if TEST_WITH_ROCM else [torch.float]
+datatypes = [torch.float, torch.bfloat16]
 
 class TestNCCL(TestCase):
 
