@@ -389,12 +389,46 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                         fqn = ref_model_results[i]['fqn']
                         model_results[i]['fqn'] = fqn
 
+def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
+    def inner(*args, **kwargs):
+        a0, a1, *a_other = args
 
+        if isinstance(a0, tuple) and isinstance(a1, tuple):
+            results = []
+            for el0, el1 in zip(a0, a1):
+                new_args = (el0, el1, *a_other)
+                results.append(inner(*new_args, **kwargs))
+            return results
+
+        elif isinstance(a0, torch.Tensor) and isinstance(a1, torch.Tensor):
+            if a0.is_quantized:
+                a0 = a0.dequantize()
+            if a1.is_quantized:
+                a1 = a1.dequantize()
+
+        # for the purposes of this util, only handle floats
+        if a0.dtype != torch.float or a1.dtype != torch.float:
+            return None
+
+        new_args = (a0, a1, *a_other)
+        return f(*new_args, **kwargs)
+    return inner
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    if x.is_quantized:
-        x = x.dequantize()
-    if y.is_quantized:
-        y = y.dequantize()
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    # For convolutions, the shape of the quantized weight has one additional
+    # dimension compared to the shape of the fp32 weight. Match the shapes
+    # to enable cosine similarity comparison.
+    x = x.reshape(1, -1)
+    y = y.reshape(1, -1)
+    return torch.nn.functional.cosine_similarity(x, y)
