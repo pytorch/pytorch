@@ -746,7 +746,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # Only run checker if we are using ONNX export type and
             # large model format export in not enabled.
             # If large model format export is enabled, proto will only contain data location instead of
-            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto 
+            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 _check_onnx_proto(proto)
