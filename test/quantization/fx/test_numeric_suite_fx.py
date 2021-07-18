@@ -955,6 +955,23 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         }
         self._test_extract_weights(m, results_len=1, qconfig_dict=qconfig_dict)
 
+    @skipIfNoFBGEMM
+    def test_extract_weights_fqn(self):
+        m = nn.Sequential(
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mq = convert_fx(copy.deepcopy(mp))
+        results = extract_weights('a', mp, 'b', mq)
+        fqn_a_0 = results['_0_0']['weight']['a'][0]['fqn']
+        fqn_b_0 = results['_0_0']['weight']['b'][0]['fqn']
+        self.assertTrue(fqn_a_0 == '0.0' and fqn_a_0 == fqn_b_0)
+        fqn_a_1 = results['_1']['weight']['a'][0]['fqn']
+        fqn_b_1 = results['_1']['weight']['b'][0]['fqn']
+        self.assertTrue(fqn_a_1 == '1' and fqn_a_1 == fqn_b_1)
+
     def _test_match_activations_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
             torch.quantization.QuantStub(),
@@ -1015,6 +1032,28 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         res = self._test_match_activations(
             m, (torch.randn(4, 4),),
             results_len=1)
+
+    @skipIfNoFBGEMM
+    def test_match_activations_fqn(self):
+        m = nn.Sequential(
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mq = convert_fx(copy.deepcopy(mp))
+        mp_ns, mq_ns = add_loggers('a', mp, 'b', mq, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        mp_ns(datum)
+        mq_ns(datum)
+
+        results = extract_logger_info(mp_ns, mq_ns, OutputLogger, 'b')
+        fqn_a_0 = results['_0_0']['node_output']['a'][0]['fqn']
+        fqn_b_0 = results['_0_0']['node_output']['b'][0]['fqn']
+        self.assertTrue(fqn_a_0 == '0.0' and fqn_a_0 == fqn_b_0)
+        fqn_a_1 = results['_1']['node_output']['a'][0]['fqn']
+        fqn_b_1 = results['_1']['node_output']['b'][0]['fqn']
+        self.assertTrue(fqn_a_1 == '1' and fqn_a_1 == fqn_b_1)
 
     def _test_add_shadow_loggers_mod_impl(self, prepare_fn=prepare_fx):
         m = nn.Sequential(
@@ -1094,6 +1133,27 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(4, 4),),
             prepared_expected_node_occurrence=expected_occurrence,
             results_len=1, compare_fp32_vs_fp32_prepared=False)
+
+    @skipIfNoFBGEMM
+    def test_shadow_activations_fqn(self):
+        m = nn.Sequential(
+            nn.Sequential(nn.Conv2d(1, 1, 1)),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        mp = prepare_fx(m, qconfig_dict)
+        mq = convert_fx(copy.deepcopy(mp))
+        mp_shadows_mq = add_shadow_loggers('a', mp, 'b', mq, OutputLogger)
+        datum = torch.randn(1, 1, 1, 1)
+        mp_shadows_mq(datum)
+
+        results = extract_shadow_logger_info(mp_shadows_mq, OutputLogger, 'b')
+        fqn_a_0 = results['_0_0']['node_output']['a'][0]['fqn']
+        fqn_b_0 = results['_0_0']['node_output']['b'][0]['fqn']
+        self.assertTrue(fqn_a_0 == '0.0' and fqn_a_0 == fqn_b_0)
+        fqn_a_1 = results['_1']['node_output']['a'][0]['fqn']
+        fqn_b_1 = results['_1']['node_output']['b'][0]['fqn']
+        self.assertTrue(fqn_a_1 == '1' and fqn_a_1 == fqn_b_1)
 
     @skipIfNoFBGEMM
     def test_logging_inputs(self):
