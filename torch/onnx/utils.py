@@ -82,9 +82,9 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
     if enable_onnx_checker is not None:
-        warnings.warn("`enable_onnx_checker' is DEPRECATED. Please stop using it."
-                      "The code now will work as it is True so that the onnx model checker "
-                      "will be run to ensure the exported model is a valid ONNX model.")
+        warnings.warn("`enable_onnx_checker' is deprecated and ignored. Will be removed in "
+                      "next release. The code now will work as it is True so that the onnx "
+                      "model checker is always run to ensure the exported model is a valid ONNX model.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
@@ -743,10 +743,12 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             else:
                 raise RuntimeError("Unknown export type")
 
-            if operator_export_type is OperatorExportTypes.ONNX and \
-               not val_use_external_data_format:
-                # Only run checker if we are using ONNX export type and
-                # large model format export in not enabled.
+            # Only run checker if we are using ONNX export type and
+            # large model format export in not enabled.
+            # If large model format export is enabled, proto will only contain data location instead of
+            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto 
+            # string in memory.
+            if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
                 _check_onnx_proto(proto)
     finally:
         assert __IN_ONNX_EXPORT
