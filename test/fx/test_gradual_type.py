@@ -834,6 +834,39 @@ class TypeCheckerTest(unittest.TestCase):
 
 
 
+    def test_type_check_batch_norm_symbolic(self):
+        class BasicBlock(torch.nn.Module):
+
+            def __init__(self, inplanes, planes, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: Dyn):
+                identity = x
+                out: TensorType((2, 2, Dyn, 4)) = self.bn1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        infer_symbolic_types(traced)
+
+        my_types = []
+
+        for n in graph.nodes:
+            my_types.append(n.type)
+
+        assert my_types[0] == my_types[1]
+        assert my_types[1] == my_types[2]
+        assert my_types[2] == my_types[3]
+
 
 if __name__ == '__main__':
     unittest.main()
