@@ -523,7 +523,8 @@ class GraphTypeChecker:
 
 
 @register_refinement_rule(Conv2d)
-def conv2d_refinement_rule(n: Node):
+@register_refinement_rule(torch.nn.Linear)
+def first_one(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
@@ -553,7 +554,42 @@ def first_two(n: Node):
         args2 = n.type.__args__
         return [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
 
+@register_refinement_rule(torch.flatten)
+def flatten_refinement_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+
+    eq_const = []
+
+    start_dim = 1
+    end_dim = -1
+
+    if len(n.args) > 1:
+        assert isinstance(n.args[1], int)
+        start_dim = n.args[1]
+
+    if len(n.args) > 2:
+        assert isinstance(n.args[2], int)
+        end_dim = n.args[2]
+
+    if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
+        l = len(n.type.__args__)
+        start_dim = l if start_dim == -1 else start_dim
+        end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
+
+        for t1, t2 in zip(n.type.__args__[0:start_dim], n.args[0].type.__args__[0:start_dim]):
+            eq_const.append(Equality(t1, t2))
+
+        for t1, t2 in zip(n.type.__args__[start_dim:end_dim], n.args[0].type.__args__[start_dim:end_dim]):
+            eq_const.append(Equality(t1, t2))
+
+        return eq_const
+
 class Refine:
+    """
+    Symbolic shape inference.
+    Generates constraitns over type variables.
+    Currently all constraints are equality constraints.
+    """
     def __init__(self, traced):
         self.constraints = []
         self.traced = traced
@@ -561,6 +597,7 @@ class Refine:
 
     def symbol_gen(self):
         val = [0]
+
         def inc():
             val[0] += 1
             return val[0]
@@ -568,19 +605,19 @@ class Refine:
 
     def refine(self):
         """
-        A gradual type checker for graphs
-        Effect: every node's field type will be
-        populated with a type after type-checking is done
+        Generates constraints for
+        every node in the graph based on
+        the operation.
         """
         graph = self.traced.graph
-
-        # type check every node with gradual type rules
-        # if any node does not type check return false
         for n in graph.nodes:
             self.refine_node(n)
         return True
 
     def replace_dyn_with_fresh_var(self, typ):
+        """
+        Replace all unknown types with fresh type variables.
+        """
         if typ == Dyn:
             new_symbol = Var(self.curr_symbol())
             return new_symbol
@@ -597,20 +634,23 @@ class Refine:
             return typ
 
     def refine_node(self, n: Node):
+        """
+        Returns a list of equality constraints for
+        call_module and call_function nodes.
+        Models the relation between input and output dimensions
+        using constraints in case they are both tensors.
+        All operations used in resnet50 are defined.
+        """
         if n.type is None:
             n.type = Dyn
 
         n.type = self.replace_dyn_with_fresh_var(n.type)
-
-        # if n.op == 'placeholder':
-        #     pass
 
         if n.op == 'call_function':
             if n.target in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[n.target](n)
             else:
                 pass
-                # raise RuntimeError(f'No refinement rule registered for target {n.target}!')
 
         if n.op == 'call_module':
             module_instance = self.traced.get_submodule(n.target)
@@ -618,11 +658,10 @@ class Refine:
                 self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
             else:
                 pass
-                # raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
 
-        # if n.op == 'output':
-        #     assert isinstance(n.args[0], Node)
-        #     pass
+        if n.op == 'output':
+            assert isinstance(n.args[0], Node)
+            n.type = n.args[0].type
 
         else:
             pass

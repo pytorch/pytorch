@@ -1,6 +1,7 @@
 import unittest
 import torch
 from torch.fx import symbolic_trace
+from torch.fx.experimental.unify_refinements import infer_symbolic_types
 from torch.fx.tensor_type import TensorType, Dyn, is_consistent, is_more_precise
 from torch.fx.annotate import annotate
 from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
@@ -821,6 +822,17 @@ class TypeCheckerTest(unittest.TestCase):
         g.type_check()
         for n1, n2 in zip(gm_static_with_types.graph.nodes, gm_run.graph.nodes):
             assert n1.type == TensorType(n2.meta['tensor_meta'].shape)
+
+        # apply shape inference to graph and check
+        # that the batch size is equal across all layers
+        infer_symbolic_types(gm_static)
+        batch_sizes = []
+        for n in gm_static.graph.nodes:
+            assert isinstance(n.type, TensorType)
+            batch_sizes.append(n.type.__args__[0])
+        assert (len(set(batch_sizes)) == 1)
+
+
 
 
 if __name__ == '__main__':
