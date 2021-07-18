@@ -705,6 +705,25 @@ class TestFXGraphMatcher(QuantizationTestCase):
         self.assert_types_for_matched_subgraph_pairs(
             results, expected_types, m1, m2)
 
+    @skipIfNoFBGEMM
+    def test_results_order(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Linear(1, 1),
+        ).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        results = get_matching_subgraph_pairs(mp, mq)
+        self.assertTrue(len(results) == 2)
+        results_iter = iter(results.items())
+        _, (subgraph_a_0, subgraph_b_0) = next(results_iter)
+        self.assertTrue(subgraph_a_0.start_node.name == '_0' and
+                        subgraph_b_0.start_node.name == '_0')
+        _, (subgraph_a_1, subgraph_b_1) = next(results_iter)
+        self.assertTrue(subgraph_a_1.start_node.name == '_1' and
+                        subgraph_b_1.start_node.name == '_1')
+
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
