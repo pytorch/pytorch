@@ -1,3 +1,4 @@
+import collections
 import enum
 
 import torch
@@ -380,7 +381,7 @@ def get_matching_subgraph_pairs(
     graph_b_iterator = _NSGraphMatchableSubgraphsIterator(
         gm_b, non_matchable_functions, non_matchable_modules,
         non_matchable_methods)
-    results = {}
+    results = collections.OrderedDict()
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
@@ -450,5 +451,10 @@ Attempting to match
 one of which is empty. Please ensure that the two models you pass in have the same number
 of subgraphs."""
             raise GraphMatchingException(msg)
+
+    # The subgraph pairs are originally created by traversing the two graphs
+    # from the outputs to the inputs. Reverse the results to return the
+    # subgraphs in their order of execution.
+    results = collections.OrderedDict(reversed(list(results.items())))
 
     return results
