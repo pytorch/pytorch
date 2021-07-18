@@ -81,6 +81,9 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
+    if strip_doc_string is not None:
+        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
+                      "next release. It's combined with `verbose' argument now.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
