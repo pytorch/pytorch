@@ -82,8 +82,8 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
     if _retain_param_name is not None:
-        warnings.warn("`_retain_param_name' is DEPRECATED. Please stop using it."
-                      "The code now will work as it is True to keep the original "
+        warnings.warn("`_retain_param_name' is deprecated and ignored. Will be removed in "
+                      "next release. The code now will work as it is True to keep the original "
                       "parameter names in the final ONNX graph.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,

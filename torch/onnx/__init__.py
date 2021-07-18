@@ -187,7 +187,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9):
             Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
             defined in torch/onnx/symbolic_helper.py.
-        _retain_param_name (bool, default True): [DEPRECATED. Backend logic is working as it's True.]
+        _retain_param_name (bool, default True): [Deprecated and ignored. Will be removed in next release]
             If True, will keep the original parameter names of model in final ONNX graph.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
