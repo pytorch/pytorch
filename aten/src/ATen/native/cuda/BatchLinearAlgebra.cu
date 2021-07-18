@@ -2874,8 +2874,10 @@ static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tenso
 static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
+  auto b1 = b.size(-2);
+  auto b2 = b.size(-1);
 #ifdef USE_CUSOLVER
-  if (batch_size == 1 && m > 512) {
+  if ((batch_size == 1 && m > 512) || (batch_size <= 8 && (m > 1024 || b1 > 1024 || b2 > 1024))) {
     lu_solve_looped_cusolver(b, lu, pivots);
   }
 #else
@@ -2884,7 +2886,7 @@ static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& p
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
-  else if (batch_size > 2 && m <= 128) {
+  else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && (m > 1024 || b1 > 1024 || b2 > 1024))) {
     lu_solve_batched_cublas(b, lu, pivots);
   }
 #endif // ifdef CUDART_VERSION
