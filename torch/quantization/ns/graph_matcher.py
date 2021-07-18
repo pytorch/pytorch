@@ -17,6 +17,10 @@ from .pattern_utils import (
     get_reversed_fusions,
     end_node_matches_reversed_fusion,
 )
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
 
 from typing import Dict, Tuple, List, Optional, Set, Any
 
@@ -96,12 +100,21 @@ class _NSGraphMatchableSubgraphsIterator:
             for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
-            # skip observers, etc
+            # skip unmatchable nodes
             # note: this check is done on the start_node, i.e.
             # if we are matching linear-relu in reverse, this would do the matchable
             # check on the linear
             if not self._is_matchable(cur_base_op_node):
                 continue
+
+            # If an observer or a fake_quant was not matched as a part of
+            # a pattern of multiple nodes, ignore it. One case where this is
+            # relevant is an observer on a graph input, which was added because
+            # it is necessary for the next node.
+            if cur_end_node.op == 'call_module' and cur_start_node is cur_end_node:
+                maybe_obs = getattr_from_fqn(self.gm, cur_end_node.target)  # type: ignore[arg-type]
+                if isinstance(maybe_obs, (ObserverBase, FakeQuantizeBase)):
+                    continue
 
             return NSSubgraph(
                 start_node=cur_start_node, end_node=cur_end_node,
