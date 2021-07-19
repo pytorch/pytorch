@@ -106,17 +106,12 @@ C10_HOST_DEVICE inline c10::BFloat16 nextafter(
   int_repr_t sign_mask = int_repr_t{1} << (bits - 1);
 
 #if defined(__HIP_PLATFORM_HCC__)
-  bool from_is_nan = (from != from);
-  bool to_is_nan = (to != to);
+  if (from != from || to != to) {
 #elif defined(_MSC_VER)
-  bool from_is_nan = isnan(from);
-  bool to_is_nan = isnan(to);
+  if (isnan(from) || isnan(to)) {
 #else
-  bool from_is_nan = std::isnan(from);
-  bool to_is_nan = std::isnan(to);
+  if (std::isnan(from) || std::isnan(to)) {
 #endif
-
-  if (from_is_nan || to_is_nan) {
     return from;
   }
 
