@@ -1216,8 +1216,8 @@ void Reducer::search_unused_parameters(
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
   }
-  if (!static_graph_) {
-    if (ddp_graph_static_ && num_iterations_ > 1) {
+  if (!static_graph_ && ddp_graph_static_) {
+    if (num_iterations_ > 1) {
       // Graph is still static if the set of unused parameters did not change.
       ddp_graph_static_ =
           prev_iteration_unused_parameters_ == unused_parameters_;
