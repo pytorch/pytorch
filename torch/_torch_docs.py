@@ -1490,16 +1490,51 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks. Each chunk is a view of
+Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
 
-Last chunk will be smaller if the tensor size along the given dimension
-:attr:`dim` is not divisible by :attr:`chunks`.
+
+.. note::
+
+    This function may return less then the specified number of chunks!
+
+.. seealso::
+
+    :func:`torch.tensor_split` a function that always returns exactly the specified number of chunks
+
+If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
+all returned chunks will be the same size.
+If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
+all returned chunks will be the same size, except the last one.
+If such division is not possible, this function may return less
+than the specified number of chunks.
 
 Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
+
+Example::
+    >>> torch.arange(11).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10]))
+    >>> torch.arange(12).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10, 11]))
+    >>> torch.arange(13).chunk(6)
+    (tensor([0, 1, 2]),
+     tensor([3, 4, 5]),
+     tensor([6, 7, 8]),
+     tensor([ 9, 10, 11]),
+     tensor([12]))
 """)
 
 add_docstr(torch.unsafe_chunk,
@@ -7263,33 +7298,7 @@ add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, *, out=None) -> Tensor
 
-Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
-:math:`n \geq 0` is called the order of the polygamma function.
-
-.. math::
-    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
-
-.. note::
-    This function is implemented only for nonnegative integers :math:`n \geq 0`.
-""" + """
-Args:
-    n (int): the order of the polygamma function
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.tensor([1, 0.5])
-    >>> torch.polygamma(1, a)
-    tensor([1.64493, 4.9348])
-    >>> torch.polygamma(2, a)
-    tensor([ -2.4041, -16.8288])
-    >>> torch.polygamma(3, a)
-    tensor([ 6.4939, 97.4091])
-    >>> torch.polygamma(4, a)
-    tensor([ -24.8863, -771.4742])
+Alias for :func:`torch.special.polygamma`.
 """.format(**common_args))
 
 add_docstr(torch.positive,
