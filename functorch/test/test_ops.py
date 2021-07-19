@@ -147,6 +147,7 @@ vjp_fail = {
     'norm',
     'to_sparse',
     'cross',
+    'fft_hfft',
 }
 
 
