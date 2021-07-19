@@ -988,6 +988,15 @@ class TestReductions(TestCase):
         self.assertEqual(torch.searchsorted(boundaries, scalar_tensor_nan), expected_result)
         self.assertEqual(torch.bucketize(float('nan'), boundaries, right=True), expected_result)
 
+        # non-contiguous out type
+        boundaries = torch.arange(10, device=device)
+        indices = torch.arange(3, 8, device=device)
+        tmp = torch.zeros(5, 2, device=device, dtype=indices.dtype)
+        output = tmp[:, 0]
+        expected_result = torch.tensor([3, 4, 5, 6, 7], device=device)
+        torch.searchsorted(boundaries, indices, out=output)
+        self.assertEqual(output, expected_result)
+
         # invalid input dimensions
         boundaries = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device)
         with self.assertRaisesRegex(
