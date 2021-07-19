@@ -122,12 +122,12 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
     int64_t pool_index = 0;
     for (int64_t j=0; j < ndim; j++) {
       if (j != dim) {
-        auto indices_row = indices_accessor[j];
-        auto stride = strides[j];
+        const auto indices_row = indices_accessor[j];
+        const auto stride = strides[j];
         pool_index += stride * indices_row[i];
       }
     }
-    if(pools.size() <= pool_index){
+    if(static_cast<int64_t>(pools.size()) <= pool_index){
       pools.resize(pool_index + 1);
     }
     pools.at(pool_index).push_back(i);

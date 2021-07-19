@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -37,13 +38,16 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
       Tensor r;
       if (self.is_quantized()) {
         r = at::empty_quantized(self.sizes(), self, options);
+        at::QuantizerPtr quantizer = r.quantizer();
+        r.copy_(self, non_blocking);
+        set_quantizer_(r, quantizer);
       } else {
         r = at::empty_strided(
             self.sizes(),
             self.strides(),
             options.memory_format(c10::nullopt).pinned_memory(pin_out));
+        r.copy_(self, non_blocking);
       }
-      r.copy_(self, non_blocking);
       return r;
     } else {
       memory_format = self.suggest_memory_format();
