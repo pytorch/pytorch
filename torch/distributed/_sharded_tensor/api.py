@@ -45,7 +45,7 @@ class ShardedTensorMetadata(object):
     shards_metadata: List[ShardMetadata]
 
     # Size of each dim of the overall Tensor.
-    overall_dims: torch.Size
+    size: torch.Size
 
     # Regular tensor fields
     dtype: torch.dtype
@@ -136,8 +136,8 @@ class ShardedTensor(object):
         if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
+        dims = list(size)
         self._sharding_spec = sharding_spec
-        self._dims = list(size)
         self._process_group = (
             process_group
             if process_group is not None
@@ -152,6 +152,7 @@ class ShardedTensor(object):
         self._metadata: ShardedTensorMetadata = None
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
+                dims,
                 dtype,
                 layout,
                 requires_grad,
@@ -160,6 +161,7 @@ class ShardedTensor(object):
             )
         elif isinstance(self._sharding_spec, EnumerableShardingSpec):
             self._init_enumerable(
+                dims,
                 dtype,
                 layout,
                 requires_grad,
@@ -238,6 +240,7 @@ class ShardedTensor(object):
 
     def _init_chunked(
         self,
+        dims,
         dtype,
         layout,
         requires_grad,
@@ -252,10 +255,10 @@ class ShardedTensor(object):
             raise ValueError(
                 f"Sharding dim needs to be an integer, found: {sharding_dim}"
             )
-        if sharding_dim >= len(self._dims) or sharding_dim < -len(self._dims):
+        if sharding_dim >= len(dims) or sharding_dim < -len(dims):
             raise ValueError(f"Invalid sharding dim: {sharding_dim}")
 
-        dim_size = self._dims[sharding_dim]
+        dim_size = dims[sharding_dim]
         devices = self._sharding_spec.placements  # type: ignore[attr-defined]
         chunks = len(devices)
         # split_size computed similar to 'torch.chunk'
@@ -275,9 +278,9 @@ class ShardedTensor(object):
                 # Build sharding_metadata.
 
                 # deepcopy for modification.
-                rank_dims = self._dims.copy()
+                rank_dims = dims.copy()
 
-                rank_offsets = [0] * len(self._dims)
+                rank_offsets = [0] * len(dims)
                 rank_offsets[sharding_dim] = split_size * idx
                 rank_dims[sharding_dim] = sharded_dim_size
 
@@ -302,7 +305,7 @@ class ShardedTensor(object):
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
             shards_metadata,
-            self._dims,
+            dims,
             dtype,
             layout,
             requires_grad,
@@ -312,6 +315,7 @@ class ShardedTensor(object):
 
     def _init_enumerable(
         self,
+        dims,
         dtype,
         layout,
         requires_grad,
@@ -319,7 +323,7 @@ class ShardedTensor(object):
         memory_format,
     ):
         # Validate the sharding spec is compatible with the tensor.
-        self._sharding_spec.check_tensor(self._dims)  # type: ignore[attr-defined]
+        self._sharding_spec.check_tensor(dims)  # type: ignore[attr-defined]
 
         current_rank = dist.get_rank(self._process_group)
 
@@ -345,7 +349,7 @@ class ShardedTensor(object):
         # Build overall metadata
         self._metadata = ShardedTensorMetadata(
             shards_metadata,
-            self._dims,
+            dims,
             dtype,
             layout,
             requires_grad,
@@ -385,8 +389,8 @@ class ShardedTensor(object):
 
     def metadata(self) -> ShardedTensorMetadata:
         """
-        Returns a list of :class:`ShardeMetadata` objects corresponding to the
-        metadata for each shard.
+        Returns a :class:`ShardedTensorMetadata` object corresponding to the
+        metadata for the entire tensor.
         """
         return self._metadata
 
@@ -402,7 +406,7 @@ class ShardedTensor(object):
         """
         Returns the size of the self tensor. The returned value is a subclass of tuple.
         """
-        return torch.Size(self._dims)
+        return self._metadata.size
 
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards

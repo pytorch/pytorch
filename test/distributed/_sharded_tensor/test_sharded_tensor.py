@@ -90,7 +90,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
         sharded_tensor = _sharded_tensor.empty(spec, 10, 20)
         sharded_tensor_metadata = sharded_tensor.metadata()
-        self.assertEqual(torch.Size([10, 20]), sharded_tensor_metadata.overall_dims)
+        self.assertEqual(torch.Size([10, 20]), sharded_tensor_metadata.size)
         self.assertEqual(torch.float, sharded_tensor_metadata.dtype)
         self.assertEqual(torch.strided, sharded_tensor_metadata.layout)
         self.assertEqual(False, sharded_tensor_metadata.requires_grad)
@@ -507,7 +507,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
 
         sharded_tensor = _sharded_tensor.empty(spec, 10, 10)
         sharded_tensor_metadata = sharded_tensor.metadata()
-        self.assertEqual(torch.Size([10, 10]), sharded_tensor_metadata.overall_dims)
+        self.assertEqual(torch.Size([10, 10]), sharded_tensor_metadata.size)
         self.assertEqual(torch.float, sharded_tensor_metadata.dtype)
         self.assertEqual(torch.strided, sharded_tensor_metadata.layout)
         self.assertEqual(False, sharded_tensor_metadata.requires_grad)
