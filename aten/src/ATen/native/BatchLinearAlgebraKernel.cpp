@@ -797,8 +797,8 @@ and the actual diagonal values are not used.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for TRTRS routine.
 */
-template<typename scalar_t>
-void apply_triangular_solve(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+template <typename scalar_t>
+void apply_triangular_solve(const Tensor& A, const Tensor& B, const Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -835,7 +835,7 @@ void apply_triangular_solve(Tensor& A, Tensor& B, Tensor& infos, bool upper, boo
 #endif
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+void triangular_solve_kernel(const Tensor& A, const Tensor& B, const Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
   });

@@ -1949,7 +1949,7 @@ REGISTER_DISPATCH(lu_stub, &apply_lu);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_triangular_solve_batched(Tensor& A, Tensor& b, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+static void apply_triangular_solve_batched(const Tensor& A, const Tensor& b, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
 #ifndef USE_MAGMA
 AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
@@ -2013,26 +2013,25 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 #endif
 }
 
-void triangular_solve_batched_magma(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
-  (void)infos; // unused
+void triangular_solve_batched_magma(const Tensor& A, const Tensor& B, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cuda", [&]{
     apply_triangular_solve_batched<scalar_t>(A, B, upper, transpose, conjugate_transpose, unitriangular);
   });
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, Tensor& infos, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
+void triangular_solve_kernel(const Tensor& A, const Tensor& B, const Tensor& /*infos*/, bool upper, bool transpose, bool conjugate_transpose, bool unitriangular) {
   // For batches smaller than 8 and matrix sizes larger than 64x64 cuBLAS forloop is faster than batched version
   if (batchCount(A) <= 8 && A.size(-1) >= 64) {
-    triangular_solve_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+    triangular_solve_cublas(A, B, upper, transpose, conjugate_transpose, unitriangular);
   } else {
 #ifndef USE_MAGMA
-    triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+    triangular_solve_batched_cublas(A, B, upper, transpose, conjugate_transpose, unitriangular);
 #else
     // cuBLAS batched is faster than MAGMA batched up until 512x512, after that MAGMA is faster
     if (A.size(-1) <= 512) {
-      triangular_solve_batched_cublas(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+      triangular_solve_batched_cublas(A, B, upper, transpose, conjugate_transpose, unitriangular);
     } else {
-      triangular_solve_batched_magma(A, B, infos, upper, transpose, conjugate_transpose, unitriangular);
+      triangular_solve_batched_magma(A, B, upper, transpose, conjugate_transpose, unitriangular);
     }
 #endif // USE_MAGMA
   }

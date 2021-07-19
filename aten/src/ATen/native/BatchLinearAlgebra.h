@@ -209,9 +209,9 @@ using lstsq_fn = void (*)(
 DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
-    Tensor& /*A*/,
-    Tensor& /*b*/,
-    Tensor& /*infos*/,
+    const Tensor& /*A*/,
+    const Tensor& /*b*/,
+    const Tensor& /*infos*/,
     bool /*upper*/,
     bool /*transpose*/,
     bool /*conjugate_transpose*/,
