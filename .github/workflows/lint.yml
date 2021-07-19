@@ -190,10 +190,10 @@ jobs:
           set -x
           scversion="v0.7.2"
           wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv
-          mkdir -p ~/local/bin
-          cp "shellcheck-${scversion}/shellcheck" ~/local/bin/
+          mkdir -p ~/.local/bin
+          cp "shellcheck-${scversion}/shellcheck" ~/.local/bin/
           rm -r "shellcheck-${scversion}"
-          ~/local/bin/shellcheck --version
+          ~/.local/bin/shellcheck --version
       - name: Extract scripts from GitHub Actions workflows
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
@@ -203,7 +203,6 @@ jobs:
       - name: Run ShellCheck
         if: always() && steps.install_shellcheck.outcome == 'success'
         run: |
-          export PATH=~/local/bin:$PATH
           if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
             echo
             echo 'ShellCheck gave a nonzero exit code. Please fix the warnings'
