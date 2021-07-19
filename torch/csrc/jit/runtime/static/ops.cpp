@@ -1567,20 +1567,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   };
 });
 
+namespace {
+
+void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
+  for (const auto i : c10::irange(tensors.size())) {
+    auto& t = tensors[i];
+    TORCH_CHECK(
+        t.dim() > 0,
+        "zero-dimensional tensor (at position ",
+        i,
+        ") cannot be concatenated");
+  }
+}
+
+} // namespace
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const size_t num_inputs = p_node->inputs().size();
     std::vector<at::Tensor> inputs(num_inputs - 1);
     for (const auto i : c10::irange(num_inputs - 1)) {
-      inputs[i] = std::move(p_node->Input(i).toTensor());
+      inputs[i] = p_node->Input(i).toTensor();
     }
-    const auto dim = p_node->Input(num_inputs - 1).toInt();
+    auto dim = p_node->Input(num_inputs - 1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cat(inputs, dim);
     } else {
+      check_cat_no_zero_dim(inputs);
+      dim = legacy_cat_wrap_dim(dim, inputs);
       auto& out_t = p_node->Output(0).toTensor();
-      at::native::cat_out(inputs, dim, out_t);
+      at::native::_cat_out_cpu(inputs, dim, out_t);
     }
   };
 });
