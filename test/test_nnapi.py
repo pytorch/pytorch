@@ -159,7 +159,7 @@ class TestNNAPI(TestCase):
             torch.randn(4, 2, 1, 3, 7),
             convert_args=[torch.zeros(0, 2, 1, 3, 7)]
         )
-        with self.assertRaisesRegex(Exception, "dims can't be flexible"):
+        with self.assertRaisesRegex(Exception, "Flattening flexible dims is not supported yet"):
             self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
         with self.assertRaisesRegex(Exception, "Only 1 dim"):
             self.check(
