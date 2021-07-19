@@ -164,10 +164,8 @@ class TestCppExtensionJIT(common.TestCase):
                 #   PTX file    1: cudaext_archflags.1.sm_61.ptx
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
-            if IS_WINDOWS:
-                print("Not wiping extensions build folder because Windows")
-            else:
-                shutil.rmtree(temp_dir)
+            # Why didn't we wipe for Windows?
+            shutil.rmtree(temp_dir)
 
             if old_envvar is None:
                 os.environ.pop('TORCH_CUDA_ARCH_LIST')
