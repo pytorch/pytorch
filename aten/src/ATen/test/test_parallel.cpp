@@ -9,12 +9,24 @@
 #include <string.h>
 #include <sstream>
 
+struct NumThreadsGuard {
+  int old_num_threads_;
+  NumThreadsGuard(int nthreads) {
+    old_num_threads_ = at::get_num_threads();
+    at::set_num_threads(nthreads);
+  }
+
+  ~NumThreadsGuard() {
+    at::set_num_threads(old_num_threads_);
+  }
+};
+
 using namespace at;
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, TestParallel) {
   manual_seed(123);
-  set_num_threads(1);
+  NumThreadsGuard guard(1);
 
   Tensor a = rand({1, 3});
   a[0][0] = 1;
@@ -36,6 +48,30 @@ TEST(TestParallel, NestedParallel) {
     if (begin == 0) {
       ASSERT_TRUE(a.sum().equal(expected));
     }
+  });
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TestParallel, NestedParallelThreadId) {
+  // check that thread id within a nested parallel block is accurate
+  at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+    at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+      // Nested parallel regions execute on a single thread
+      ASSERT_EQ(begin, 0);
+      ASSERT_EQ(end, 10);
+
+      // Thread id reflects inner parallel region
+      ASSERT_EQ(at::get_thread_num(), 0);
+    });
+  });
+
+  at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
+    auto num_threads =
+      at::parallel_reduce(0, 10, 1, 0, [&](int64_t begin, int64_t end, int ident) {
+        // Thread id + 1 should always be 1
+        return at::get_thread_num() + 1;
+      }, std::plus<>{});
+    ASSERT_EQ(num_threads, 1);
   });
 }
 

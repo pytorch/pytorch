@@ -15,21 +15,31 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import typing
 import io
 import pickle
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
+from torch._C import Future as CFuture
 from torch._sources import get_source_lines_and_file, parse_def, fake_range
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
 else:
     from typing_extensions import Final
+
+LockType: Type
+try:
+    import _thread
+    LockType = _thread.LockType
+except ImportError:
+    import _dummy_thread
+    LockType = _dummy_thread.LockType
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -221,6 +231,8 @@ def createResolutionCallbackFromClosure(fn):
         def __getattr__(self, key):
             if key in closure:
                 return closure[key]
+            elif hasattr(typing, key):
+                return getattr(typing, key)
             elif hasattr(builtins, key):
                 return getattr(builtins, key)
             return None
@@ -703,13 +715,39 @@ def copy_torchscript_modifier(orig, new) -> None:
 # qualified_name => list[overload_functions]
 _overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
+
+def _get_overload_example():
+    return '''
+Example usage of overload function:
+@torch.jit._overload
+def my_function(x: type0) -> type0: # decl 1
+    pass
+
+@torch.jit._overload
+def my_function(x: type1) -> type1: # decl 2
+    pass
+
+def my_function(x):                 # implementation
+    if isinstance(x, type0):
+        return x
+    elif isinstance(x, type1):
+        return x
+'''
+
+def get_overload_no_implementation_error_message(kind, obj):
+    sourcelines, file_lineno, filename = get_source_lines_and_file(obj)
+    return (f'Implementation for the {kind} "{_qualified_name(obj)}" is missing. Please make' +
+           "sure a definition is provided and defined after all overload declarations.\n" +
+           f'File "{filename}", line {file_lineno}:' + "\n" + ''.join(sourcelines) +
+           _get_overload_example())
+
 def _check_overload_body(func):
     parsed_def = parse_def(func)
     body = parsed_def.ast.body[0].body
     if len(body) != 1 or not isinstance(body[0], ast.Pass):
         msg = "Only `pass` statement can be the body of overload declaration:\n"
         msg += '\n'.join(parsed_def.source.split("\n")[:3])
-        msg += " <- Expecting `pass` here! "
+        msg += " <- Expecting `pass` here!\n" + _get_overload_example()
         raise RuntimeError(msg)
 
 def _overload(func):
@@ -759,6 +797,7 @@ _overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno = {}
 
 def _overload_method(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name, None)
@@ -871,6 +910,7 @@ def is_future(ann) -> bool:
 
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
+    from torch._C._distributed_rpc import PyRRef
 
     def is_rref(ann) -> bool:
         if ann is RRef:
@@ -880,6 +920,14 @@ if torch.distributed.rpc.is_available():
                 "RRef[int]"
             )
         return getattr(ann, "__origin__", None) is RRef
+
+    def is_rref_instance(obj) -> bool:
+        return isinstance(obj, PyRRef)
+
+else:
+    def is_rref_instance(obj) -> bool:
+        # If the RPC module doesn't exist then RRefs don't exist either.
+        return False
 
 def is_final(ann) -> bool:
     return ann.__module__ in {'typing', 'typing_extensions'} and \
@@ -990,23 +1038,31 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    fields = list(obj._fields)
+    if hasattr(obj, "_field_defaults"):
+        defaults = [obj._field_defaults[field]
+                    for field in obj._fields
+                    if field in obj._field_defaults]
+    else:
+        defaults = []
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
-    for field in fields:
+    for field in obj._fields:
         if has_annotations and field in obj.__annotations__:
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
-    return type(obj).__name__, fields, annotations
+    return type(obj).__name__, obj._fields, annotations, defaults
 
 
-def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
+def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
+    if sys.version_info < (3, 7, 0):
+        TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[no-redef, misc]
+        TupleType.__new__.__defaults__ = defaults    # type: ignore[attr-defined]
+    else:
+        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
-
 
 @contextlib.contextmanager
 def _disable_emit_hooks():
@@ -1147,8 +1203,21 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, torch.Tensor):
             self.tensors.append(obj)
             return ""
-        else:
-            return None
+        # Since we just want to extract tensors, we don't mind if an object is
+        # unpicklable if it doesn't contain tensors, as we can just ignore/skip
+        # it. To play it safe, we only do so for common objects that we're sure
+        # don't contain tensors. Feel free to add new types here. Note also that
+        # even if a type isn't listed here this won't block users, since thet
+        # can just add a __getstate__ or __reduce__ method to their class.
+        if isinstance(obj, LockType):
+            return ""
+        # Futures and RRefs don't technically contain a value, they just offer
+        # the means to access a value.
+        if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, torch.cuda.Event):
+            return ""
+        return None
 
 
 def _extract_tensors(obj):

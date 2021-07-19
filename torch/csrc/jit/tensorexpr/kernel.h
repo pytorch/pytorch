@@ -23,6 +23,17 @@ inline std::vector<int64_t> bufferSizes(const T& t) {
   }
   return sizes;
 }
+
+enum ElementType {
+  kAllTypes = 0,
+  kIntegralTypes = 1 << 0,
+  kFloatingPointTypes = 1 << 1,
+  kBoolType = 1 << 2,
+  kComplexTypes = 1 << 3,
+  kQintTypes = 1 << 4,
+  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+};
+
 using ArgNone = c10::monostate;
 using BufList = std::vector<tensorexpr::BufHandle>;
 using IntList = std::vector<int64_t>;
@@ -35,6 +46,39 @@ using ArgValue = c10::variant<
     BufList,
     IntList,
     ArgNone>;
+
+using NNCLoweringFunction = std::function<Tensor*(
+    const std::vector<ArgValue>&,
+    const std::vector<ExprHandle>&,
+    const c10::optional<ScalarType>&,
+    at::Device)>;
+
+// Get the dimensions of a value.
+std::vector<ExprHandle> valueShape(const ArgValue& v);
+
+// If v is a tensor, broadcast it to match the shape of axes, or return
+// directly if v is a constant.
+ExprHandle tensorOrConstant(
+    const ArgValue& v,
+    const std::vector<ExprHandle>& axes);
+
+size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
+
+ExprHandle broadcast(BufHandle b, const std::vector<ExprHandle>& axes);
+
+ExprHandle constant(const ArgValue& v);
+
+std::vector<ExprHandle> computeIndicesToBroadcast(
+    const std::vector<ExprHandle>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes);
+
+void promoteInputs(
+    std::vector<ExprHandle>& inputs,
+    const int typeConstraints = kAllTypes);
+
+ExprHandle demoteOutput(
+    const ExprHandle& e,
+    const c10::optional<ScalarType> type);
 
 inline std::string getArgValueName(const ArgValue& a) {
   if (c10::get_if<tensorexpr::BufHandle>(&a)) {
@@ -79,16 +123,6 @@ struct TensorInfo {
   c10::ScalarType dtype;
 };
 
-enum ElementType {
-  kAllTypes = 0,
-  kIntegralTypes = 1 << 0,
-  kFloatingPointTypes = 1 << 1,
-  kBoolType = 1 << 2,
-  kComplexTypes = 1 << 3,
-  kQintTypes = 1 << 4,
-  kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
-};
-
 TORCH_API Tensor* computeOperandValue(
     c10::Symbol op,
     const std::vector<ArgValue>& inputs,
@@ -103,7 +137,10 @@ class TORCH_API TensorExprKernel {
   };
 
  public:
-  explicit TensorExprKernel(const std::shared_ptr<Graph>& subgraph);
+  explicit TensorExprKernel(
+      const std::shared_ptr<Graph>& subgraph,
+      std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings =
+          {});
 
   void run(Stack& stack);
   void runFast(
@@ -198,6 +235,12 @@ class TORCH_API TensorExprKernel {
     c10::optional<Dtype> dtype;
   };
 
+  NNCLoweringFunction getCustomLoweringFor(c10::Symbol op) const;
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> getCustomLowerings()
+      const {
+    return custom_lowerings_;
+  }
+
  private:
   struct UnpackedTensorOptions {
     c10::optional<c10::ScalarType> dtype;
@@ -235,6 +278,8 @@ class TORCH_API TensorExprKernel {
 
   std::vector<at::Tensor> unpacked_constant_tensors_;
   std::vector<ConstantDescr> constants_;
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

@@ -4,6 +4,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -31,7 +32,9 @@
 
 using namespace torch;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THCState *state = nullptr;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool in_bad_fork = false;  // True for children forked after cuda init
 
 #ifndef WIN32
@@ -205,7 +208,9 @@ PyObject * THCPModule_cudaCachingAllocator_raw_alloc(PyObject *_unused, PyObject
     return nullptr;
   }
   ssize_t size = PyLong_AsSsize_t(size_o);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaStream_t stream = static_cast<cudaStream_t>(PyLong_AsVoidPtr(stream_o));
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* mem = c10::cuda::CUDACachingAllocator::raw_alloc_with_stream(size, stream);
   return PyLong_FromVoidPtr(mem);
   END_HANDLE_TH_ERRORS
@@ -244,11 +249,13 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
   END_HANDLE_TH_ERRORS
 }
 
-// We need to ensure that as long as a thread will NEVER loose the GIL as long as
-// it holds the CUDA mutex. Otherwise another thread might be scheduled and try to
-// e.g. allocate a new tensor which will cause a deadlock. It's enough to have a
-// single global, because it can be only set once (cudaMutex is not recursive)
-// by the thread that owns the mutex (obviously there can be only one such thread).
+// We need to ensure that as long as a thread will NEVER loose the GIL as long
+// as it holds the CUDA mutex. Otherwise another thread might be scheduled and
+// try to e.g. allocate a new tensor which will cause a deadlock. It's enough to
+// have a single global, because it can be only set once (cudaMutex is not
+// recursive) by the thread that owns the mutex (obviously there can be only one
+// such thread).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject * THCPModule_cudaLockMutex(PyObject *module, PyObject *noargs)
@@ -285,7 +292,7 @@ PyObject * THCPModule_hasPrimaryContext(PyObject *_unused, PyObject *arg)
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device_index)) {
+  if (at::cuda::detail::hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -360,6 +367,7 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   py::dict result;
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
+  result["max_split_size"] = stats.max_split_size;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -368,6 +376,8 @@ PyObject * THCPModule_memoryStats(PyObject *_unused, PyObject *arg)
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
   result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
+  result["oversize_allocations"] = statToDict(stats.oversize_allocations);
+  result["oversize_segments"] = statToDict(stats.oversize_segments);
 
   return result.release().ptr();
   END_HANDLE_TH_ERRORS
@@ -531,6 +541,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
 PyObject * THCPModule_getCurrentBlasHandle_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS

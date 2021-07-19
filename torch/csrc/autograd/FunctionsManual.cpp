@@ -248,7 +248,7 @@ Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & expone
 Tensor pow_backward_exponent(Tensor grad, const Tensor& self, const Tensor& exponent, Tensor result) {
   Tensor cond;
   if (exponent.is_complex()) {
-    auto is_real_exp = at::logical_and(at::imag(exponent.resolve_conj()) == 0, at::real(exponent) >= 0);
+    auto is_real_exp = at::logical_and(at::imag(exponent) == 0, at::real(exponent) >= 0);
     cond = at::logical_and(self == 0, is_real_exp);
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
@@ -264,7 +264,7 @@ Tensor pow_backward_exponent(Tensor grad, const Scalar & base, const Tensor& exp
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
-        return at::logical_and(at::imag(exp.resolve_conj()) == 0, at::real(exp) >= 0);
+        return at::logical_and(at::imag(exp) == 0, at::real(exp) >= 0);
       } else {
         return exp >=0;
       }
@@ -486,14 +486,11 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
 }
 
 Tensor cumsum_backward(const Tensor & grad, int64_t dim) {
-  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
   // Trivial case
   if (grad.numel() <= 1 || grad.size(dim) == 1) {
     return grad;
   }
-  const auto grad_cumsum = grad.cumsum(dim);
-  const auto grad_sum = grad_cumsum.narrow(dim, -1, 1);
-  return grad_sum - grad_cumsum + grad;
+  return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, IntArrayRef dim, bool keepdim) {
@@ -536,8 +533,7 @@ Tensor logcumsumexp_backward(Tensor grad, const Tensor & self, Tensor result, in
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   IntArrayRef sizes;
   at::TensorOptions o;
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto v : grads) {
+  for (const auto& v : grads) {
     if (v.defined()) {
       sizes = v.sizes();
       o = static_cast<Tensor>(v).options();
@@ -1216,10 +1212,8 @@ Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
 }
 
 Tensor softmax_double_backward(const Tensor & grad, const Tensor & grad_output, int dim, const Tensor & output) {
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto gO = grad_output;
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto ggI = grad;
+  const auto& gO = grad_output;
+  const auto& ggI = grad;
 
   auto ggI_output = ggI * output;
   auto ggI_out_sum = ggI_output.sum(dim, true);
@@ -2180,7 +2174,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (self.is_complex() && gu.defined()) {
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
     at::real(L).zero_();
-    at::imag(L.resolve_conj()).mul_(sigma_inv);
+    at::imag(L).mul_(sigma_inv);
     Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
@@ -2201,8 +2195,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   // variable names correspond to the ones in the reference document
   auto D = eigenvalues;
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  auto U = eigenvectors;
+  const auto& U = eigenvectors;
   auto D_grad = grads[0];
   auto U_grad = grads[1];
 
@@ -2221,7 +2214,7 @@ Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     // path for torch.linalg.eig with always a complex tensor of eigenvalues
     else {
-      is_imag_eigvals_zero = (at::imag(D.resolve_conj()) == 0.0).min().item<bool>();
+      is_imag_eigvals_zero = (at::imag(D) == 0.0).min().item<bool>();
       // insert an additional dimension to be compatible with torch.eig.
       // Recall that it produces 2D tensors.
       // We extract only the real parts as there is no support for
@@ -3243,7 +3236,7 @@ infinitely_differentiable_native_group_norm_backward(
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
-                                                       IntArrayRef sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+                                                       IntArrayRef sumdim, std::array<bool, 3> grad_mask) {
   Tensor grad_i1, grad_i2, grad_i3;
   if (grad_out.defined()) {
     if (grad_mask[0])
@@ -3316,9 +3309,8 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   }
 }
 
-bool any_variable_defined(variable_list& variables) {
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto variable : variables) {
+bool any_variable_defined(const variable_list& variables) {
+  for (const auto& variable : variables) {
     if (variable.defined()) {
       return true;
     }
@@ -3383,9 +3375,9 @@ std::tuple<Tensor, Tensor> householder_product_backward(const Tensor& grad, cons
 
   auto start_j = tau.size(-1) - 1;
   for (int64_t j = start_j; j >= 0; j--) {
-    auto v = input_.index({"...", Slice(), j});
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto v1 = v, v2 = v;
+    const auto v = input_.index({"...", Slice(), j});
+    const auto& v1 = v;
+    const auto& v2 = v;
 
     // we need to recompute input[j] * at::outer(v, v)
     auto tau_unsqueezed = tau.index({"...", j}).unsqueeze(-1);  // tau[..., j][:, None]
