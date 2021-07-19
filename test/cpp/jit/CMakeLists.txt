@@ -17,15 +17,12 @@ add_library(backend_with_compiler SHARED
         )
 target_link_libraries(backend_with_compiler torch)
 
-# Don't link nnapi_backend library on MacOS
-if (BUILD_PYTHON)
-  add_library(nnapi_backend SHARED
-          ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
-          ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
-          )
-  # Pybind11 requires explicit linking of the torch_python library
-  target_link_libraries(nnapi_backend torch torch_python)
-endif()
+add_library(nnapi_backend SHARED
+        ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
+        ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+        )
+# Pybind11 requires explicit linking of the torch_python library
+target_link_libraries(nnapi_backend torch torch_python)
 
 if(INSTALL_TEST)
   install(TARGETS torchbind_test DESTINATION lib)
