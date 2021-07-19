@@ -24,7 +24,7 @@ def _send_to_scribe_via_boto3(logs: str) -> str:
     client = boto3.client("lambda")
     res = client.invoke(FunctionName='gh-ci-scribe-proxy', Payload=json.dumps(event).encode())
     payload = str(res['Payload'].read().decode())
-    if res['FunctionError']:
+    if res.get('FunctionError'):
         raise Exception(payload)
     return payload
 

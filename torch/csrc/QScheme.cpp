@@ -46,7 +46,6 @@ PyTypeObject THPQSchemeType = {
   sizeof(THPQScheme),                          /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
