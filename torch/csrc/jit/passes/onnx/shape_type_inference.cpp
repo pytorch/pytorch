@@ -45,8 +45,8 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 
   if (new_tensor_type && old_tensor_type) {
     if (!old_tensor_type->device()) {
-      // device not avaible means this is an invalid tensor type (most likely an
-      // empty one) return inferred type directly.
+      // device not available means this is an invalid tensor type (most likely
+      // an empty one) -> return inferred type directly.
       return new_tensor_type;
     }
     auto type = old_tensor_type;
@@ -1442,10 +1442,8 @@ void ONNXShapeTypeInference(
       const char shape_err[] = "ShapeInferenceError";
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char type_err[] = "TypeInferenceError";
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if ((strstr(ex.what(), shape_err) == NULL) &&
-          // NOLINTNEXTLINE(modernize-use-nullptr)
-          (strstr(ex.what(), type_err) == NULL))
+      if ((strstr(ex.what(), shape_err) == nullptr) &&
+          (strstr(ex.what(), type_err) == nullptr))
         throw;
     }
     GRAPH_DEBUG(
@@ -1582,7 +1580,8 @@ size_t ONNXAssignOutputShape(
           auto& new_var = THPVariable_Unpack(list_elem);
           TORCH_CHECK(
               var.scalar_type() == new_var.scalar_type(),
-              "Unsupported sequence type in model outputs. ONNX supports sequences of elements of the same data type.");
+              "Unsupported sequence with mixed elment types in model outputs. "
+              "ONNX supports only sequences of elements of the same data type.");
         }
         auto elem_type = graph->outputs()
                              .at(outputs_index)
@@ -1636,9 +1635,8 @@ size_t ONNXAssignOutputShape(
     // outputs have been disabled.
   } else {
     std::string msg =
-        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
-        "Dictionaries and strings are also accepted, but their usage is not "
-        "recommended. Here, received an input of unsupported type: ";
+        ("Model output has unsupported type. See "
+         "https://pytorch.org/docs/stable/onnx.html#types. Got type: ");
     msg += THPUtils_typename(output_obj);
     throw std::runtime_error(msg);
   }
@@ -1665,6 +1663,7 @@ void ONNXAssignOutputShape(
       "Incorrect number of elements provided as example outputs.");
 
   Py_DECREF(py_obj);
+  GRAPH_DUMP("After ONNXAssignOutputShape", graph);
 }
 
 void ONNXShapeTypeInference(

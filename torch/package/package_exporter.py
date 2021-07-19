@@ -48,6 +48,11 @@ class _ModuleProviderAction(Enum):
     EXTERN = 2
     MOCK = 3
     DENY = 4
+    # Special case: when a module is mocked, PackageExporter writes out a
+    # `_mock` module that implements our mocking stubs. If we re-package code,
+    # we may encounter a `_mock` module from the original package. If we do,
+    # just ignore it and write a `_mock` module once.
+    REPACKAGED_MOCK_MODULE = 5
 
 
 class PackagingErrorReason(Enum):
@@ -415,6 +420,14 @@ class PackageExporter:
             module_name in self.dependency_graph
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
+            return
+
+        if module_name == "_mock":
+            self.dependency_graph.add_node(
+                module_name,
+                action=_ModuleProviderAction.REPACKAGED_MOCK_MODULE,
+                provided=True,
+            )
             return
 
         if self._can_implicitly_extern(module_name):
@@ -836,6 +849,11 @@ class PackageExporter:
                     f"Exporter did not match any modules to {pattern}, which was marked as allow_empty=False"
                 )
 
+    def _write_mock_file(self):
+        if "_mock.py" not in self._written_files:
+            mock_file = str(Path(__file__).parent / "_mock.py")
+            self._write_source_string("_mock", _read_file(mock_file), is_package=False)
+
     def _execute_dependency_graph(self):
         """Takes a finalized dependency graph describing how to package all
         modules and executes it, writing to the ZIP archive.
@@ -857,12 +875,7 @@ class PackageExporter:
                 for hook in self._mock_hooks.values():
                     hook(self, module_name)
 
-                if not _mock_written:
-                    mock_file = str(Path(__file__).parent / "_mock.py")
-                    self._write_source_string(
-                        "_mock", _read_file(mock_file), is_package=False
-                    )
-                    _mock_written = True
+                self._write_mock_file()
 
                 is_package = hasattr(self._import_module(module_name), "__path__")
                 self._write_source_string(module_name, _MOCK_IMPL, is_package)
@@ -885,6 +898,9 @@ class PackageExporter:
                 is_package = attrs["is_package"]
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
+
+            elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
+                self._write_mock_file()
 
             else:
                 raise AssertionError(
@@ -923,6 +939,79 @@ class PackageExporter:
             top_level_package_name not in _DISALLOWED_MODULES
             and is_stdlib_module(top_level_package_name)
         )
+
+    def dependency_graph_string(self) -> str:
+        """Returns digraph string representation of dependencies in package.
+
+        Returns:
+            A string representation of dependencies in package.
+        """
+        edges = "\n".join(f'"{f}" -> "{t}";' for f, t in self.dependency_graph.edges)
+        return f"""\
+digraph G {{
+rankdir = LR;
+node [shape=box];
+{edges}
+}}
+"""
+
+    def _nodes_with_action_type(
+        self, action: Optional[_ModuleProviderAction]
+    ) -> List[str]:
+        result = []
+        for name, node_dict in self.dependency_graph.nodes.items():
+            node_action = node_dict.get("action", None)
+            if node_action == action and "is_pickle" not in node_dict:
+                result.append(name)
+        result.sort()
+        return result
+
+    def externed_modules(self) -> List[str]:
+        """Return all modules that are currently externed.
+
+        Returns:
+            A list containing the names of modules which will be
+            externed in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.EXTERN)
+
+    def interned_modules(self) -> List[str]:
+        """Return all modules that are currently interned.
+
+        Returns:
+            A list containing the names of modules which will be
+            interned in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.INTERN)
+
+    def mocked_modules(self) -> List[str]:
+        """Return all modules that are currently mocked.
+
+        Returns:
+            A list containing the names of modules which will be
+            mocked in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.MOCK)
+
+    def denied_modules(self) -> List[str]:
+        """Return all modules that are currently denied.
+
+        Returns:
+            A list containing the names of modules which will be
+            denied in this package.
+        """
+        return self._nodes_with_action_type(_ModuleProviderAction.DENY)
+
+    def get_rdeps(self, module_name: str) -> List[str]:
+        """Return a list of all modules which depend on the module ``module_name``.
+
+        Returns:
+            A list containing the names of modules which depend on ``module_name``.
+        """
+        if module_name in self.dependency_graph._pred.keys():
+            return list(self.dependency_graph._pred[module_name].keys())
+        else:
+            return []
 
 
 # even though these are in the standard library, we do not allow them to be
