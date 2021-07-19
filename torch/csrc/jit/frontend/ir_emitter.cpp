@@ -1321,13 +1321,51 @@ struct to_ir {
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
-      auto comprehension_out = emitExpr(lc.elt());
+      Value* out = emitExpr(lc.elt());
+
+      // If we didn't have a type annotation, the type of the list would
+      // be set to `Tensor`. We don't want to unify this default type
+      // with the actual elements in the list, so let the type begin as
+      // the first element in the list
       if (!type_set) {
-        list_value->setType(ListType::create(comprehension_out->type()));
+        list_value->setType(ListType::create(out->type()));
         type_set = true;
       }
+
+      ListTypePtr lt = list_value->type()->expect<ListType>();
+
+      const TypePtr element_type_hint =
+          type_hint ? type_hint->expect<ListType>()->getElementType() : nullptr;
+
+      auto unified = unifyTypes(
+          lt->getElementType(),
+          out->type(),
+          /*default_to_any=*/true,
+          element_type_hint);
+
+      if (lt->getElementType() != AnyType::get() &&
+          *unified == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. The first ",
+            "non-matching element was typed as ",
+            out->type()->repr_str(),
+            ", while the elements before it "
+            "were ",
+            lt->getElementType()->repr_str(),
+            "\n",
+            lc.range().str());
+      }
+
+      if (!type_hint) {
+        list_value->setType(ListType::create(*unified));
+      }
+
       NamedValue self = NamedValue(loc, "self", list_value);
-      NamedValue input = NamedValue(loc, "", comprehension_out);
+      NamedValue input = NamedValue(loc, "", out);
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
@@ -1366,10 +1404,88 @@ struct to_ir {
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
+
+      // Make sure that any key and value types are subtypes of the
+      // annotatated key/value types
+      if (type_hint) {
+        DictTypePtr dict_type_hint = type_hint->expect<DictType>();
+
+        std::stringstream ss;
+        std::stringstream err;
+
+        bool is_key_subtype =
+            k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss);
+
+        if (!is_key_subtype) {
+          err << "Dict type annotation `" << dict_type_hint->repr_str()
+              << "` did not match the "
+              << "type of an actual key type `" << k->type()->repr_str()
+              << "`\n"
+              << ss.str();
+        }
+
+        ss.str(std::string());
+        bool is_value_subtype =
+            v->type()->isSubtypeOfExt(dict_type_hint->getValueType(), &ss);
+
+        if (!is_value_subtype) {
+          err << "Dict type annotation `" << dict_type_hint->repr_str()
+              << "` did not match the "
+              << "type of an actual value type `" << v->type()->repr_str()
+              << "`\n"
+              << ss.str();
+        }
+
+        if (!is_key_subtype || !is_value_subtype) {
+          throw ErrorReport(dc) << err.str();
+        }
+      }
+
+      // If we didn't have a type annotation, the type of the dict would
+      // be set to `(str, Tensor)`. We don't want to unify this default
+      // type with the actual elements in the dict, so let the type
+      // begin as the first element in the dict
       if (!type_set) {
         dict_value->setType(DictType::create(k->type(), v->type()));
         type_set = true;
       }
+
+      DictTypePtr dt = dict_value->type()->expect<DictType>();
+
+      const TypePtr value_type_hint =
+          type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
+      c10::optional<TypePtr> unified = unifyTypes(
+          dt->getValueType(),
+          v->type(),
+          /*default_to_any=*/true,
+          value_type_hint);
+
+      // Warn the user if we inferred the type of the values to be `Any`
+      // even though the annotation was something else
+      if (dt->getValueType() != AnyType::get() && *unified == AnyType::get()) {
+        TORCH_WARN(
+            "Dict consists of heterogeneous types, which means",
+            " that it has been typed as `Dict[str, Any]`. To use "
+            "any of the values in the Dict, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. The first ",
+            "non-matching element was typed as ",
+            v->type()->repr_str(),
+            ", while the elements before it "
+            "were ",
+            dt->getValueType()->repr_str(),
+            "\n",
+            dc.range().str());
+      }
+
+      // We only want to set `dict_value` if we don't have a type hint
+      // to allow for the case that `*unified` is a subtype of
+      // the value type given by `type_hint`
+      if (!type_hint) {
+        dict_value->setType(DictType::create(k->type(), *unified));
+      }
+
       NamedValue self = NamedValue(loc, "self", dict_value);
       NamedValue input_k = NamedValue(loc, "", k);
       NamedValue input_v = NamedValue(loc, "", v);
@@ -3534,6 +3650,66 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
+  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint) {
+    auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // Determine the element type of the list. If we have a type hint
+    // of `List[T]`, use `T`. If the list is non-empty, find the
+    // greatest common supertype of all the list elements (defaulting to
+    // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
+    TypePtr elem_type = TensorType::get();
+
+    if (type_hint) {
+      if (type_hint->kind() == TypeKind::ListType) {
+        elem_type = type_hint->expectRef<ListType>().getElementType();
+      } else {
+        // If the type hint was not `List[T]`, throw an error
+        throw ErrorReport(ll) << "Expected a List type hint but instead got "
+                              << type_hint->repr_str();
+      }
+    }
+
+    if (!values.empty()) {
+      auto types = fmap(values, [](const Value* v) { return v->type(); });
+
+      std::stringstream nowhere; // never used
+
+      const TypePtr element_type_hint =
+          type_hint ? type_hint->expect<ListType>()->getElementType() : nullptr;
+
+      c10::optional<TypePtr> unified = unifyTypeList(
+          types, nowhere, /*default_to_any=*/true, element_type_hint);
+
+      if (!type_hint && *unified == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. \n",
+            ll.range().str());
+      }
+
+      if (type_hint && !(*unified)->isSubtypeOf(elem_type)) {
+        throw ErrorReport(ll)
+            << "List type annotation `" << type_hint->repr_str()
+            << "` did not match the types of the given list elements,"
+            << " which were unified to " << (*unified)->repr_str();
+      }
+
+      // We only want to set `elem_type` if we don't have a type hint
+      // to allow for the case that `*unified` is a subtype of
+      // `type_hint`
+      if (!type_hint) {
+        elem_type = *unified;
+      }
+    }
+
+    Value* result =
+        graph->insertNode(graph->createList(elem_type, values))->output();
+    return result;
+  }
+
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr) {
@@ -3616,46 +3792,7 @@ struct to_ir {
       } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-
-        // determine the element type of the list
-        // if we have a type hint of List[T], use T
-        // if the list is non-empty use type_of(list[0])
-        // otherwise assume it is List[Tensor]
-        TypePtr elem_type = TensorType::get();
-        if (type_hint) {
-          if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expectRef<ListType>().getElementType();
-          } else {
-            // If the type hint was not a List[T] throw an error
-            throw ErrorReport(tree)
-                << "Expected a List type hint but instead got "
-                << type_hint->repr_str();
-          }
-        } else if (!values.empty()) {
-          std::stringstream ss;
-          auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(types, ss);
-          if (!maybe_elem_type) {
-            throw ErrorReport(tree) << "Lists must contain only a single type\n"
-                                    << ss.str();
-          }
-          elem_type = maybe_elem_type.value();
-        }
-
-        for (auto v : values) {
-          std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
-            throw ErrorReport(tree)
-                << "Lists must contain only a single type, expected: "
-                << elem_type->repr_str() << " but found "
-                << v->type()->repr_str() << " instead.\n"
-                << ss.str();
-          }
-        }
-        Value* result =
-            graph->insertNode(graph->createList(elem_type, values))->output();
-        return result;
+        return emitListLiteral(ll, type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -3690,24 +3827,68 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        auto checkTypeOfValues = [](const TypePtr& type,
-                                    const char* what,
-                                    const std::vector<Value*>& values,
-                                    TreeList trees) {
-          for (size_t i = 0, N = values.size(); i < N; ++i) {
-            std::stringstream ss;
-            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
-              throw ErrorReport(trees[i])
-                  << "Dict " << what
-                  << " must contain only a single type, expected: "
-                  << type->repr_str() << " but found "
-                  << values[i]->type()->repr_str() << " instead.\n"
-                  << ss.str();
+        for (size_t i = 0; i < keys.size(); ++i) {
+          std::stringstream ss;
+          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
+            throw ErrorReport(key_trees[i])
+                << "Dict keys must contain "
+                << "only a single type. Expected: " << key_type->repr_str()
+                << " but found " << keys[i]->type()->repr_str() << " instead.\n"
+                << ss.str();
+          }
+        }
+
+        if (!values.empty()) {
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+
+          std::stringstream nowhere; // never used
+
+          const TypePtr value_type_hint =
+              type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
+          c10::optional<TypePtr> unified = unifyTypeList(
+              types,
+              /*why_not=*/nowhere,
+              /*default_to_any=*/true,
+              value_type_hint);
+
+          if (!type_hint && *unified == AnyType::get()) {
+            TORCH_WARN(
+                "Dict values consist of heterogeneous types, which "
+                "means that they have been typed as `Any`. To use "
+                "any of the values in the Dist, it will be "
+                "necessary to add an `assert isinstance` statement "
+                "before first use to trigger type refinement. \n",
+                dl.range().str());
+          }
+
+          if (type_hint) {
+            TypePtr value_type_hint =
+                type_hint->expect<DictType>()->getValueType();
+            for (size_t i = 0; i < types.size(); ++i) {
+              TORCH_CHECK(
+                  types[i]->isSubtypeOf(value_type_hint),
+                  "Type "
+                  "hint for dict was",
+                  type_hint->repr_str(),
+                  "but the value ",
+                  "at index ",
+                  i,
+                  " has type ",
+                  types[i]->repr_str(),
+                  ", which is not a valid"
+                  " subtype of ",
+                  value_type_hint->repr_str());
             }
           }
-        };
-        checkTypeOfValues(key_type, "keys", keys, key_trees);
-        checkTypeOfValues(value_type, "values", values, value_trees);
+
+          // We only want to set `value_type` if we don't have a type
+          // hint to allow for the case that `*unified` is a subtype of
+          // the value type given by `type_hint`
+          if (!type_hint) {
+            value_type = *unified;
+          }
+        }
 
         return graph
             ->insertNode(graph->createDict(key_type, value_type, keys, values))
