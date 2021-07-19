@@ -77,13 +77,13 @@ void check_allany_for_meta(
 }
 
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  this->dim = maybe_wrap_dim(dim, self.dim());
-  check_allany_for_meta(*this, "all", self, this->dim, keepdim);
+  dim_ = maybe_wrap_dim(dim, self.dim());
+  check_allany_for_meta(*this, "all", self, dim_, keepdim);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  this->dim = maybe_wrap_dim(dim, self.dim());
-  check_allany_for_meta(*this, "any", self, this->dim, keepdim);
+  dim_ = maybe_wrap_dim(dim, self.dim());
+  check_allany_for_meta(*this, "any", self, dim_, keepdim);
 }
 
 void check_argmax_argmin(
@@ -1266,9 +1266,9 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, this->dim, keepdim);
+  auto iter = get_allany_iter(self, result, dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, this->dim, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 1, dim_, keepdim)) {
     _all(mut_result, iter);
   }
 }
@@ -1298,9 +1298,9 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, this->dim, keepdim);
+  auto iter = get_allany_iter(self, result, dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, this->dim, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 0, dim_, keepdim)) {
     _any(mut_result, iter);
   }
 }

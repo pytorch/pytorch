@@ -247,24 +247,26 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda) (
 
   checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
 
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  kH_ = safe_downcast<int, int64_t>(kernel_size[0]);
+  kW_ = kernel_size.size() == 1 ? kH_ : safe_downcast<int, int64_t>(kernel_size[1]);
 
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  dH_ = stride.empty() ? kH_ : safe_downcast<int, int64_t>(stride[0]);
+  dW_ = stride.empty() ? kW_ :
+                 stride.size() == 1 ? dH_ : safe_downcast<int, int64_t>(stride[1]);
 
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  padH_ = safe_downcast<int, int64_t>(padding[0]);
+  padW_ = padding.size() == 1 ? padH_ : safe_downcast<int, int64_t>(padding[1]);
 
   /* sizes */
-  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t nInputPlane = input_.size(-3);
-  const int64_t inputHeight = input_.size(-2);
-  const int64_t inputWidth = input_.size(-1);
+  nbatch_ = input_.ndimension() == 4 ? input_.size(-4) : 1;
+  nInputPlane_ = input_.size(-3);
+  inputHeight_ = input_.size(-2);
+  inputWidth_ = input_.size(-1);
 
-  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  outputWidth_ =
+      pooling_output_shape<int64_t>(inputWidth_, kW_, padW_, dW_, 1, ceil_mode);
+  outputHeight_ = pooling_output_shape<int64_t>(
+      inputHeight_, kH_, padH_, dH_, 1, ceil_mode);
   const auto memory_format = input_.suggest_memory_format();
 
   Tensor input = input_.contiguous(memory_format);
@@ -289,37 +291,55 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda) (
           case MemoryFormat::ChannelsLast: {
             output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
             avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
-                <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                  count,
-                  input_data,
-                  nbatch,
-                  nInputPlane,
-                  inputHeight, inputWidth,
-                  outputHeight, outputWidth,
-                  kH, kW,
-                  dH, dW,
-                  padH, padW,
-                  output_data,
-                  divisor_override_value,
-                  count_include_pad, use_divisor);
+                <<<num_blocks,
+                   num_threads,
+                   0,
+                   at::cuda::getCurrentCUDAStream()>>>(
+                    count,
+                    input_data,
+                    nbatch_,
+                    nInputPlane_,
+                    inputHeight_,
+                    inputWidth_,
+                    outputHeight_,
+                    outputWidth_,
+                    kH_,
+                    kW_,
+                    dH_,
+                    dW_,
+                    padH_,
+                    padW_,
+                    output_data,
+                    divisor_override_value,
+                    count_include_pad,
+                    use_divisor);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
             break;
           }
           case MemoryFormat::Contiguous: {
             avg_pool2d_out_cuda_frame<scalar_t, accscalar_t>
-              <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-                count,
-                input_data,
-                nbatch,
-                nInputPlane,
-                inputHeight, inputWidth,
-                outputHeight, outputWidth,
-                kH, kW,
-                dH, dW,
-                padH, padW,
-                output_data,
-                divisor_override_value,
-                count_include_pad, use_divisor);
+                <<<num_blocks,
+                   num_threads,
+                   0,
+                   at::cuda::getCurrentCUDAStream()>>>(
+                    count,
+                    input_data,
+                    nbatch_,
+                    nInputPlane_,
+                    inputHeight_,
+                    inputWidth_,
+                    outputHeight_,
+                    outputWidth_,
+                    kH_,
+                    kW_,
+                    dH_,
+                    dW_,
+                    padH_,
+                    padW_,
+                    output_data,
+                    divisor_override_value,
+                    count_include_pad,
+                    use_divisor);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
             break;
           }

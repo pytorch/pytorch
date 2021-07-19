@@ -452,7 +452,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         return f"""\
 struct TORCH_API structured_{name} : public {parent_class} {{
     void meta({args_str});
-    {precomputed if precomputed is not None else ""};
+    {precomputed.replace(",", ";") if precomputed is not None else ""};
 }};
 """
 

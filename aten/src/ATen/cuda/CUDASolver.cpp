@@ -99,16 +99,16 @@ void getrf<c10::complex<float>>(
 
 template <>
 void getrs<double>(
-    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info, cublasOperation_t trans) {
+    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(
-    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
 void getrs<float>(
-    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info, cublasOperation_t trans) {
+    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(
-    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
@@ -121,11 +121,10 @@ void getrs<c10::complex<double>>(
     int* ipiv,
     c10::complex<double>* ret,
     int ldb,
-    int* info,
-    cublasOperation_t trans) {
+    int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrs(
       handle,
-      trans,
+      CUBLAS_OP_N,
       n,
       nrhs,
       reinterpret_cast<cuDoubleComplex*>(dA),
@@ -146,11 +145,10 @@ void getrs<c10::complex<float>>(
     int* ipiv,
     c10::complex<float>* ret,
     int ldb,
-    int* info,
-    cublasOperation_t trans) {
+    int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrs(
       handle,
-      trans,
+      CUBLAS_OP_N,
       n,
       nrhs,
       reinterpret_cast<cuComplex*>(dA),
