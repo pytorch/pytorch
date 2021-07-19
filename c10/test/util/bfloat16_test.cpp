@@ -1,5 +1,5 @@
-#include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/BFloat16.h>
 #include <gtest/gtest.h>
 
 namespace {
