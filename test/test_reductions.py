@@ -1,8 +1,6 @@
 import torch
 import numpy as np
-import scipy.special
 
-import unittest
 import math
 from typing import Dict, List
 import random
@@ -12,7 +10,7 @@ import warnings
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_SCIPY, slowTest, torch_to_numpy_dtype_dict,
+    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -102,7 +100,7 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, -1)
 
-    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfNoSciPy
     def test_logsumexp(self, device):
         from scipy.special import logsumexp
         a = torch.randn(5, 4, device=device)
@@ -358,7 +356,7 @@ class TestReductions(TestCase):
                 use_integral=False)
 
     @onlyCPU
-    @unittest.skipIf(not TEST_SCIPY, 'Scipy not found')
+    @skipIfNoSciPy
     def test_logsumexp_dim(self, device):
         from scipy.special import logsumexp
         self._test_dim_ops(
@@ -1872,6 +1870,7 @@ class TestReductions(TestCase):
 
         nan = float('nan')
         check(torch.median, nan, [], nan)
+        check(torch.median, [], [], nan)
         check(torch.nanmedian, nan, [], nan)
         check(torch.median, nan, [0], [nan, 0])
         check(torch.nanmedian, nan, [0], [nan, 0])
@@ -2625,7 +2624,9 @@ class TestReductions(TestCase):
     # there is some repetition with test_tensor_compare_ops_optional_dim_empty and test_tensor_compare_ops_empty,
     # these tests are kept separate since tests for math operators also require checking for correctness of the
     # returned data using allclose() or isinf() which does not exists in the former tests.
+    @skipIfNoSciPy
     def test_tensor_reduce_ops_empty(self, device):
+        from scipy.special import logsumexp
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
         np_input = np.empty(shape)
@@ -2636,7 +2637,7 @@ class TestReductions(TestCase):
             ('mean', torch.mean, nan, np.mean),
             ('var', torch.var, nan, np.var),
             ('std', torch.std, nan, np.std),
-            ('logsumexp', torch.logsumexp, -inf, scipy.special.logsumexp),
+            ('logsumexp', torch.logsumexp, -inf, logsumexp),
         ]
 
         for name, fn, return_value, np_function in test_functions:
