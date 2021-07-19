@@ -1,4 +1,4 @@
-from unification import unify, Var
+from unification import unify, Var  # type: ignore
 from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.tensor_type import TensorType
 from copy import deepcopy

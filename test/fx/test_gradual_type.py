@@ -16,11 +16,14 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-skipIfNoMkldnn = unittest.skipIf(
-    not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()),
-    "no MKLDNN",
-)
 
+try:
+    import unification
+    unification
+    HAS_UNIFICATION = True
+except ImportError:
+    HAS_UNIFICATION = False
+skipIfNoUnification = unittest.skipIf(not HAS_UNIFICATION, "no unification")
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -789,6 +792,7 @@ class TypeCheckerTest(unittest.TestCase):
                     assert is_consistent(n.type, TensorType(b.size()))
 
     @skipIfNoTorchVision
+    @skipIfNoUnification
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
         sample_input = torch.randn(1, 3, 224, 224)
@@ -830,7 +834,7 @@ class TypeCheckerTest(unittest.TestCase):
         assert (len(set(batch_sizes)) == 1)
 
 
-
+    @skipIfNoUnification
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
