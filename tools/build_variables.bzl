@@ -541,6 +541,7 @@ libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + lib
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
+    "torch/csrc/cuda/ucc.cpp",
 ]
 
 torch_cpp_srcs = [
