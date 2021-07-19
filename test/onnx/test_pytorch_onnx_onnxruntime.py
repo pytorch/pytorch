@@ -7827,25 +7827,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.TRAINING, rtol=1e-3, atol=1e-5)
 
-    def test_conv_bn_scripting(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
-                self.bn = torch.nn.BatchNorm2d(16, affine=True)
-
-            def forward(self, x):
-                x = self.conv(x)
-                bn = self.bn(x)
-                return bn
-
-        model_export = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.TRAINING, rtol=1e-3, atol=1e-5)
-        self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
-
-    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
-    @skipForAllOpsetVersions()
     def test_multiple_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -8074,9 +8055,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TransformModule(), (input,),
                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
                       test_with_inputs=[(input,), (input_test,)])
-
-
-
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()

@@ -37,7 +37,10 @@ class TestUtilityFuns(TestCase):
                         operator_export_type=OperatorExportTypes.ONNX,
                         input_names=None,
                         dynamic_axes=None):
-
+        if training == torch.onnx.TrainingMode.TRAINING:
+            model.train()
+        elif training == torch.onnx.TrainingMode.EVAL:
+            model.eval()
         # Need disable onnx_shape_inference for this test because it puts const node to initializers.
         _set_onnx_shape_inference(False)
         utils._validate_dynamic_axes(dynamic_axes, model, None, None)
@@ -811,11 +814,11 @@ class TestUtilityFuns(TestCase):
         model = torch.jit.script(MyModule())
         x = torch.randn(10, 3, 128, 128)
         example_outputs = model(x)
-        f = io.BytesIO()
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = self._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
                                             operator_export_type=OperatorExportTypes.ONNX,
+                                            training=torch.onnx.TrainingMode.TRAINING,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         graph_input_params = [param.debugName() for param in graph.inputs()]
@@ -861,6 +864,7 @@ class TestUtilityFuns(TestCase):
         model = torchvision.models.resnet18(pretrained=True)
         x = torch.randn(2, 3, 224, 224, requires_grad=True)
         graph, _, __ = self._model_to_graph(model, (x, ),
+                                            training=TrainingMode.EVAL,
                                             input_names=['x'], dynamic_axes={'x': [0, 1, 2, 3]})
 
         for node in graph.nodes():
@@ -880,7 +884,6 @@ class TestUtilityFuns(TestCase):
             def forward(self, x, y):
                 return f(x, y)
 
-        model = MyModule()
         input_1 = torch.tensor(11)
         input_2 = torch.tensor(12)
         _set_opset_version(self.opset_version)

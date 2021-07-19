@@ -53,17 +53,8 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
         continue;
       }
 
-      if (bnNode->outputs().size() > 1) { // BN layer is not in eval mode
-        continue;
-      }
-
-      bool skip = false;
-      for (size_t i = 1; i < bnNode->outputs().size(); i++) {
-        auto output = bnNode->outputs().at(i);
-        if (output->hasUses())
-          skip = true;
-      }
-      if (skip) {
+      if (oldConv->outputs().size() !=
+          bnNode->outputs().size()) { // BN layer is not in eval mode
         continue;
       }
 
