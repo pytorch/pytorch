@@ -182,14 +182,14 @@ TEST(BFloat16Math, NextAfter) {
   check_nextafter(zero, -zero, /*expected=*/-zero);
 
   check_nextafter(one, one, /*expected=*/one);
-  check_nextafter(one, zero, /*expected=*/{one.x - 1, from_bits});
-  check_nextafter(one, two, /*expected=*/{one.x + 1, from_bits});
+  check_nextafter(one, zero, /*expected=*/{one.x - uint16_t{1}, from_bits});
+  check_nextafter(one, two, /*expected=*/{one.x + uint16_t{1}, from_bits});
 
-  check_nextafter(two, -one, /*expected=*/{two.x - 1, from_bits});
+  check_nextafter(two, -one, /*expected=*/{two.x - uint16_t{1}, from_bits});
 
   check_nextafter(-one, -one, /*expected=*/-one);
-  check_nextafter(-one, zero, /*expected=*/{(-one).x - 1, from_bits});
-  check_nextafter(-one, -two, /*expected=*/{(-one).x + 1, from_bits});
+  check_nextafter(-one, zero, /*expected=*/{(-one).x - uint16_t{1}, from_bits});
+  check_nextafter(-one, -two, /*expected=*/{(-one).x + uint16_t{1}, from_bits});
 
   check_nextafter(nan, one, /*expected=*/nan);
   check_nextafter(zero, nan, /*expected=*/nan);
