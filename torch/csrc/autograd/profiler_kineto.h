@@ -34,6 +34,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   uint64_t correlationId;
   uint64_t startThreadId;
   uint64_t endThreadId;
+  c10::optional<std::vector<std::string>> inputs_names;
   c10::optional<std::vector<std::vector<int64_t>>> shapes;
   c10::optional<std::vector<std::string>> dtypes;
   int64_t sequenceNr;
@@ -67,8 +68,16 @@ struct TORCH_API KinetoEvent {
     return shapes_ != c10::nullopt;
   }
 
+  bool hasInputsNames() const {
+    return inputs_names_ != c10::nullopt;
+  }
+
   const std::vector<std::vector<int64_t>>& shapes() const {
     return *shapes_;
+  }
+
+  const std::vector<std::string>& inputs_names() const {
+    return *inputs_names_;
   }
 
   bool hasTypes() const {
@@ -116,6 +125,11 @@ struct TORCH_API KinetoEvent {
 
   KinetoEvent& shapes(const std::vector<std::vector<int64_t>>& shapes) {
     shapes_ = shapes;
+    return *this;
+  }
+
+  KinetoEvent& inputs_names(const std::vector<std::string>& inputs_names) {
+    inputs_names_ = inputs_names;
     return *this;
   }
 
@@ -202,6 +216,7 @@ struct TORCH_API KinetoEvent {
 
   uint8_t activity_type_ = 0;
   c10::optional<std::vector<std::vector<int64_t>>> shapes_;
+  c10::optional<std::vector<std::string>> inputs_names_;
   c10::optional<std::vector<std::string>> stack_;
   c10::optional<std::vector<std::string>> dtypes_;
   uint64_t flops_ = 0;

@@ -153,6 +153,10 @@ struct TORCH_API RecordFunction {
     return state_->op_input_size;
   }
 
+  std::vector<std::string> inputs_names() const {
+    return state_->op_input_names;
+  }
+
   size_t num_outputs() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called num_outputs() on inactive RecordFunction");
     return state_->op_output_size;
@@ -308,6 +312,8 @@ struct TORCH_API RecordFunction {
     c10::optional<c10::OperatorName> operator_name_;
     size_t op_input_size{0};
     size_t op_output_size{0};
+
+    std::vector<std::string> op_input_names;
 
     // Kind of scope this RecordFunction is observing
     const RecordScope scope_;

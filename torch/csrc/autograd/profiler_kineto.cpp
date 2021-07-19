@@ -37,6 +37,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
+std::string namesToStr(const std::vector<std::string>& names);
 std::string stacksToStr(const std::vector<std::string>& stacks);
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
@@ -97,6 +98,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .setAsync(fn.isAsync());
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
+      }
+      if (ctx->inputs_names && !ctx->inputs_names->empty()) {
+        kineto_events_.back().inputs_names(*ctx->inputs_names);
       }
       if (ctx->dtypes && !ctx->dtypes->empty()) {
         kineto_events_.back().dtypes(*ctx->dtypes);
@@ -181,6 +185,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       if (kineto_event.hasShapes()) {
         activity.addMetadata("Input Dims", shapesToStr(kineto_event.shapes()));
       }
+      if (kineto_event.hasInputsNames()) {
+        activity.addMetadata("Input Names", namesToStr(kineto_event.inputs_names()));
+      }
       if (kineto_event.hasStack()) {
         activity.addMetadata("Call stack", stacksToStr(kineto_event.stack()));
       }
@@ -263,6 +270,7 @@ void pushProfilingCallbacks() {
 
         if (config.report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+          ctx_ptr->inputs_names = fn.inputs_names();
           ctx_ptr->dtypes = inputTypes(fn);
         }
 
@@ -344,6 +352,19 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
       oss << shapes[t_idx][s_idx];
     }
     oss << "]";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string namesToStr(const std::vector<std::string>& names){
+  std::ostringstream oss;
+  oss << "[";
+  for (const auto t_idx : c10::irange(names.size())) {
+    if (t_idx > 0) {
+      oss << ", ";
+    }
+    oss << names[t_idx];
   }
   oss << "]";
   return oss.str();

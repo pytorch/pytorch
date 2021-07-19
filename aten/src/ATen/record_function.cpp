@@ -554,6 +554,9 @@ void RecordFunction::before(
   state_->thread_id_ = currentThreadId();
   state_->operator_name_ = op.operator_name();
   state_->op_input_size = op.schema().arguments().size();
+  for(int i=0; i < op.schema().arguments().size(); i++){
+    state_->op_input_names.push_back(op.schema().arguments()[i].name());
+  }
   state_->op_output_size = op.schema().returns().size();
   state_->name_ = StringView(op.schema().name());
 
