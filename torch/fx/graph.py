@@ -359,10 +359,7 @@ class Graph:
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         assert isinstance(output_vals, tuple)
         output_val, old_output_val = output_vals
-        if hasattr(old_output_val, 'type'):
-            g.output(output_val, old_output_val.type)
-        else:
-            g.output(output_val)
+        g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
         return g
 
     def create_node(self, op: str, target: 'Target',
