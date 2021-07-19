@@ -1,4 +1,5 @@
 #include <c10/util/BFloat16.h>
+#include <c10/util/BFloat16-math.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -144,6 +145,51 @@ TEST(BFloat16Math, Subtraction) {
 
   float res = c10::detail::f32_from_bits(b.x);
   EXPECT_EQ(res, expected);
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(BFloat16Math, NextAfter) {
+  auto from_bits = c10::BFloat16::from_bits();
+  c10::BFloat16 zero{0};
+  c10::BFloat16 one{1};
+  c10::BFloat16 two{2};
+  c10::BFloat16 max = std::numeric_limits<c10::BFloat16>::max();
+  c10::BFloat16 lowest = std::numeric_limits<c10::BFloat16>::lowest();
+  c10::BFloat16 inf = std::numeric_limits<c10::BFloat16>::infinity();
+  c10::BFloat16 nan = std::numeric_limits<c10::BFloat16>::quiet_NaN();
+  c10::BFloat16 denorm_min = std::numeric_limits<c10::BFloat16>::denorm_min();
+
+  auto check_nextafter =
+      [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
+        c10::BFloat16 actual = std::nextafter(from, to);
+        if (from != from || to != to) {
+          ASSERT_NE(actual, expected);
+        } else {
+          ASSERT_EQ(actual, expected);
+        }
+      };
+
+  check_nextafter(inf, inf, /*expected=*/inf);
+  check_nextafter(-inf, -inf, /*expected=*/-inf);
+  check_nextafter(inf, zero, /*expected=*/max);
+  check_nextafter(-inf, zero, /*expected=*/lowest);
+
+  check_nextafter(zero, one, /*expected=*/denorm_min);
+  check_nextafter(zero, -one, /*expected=*/-denorm_min);
+  check_nextafter(zero, zero, /*expected=*/zero);
+  check_nextafter(zero, -zero, /*expected=*/-zero);
+
+  check_nextafter(one, one, /*expected=*/one);
+  check_nextafter(one, zero, /*expected=*/{one.x - 1, from_bits});
+  check_nextafter(one, two, /*expected=*/{one.x + 1, from_bits});
+
+  check_nextafter(-one, -one, /*expected=*/-one);
+  check_nextafter(-one, zero, /*expected=*/{(-one).x - 1, from_bits});
+  check_nextafter(-one, -two, /*expected=*/{(-one).x + 1, from_bits});
+
+  check_nextafter(nan, one, /*expected=*/nan);
+  check_nextafter(zero, nan, /*expected=*/nan);
+  check_nextafter(nan, nan, /*expected=*/nan);
 }
 
 float BinaryToFloat(uint32_t bytes) {
