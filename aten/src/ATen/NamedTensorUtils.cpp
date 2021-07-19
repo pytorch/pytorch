@@ -171,7 +171,8 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
   const auto src_names = src.names();
   const auto result_dim = static_cast<int64_t>(result.dim());
   const auto src_dim = static_cast<int64_t>(src_names.size());
-  TORCH_INTERNAL_ASSERT(src_dim - excluded_idxs.size() == result_dim);
+  const auto excluded_dim = static_cast<int64_t>(excluded_idxs.size());
+  TORCH_INTERNAL_ASSERT(src_dim - excluded_dim == result_dim);
 
   // fast path
   if (excluded_idxs.size() == 1) {
