@@ -188,7 +188,7 @@ class TestJoin(MultiProcessTestCase):
         r"""Rank i gets i * ``offset`` additional inputs."""
         return 1
 
-    def _test_joinable_base(
+    def _test_join_base(
         self,
         uneven_inputs: bool,
         num_joinables: int,
@@ -276,7 +276,7 @@ class TestJoin(MultiProcessTestCase):
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * self.offset
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -295,7 +295,7 @@ class TestJoin(MultiProcessTestCase):
         num_allreduces = 0  # set to 0 to skip the main hooks
         run_post_hooks = False
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -325,7 +325,7 @@ class TestJoin(MultiProcessTestCase):
         for num_joined in range(1, self.rank + 1):
             expected_total += (self.world_size - num_joined) * self.offset
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -356,7 +356,7 @@ class TestJoin(MultiProcessTestCase):
         # The expected total is now multiplied by a factor of `NUM_JOINABLES`
         expected_total *= num_joinables
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -379,7 +379,7 @@ class TestJoin(MultiProcessTestCase):
 
         expected_total = self.world_size * self.base_num_inputs
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=uneven_inputs,
             num_joinables=num_joinables,
             enable=enable,
@@ -407,7 +407,7 @@ class TestJoin(MultiProcessTestCase):
 
         expected_total = self.world_size * self.base_num_inputs * num_joinables
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=uneven_inputs,
             num_joinables=num_joinables,
             enable=enable,
@@ -430,7 +430,7 @@ class TestJoin(MultiProcessTestCase):
         throw_on_early_termination = True
         run_post_hooks = False
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -456,7 +456,7 @@ class TestJoin(MultiProcessTestCase):
         throw_on_early_termination = True
         run_post_hooks = False
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
@@ -483,7 +483,7 @@ class TestJoin(MultiProcessTestCase):
         # The expected total is now multiplied by a factor of `NUM_ALLREDUCES`
         expected_total *= num_allreduces
 
-        self._test_joinable_base(
+        self._test_join_base(
             uneven_inputs=True,
             num_joinables=num_joinables,
             enable=True,
