@@ -763,19 +763,23 @@ def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, na
     padding = tuple(tuple_fn(padding))
     return padding
 
-def assert_training_mode(op_mode, op_name):
+
+def check_training_mode(op_train_mode, op_name):
     global _training_mode
-    op_mode = True if op_mode == 1 else False
-    if op_mode != _training_mode:
-        op_mode = "training " if op_mode else "inference"
+    op_train_mode = True if op_train_mode == 1 else False
+    if _training_mode is not None and op_train_mode != _training_mode:
+        op_mode = "training " if op_train_mode else "inference"
         training_mode = "training " if _training_mode else "inference"
         # setting the model mode could result in op_mode != _training_mode
         # if the model is a FuncModule. In this case we warn the user of
-        # the state and export depending on training_mode
+        # the state and export depending on op_mode
+        # This is to support use-cases of fixing certain layer weights
+        # in training.
         warnings.warn("ONNX export mode is set to " + training_mode +
                       " mode, but operator " + op_name + " is set to " +
-                      op_mode + " mode. The model will be exported in " +
-                      training_mode + ", as specified by the export mode.")
+                      op_mode + " mode. The operators will be exported in " +
+                      op_mode + ", as specified by the functional operator.")
+
 
 def _flatten_helper(g, input, start_dim, end_dim, dim):
     input_size = g.op("Shape", input)
