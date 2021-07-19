@@ -1465,7 +1465,7 @@
   variants: method
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  structured: true
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: cumsum_out
