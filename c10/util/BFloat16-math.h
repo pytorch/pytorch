@@ -103,7 +103,7 @@ C10_HOST_DEVICE inline c10::BFloat16 nextafter(c10::BFloat16 from, c10::BFloat16
   // get a mask to get the sign bit i.e. MSB
   int_repr_t sign_mask = int_repr_t{1} << (bits - 1);
 
-  if (::isnan(from) || ::isnan(to) {
+  if (::isnan(from) || ::isnan(to)) {
     return from;
   }
 
