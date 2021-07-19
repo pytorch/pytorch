@@ -425,6 +425,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
 # just for error checks
+@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv1d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
