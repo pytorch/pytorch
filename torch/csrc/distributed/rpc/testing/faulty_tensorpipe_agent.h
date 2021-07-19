@@ -41,15 +41,10 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       worker_id_t selfId,
       int worldSize,
       c10::intrusive_ptr<c10d::ProcessGroup> pg,
-      TensorPipeRpcBackendOptions opts,
+      FaultyTensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
-      int numSendRecvThreads,
-      std::chrono::milliseconds rpcTimeout,
-      std::unique_ptr<RequestCallback> cb,
-      const std::vector<std::string>& messagesToFail,
-      const std::unordered_map<std::string, float>& messageTypesToDelay,
-      int failNumSends = 0);
+      std::unique_ptr<RequestCallback> callback);
 
   // Faulty send function for this class.
   c10::intrusive_ptr<JitFuture> send(
@@ -87,7 +82,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       const std::unordered_map<std::string, float>& messageTypesToDelay) const;
 
   // Number of sends to intentionally fail before allowing one to succeed.
-  const int failNumSends_;
+  const int numFailSends_;
 
   // Vector of the MessageTypes that we must use the faulty send for. This is
   // parsed based on a list of strings passed in by the python tests.

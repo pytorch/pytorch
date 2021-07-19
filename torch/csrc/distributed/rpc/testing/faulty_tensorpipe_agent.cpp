@@ -15,15 +15,10 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
     worker_id_t selfId,
     int worldSize,
     c10::intrusive_ptr<c10d::ProcessGroup> pg,
-    TensorPipeRpcBackendOptions opts,
+    FaultyTensorPipeRpcBackendOptions opts,
     std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
     std::vector<c10::Device> devices,
-    int numSendRecvThreads,
-    std::chrono::milliseconds rpcTimeout,
-    std::unique_ptr<RequestCallback> cb,
-    const std::vector<std::string>& messagesToFail,
-    const std::unordered_map<std::string, float>& messageTypesToDelay,
-    int failNumSends)
+    std::unique_ptr<RequestCallback> callback)
     : TensorPipeAgent(
           store,
           std::move(selfName),
@@ -33,10 +28,10 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
           std::move(opts),
           std::move(reverseDeviceMaps),
           std::move(devices),
-          std::move(cb)),
-      failNumSends_(failNumSends),
-      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
-      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
+          std::move(callback)),
+      numFailSends_(opts.numFailSends),
+      messageTypesToFail_(parseMessagesToFailInput(opts.messagesToFail)),
+      messageTypesToDelay_(parseMessagesToDelay(opts.messagesToDelay)) {}
 
 std::vector<MessageType> FaultyTensorPipeAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
@@ -87,7 +82,7 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
   if (it == failMessageCountMap_.end()) {
     failMessageCountMap_[key] = 0;
   }
-  if (failMessageCountMap_[key] < failNumSends_) {
+  if (failMessageCountMap_[key] < numFailSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
     auto jitFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());

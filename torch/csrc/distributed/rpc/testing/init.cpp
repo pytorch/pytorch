@@ -1,9 +1,9 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
-#include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.h>
 #include <torch/csrc/utils/pybind.h>
@@ -21,8 +21,8 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
-  // Add the FaultyProcessGroupAgent / FaultyTensorPipeAgent and its backend options object to the
-  // python module torch._C._distributed_rpc_testing
+  // Add the FaultyProcessGroupAgent / FaultyTensorPipeAgent and its backend
+  // options object to the python module torch._C._distributed_rpc_testing
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module) {
     throw python_error();
@@ -33,7 +33,8 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       "_distributed_rpc_testing", "distributed rpc testing bindings");
   auto module = py::handle(m).cast<py::module>();
 
-  // Import the rpc_module so we can subclass ProcessGroupAgent and TensorPipeAgent
+  // Import the rpc_module so we can subclass ProcessGroupAgent and
+  // TensorPipeAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
 
   shared_ptr_class_<FaultyProcessGroupRpcBackendOptions>(
@@ -160,39 +161,29 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<FaultyTensorPipeAgent>(
       module, "FaultyTensorPipeAgent", rpc_module.attr("TensorPipeAgent"))
-            .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store> store,
-                    std::string name,
-                    worker_id_t rank,
-                    int world_size,
-                      c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
-                                       TensorPipeRpcBackendOptions opts,
+      .def(
+          py::init(
+              [](const c10::intrusive_ptr<::c10d::Store> store,
+                 std::string name,
+                 worker_id_t rank,
+                 int world_size,
+                 c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
+                 FaultyTensorPipeRpcBackendOptions opts,
                  std::unordered_map<std::string, DeviceMap> reverse_device_maps,
-                 std::vector<c10::Device> devices,
-                      int num_send_recv_threads,
-                      std::chrono::milliseconds rpc_timeout,
-                      const std::vector<std::string>& messages_to_fail,
-                      const std::unordered_map<std::string, float>&
-                          messages_to_delay,
-                      int fail_num_sends) {
-            return std::shared_ptr<FaultyTensorPipeAgent>(
-                new FaultyTensorPipeAgent(
-                    store,
-                    std::move(name),
-                    rank,
-                    world_size,
-                    process_group,
-                    opts,
-                    reverse_device_maps,
-                    devices,
-                    num_send_recv_threads,
-                    rpc_timeout,
-                    std::make_unique<RequestCallbackImpl>(),
-                    messages_to_fail,
-                    messages_to_delay,
-                    fail_num_sends),
-                impl::destroy_without_gil<FaultyTensorPipeAgent>);
-          }),
+                 std::vector<c10::Device> devices) {
+                return std::shared_ptr<FaultyTensorPipeAgent>(
+                    new FaultyTensorPipeAgent(
+                        store,
+                        std::move(name),
+                        rank,
+                        world_size,
+                        process_group,
+                        opts,
+                        reverse_device_maps,
+                        devices,
+                        std::make_unique<RequestCallbackImpl>()),
+                    impl::destroy_without_gil<FaultyTensorPipeAgent>);
+              }),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
@@ -200,13 +191,8 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
           py::arg("process_group"),
           py::arg("opts"),
           py::arg("reverse_device_maps"),
-          py::arg("devices"),
-          py::arg("num_send_recv_threads"),
-          py::arg("rpc_timeout"),
-          py::arg("messages_to_fail"),
-          py::arg("messages_to_delay"),
-          py::arg("fail_num_sends"))
-     .def(
+          py::arg("devices"))
+      .def(
           "join",
           &TensorPipeAgent::join,
           py::call_guard<py::gil_scoped_release>(),

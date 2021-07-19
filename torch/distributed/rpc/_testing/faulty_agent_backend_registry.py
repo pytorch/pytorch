@@ -148,15 +148,6 @@ def _faulty_tensorpipe_init_backend_handler(
         )
 
     group = _init_process_group(store, rank, world_size)
-
-    if torch.cuda.is_available():
-        # It's necessary to initialize PyTorch CUDA states here (e.g.,
-        # CUDACachingAllocator). If this is missing, we could hit errors like
-        # "allocator not initialized", because other processes might send
-        # CUDA-related RPC request to this process before user code in this
-        # process initializes its PyTorch CUDA states.
-        torch.cuda.init()
-
     agent = FaultyTensorPipeAgent(
         store,
         name,
@@ -166,23 +157,8 @@ def _faulty_tensorpipe_init_backend_handler(
         rpc_backend_options,
         {},  # reverse_device_map
         [],  # devices
-        rpc_backend_options.num_worker_threads,  # num_send_recv_threads
-        timedelta(seconds=rpc_backend_options.rpc_timeout),
-        rpc_backend_options.messages_to_fail,
-        rpc_backend_options.messages_to_delay,
-        rpc_backend_options.num_fail_sends,
     )
-
     api._init_rpc_states(agent)
-
-    # # Run one dummy round of RPC to initialize channels/transports. Without
-    # # this, it's easy to hit timeout in rpc.shutdown() if there is no other RPC
-    # # on that process before rpc.shutdown(), as the agent initialization can
-    # # take longer than 5s.
-    # api._all_gather(None, timeout=rpc_constants.DEFAULT_RPC_TIMEOUT_SEC)
-    # # Need a barrier here to make sure no peers leave before the rank0 finishes
-    # # _all_gather
-    # group.barrier().wait()
 
     return agent
 

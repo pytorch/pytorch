@@ -30,7 +30,7 @@ class FaultyProcessGroupRpcBackendOptions(ProcessGroupRpcBackendOptions):
 class FaultyTensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def __init__(
         self,
-        num_workers_threads: int,
+        num_worker_threads: int,
         rpc_timeout: float,
         init_method: str,
         messages_to_fail: List[str],
@@ -75,9 +75,4 @@ class FaultyTensorPipeAgent(TensorPipeAgent):
         options: FaultyTensorPipeRpcBackendOptions,
         reverse_device_maps: Dict[str, Dict[torch.device, torch.device]],
         devices: List[torch.device],
-        num_worker_threads: int,
-        rpc_timeout: timedelta,
-        messages_to_fail: List[str],
-        messages_to_delay: Dict[str, float],
-        num_fail_sends: int,
     ): ...
