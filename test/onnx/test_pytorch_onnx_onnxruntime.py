@@ -3301,7 +3301,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([14])
     def test_batchnorm1d_norunningstats(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, track_running_stats=False)
@@ -3320,7 +3319,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.BatchNorm2d(3, affine=False)
         self.run_test(model, x)
 
-    @skipIfUnsupportedOpsetVersion([14])
     def test_batchnorm2d_norunningstats(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, track_running_stats=False)
@@ -7652,8 +7650,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
-    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
-    @skipForAllOpsetVersions()
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7678,7 +7674,6 @@ class TestONNXRuntime(unittest.TestCase):
         model_export.train()
         self.run_test(model_export, (x, ), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_batchnorm_training_mode_fix_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7704,7 +7699,6 @@ class TestONNXRuntime(unittest.TestCase):
         model_export.train()
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.PRESERVE, rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
     def test_batchnorm_eval_mode_train_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7808,8 +7802,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
-    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
-    @skipForAllOpsetVersions()
     def test_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
