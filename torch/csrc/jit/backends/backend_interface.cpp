@@ -3,8 +3,5 @@
 namespace torch {
 namespace jit {
 
-PyTorchBackendInterface::PyTorchBackendInterface() = default;
-PyTorchBackendInterface::~PyTorchBackendInterface() = default;
-
 } // namespace jit
 } // namespace torch
