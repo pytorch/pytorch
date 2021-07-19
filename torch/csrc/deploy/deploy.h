@@ -1,10 +1,9 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
