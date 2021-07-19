@@ -18,7 +18,7 @@ add_library(backend_with_compiler SHARED
 target_link_libraries(backend_with_compiler torch)
 
 # Don't link nnapi_backend library on MacOS
-if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+if (BUILD_PYTHON)
   add_library(nnapi_backend SHARED
           ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
           ${TORCH_ROOT}/torch/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
