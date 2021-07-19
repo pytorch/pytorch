@@ -1548,16 +1548,16 @@ TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
+#CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
 #CHECK: for (int n1
-#CHECK:   Allocate(d_local); // dtype=float, dims=[1]
 #CHECK:   d_local[0] = 0
 #CHECK:   for (int m1
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK:   sum[l1] = (sum[l1]) + (d_local[0])
-#CHECK:   Free(d_local);
 #CHECK: }
+#CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
@@ -1621,8 +1621,8 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
 #CHECK: sum[l1] = (sum[l1]) + (scale_local[12 * n1_1 + m1_1]);
-#CHECK: Free(scale_local);
 #CHECK: scale_1[l] = (b[l]) * (sum[l]);
+#CHECK: Free(scale_local);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
@@ -1660,8 +1660,8 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1709,8 +1709,8 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1759,8 +1759,8 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1815,8 +1815,8 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
-#CHECK:   Allocate(tmp); // dtype=float, dims=[n]
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp[i] = 0
 #CHECK:   }
@@ -1886,9 +1886,9 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[1]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
-#CHECK:     Allocate(tmp); // dtype=float, dims=[1]
 #CHECK:     tmp[0] = 0
 #CHECK:     for (int c
 #CHECK:       tmp[0] = (tmp[0]) + (B[

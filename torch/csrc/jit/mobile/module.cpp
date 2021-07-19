@@ -164,10 +164,8 @@ void Method::run(Stack& stack) const {
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
   std::unordered_map<std::string, std::string> copied_metadata =
-      owner_->metadata();
-  if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
-    copied_metadata["model_name"] = owner_->name();
-  }
+      owner_->getMetadata();
+
   if (observer) {
     observer->onEnterRunMethod(
         copied_metadata, instance_key, function_->name());
