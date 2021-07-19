@@ -5770,6 +5770,13 @@ for shape in [(1,), ()]:
         y.sum().backward()
         self.assertEqual(a.grad, y)
 
+    def test_saved_variable_default_hooks(self):
+        with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+            a = torch.randn(5, requires_grad=True)
+            y = torch.exp(a)
+        y.sum().backward()
+
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):

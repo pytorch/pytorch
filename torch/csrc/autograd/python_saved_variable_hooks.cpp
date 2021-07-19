@@ -44,4 +44,18 @@ namespace torch { namespace autograd {
       Py_XDECREF(data_);
     }
   }
+
+  void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
+    pack_hook_ = pack_hook.release().ptr();
+    unpack_hook_ = unpack_hook.release().ptr();
+  }
+
+  void PyDefaultSavedVariableHooks::reset_hooks() {
+    if (Py_IsInitialized()) {
+      py::gil_scoped_acquire gil;
+      Py_XDECREF(pack_hook_);
+      Py_XDECREF(unpack_hook_);
+    }
+  }
+
 }}

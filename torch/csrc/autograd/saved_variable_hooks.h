@@ -10,4 +10,8 @@ struct TORCH_API SavedVariableHooks {
   virtual ~SavedVariableHooks() = default;
 };
 
+struct TORCH_API DefaultSavedVariableHooks {
+  //
+};
+
 }}

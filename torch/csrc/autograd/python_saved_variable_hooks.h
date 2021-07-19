@@ -23,4 +23,13 @@ private:
   PyObject* data_ = nullptr;
 };
 
+struct PyDefaultSavedVariableHooks : public DefaultSavedVariableHooks {
+  static void set_hooks(py::function &pack_hook, py::function &unpack_hook);
+  static void reset_hooks();
+
+private:
+  static PyObject* pack_hook_;
+  static PyObject* unpack_hook_;
+};
+
 }}
