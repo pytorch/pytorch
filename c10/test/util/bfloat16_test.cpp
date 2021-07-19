@@ -184,7 +184,7 @@ TEST(BFloat16Math, NextAfter) {
   check_nextafter(one, one, /*expected=*/one);
   check_nextafter(one, zero, /*expected=*/{one.x - 1, from_bits});
   check_nextafter(one, two, /*expected=*/{one.x + 1, from_bits});
-  
+
   check_nextafter(two, -one, /*expected=*/{two.x - 1, from_bits});
 
   check_nextafter(-one, -one, /*expected=*/-one);
