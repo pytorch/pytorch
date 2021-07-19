@@ -36,8 +36,7 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
           std::move(cb)),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
-      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) 
-      {}
+      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
 
 std::vector<MessageType> FaultyTensorPipeAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
@@ -102,25 +101,20 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
   }
 }
 
-// void FaultyTensorPipeAgent::enqueueSend(SendWork work) {
-  // float msgDelay = getDelayForMessage(work.message_->type());
-  // if (msgDelay != 0) {
-  //   // Sleep for the specified delay for the message.
-  //   std::this_thread::sleep_for(std::chrono::milliseconds(
-  //       static_cast<int>(msgDelay * kSecToMsConversion)));
-  // }
-//   ProcessGroupAgent::enqueueSend(std::move(work));
-// }
-
-// void FaultyTensorPipeAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
-//   float msgDelay = getDelayForMessage(message->type());
-//   if (msgDelay != 0) {
-//     // Sleep for the specified delay for the message.
-//     std::this_thread::sleep_for(std::chrono::milliseconds(
-//         static_cast<int>(msgDelay * kSecToMsConversion)));
-//   }
-//   ProcessGroupAgent::sendToSelf(std::move(message));
-// }
+void FaultyTensorPipeAgent::pipeWrite(
+    const std::shared_ptr<tensorpipe::Pipe>& pipe,
+    c10::intrusive_ptr<Message> rpcMessage,
+    std::vector<c10::Device>&& devices,
+    std::vector<c10::Stream> streams,
+    std::function<void(const tensorpipe::Error&)> fn) noexcept {
+  float msgDelay = getDelayForMessage(rpcMessage->type());
+  if (msgDelay != 0) {
+    // Sleep for the specified delay for the message.
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int>(msgDelay * kSecToMsConversion)));
+  }
+  TensorPipeAgent::pipeWrite(pipe, rpcMessage, std::move(devices), streams, fn);
+}
 
 bool FaultyTensorPipeAgent::shouldFailMessage(MessageType type) const {
   // Return true if the input message type is in the messageTypesToFail_ list

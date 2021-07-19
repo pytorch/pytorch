@@ -1,5 +1,12 @@
+import torch
 from ._distributed_c10d import ProcessGroup, Store
-from ._distributed_rpc import ProcessGroupAgent, ProcessGroupRpcBackendOptions, TensorPipeRpcBackendOptions, TensorPipeAgent, WorkerInfo
+from ._distributed_rpc import (
+    ProcessGroupAgent,
+    ProcessGroupRpcBackendOptions,
+    _TensorPipeRpcBackendOptionsBase,
+    TensorPipeAgent,
+    WorkerInfo,
+)
 from typing import List, Dict, overload
 from datetime import timedelta
 
@@ -13,14 +20,14 @@ class FaultyProcessGroupRpcBackendOptions(ProcessGroupRpcBackendOptions):
         init_method: str,
         messages_to_fail: List[str],
         messages_to_delay: Dict[str, float],
-        num_fail_sends: int
+        num_fail_sends: int,
     ): ...
     num_send_recv_threads: int
     messages_to_fail: List[str]
     messages_to_delay: Dict[str, float]
     num_fail_sends: int
 
-class FaultyTensorPipeRpcBackendOptions(TensorPipeRpcBackendOptions):
+class FaultyTensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def __init__(
         self,
         num_workers_threads: int,
@@ -28,7 +35,7 @@ class FaultyTensorPipeRpcBackendOptions(TensorPipeRpcBackendOptions):
         init_method: str,
         messages_to_fail: List[str],
         messages_to_delay: Dict[str, float],
-        num_fail_sends: int
+        num_fail_sends: int,
     ): ...
     num_send_recv_threads: int
     messages_to_fail: List[str]
@@ -45,7 +52,7 @@ class FaultyProcessGroupAgent(ProcessGroupAgent):
         rpc_timeout: timedelta,
         messages_to_fail: List[str],
         messages_to_delay: Dict[str, float],
-        num_fail_sends: int
+        num_fail_sends: int,
     ): ...
     def join(self): ...
     def shutdown(self): ...
@@ -66,9 +73,11 @@ class FaultyTensorPipeAgent(TensorPipeAgent):
         world_size: int,
         process_group: ProcessGroup,
         options: FaultyTensorPipeRpcBackendOptions,
-        num_send_recv_threads: int,
+        reverse_device_maps: Dict[str, Dict[torch.device, torch.device]],
+        devices: List[torch.device],
+        num_worker_threads: int,
         rpc_timeout: timedelta,
         messages_to_fail: List[str],
         messages_to_delay: Dict[str, float],
-        num_fail_sends: int
+        num_fail_sends: int,
     ): ...

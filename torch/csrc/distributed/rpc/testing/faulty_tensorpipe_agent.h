@@ -59,16 +59,20 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;
 
+  // Add delay to writes
+  void pipeWrite(
+      const std::shared_ptr<tensorpipe::Pipe>& pipe,
+      c10::intrusive_ptr<Message> rpcMessage,
+      std::vector<c10::Device>&& devices,
+      std::vector<c10::Stream> streams,
+      std::function<void(const tensorpipe::Error&)> fn) noexcept override;
+
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use
   // the faulty send or not.
-  virtual bool shouldFailMessage(MessageType type) const;
+  bool shouldFailMessage(MessageType type) const;
 
  private:
-  // Overrides ProcessGroupAgent's enqueueSend to inject delays.
-//   void enqueueSend(SendWork work) override;
-  // Override ProcessGroupAgent's sendToSelf to inject delays.
-//   void sendToSelf(c10::intrusive_ptr<Message> message) override;
   // This function parses the list of strings passed in by the python tests and
   // resolves the Message Types that must use the faulty send.
   std::vector<MessageType> parseMessagesToFailInput(
