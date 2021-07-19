@@ -149,10 +149,10 @@ class QConfigWithModule(namedtuple('QConfigWithModule', ['activation', 'weight']
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         return super(QConfigWithModule, cls).__new__(cls, activation, weight)
 
-    def get_module():
-        return None
 
-def create_qconfig_with_module(qconfig: Any, module: nn.Module):
+def create_qconfig_with_module(
+        qconfig: Union[QConfigDynamic, QConfig, QConfigWithModule, None],
+        module: Union[nn.Module, None]):
     if (module is None or qconfig is None or
             qconfig.activation.__module__ != 'torch.quantization.observer' or
             qconfig.weight.__module__ != 'torch.quantization.observer'):
