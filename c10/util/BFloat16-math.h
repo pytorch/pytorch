@@ -94,6 +94,8 @@ inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) {
 C10_HOST_DEVICE inline c10::BFloat16 nextafter(
     c10::BFloat16 from,
     c10::BFloat16 to) {
+  // inspired from :
+  // https://github.com/ifduyue/musl/blob/master/src/math/nextafter.c
   using int_repr_t = uint16_t;
   using float_t = c10::BFloat16;
   constexpr uint8_t bits = 16;
