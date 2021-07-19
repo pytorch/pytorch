@@ -1,5 +1,7 @@
 #include <c10d/ProcessGroupUCC.hpp>
 
+#ifdef USE_C10D_UCC
+
 namespace c10d {
 
 ProcessGroupUCC::ProcessGroupUCC(
@@ -111,3 +113,5 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
 }
 
 } // namespace c10d
+
+#endif
