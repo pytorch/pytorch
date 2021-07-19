@@ -151,6 +151,74 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   return self;
 }
 
+struct TORCH_API ToCopyBackward : public Node {
+  variable_list apply(variable_list&& grads) override {
+    check_input_variables("ToCopyBackwards", grads, 1, -1, true);
+    auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
+    variable_list grad_inputs(1);
+    if (!grad->defined() || !should_compute_output(0)) {
+      return grad_inputs;
+    }
+    grad_inputs[0] = grad->to(
+      self_options.dtype().toScalarType(),
+      self_options.layout(),
+      self_options.device(),
+      self_options.pinned_memory(),
+      /*non_blocking=*/false,
+      /*copy=*/false,
+      self_options.memory_format_opt());
+    return grad_inputs;
+  }
+
+  at::TensorOptions self_options;
+};
+
+// Needs manual binding because of special requires_grad handling:
+// auto x = torch::zeros({}, torch::requires_grad());
+// auto y = at::_to_copy(x, torch::kLong)
+// Autograd codegen assumes that individual outputs to a function are known
+// to be differentiable or not. However the output of `_to_copy` is not
+// differentiable depending on the dtype of the output.
+at::Tensor _to_copy(
+    c10::DispatchKeySet ks,
+    const at::Tensor & self,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory,
+    bool non_blocking,
+    c10::optional<at::MemoryFormat> memory_format) {
+  auto& self_ = unpack(self, "self", 0);
+  auto _any_requires_grad = compute_requires_grad(self);
+  if (dtype.has_value()) {
+    // Don't compute gradients if the output isn't differentiable
+    _any_requires_grad &= isDifferentiableType(dtype.value());
+  }
+  std::shared_ptr<ToCopyBackward> grad_fn;
+  if (_any_requires_grad) {
+    grad_fn = std::shared_ptr<ToCopyBackward>(new ToCopyBackward(), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges( self ));
+    grad_fn->self_options = self.options();
+  }
+  auto _tmp = ([&]() {
+    at::AutoDispatchBelowADInplaceOrView guard;
+    return at::redispatch::_to_copy(ks & c10::after_autograd_keyset, self_, dtype, layout, device, pin_memory, non_blocking, memory_format);
+  })();
+  auto result = std::move(_tmp);
+  if (grad_fn) {
+      set_history(flatten_tensor_args( result ), grad_fn);
+  }
+  if (isDifferentiableType(self.scalar_type()) &&
+      (generated::details::isFwGradDefined(self))) {
+    auto self_fw_grad = generated::details::toNonOptFwGrad(self);
+    auto new_fw_grad = at::_to_copy(
+        self_fw_grad, dtype, layout, device, pin_memory, non_blocking, memory_format);
+    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+  }
+
+  return result;
+}
+
 const Tensor& resize_(
     c10::DispatchKeySet ks,
     const Tensor& self,
@@ -255,6 +323,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
+  m.impl("_to_copy", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_to_copy)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 
