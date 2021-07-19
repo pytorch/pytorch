@@ -75,6 +75,18 @@ def clamp_max(g, self, max):
         return g.op("Min", self, max)
 
 
+def relu6(g, input):
+    relu = g.op("Relu", input)
+    dtype = input.type().scalarType()
+    if dtype is None:
+        dtype = 6  # float
+    else:
+        dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    min_val = g.op("Constant", value_t=torch.tensor(0, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    max_val = g.op("Constant", value_t=torch.tensor(6, dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
+    return clamp(g, relu, min_val, max_val)
+
+
 # Opset 11 gather accepts negative indices
 @parse_args("v", "i", "v")
 def select(g, self, dim, index):
@@ -868,6 +880,17 @@ def prim_ConstantChunk(g, self, chunks, dim):
         res.append(g.op("Slice", self, start, end, axis))
         start = end
     return res
+
+def chunk(g, self, chunks, dim):
+    # Calculate chunk size for dynamic chunk
+    dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
+    chunk_size_s = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
+    chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size_s), chunks)
+    # Create splits vector
+    chunk_vec = [expand(g, chunk_size, chunk_size_s, None),
+                 g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s))]
+    chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)
+    return split(g, self, chunk_vec, dim)
 
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     from torch.onnx.symbolic_opset9 import reshape

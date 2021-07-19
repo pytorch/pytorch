@@ -8,11 +8,12 @@ from jit.test_tracer import TestTracer, TestMixTracingScripting  # noqa: F401
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
-from jit.test_backends import TestBackends  # noqa: F401
-from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict  # noqa: F401
+from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
+from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
 from jit.test_models import TestModels  # noqa: F401
+from jit.test_modules import TestModules  # noqa: F401
 from jit.test_autodiff_subgraph_slicing import TestAutodiffSubgraphSlicing  # noqa: F401
 from jit.test_custom_operators import TestCustomOperators  # noqa: F401
 from jit.test_export_modes import TestExportModes  # noqa: F401
@@ -56,6 +57,7 @@ from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
 from jit.test_script_profile import TestScriptProfile  # noqa: F401
 from jit.test_convert_activation import TestFunctionalToInplaceActivation, TestInplaceToFunctionalActivation  # noqa: F401
+from jit.test_parametrization import TestParametrization  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -131,7 +133,6 @@ def canonical(graph):
 
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
-
 
 def doAutodiffCheck(testname):
     # TODO: setting false on test itself is not working
@@ -896,6 +897,7 @@ class TestJit(JitTestCase):
             (Mod(nn.ConstantPad3d(3, 3.5)), torch.randn(16, 3, 10, 20, 30)),
             (Mod(nn.ReflectionPad1d(2)), torch.arange(8, dtype=torch.float).reshape(1, 2, 4)),
             (Mod(nn.ReflectionPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
+            (Mod(nn.ReflectionPad3d(3)), torch.randn(16, 3, 8, 32, 48)),
             (Mod(nn.ReplicationPad1d(2)), torch.arange(8, dtype=torch.float).reshape(1, 2, 4)),
             (Mod(nn.ReplicationPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
             (Mod(nn.ReplicationPad3d(3)), torch.randn(16, 3, 8, 32, 48)),
@@ -1742,20 +1744,18 @@ graph(%Ra, %Rb):
         def equation_format(x, y):
             return torch.einsum('i,j->ij', (x, y))
 
+        def equation_format_varargs(x, y):
+            return torch.einsum('i,j->ij', x, y)
+
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
-
-        # Sublist format cannot be scripted because it is
-        # a NumPy API only feature
-        with self.assertRaises(RuntimeError):
-            torch.jit.script(sublist_format)
 
         x = make_tensor((5,), 'cpu', torch.float32)
         y = make_tensor((10,), 'cpu', torch.float32)
 
-        check(equation_format, torch.jit.script(equation_format), x, y)
-        check(equation_format, torch.jit.trace(equation_format, (x, y)), x, y)
-        check(sublist_format, torch.jit.trace(sublist_format, (x, y)), x, y)
+        for fn in [equation_format, equation_format_varargs, sublist_format]:
+            check(fn, torch.jit.script(fn), x, y)
+            check(fn, torch.jit.trace(fn, (x, y)), x, y)
 
     def test_python_ivalue(self):
         # Test if pure python object can be hold as IValue and conversion
@@ -4792,6 +4792,193 @@ a")
                     test(backward=True)
                     test(backward=True)
                     test(backward=True)
+
+    def test_index(self):
+        def consec(size, start=0):
+            numel = torch.tensor(size).prod().item()
+            return torch.arange(numel).view(size)
+
+        def consec_list(size):
+            return list(range(size))
+
+        def random_string(size):
+            letters = string.ascii_lowercase
+            return "".join(random.choice(letters) for i in range(size))
+
+        def check_indexing(indexing, tensor):
+            template = dedent("""
+            def func(x):
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor])
+
+        def check_dynamic_indexing(indexing, tensor, value1, value2):
+            value1 = torch.tensor(value1)
+            value2 = torch.tensor(value2)
+
+            template = dedent("""
+            def func(x, value1, value2):
+                i = int(value1)
+                j = int(value2)
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [tensor, value1, value2])
+
+        # Torchscript assumes type Tensor by default, so we need this explicit
+        # declaration.
+        def check_indexing_list_int(indexing, list):
+            template = dedent("""
+            def func(x):
+                # type: (List[int]) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [list])
+
+        def check_indexing_str(indexing, str):
+            template = dedent("""
+            def func(x):
+                # type: (str) -> Any
+                return x{}
+            """)
+
+            self._check_code(template.format(indexing), "func", [str])
+
+        # basic slices
+        check_indexing('[0]', consec((3, 3)))
+        check_indexing('[1]', consec((3, 3), 10))
+        check_indexing('[2]', consec((3, 3), 19))
+        check_indexing('[2]', consec((3,)))
+        check_indexing('[-1]', consec((3, 3), 19))
+        check_indexing('[0:2]', consec((3, 3, 3)))
+        check_indexing('[1:-1]', consec((3, 3, 3)))
+        check_indexing('[-3:-1]', consec((6, 3)))
+        check_indexing('[1:]', consec((3, 3)))
+        check_indexing('[:1]', consec((3, 3)))
+        check_indexing('[:]', consec((3, 2)))
+
+        # multi-dim: indexes
+        check_indexing('[0, 1]', consec((3, 3)))
+        check_indexing('[0, 1]', consec((3, 3, 2)))
+        check_indexing('[1, 0, 2]', consec((3, 3, 3)))
+        check_indexing('[2, -1]', consec((3, 3)))
+
+        # multi-dim: mixed slicing and indexing
+        check_indexing('[0, 1:2]', consec((3, 3)))
+        check_indexing('[0, :1]', consec((3, 3, 2)))
+        check_indexing('[1, 2:]', consec((3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[1:, -1, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 2:, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, 1:, 0]', consec((3, 3, 3, 3)))
+        check_indexing('[-1, :, 0, 2]', consec((3, 3, 3, 3)))
+
+        # zero-sized slices
+        check_indexing('[0:0]', consec((2, 2)))
+        check_indexing('[0:0, 1]', consec((3, 3)))
+
+        # trivial expression usage
+        check_indexing('[1+1]', consec((3, 3)))
+        check_indexing('[1:(0 + 2)]', consec((3, 3, 3)))
+
+        # None for new dimensions
+        check_indexing('[None, 0]', consec((3, 3)))
+        check_indexing('[1, None]', consec((3, 3), 10))
+        check_indexing('[None, None, 2]', consec((3, 3), 19))
+        check_indexing('[None, 2, None]', consec((3,)))
+        check_indexing('[0:2, None]', consec((3, 3, 3)))
+        check_indexing('[None, 1:-1]', consec((3, 3, 3)))
+        check_indexing('[None, -3:-1, None]', consec((6, 3)))
+        check_indexing('[-1, None, 2:, None, 1:2]', consec((3, 3, 3, 3)))
+        check_indexing('[None, -1, None, 2:, None, 1:2, None]', consec((3, 3, 3, 3)))
+
+        # dynamic expression usage
+        check_dynamic_indexing("[i + j]", consec((3, 3)), 0, 1)
+        check_dynamic_indexing("[i:j, i]", consec((3, 3, 2)), 0, 2)
+
+        # positive striding
+        check_indexing_list_int('[0]', consec_list(6))
+        check_indexing_list_int('[1]', consec_list(7))
+        check_indexing_list_int('[2]', consec_list(8))
+        check_indexing_list_int('[2]', consec_list(9))
+        check_indexing_list_int('[-1]', consec_list(10))
+        check_indexing_list_int('[0:2]', consec_list(11))
+        check_indexing_list_int('[1:-1]', consec_list(12))
+        check_indexing_list_int('[-3:-1]', consec_list(13))
+        check_indexing_list_int('[1:]', consec_list(15))
+        check_indexing_list_int('[:1]', consec_list(16))
+        check_indexing_list_int('[:]', consec_list(17))
+        check_indexing_list_int('[::]', consec_list(0))
+        check_indexing_list_int('[1000::]', consec_list(0))
+        check_indexing_list_int('[:1000:]', consec_list(0))
+
+        # negative striding
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[:3:-1]', consec_list(7))
+        check_indexing_list_int('[3::-1]', consec_list(7))
+        check_indexing_list_int('[1000::-1]', consec_list(7))
+        check_indexing_list_int('[3:0:-1]', consec_list(7))
+        check_indexing_list_int('[3:-1000:-1]', consec_list(7))
+        check_indexing_list_int('[0:0:-1]', consec_list(7))
+        check_indexing_list_int('[0:-1000:-1]', consec_list(7))
+
+        # only step is specified
+        check_indexing_list_int('[::-1]', consec_list(0))
+        check_indexing_list_int('[::-1]', consec_list(7))
+        check_indexing_list_int('[::-2]', consec_list(7))
+        check_indexing_list_int('[::2]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(7))
+        check_indexing_list_int('[::-42]', consec_list(7))
+        check_indexing_list_int('[::42]', consec_list(0))
+        check_indexing_list_int('[::-42]', consec_list(0))
+        check_indexing_list_int('[::9223372036854775807]', consec_list(42))
+        check_indexing_list_int('[::-9223372036854775807]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_list_int('[::-9223372036854775808]', consec_list(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_list_int('[::0]', consec_list(42))
+
+        # striding strings
+        check_indexing_str('[0]', random_string(6))
+        check_indexing_str('[1]', random_string(7))
+        check_indexing_str('[2]', random_string(8))
+        check_indexing_str('[2]', random_string(9))
+        check_indexing_str('[-1]', random_string(10))
+        check_indexing_str('[0:2]', random_string(11))
+        check_indexing_str('[1:-1]', random_string(12))
+        check_indexing_str('[-3:-1]', random_string(13))
+        check_indexing_str('[1:]', random_string(15))
+        check_indexing_str('[:1]', random_string(16))
+        check_indexing_str('[:]', random_string(17))
+        check_indexing_str('[::]', random_string(0))
+        check_indexing_str('[1000::]', random_string(0))
+        check_indexing_str('[:1000:]', random_string(0))
+
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[:3:-1]', random_string(7))
+        check_indexing_str('[3::-1]', random_string(7))
+        check_indexing_str('[1000::-1]', random_string(7))
+        check_indexing_str('[3:0:-1]', random_string(7))
+        check_indexing_str('[3:-1000:-1]', random_string(7))
+        check_indexing_str('[0:0:-1]', random_string(7))
+        check_indexing_str('[0:-1000:-1]', random_string(7))
+
+        check_indexing_str('[::-1]', random_string(0))
+        check_indexing_str('[::-1]', random_string(7))
+        check_indexing_str('[::-2]', random_string(7))
+        check_indexing_str('[::2]', random_string(7))
+        check_indexing_str('[::42]', random_string(7))
+        check_indexing_str('[::-42]', random_string(7))
+        check_indexing_str('[::42]', random_string(0))
+        check_indexing_str('[::-42]', random_string(0))
+        check_indexing_str('[::9223372036854775807]', random_string(42))
+        check_indexing_str('[::-9223372036854775807]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "out of bounds"):
+            check_indexing_str('[::-9223372036854775808]', random_string(42))
+        with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
+            check_indexing_str('[::0]', random_string(42))
 
     def test_module_copy_with_attributes(self):
         class Vocabulary(torch.jit.ScriptModule):
@@ -10397,7 +10584,10 @@ dedent """
             def f5(a):
                 torch.cat([3])
 
-        with self.assertRaisesRegex(RuntimeError, 'Lists must contain only a single type'):
+        with self.assertRaisesRegex(RuntimeError, r'Expected a value of'
+                                    r' type \'List\[int\]\' for argument'
+                                    r' \'size\' but instead found type '
+                                    r'\'List\[Any\]\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
@@ -10713,9 +10903,8 @@ dedent """
 
         graph = torch.jit.script(func).graph
         FileCheck().check("int = prim::Constant").check("aten::add_").run(str(graph))
-        self.run_pass('remove_inplace_ops', graph)
-        self.run_pass('erase_number_types', graph)
-        FileCheck().check_not("int = prim::Constant").check_not("aten::add_").run(str(graph))
+        self.run_pass("erase_number_types", graph)
+        FileCheck().check_not("int = prim::Constant").run(str(graph))
 
     def test_remove_dropout(self):
         weight_0_shape = (20, 5)
@@ -13962,6 +14151,131 @@ dedent """
                                                   r"for argument \'value\' but instead found type \'int\'."):
             torch.jit.script(test_error)
 
+    def test_namedtuple_default_values_simple_type(self):
+
+        class Point(NamedTuple):
+            x: Optional[int] = None
+            y: int = 2
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=3, y=2)
+
+        self.checkModule(M(), (p,))
+        self.checkModule(M(), (Point(),))
+
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int? = None, y : int = 2))")   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_missing(self):
+
+        class Point(NamedTuple):
+            x: Optional[int]
+            y: int
+            z: int = 3
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p1 = Point(x=3, y=2)
+        p2 = Point(x=3, y=2, z=1)
+
+        self.checkModule(M(), (p1,))
+        self.checkModule(M(), (p2,))
+
+        m = torch.jit.script(M())
+
+        FileCheck().check(r"NamedTuple(x : int?, y : int, z : int = 3))")   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_container_type(self):
+
+        class Point(NamedTuple):
+            x: Optional[List[int]] = None
+            y: List[int] = [1, 2, 3]
+            z: Optional[Dict[str, int]] = {"a": 1}
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=[4, 5, 6], y=[3, 2, 1], z={"b": 2})
+
+        self.checkModule(M(), (p,))
+        self.checkModule(M(), (Point(),))
+
+        m = torch.jit.script(M())
+
+        first_line = r"NamedTuple(x : int[]? = None, y : int[] = "    \
+                     r"[1, 2, 3], z : Dict(str, int)? = {a: 1}))"
+
+        FileCheck().check(first_line)   \
+                   .run(m.graph)
+
+    def test_namedtuple_default_values_Tensor_type(self):
+
+        class Point(NamedTuple):
+            x: torch.Tensor = torch.rand(2, 3)
+
+        make_global(Point)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, point: Point):
+                return point
+
+        p = Point(x=torch.rand(2, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "Tensors are not "
+                                    "supported as default NamedTuple "
+                                    "fields"):
+            m = torch.jit.script(M())
+            m(p)
+
+    @unittest.skipIf(sys.version_info < (3, 7, 0), "defaults keyword added in Python 3.8")
+    def test_namedtuple_default_values_using_factory_constructor(self):
+        Pair = namedtuple("Pair", ["x", "y"], defaults=(1, 2))
+
+        make_global(Pair)
+
+        @torch.jit.script
+        def fn(x: Pair) -> Pair:
+            return x
+
+        # TODO: We can't use `checkScript` with the NamedTuple factory
+        # constructor. Using the factory constructor with TorchScript
+        # TorchScript creates an anonymous `NamedTuple` class instead of
+        # preserving the actual name. For example, the actual generated
+        # signature in this case is:
+        #   graph(%x.1 : NamedTuple(x : Tensor, y : Tensor))
+        # It looks like similar test cases have had this issue as well
+        # (see: `test_namedtuple_python`).
+        FileCheck().check(r"NamedTuple(x : Tensor = 1, y : Tensor = 2))")   \
+                   .check_next(r"return (%x.1)")    \
+                   .run(fn.graph)
+
     def test_isinstance_dynamic(self):
         @torch.jit.script
         def foo(a):
@@ -15775,9 +16089,16 @@ def add_nn_module_test(*args, **kwargs):
         args_variable, kwargs_variable = create_input(input, dtype=dtype)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
+        # TODO(issue#52052) Neither this nor no_grad should be required
+        # if check_against_reference() is updated to check gradients
+        # w.r.t. weights and then only check w.r.t. inputs if any
+        # inputs require it.
+        any_requires_grad = any(input.requires_grad for input in f_args_variable)
+
         # Check against Python module as reference
         check_against_reference(self, create_script_module, create_nn_module,
-                                lambda x: x, f_args_variable, no_grad=no_grad)
+                                lambda x: x, f_args_variable,
+                                no_grad=no_grad or not any_requires_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)

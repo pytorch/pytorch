@@ -283,9 +283,8 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   // simplify the CUDA kernel.
   if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
     if (!all_strides_match(indices)) {
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t i = 0; i < indices.size(); i++) {
-        indices[i] = indices[i].contiguous();
+      for (auto & indice : indices) {
+        indice = indice.contiguous();
       }
     }
   }
@@ -312,10 +311,9 @@ static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::
     std::tie(self, indices) = transposeToFront(self, indices);
   }
   // Ensure indices are on the same device as self
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (size_t i = 0; i < indices.size(); i++) {
-    if (indices[i].defined() && indices[i].device() != self.device()) {
-      indices[i] = indices[i].to(self.device());
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
     }
   }
   return AdvancedIndex(self, indices);
@@ -847,7 +845,14 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   if (self.dim() > 0) {
     result_size[dim] = numel;
   }
-  at::native::resize_output(result, result_size);
+  if (self.is_quantized()) {
+    TORCH_CHECK(
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
+    result = at::empty_quantized(result_size, result);
+  } else {
+    at::native::resize_output(result, result_size);
+  }
 
   auto index_contig = index.contiguous();
 
@@ -934,32 +939,61 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
     TORCH_CHECK(result.dim() <= 1, "result.dim() (", result.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
-      self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
-      auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
-      auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+    if(self.is_quantized()){
+      AT_DISPATCH_QINT_TYPES(self.scalar_type(), "index_select_quant", [&index_contig, &self, &result, &dim, &numel] {
+        auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+        auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
 
-      auto self_data_ptr = self.data_ptr<scalar_t>();
-      auto result_data_ptr = result.data_ptr<scalar_t>();
-      auto self_numel = self.numel();
-      AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
-        [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
-        auto index_data = index_contig.data_ptr<index_t>();
-        for (auto i = 0; i < numel; i++) {
-          auto self_i = index_data[i];
-          TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
-          scalar_t *self_ip = self_data_ptr + self_i * self_stride;
-          *(result_data_ptr + i * result_stride) = *self_ip;
-        }
+        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto result_data_ptr = result.data_ptr<scalar_t>();
+        auto self_numel = self.numel();
+        AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_quant_",
+          [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
+          auto index_data = index_contig.data_ptr<index_t>();
+          for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            *(result_data_ptr + i * result_stride) = *self_ip;
+          }
+        });
       });
-    });
+    } else {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+        self.scalar_type(), "index_select", [&index_contig, &self, &result, &dim, &numel] {
+        auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
+        auto result_stride = result.dim() == 0 ? 1 : result.stride(dim);
+
+        auto self_data_ptr = self.data_ptr<scalar_t>();
+        auto result_data_ptr = result.data_ptr<scalar_t>();
+        auto self_numel = self.numel();
+        AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_select_out_cpu_",
+          [&index_contig, &numel, &self_numel, &self_data_ptr, &self_stride, &result_data_ptr, &result_stride] {
+          auto index_data = index_contig.data_ptr<index_t>();
+          for (auto i = 0; i < numel; i++) {
+            auto self_i = index_data[i];
+            TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_numel), "index out of range in self");
+            scalar_t *self_ip = self_data_ptr + self_i * self_stride;
+            *(result_data_ptr + i * result_stride) = *self_ip;
+          }
+        });
+      });
+    }
   }
 
   return result;
 }
 
 Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index) {
-  Tensor result = at::empty({0}, self.options());
+  Tensor result;
+  if (self.is_quantized()) {
+    TORCH_CHECK(
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
+    result = at::empty_quantized({0}, self);
+  } else {
+    result = at::empty({0}, self.options());
+  }
   return at::native::index_select_out_cpu_(self, dim, index, result);
 }
 
@@ -1568,7 +1602,10 @@ Tensor& nonzero_out_cpu(const Tensor& self, Tensor& result) {
   const auto self_sizes = self.sizes();
   const auto total_nonzero = thread_count_nonzero.back();
   const int64_t ndim = self_sizes.size();
-  resize_output(result, {total_nonzero, ndim});
+  if (resize_output(result, {total_nonzero, ndim})) {
+    // Default to fortran-contiguous output (see gh-46224)
+    result.as_strided_({total_nonzero, ndim}, {1, total_nonzero});
+  }
 
   if (result.numel() == 0) {
     return result;

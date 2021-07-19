@@ -348,11 +348,18 @@ class TestViewOps(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypes(*torch.testing.get_all_complex_dtypes())
-    def test_conj_view(self, device, dtype) -> None:
+    def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5,), dtype, device)
+        t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
         v = t.conj()
         self.assertTrue(self.is_view_of(t, v))
-        self.assertEqual(v, torch.from_numpy(t.cpu().numpy().conj()).to(device=device))
+        self.assertEqual(v, t_numpy_conj)
+
+        if (t.is_complex()):
+            v_imag = v.imag
+            self.assertTrue(self.is_view_of(t, v_imag))
+            self.assertEqual(v_imag, t_numpy_conj.imag)
+            self.assertTrue(v_imag.is_neg())
 
     @onlyOnCPUAndCUDA
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
@@ -449,11 +456,41 @@ class TestViewOps(TestCase):
             v[0, 1] = 0
             self.assertEqual(t[1, 0], v[0, 1])
 
+    def test_transpose_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapdims_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapaxes_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.transpose_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
     def test_t_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.t()
         self.assertTrue(self.is_view_of(t, v))
 
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_t_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.t_()
+        self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
@@ -480,6 +517,14 @@ class TestViewOps(TestCase):
         v[0, 1] = 0
         self.assertEqual(t, v._base)
 
+    def test_squeeze_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.squeeze_()
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t, v._base)
+
     def test_unsqueeze_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.unsqueeze(t, 1)
@@ -488,11 +533,27 @@ class TestViewOps(TestCase):
         v[0, 0, 1] = 0
         self.assertEqual(t[0, 1], v[0, 0, 1])
 
+    def test_unsqueeze_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.unsqueeze_(1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 0, 1] = 0
+        self.assertEqual(t[0, 1], v[0, 0, 1])
+
     def test_as_strided_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.as_strided(t, (25,), (1,))
         self.assertTrue(self.is_view_of(t, v))
 
+        v[6] = 0
+        self.assertEqual(t[1, 1], v[6])
+
+    def test_as_strided_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.as_strided_((25,), (1,))
+        self.assertTrue(self.is_view_of(t, v))
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 

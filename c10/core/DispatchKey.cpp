@@ -11,9 +11,10 @@ const char* toString(DispatchKey t) {
       return "CPU";
     case DispatchKey::CUDA:
       return "CUDA";
-
     case DispatchKey::HIP:
       return "HIP";
+    case DispatchKey::VE:
+      return "VE";
     case DispatchKey::FPGA:
       return "FPGA";
     case DispatchKey::XPU:
@@ -52,11 +53,16 @@ const char* toString(DispatchKey t) {
       return "SparseCsrCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
+    case DispatchKey::SparseVE:
+      return "SparseVE";
     case DispatchKey::SparseXPU:
       return "SparseXPU";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
+
+    case DispatchKey::Python:
+      return "Python";
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
@@ -65,6 +71,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::PrivateUse3:
       return "PrivateUse3";
 
+    case DispatchKey::Negative:
+      return "Negative";
     case DispatchKey::Conjugate:
       return "Conjugate";
     case DispatchKey::Meta:
@@ -77,6 +85,8 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::AutogradCPU:
       return "AutogradCPU";
+    case DispatchKey::AutogradXPU:
+      return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:

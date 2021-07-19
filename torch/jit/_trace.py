@@ -148,7 +148,7 @@ def _clone_inputs(args):
             # TODO: figure out one liner to .clone() and set requires_grad
             v = (
                 a.detach()
-                .clone(memory_format=torch.preserve_format)
+                .clone(memory_format=None if a.is_mkldnn else torch.preserve_format)
                 .requires_grad_(a.requires_grad)
             )
             if a.grad is not None:
@@ -485,6 +485,10 @@ def _check_trace(
                         orig = orig.dequantize()
                     if ref.is_quantized:
                         ref = ref.dequantize()
+                    if orig.is_mkldnn:
+                        orig = orig.to_dense()
+                    if ref.is_mkldnn:
+                        ref = ref.to_dense()
                     torch.testing.assert_allclose(
                         orig.double(),
                         ref.double(),
@@ -554,7 +558,8 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False
+            share_types=False,
+            is_tracing=True
         )
     else:
         if _module_class is None:
@@ -1063,7 +1068,7 @@ class TracedModule(ScriptModule):
             )
 
         script_module = torch.jit._recursive.create_script_module(
-            tmp_module, lambda module: (), share_types=False
+            tmp_module, lambda module: (), share_types=False, is_tracing=True
         )
 
         self.__dict__["_name"] = type(orig).__name__

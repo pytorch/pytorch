@@ -476,7 +476,8 @@ Keyword args:
 Returns:
     A named tuple `(eigenvalues, eigenvectors)` which corresponds to :math:`\Lambda` and :math:`V` above.
 
-    `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`A` is real.
+    `eigenvalues` and `eigenvectors` will always be complex-valued, even when :attr:`A` is real. The eigenvectors
+    will be given by the columns of `eigenvectors`.
 
 Examples::
 
@@ -634,12 +635,12 @@ Keyword args:
     out (tuple, optional): output tuple of two tensors. Ignored if `None`. Default: `None`.
 
 Returns:
-    A named tuple `(eigenvalues, eigenvectors)` which corresponds to :math:`\Lambda` and :math:`V` above.
+    A named tuple `(eigenvalues, eigenvectors)` which corresponds to :math:`\Lambda` and :math:`Q` above.
 
     `eigenvalues` will always be real-valued, even when :attr:`A` is complex.
     It will also be ordered in ascending order.
 
-    `eigenvectors` will have the same dtype as :attr:`A`.
+    `eigenvectors` will have the same dtype as :attr:`A` and will contain the eigenvectors as its columns.
 
 Examples::
 
@@ -1211,7 +1212,7 @@ If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal attr:`A` as a batch of
+This function does not necessarily treat multidimensonal :attr:`A` as a batch of
 vectors, instead:
 
 - If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
@@ -1222,15 +1223,15 @@ This behavior is for consistency with :func:`torch.linalg.norm`.
 
 :attr:`ord` defines the vector norm that is computed. The following norms are supported:
 
-======================   ========================================================
+======================   ===============================
 :attr:`ord`              vector norm
-======================   ========================================================
+======================   ===============================
 `2` (default)            `2`-norm (see below)
 `inf`                    `max(abs(x))`
 `-inf`                   `min(abs(x))`
 `0`                      `sum(x != 0)`
 other `int` or `float`   `sum(abs(x)^{ord})^{(1 / ord)}`
-======================   ========================================================
+======================   ===============================
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
@@ -1451,7 +1452,7 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-The returned decomposition is a named tuple `(U, S, Vh)`
+The returned decomposition is a named tuple `(U, S, Vᴴ)`
 which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
 The singular values are returned in descending order.
@@ -1482,7 +1483,7 @@ Differences with `numpy.linalg.svd`:
              In this case, one may multiply the associated singular vectors of `U` and `V` spanning
              the subspace by a rotation matrix and `the resulting vectors will span the same subspace`_.
 
-.. warning:: Gradients computed using `U` or `Vh` will only be finite when
+.. warning:: Gradients computed using `U` or `Vᴴ` will only be finite when
              :attr:`A` does not have zero as a singular value or repeated singular values.
              Furthermore, if the distance between any two singular values is close to zero,
              the gradient will be numerically unstable, as it depends on the singular values
@@ -1511,18 +1512,19 @@ Args:
     full_matrices (bool, optional): controls whether to compute the full or reduced
                                     SVD, and consequently,
                                     the shape of the returned tensors
-                                    `U` and `Vh`. Default: `True`.
+                                    `U` and `Vᴴ`. Default: `True`.
 
 Keyword args:
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
 Returns:
-    A named tuple `(U, S, Vh)` which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
+    A named tuple `(U, S, Vᴴ)` which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 
     `S` will always be real-valued, even when :attr:`A` is complex.
     It will also be ordered in descending order.
 
-    `U` and `Vh` will have the same dtype as :attr:`A`.
+    `U` and `Vᴴ` will have the same dtype as :attr:`A`. The left / right singular vectors will be given by
+    the columns of `U` and the rows of `Vᴴ` respectively.
 
 Examples::
 

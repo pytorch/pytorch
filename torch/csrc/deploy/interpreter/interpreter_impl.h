@@ -125,6 +125,9 @@ struct InterpreterSessionImpl {
 
 struct InterpreterImpl {
   virtual InterpreterSessionImpl* acquire_session() = 0;
+  virtual void set_find_module(
+      std::function<at::optional<std::string>(const std::string&)>
+          find_module) = 0;
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };
 

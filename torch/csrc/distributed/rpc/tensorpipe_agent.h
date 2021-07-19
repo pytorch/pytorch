@@ -9,19 +9,12 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
-#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
 namespace tensorpipe {
-
-struct CpuBuffer;
-
-#ifdef USE_CUDA_NOT_ROCM
-struct CudaBuffer;
-#endif
 
 class Context;
 class Error;
@@ -43,10 +36,32 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+// These priorities instruct TensorPipe on which transport/channel to pick
+// during handshake. Higher priorities will take precedence over lower ones.
+// The transport with lowest priority will be the one used to bootstrap pipes.
+
+constexpr int64_t kShmTransportPriority = 200;
+constexpr int64_t kIbvTransportPriority = 100;
+// The UV transport just uses TCP and should work everywhere, thus keep it last.
+constexpr int64_t kUvTransportPriority = 0;
+
+constexpr int64_t kCmaChannelPriority = 1200;
+constexpr int64_t kMultiplexedUvChannelPriority = 1100;
+// The basic channel reuses a transport as a channel, and is thus our fallback.
+constexpr int64_t kBasicChannelPriority = 1000;
+
+// CPU channel have higher priority than CUDA channels, since the latter might
+// handle CPU-to-CPU transfers, but will always be less efficient than their
+// CPU-only counterparts.
+constexpr int64_t kCudaIpcChannelPriority = 300;
+constexpr int64_t kCudaGdrChannelPriority = 200;
+constexpr int64_t kCudaXthChannelPriority = 400;
+constexpr int64_t kCudaBasicChannelPriority = 0;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
-struct TransportRegistration {
+struct TORCH_API TransportRegistration {
   std::shared_ptr<tensorpipe::transport::Context> transport;
   int64_t priority;
   std::string address;
@@ -55,7 +70,7 @@ struct TransportRegistration {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct ChannelRegistration {
+struct TORCH_API ChannelRegistration {
   std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
@@ -65,7 +80,7 @@ C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
-struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
+struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,
       optional<std::vector<std::string>> transports,
@@ -130,13 +145,13 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
 };
 
 // Struct to track the network source metrics
-struct NetworkSourceInfo {
+struct TORCH_API NetworkSourceInfo {
   worker_id_t srcRank;
   std::vector<uint8_t> srcMachineAddr;
 };
 
 // Struct to track aggregated network metrics
-struct AggregatedNetworkData {
+struct TORCH_API AggregatedNetworkData {
   uint64_t numCalls{0};
   uint64_t totalSentBytes{0};
   uint64_t totalRecvBytes{0};
@@ -147,7 +162,7 @@ struct AggregatedNetworkData {
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
 // memory (linux) and TCP (linux & mac) support. CUDA support is in progress.
-class TensorPipeAgent : public RpcAgent {
+class TORCH_API TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
       const c10::intrusive_ptr<::c10d::Store>& store,
@@ -284,6 +299,7 @@ class TensorPipeAgent : public RpcAgent {
   // TODO: To achieve better performance we can have a pipe pool per
   // client that can be configured using RpcBackendOptions.
   struct ClientPipe {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     mutable std::mutex mutex_;
@@ -327,6 +343,7 @@ class TensorPipeAgent : public RpcAgent {
   struct TimeoutMessageMetadata {
     TimeoutMessageMetadata(
         uint64_t messageId_,
+        // NOLINTNEXTLINE(modernize-pass-by-value)
         std::shared_ptr<AtomicJitFuture> responseFuture_,
         std::chrono::milliseconds timeout_)
         : messageId(messageId_),
