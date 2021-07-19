@@ -4891,6 +4891,50 @@ criterion_tests = [
     ),
 ]
 
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    criterion = args[-1]
+    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
+
+    output = criterion(*single_batch_input_args)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
+
+# Check that classification criterion work with no batch dimensions
+# List of tuples of (name, input_fn, target_fn)
+classification_criterion_no_batch = [
+    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9)),
+    ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
+    ('KLDivLoss', lambda: F.logsigmoid(torch.randn(9)), lambda: torch.sigmoid(torch.randn(9))),
+    ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+    ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
+    ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+]
+classification_criterion_no_batch_extra_info: Dict[str, dict] = {
+    'MultiLabelMarginLoss': {'check_gradgrad': False},
+}
+reductions = ['none', 'mean', 'sum']
+for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
+                                                      reductions):
+    classificaiton_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args: getattr(nn, name)(reduction=reduction),
+        input_fn=input_fn,
+        target_fn=target_fn,
+        test_cpp_api_parity=False,
+    )
+    extra_info = classification_criterion_no_batch_extra_info.get(name, {})
+    classificaiton_test_info.update(extra_info)
+    criterion_tests.append(classificaiton_test_info)
+
 
 class NNTestCase(TestCase):
 
