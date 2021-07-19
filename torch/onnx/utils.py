@@ -526,13 +526,11 @@ def _model_to_graph(model, args, verbose=False,
 
 
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
-                            input_names=None, output_names=None, operator_export_type=None,
+                            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
                             google_printer=False, opset_version=None, _retain_param_name=True,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
-    if operator_export_type is None:
-        operator_export_type = OperatorExportTypes.ONNX
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
