@@ -1,16 +1,13 @@
-import errno
 import hypothesis.strategies as st
 from hypothesis import given, assume, settings
 import io
 import math
 import numpy as np
 import os
-import shutil
 import struct
 import unittest
 from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
-
 from caffe2.proto import caffe2_pb2
 from caffe2.proto.caffe2_pb2 import BlobSerializationOptions
 from caffe2.python import core, test_util, workspace
@@ -430,6 +427,26 @@ class TestLoadSave(TestLoadSaveBase):
             absolute_path=1,
             dbs=db_files, db_type=self._db_type,
             load_all=False)
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
+    def testLoadWithDBOptions(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
+
+        db_files = [tmp_file, tmp_file]
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+
+        db_options = b"test_db_options"
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))],
+            absolute_path=1,
+            dbs=db_files, db_type=self._db_type,
+            load_all=False,
+            db_options=db_options,
+        )
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
