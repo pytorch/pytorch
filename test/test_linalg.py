@@ -3991,8 +3991,14 @@ class TestLinalg(TestCase):
         def check(x, y):
             # Compare with numpy
             res = torch_fn(x, y)
-            ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
-            self.assertEqual(res.cpu(), ref)
+            if x.dtype == torch.bfloat16:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().float().numpy(), y.cpu().float().numpy())))
+            else:
+                ref = torch.from_numpy(np.array(np_fn(x.cpu().numpy(), y.cpu().numpy())))
+            if res.dtype == torch.bfloat16:
+                self.assertEqual(res.cpu(), ref.bfloat16())
+            else:
+                self.assertEqual(res.cpu(), ref)
 
             # Test out variant
             out = torch.empty_like(res)
@@ -4005,19 +4011,20 @@ class TestLinalg(TestCase):
         check(x, y)
 
         # Contiguous
-        x = torch.randn(10, dtype=dtype, device=device)
-        y = torch.randn(10, dtype=dtype, device=device)
+        x = torch.randn(200, dtype=dtype, device=device)
+        y = torch.randn(200, dtype=dtype, device=device)
         check(x, y)
 
         # 0 strided
-        y = torch.randn(1, dtype=dtype, device=device).expand(10)
+        y = torch.randn(1, dtype=dtype, device=device).expand(200)
         check(x, y)
 
         # 2 strided
         check(x[::2], y[::2])
 
-    @dtypes(torch.float, torch.cfloat)
-    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    @dtypes(torch.float, torch.cfloat, torch.bfloat16)
+    @dtypesIfCUDA(torch.float, torch.cfloat)
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5, torch.bfloat16: 1e-0})
     def test_dot_vs_numpy(self, device, dtype):
         self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
 
@@ -6153,12 +6160,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return torch.randint(0, 100, (x, y), dtype=dtype, device=device)
 
         def genf_bfloat(x, y):
-            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype)
+            return torch.randn(x, y, dtype=torch.float32, device=device).to(dtype) * 0.1
 
         def genf_float(x, y):
             return torch.randn(x, y, dtype=dtype, device=device)
 
-        for (n, m, p) in [(20, 10, 5), (15, 5, 10), (5, 18, 10)]:
+        for (n, m, p) in [(20, 10, 15), (15, 20, 10), (25, 18, 10)]:
             if (dtype == torch.int32) or (dtype == torch.int64):
                 genf = genf_int
             elif (dtype == torch.bfloat16):
@@ -6229,7 +6236,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         batch_sizes = [1, 10]
-        M, N, O = 23, 8, 12
+        M, N, O = 23, 15, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         is_supported = True
@@ -6251,8 +6258,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-0.1, high=0.1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-0.1, high=0.1)
                 b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                 b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                 yield b1, b2
@@ -6260,8 +6267,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for b1, b2, b3, b4, b5, b6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if b1 else 1, M if b2 else 1, N if b3 else 1)
                 shape2 = (num_batches if b4 else 1, N if b5 else 1, O if b6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-0.1, high=0.1).expand(num_batches, M, N)
+                b2 = make_tensor(shape2, device, dtype, low=-0.1, high=0.1).expand(num_batches, N, O)
                 yield b1, b2
             # zero-sized tensors
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
@@ -6341,7 +6348,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 2
-        M, N, O = 2, 3, 4
+        M, N, O = 16, 17, 18
 
         is_supported = True
         if dtype == torch.bfloat16:
@@ -6367,8 +6374,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 for perm3 in itertools.permutations((0, 1)):
-                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                    b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1) * 0.1
+                    b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1) * 0.1
                     b1 = b1.permute(perm1).contiguous().permute(invert_perm(perm1))
                     b2 = b2.permute(perm2).contiguous().permute(invert_perm(perm2))
                     ref = torch.from_numpy(
@@ -6380,8 +6387,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for s1, s2, s3, s4, s5, s6 in itertools.product((True, False), repeat=6):
                 shape1 = (num_batches if s1 else 1, M if s2 else 1, N if s3 else 1)
                 shape2 = (num_batches if s4 else 1, N if s5 else 1, O if s6 else 1)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1).expand(num_batches, M, N) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1).expand(num_batches, N, O) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6391,8 +6398,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             for z1, z2, z3, z4 in itertools.product((True, False), repeat=4):
                 shape1 = (num_batches if z1 else 0, M if z2 else 0, N if z3 else 0)
                 shape2 = (num_batches if z1 else 0, N if z3 else 0, O if z4 else 0)
-                b1 = make_tensor(shape1, device, dtype, low=-1, high=1)
-                b2 = make_tensor(shape2, device, dtype, low=-1, high=1)
+                b1 = make_tensor(shape1, device, dtype, low=-1, high=1) * 0.1
+                b2 = make_tensor(shape2, device, dtype, low=-1, high=1) * 0.1
                 ref = torch.from_numpy(
                     b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()
                 ).to(device=device, dtype=dtype).sum(0)
@@ -6414,7 +6421,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             return
 
         num_batches = 10
-        M, N, O = 12, 8, 5
+        M, N, O = 12, 8, 50
 
         is_supported = True
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
