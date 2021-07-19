@@ -1,7 +1,6 @@
 #pragma once
 
 #ifdef USE_C10D_UCC
-fsdfasfsfsafs
 
 #include <c10d/Store.hpp>
 #include <c10d/ProcessGroup.hpp>
