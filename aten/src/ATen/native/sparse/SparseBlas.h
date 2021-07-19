@@ -14,5 +14,14 @@ using addmv_out_sparse_csr_fn = void (*)(
     const Tensor& /*result*/);
 DECLARE_DISPATCH(addmv_out_sparse_csr_fn, addmv_out_sparse_csr_stub);
 
+using triangular_solve_out_sparse_csr_fn = void (*)(
+    const Tensor& /*A*/,
+    const Tensor& /*B*/,
+    const Tensor& /*X*/,
+    bool /*upper*/,
+    bool /*transpose*/,
+    bool /*unitriangular*/);
+DECLARE_DISPATCH(triangular_solve_out_sparse_csr_fn, triangular_solve_out_sparse_csr_stub);
+
 } // namespace native
 } // namespace at

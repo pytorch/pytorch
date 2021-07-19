@@ -54,5 +54,32 @@ Tensor& addmv_out_sparse_csr(
   return result;
 }
 
+DEFINE_DISPATCH(triangular_solve_out_sparse_csr_stub);
+
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `B` - dense Tensor of size m × nrhs.
+  * `A` - sparse Tensor of size m × m.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `X` - dense Tensor of size m × nrhs.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+*/
+std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr(
+    const Tensor& B,
+    const Tensor& A,
+    bool upper,
+    bool transpose,
+    bool unitriangular,
+    Tensor& X,
+    Tensor& clone_A) {
+  triangular_solve_out_sparse_csr_stub(A.device().type(), A, B, X, upper, transpose, unitriangular);
+  return std::tuple<Tensor&, Tensor&>(X, clone_A);
+}
+
 } // namespace native
 } // namespace at

@@ -210,24 +210,33 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   TORCH_CHECK(A.dim() >= 2,
            "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
 
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = at::native::_linalg_broadcast_batch_dims(self, A, "triangular_solve");
+  if (A.layout() == Layout::Strided) {
+    Tensor self_broadcasted, A_broadcasted;
+    std::tie(self_broadcasted, A_broadcasted) = at::native::_linalg_broadcast_batch_dims(self, A, "triangular_solve");
 
-  auto ndim = self_broadcasted.dim();
-  IntArrayRef solution_sizes = self_broadcasted.sizes();
-  auto nrows = solution_sizes[ndim - 2];
+    auto ndim = self_broadcasted.dim();
+    IntArrayRef solution_sizes = self_broadcasted.sizes();
+    auto nrows = solution_sizes[ndim - 2];
 
-  // make column major strides for BLAS
-  auto solution_strides = at::detail::defaultStrides(solution_sizes);
-  solution_strides[ndim - 2] = 1;
-  solution_strides[ndim - 1] = nrows;
-  set_output(0, solution_sizes, solution_strides, self.options(), {});
+    // make column major strides for BLAS
+    auto solution_strides = at::detail::defaultStrides(solution_sizes);
+    solution_strides[ndim - 2] = 1;
+    solution_strides[ndim - 1] = nrows;
+    set_output(0, solution_sizes, solution_strides, self.options(), {});
 
-  // make column major strides for BLAS
-  auto clone_A_strides = at::detail::defaultStrides(A_broadcasted.sizes());
-  clone_A_strides[ndim - 2] = 1;
-  clone_A_strides[ndim - 1] = nrows;
-  set_output(1, A_broadcasted.sizes(), clone_A_strides, A.options(), {});
+    // make column major strides for BLAS
+    auto clone_A_strides = at::detail::defaultStrides(A_broadcasted.sizes());
+    clone_A_strides[ndim - 2] = 1;
+    clone_A_strides[ndim - 1] = nrows;
+    set_output(1, A_broadcasted.sizes(), clone_A_strides, A.options(), {});
+  } else if (A.layout() == Layout::SparseCsr) {
+    // no broadcasting for non-strided layout
+    at::native::linearSolveCheckInputs(self, A, "triangular_solve");
+    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
+  }
 }
 
 } // namespace meta

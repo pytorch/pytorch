@@ -34,12 +34,41 @@ void addmv_out_sparse_csr_cpu_impl(
 #endif
 }
 
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `A` - sparse Tensor of size m × m.
+  * `B` - dense Tensor of size m × nrhs.
+  * `X` - dense Tensor of size m × nrhs.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+*/
+void triangular_solve_out_sparse_csr_cpu_impl(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "Calling triangular solve on a sparse CPU tensor not implemented!");
+}
+
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(addmv_out_sparse_csr_stub, DEFAULT, &addmv_out_sparse_csr_cpu_impl);
 REGISTER_AVX_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
 REGISTER_AVX2_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
 REGISTER_VSX_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
+
+REGISTER_ARCH_DISPATCH(triangular_solve_out_sparse_csr_stub, DEFAULT, &triangular_solve_out_sparse_csr_cpu_impl);
+REGISTER_AVX_DISPATCH(triangular_solve_out_sparse_csr_stub, &triangular_solve_out_sparse_csr_cpu_impl);
+REGISTER_AVX2_DISPATCH(triangular_solve_out_sparse_csr_stub, &triangular_solve_out_sparse_csr_cpu_impl);
+REGISTER_VSX_DISPATCH(triangular_solve_out_sparse_csr_stub, &triangular_solve_out_sparse_csr_cpu_impl);
 
 } // namespace native
 } // namespace at
