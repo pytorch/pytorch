@@ -5911,6 +5911,8 @@ else:
         dst = dst.masked_scatter(mask, src)
         self.assertEqual(dst, torch.tensor([True, True, True], device=device))
 
+    # refer https://github.com/pytorch/pytorch/issues/60190
+    @skipIfRocm
     @onlyCUDA
     @largeTensorTest('30GB')
     def test_masked_scatter_large_tensor(self, device):
@@ -7703,6 +7705,36 @@ else:
 
         # Reset the original dtype
         torch.set_default_dtype(default_dtype)
+
+    def test_hook_remove(self, device):
+        # Reference: https://github.com/pytorch/pytorch/issues/58354
+        def _test_helper(remove_hook):
+            def install_hook(tensor):
+                handle = None
+
+                def hook(tensor):
+                    if remove_hook:
+                        handle.remove()
+                    return torch.zeros_like(tensor)
+                handle = tensor.register_hook(hook)
+
+            t = torch.ones((1, 5), device=device, requires_grad=True)
+            install_hook(t)
+
+            # First call to backward
+            t.mean().backward()
+            self.assertEqual(t.grad, torch.zeros_like(t))
+
+            # Second call to backward
+            t.mean().backward()
+            if remove_hook:
+                # After removing the hook, make sure the usual gradient is returned
+                self.assertEqual(t.grad, 0.2 * torch.ones_like(t))
+            else:
+                self.assertEqual(t.grad, torch.zeros_like(t))
+
+        _test_helper(remove_hook=True)
+        _test_helper(remove_hook=False)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
