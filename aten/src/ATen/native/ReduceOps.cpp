@@ -116,6 +116,22 @@ TORCH_META_FUNC(argmin)
   check_argmax_argmin(*this, "argmin", self, dim, keepdim);
 }
 
+TORCH_META_FUNC(cumsum)
+(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  const auto& result = maybe_get_output();
+  ScalarType out_dtype;
+
+  if (result.defined()) {
+    out_dtype = dtype.value_or(result.scalar_type());
+  } else {
+    auto is_integral = at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
+    out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
+  }
+
+  set_output(self.sizes(), self.options().dtype(out_dtype));
+  namedinference::propagate_names(result, self);
+}
+
 } // namespace meta
 
 namespace native {
@@ -180,53 +196,21 @@ Tensor& logcumsumexp_out(const Tensor& self, int64_t dim, Tensor& result) {
   return result;
 }
 
-Tensor _cumsum_cpu(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  cumsum_stub(self.device().type(), result, self, dim);
-  return result;
-}
-
-Tensor& _cumsum_out_cpu(const Tensor& self, int64_t dim, Tensor& result) {
-  cumsum_stub(self.device().type(), result, self, dim);
-  return result;
-}
-
-Tensor cumsum(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return at::_cumsum(integer_upcast(self, dtype), dim);
-  }();
-  namedinference::propagate_names(result, self);
-  return result;
-}
-
-Tensor& cumsum_(Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-          !dtype.has_value() || (self.scalar_type() == dtype.value()),
-          "provided dtype must match the dtype of self tensor in cumsum. Got ",
-          toString(self.scalar_type()),
-          " and ",
-          toString(dtype.value()),
-          ".");
-
-  return at::_cumsum_out(self, self, dim);
-}
-
-Tensor& cumsum_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype, Tensor& result) {
-  // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  TORCH_CHECK(
-      !dtype.has_value() || (result.scalar_type() == dtype.value()),
-      "provided dtype must match dtype of result in cumsum. Got ",
-      toString(result.scalar_type()),
-      " and ",
-      toString(dtype.value()),
-      ".");
-  {
-    NoNamesGuard guard;
-    at::_cumsum_out(result, self.toType(result.scalar_type()), dim);
+TORCH_IMPL_FUNC(cumsum_out)
+(const Tensor& self,
+ int64_t dim,
+ c10::optional<ScalarType> dtype,
+ const Tensor& result) {
+  NoNamesGuard guard;
+  if (self.dim() == 0) {
+    result.fill_(self);
+  } else if (self.numel() == 0) {
+    result.zero_();
+  } else {
+    dim = maybe_wrap_dim(dim, self.dim());
+    auto& result_mut = const_cast<Tensor&>(result);
+    cumsum_stub(self.device().type(), result_mut, self.to(result.scalar_type()), dim);
   }
-  namedinference::propagate_names(result, self);
-  return result;
 }
 
 Tensor _cumprod_cpu(const Tensor& self, int64_t dim) {
@@ -1783,7 +1767,7 @@ Tensor cumsum(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) 
   return at::cumsum(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumsum_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-    return native::cumsum_(self, dimname_to_position(self, dim), dtype);
+  return at::cumsum_out(self, self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumsum_out(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, Tensor& result) {
   return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
