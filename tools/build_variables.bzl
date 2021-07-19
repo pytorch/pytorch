@@ -313,6 +313,7 @@ core_sources_full_mobile = [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
@@ -643,6 +644,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
+    "torch/csrc/autograd/python_saved_variable_hooks.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_function.cpp",
