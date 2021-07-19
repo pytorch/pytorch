@@ -9,8 +9,8 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
+#include <c10/util/Exception.h>
 
-#include "c10/util/Exception.h"
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/serialize/file_adapter.h"
