@@ -117,8 +117,9 @@ class profile(object):
         with_flops (bool): use formula to estimate the FLOPS of specific operators
             (matrix multiplication and 2D convolution).
         with_module_hierarchy (bool): record module hierarchy (including function names)
-            corresponding to the callstack of the op. e.g. If A's forward call's B's forward
-            and it has aten::add op then aten::add's module hierarchy is A.B
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.

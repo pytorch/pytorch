@@ -27,7 +27,7 @@ class ProfilerConfig:
         report_input_shapes: bool,
         profile_memory: bool,
         with_stack: bool,
-        with_flops: bool
+        with_flops: bool,
         with_module_hierarchy: bool
     ) -> None: ...
     ...

@@ -362,7 +362,8 @@ class TestProfiler(TestCase):
         op_to_module_hierarchy["aten::mul"] = [
             "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method"]
         op_to_module_hierarchy["aten::add"] = [
-            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_", "TOP(C)::forward.SELF(C)::call_b.B0(B)::forward", "TOP(C)::forward"]
+            "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_",
+            "TOP(C)::forward.SELF(C)::call_b.B0(B)::forward", "TOP(C)::forward"]
         with TemporaryFileName(mode="w+") as fname:
             with profile(activities=[torch.profiler.ProfilerActivity.CPU], with_module_hierarchy=True,) as prof:
                 model(input_a, input_b)

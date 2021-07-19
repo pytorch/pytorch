@@ -359,8 +359,9 @@ class profile(object):
         with_stack (bool, optional): record source information (file and line number) for the ops.
 
         with_module_hierarchy (bool): record module hierarchy (including function names)
-            corresponding to the callstack of the op. e.g. If A's forward call's B's forward
-            and it has aten::add op then aten::add's module hierarchy is A.B
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 

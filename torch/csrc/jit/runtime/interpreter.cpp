@@ -779,7 +779,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
  public:
   std::string moduleHierarchy() const {
     std::string module_hierarchy("TOP");
-    std::vector<StackEntry> entries;
     for (size_t i = 0; i < frames.size(); ++i) {
       const Frame& frame = frames[i];
       std::string fn_name = frame.function->function_name_;
@@ -796,7 +795,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           g_self_type = g_self_type.substr(g_self_type.find_last_of('.') + 1);
         }
       }
-      module_hierarchy += "(" + g_self_type + ")::" + fn_name;
+      module_hierarchy.append("(")
+          .append(g_self_type)
+          .append(")::")
+          .append(fn_name);
 
       size_t pc = frame.pc;
       // CALL nodes have already advanced the pc, so
@@ -819,7 +821,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           } else {
             // This is likely a call to free function, not associated with
             // any class
-            module_hierarchy += ".::" + fn_name;
+            module_hierarchy.append(".::").append(fn_name);
           }
         }
       }
@@ -838,13 +840,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         } else {
           class_instance_name = "INSTANCE_NAME_UNKNOWN";
         }
-        module_hierarchy += "." + class_instance_name;
+        module_hierarchy.append(".").append(class_instance_name);
       } else if (node->kind() == prim::CallFunction) {
         auto function_constant = node->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         auto fun_name = fun_type->function()->name();
-        module_hierarchy += ".CALL_FUNCTION::" + fun_name;
+        module_hierarchy.append(".CALL_FUNCTION::").append(fun_name);
       }
     }
     return module_hierarchy;
