@@ -91,4 +91,50 @@ inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) {
   return std::fmod(float(a), float(b));
 }
 
+inline c10::BFloat16 nextafter(c10::BFloat16 from, c10::BFloat16 to) {
+  using int_repr_t = uint16_t;
+  using float_t = c10::BFloat16;
+  constexpr uint8_t bits = 16;
+  union {
+    float_t f;
+    int_repr_t i;
+  } ufrom = {from}, uto = {to};
+
+  // get a mask to get the sign bit i.e. MSB
+  int_repr_t sign_mask = int_repr_t{1} << (bits - 1);
+
+  if (at::_isnan(from) || at::_isnan(to)) {
+    return from;
+  }
+
+  // if they are exactly the same.
+  if (ufrom.i == uto.i) {
+    return from;
+  }
+
+  // mask the sign-bit to zero i.e. positive
+  // equivalent to abs(x)
+  int_repr_t abs_from = ufrom.i & ~sign_mask;
+  int_repr_t abs_to = uto.i & ~sign_mask;
+  if (abs_from == 0) {
+    // if both are zero but with different sign,
+    // preserve the sign of `to`.
+    if (abs_to == 0) {
+      return to;
+    }
+    // smallest subnormal with sign of `to`.
+    ufrom.i = (uto.i & sign_mask) | int_repr_t{1};
+    return ufrom.f;
+  }
+
+  // if abs(from) > abs(to) or sign(from) != sign(to)
+  if (abs_from > abs_to || ((ufrom.i ^ uto.i) & sign_mask)) {
+    ufrom.i--;
+  } else {
+    ufrom.i++;
+  }
+
+  return ufrom.f;
+}
+
 } // namespace std
