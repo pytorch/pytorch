@@ -1583,6 +1583,7 @@ new_module_tests = [
         input_size=(4, 56, 56, 56),
         cudnn=True,
         check_eval=True,
+        gradcheck_fast_mode=True,
         desc='3d_no_affine_large_feature',
     ),
     dict(
@@ -5297,6 +5298,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
+        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5316,11 +5318,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
-                                           check_batched_grad=self.check_batched_grad))
+                                           check_batched_grad=self.check_batched_grad,
+                                           fast_mode=self.gradcheck_fast_mode))
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad))
+                                               check_batched_grad=self.check_batched_grad,
+                                               fast_mode=self.gradcheck_fast_mode))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
