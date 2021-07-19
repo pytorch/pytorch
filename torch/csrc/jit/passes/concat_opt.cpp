@@ -335,6 +335,7 @@ class ConcatExpander {
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type);
       TORCH_INTERNAL_ASSERT(cat_inp_tensor_type->dim());
       auto cat_inp_tensortype_sizes = cat_inp_tensor_type->sizes();
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       int end_idx = start_idx + *cat_inp_tensortype_sizes[cat_dim_value];
       auto end = graph_->insertConstant(end_idx);
 
@@ -521,7 +522,7 @@ class VariadicCatUpdater {
     collectCatNodes(graph_->block());
     bool changed = false;
     for (auto c : cat_nodes_) {
-      changed = changed || replaceWithVariadicCat(c);
+      changed = replaceWithVariadicCat(c) || changed;
     }
     return changed;
   }

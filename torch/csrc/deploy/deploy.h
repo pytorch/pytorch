@@ -2,6 +2,7 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <assert.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <fstream>
@@ -25,6 +26,7 @@ struct TORCH_API InterpreterSession {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Obj self; // when retreived from a PythonMovable this will be set.
   InterpreterSession(InterpreterSession&&) noexcept = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~InterpreterSession();
   Obj global(const char* module, const char* name) {
     TORCH_DEPLOY_TRY
@@ -107,27 +109,8 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  InterpreterManager(size_t n_interp = 2) : resources_(n_interp) {
-    TORCH_DEPLOY_TRY
-    for (const auto i : c10::irange(n_interp)) {
-      instances_.emplace_back(this);
-      auto I = instances_.back().acquire_session();
-      // make torch.version.interp be the interpreter id
-      // can be used for balancing work across GPUs
-      I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
-      // std::cerr << "Interpreter " << i << " initialized\n";
-      instances_.back().pImpl_->set_find_module(
-          [this](const std::string& name) -> at::optional<std::string> {
-            auto it = registered_module_sources_.find(name);
-            if (it != registered_module_sources_.end()) {
-              return it->second;
-            } else {
-              return at::nullopt;
-            }
-          });
-    }
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+  explicit InterpreterManager(size_t n_interp = 2);
+
   // get a free model, guarenteed that no other user of acquire_one has the same
   // model. It _is_ possible that other users will be using the interpreter.
   InterpreterSession acquire_one() {
@@ -185,6 +168,7 @@ struct TORCH_API ReplicatedObjImpl {
       PickledObject data,
       InterpreterManager* manager)
       : object_id_(object_id), data_(data), manager_(manager) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~ReplicatedObjImpl();
   void unload(const Interpreter* on_this_interpreter);
   int64_t object_id_;
@@ -229,6 +213,36 @@ struct TORCH_API ReplicatedObj {
   friend struct Package;
   friend struct InterpreterSession;
   friend struct InterpreterManager;
+};
+
+class PythonMethodWrapper : public torch::IMethod {
+  // PythonMethodWrapper is a more specific instance of a
+  // ReplicatedObj which represents a python method, and
+  // is therefore callable and has argument names accessible.
+ public:
+  // TODO(whc) make bound method pickleable, then directly construct from that
+  PythonMethodWrapper(
+      torch::deploy::ReplicatedObj model,
+      std::string method_name)
+      : model_(std::move(model)), method_name_(std::move(method_name)) {}
+
+  c10::IValue operator()(
+      std::vector<c10::IValue> args,
+      const IValueMap& kwargs = IValueMap()) override {
+    // TODO(whc) ideally, pickle the method itself as replicatedobj, to skip
+    // this lookup each time
+    auto model_session = model_.acquire_session();
+    auto method = model_session.self.attr(method_name_.c_str());
+    return method.call_kwargs(args, kwargs).toIValue();
+  }
+
+  std::vector<std::string> getArgumentNames() override {
+    throw std::runtime_error("getArgumentNames not yet implemented");
+  }
+
+ private:
+  torch::deploy::ReplicatedObj model_;
+  std::string method_name_;
 };
 
 struct TORCH_API Package {

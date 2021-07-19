@@ -133,6 +133,84 @@ void format(Stack& stack, size_t num_inputs) {
   push(stack, ss.str());
 }
 
+void einsum(Stack& stack, size_t num_inputs) {
+  TORCH_CHECK(
+      num_inputs >= 2,
+      "einsum(): must specify the equation string and at least one operand, ",
+      "or at least one operand and its subscripts list");
+
+  const auto args = last(stack, num_inputs);
+
+  // Convert the subscript list format which is an interleaving of operand and
+  // its subscripts list with an optional output subscripts list at the end
+  // (see documentation for more details on this) to the equation string
+  // format by creating the equation string from the subscripts list and
+  // grouping the input operands into a tensorlist (List[Tensor]).
+  std::stringstream ss;
+
+  auto parse_sublist = [&ss](const c10::List<int64_t>& l, size_t arg_num) {
+    for (const auto i : c10::irange(l.size())) {
+      TORCH_CHECK(
+          l[i] >= 0 && l[i] < 52,
+          "einsum(): expected subscript ",
+          i,
+          " in argument ",
+          arg_num,
+          " to be within the range [0, 52), but got ",
+          l[i]);
+      if (l[i] < 26) {
+        ss << static_cast<char>(l[i] + 'A');
+      } else {
+        ss << static_cast<char>(l[i] - 26 + 'a');
+      }
+    }
+  };
+
+  // Parse subscripts for input operands
+  for (auto i = decltype(num_inputs){1}; i < num_inputs; i += 2) {
+    TORCH_CHECK(
+        args[i].isIntList(),
+        "einsum(): expected List[int] in argument ",
+        i,
+        ", but got ",
+        args[i].type()->repr_str());
+    parse_sublist(args[i].toIntList(), i);
+    if (i + 2 < num_inputs) {
+      ss << ',';
+    }
+  }
+
+  // Parse optional output subscripts (provided if #args is odd)
+  if (num_inputs % 2 == 1) {
+    TORCH_CHECK(
+        args.back().isIntList(),
+        "einsum(): expected List[int] in argument ",
+        num_inputs - 1,
+        ", but got ",
+        args.back().type()->repr_str());
+    ss << "->";
+    parse_sublist(args.back().toIntList(), num_inputs - 1);
+  }
+
+  const auto equation = ss.str();
+  std::vector<at::Tensor> operands;
+
+  // Parse input operands
+  const auto end = num_inputs % 2 == 1 ? num_inputs - 1 : num_inputs;
+  for (auto i = decltype(num_inputs){0}; i < end; i += 2) {
+    TORCH_CHECK(
+        args[i].isTensor(),
+        "einsum(): expected Tensor in argument ",
+        i,
+        ", but got ",
+        args[i].type()->repr_str());
+    operands.emplace_back(args[i].toTensor());
+  }
+
+  drop(stack, num_inputs);
+  push(stack, at::einsum(equation, operands));
+}
+
 void percentFormat(Stack& stack, size_t num_inputs) {
   auto format_str = peek(stack, 0, num_inputs).toStringRef();
   auto args = last(stack, num_inputs - 1)[0];

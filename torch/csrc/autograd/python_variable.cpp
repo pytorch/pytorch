@@ -103,6 +103,7 @@ class PyInterpreterHolder {
  private:
   c10::impl::PyInterpreter* impl_;
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
@@ -754,7 +755,9 @@ struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
 // An alternative way to reduce the risk of python_gil_hooks going prematurely
 // dead would be to leak it at destruction time.  I didn't do that because
 // it's annoying to write the Registerer class for this case.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcretePythonGILHooks python_gil_hooks;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
 #endif
 
@@ -1033,7 +1036,6 @@ PyTypeObject THPVariableMetaType = {
   sizeof(THPVariableMeta),                     /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -1080,7 +1082,6 @@ PyTypeObject THPVariableType = {
     // directly.  Subclasses will have their tp_dealloc set appropriately
     // by the metaclass
     nullptr, /* tp_dealloc */
-    // NOLINTNEXTLINE(modernize-use-nullptr)
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -1136,7 +1137,9 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs
 }
 
 static void clear_slots(PyTypeObject* type, PyObject* self) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t i, n;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
@@ -1145,8 +1148,8 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      if (obj != NULL) {
-        *(PyObject**)addr = NULL;
+      if (obj != nullptr) {
+        *(PyObject**)addr = nullptr;
         Py_DECREF(obj);
       }
     }
@@ -1230,11 +1233,11 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // All Python defined classes have __dict__
   if (C10_LIKELY(type->tp_dictoffset)) {
     PyObject** dictptr = _PyObject_GetDictPtr(self);
-    if (dictptr != NULL) {
+    if (dictptr != nullptr) {
       PyObject* dict = *dictptr;
-      if (dict != NULL) {
+      if (dict != nullptr) {
         Py_DECREF(dict);
-        *dictptr = NULL;
+        *dictptr = nullptr;
       }
     }
   }
@@ -1298,7 +1301,9 @@ static int traverse_slots(
     PyObject* self,
     visitproc visit,
     void* arg) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t i, n;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
@@ -1307,7 +1312,7 @@ static int traverse_slots(
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      if (obj != NULL) {
+      if (obj != nullptr) {
         int err = visit(obj, arg);
         if (err)
           return err;
