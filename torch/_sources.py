@@ -2,8 +2,7 @@ import ast
 import functools
 import inspect
 from textwrap import dedent
-from typing import Any, Optional, Tuple, List
-from collections import namedtuple
+from typing import Any, Optional, Tuple, List, NamedTuple
 from torch._C import ErrorReport
 from torch._C._jit_tree_views import SourceRangeFactory
 
@@ -85,7 +84,10 @@ def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
 
 
-ParsedDef = namedtuple('ParsedDef', ['ast', 'ctx', 'source'])
+class ParsedDef(NamedTuple):
+    ast: ast.Module
+    ctx: SourceContext
+    source: str
 
 def parse_def(fn):
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, ErrorReport.call_stack())
