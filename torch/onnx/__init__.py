@@ -110,9 +110,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
-            * ``TrainingMode.EVAL``: export the model in inference mode. If export_params = False
-              or keep_initializers_as_inputs = True, optimizations that might adjust graph
-              inputs will be skipped (e.g., fusing Conv and BatchNorm ops).
+            * ``TrainingMode.EVAL``: export the model in inference mode. In this case, optimizations
+              (e.g., fusing Conv and BatchNorm ops) may adjust graph inputs by modifying model params
+              and model param names. Such adjustment could be skipped by setting export_params = False
+              or keep_initializers_as_inputs = True.
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
             * ``TrainingMode.TRAINING``: export the model in training mode. Disables optimizations
