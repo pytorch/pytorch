@@ -1,5 +1,8 @@
 #include <torch/csrc/python_headers.h>
 
+#include <torch/csrc/distributed/rpc/ps.h>
+
+
 #include <torch/csrc/distributed/rpc/process_group_agent.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
@@ -604,6 +607,21 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           "sync",
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
+
+  shared_ptr_class_<ParameterServer>(module, "ParameterServer")
+      .def(
+          py::init<int32_t, int32_t>(),
+          py::arg("num_trainers"),
+          py::arg("num_buckets"))
+      .def(
+          "add_grad_bucket",
+          [](ParameterServer& self, at::Tensor bucket, int16_t id) {
+            return std::make_shared<jit::PythonFutureWrapper>(
+                self.addGradBucket(std::move(bucket), id));
+          }
+      );
+
+
 
 #ifdef USE_TENSORPIPE
 

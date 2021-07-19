@@ -51,6 +51,7 @@ if is_available():
         _TensorPipeRpcBackendOptionsBase,
         ProcessGroupRpcBackendOptions,
         RpcAgent,
+        ParameterServer,
         PyRRef,
         ProcessGroupAgent,
         TensorPipeAgent,
