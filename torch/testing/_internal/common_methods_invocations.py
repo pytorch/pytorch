@@ -1353,7 +1353,7 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for input_shape, batch1_shape, batch2_shape, beta, alpha in test_cases:
             if dtype.is_complex:
-                beta, alpha = beta * (1 + 2j), alpha * (2 + 3j)
+                beta, alpha = beta * (1 + 2j), alpha * (2 + 3j)  # type: ignore[assignment]
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta, alpha=alpha))
 
