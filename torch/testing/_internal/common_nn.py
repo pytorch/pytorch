@@ -1616,8 +1616,8 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(1, 6, 1e-3),
-        cpp_constructor_args='torch::nn::GroupNormOptions(1, 6).eps(1e-3)',
+        constructor_args=(1, 6, 1e-5),
+        cpp_constructor_args='torch::nn::GroupNormOptions(1, 6).eps(1e-5)',
         input_size=(150, 6),
         cudnn=True,
         check_eval=True,
@@ -1654,6 +1654,17 @@ new_module_tests = [
         check_eval=True,
         check_bfloat16=True,
         desc='2d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(2, 6, 1e-5),
+        cpp_constructor_args='torch::nn::GroupNormOptions(2, 6).eps(1e-5)',
+        input_size=(150, 6, 3, 7),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_affine_large_batch',  # For large batch_size
+        check_bfloat16=True,
+        test_cpu=False,
     ),
     dict(
         module_name='GroupNorm',

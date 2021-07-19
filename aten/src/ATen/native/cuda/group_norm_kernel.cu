@@ -109,6 +109,8 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
   const int64_t n = blockIdx.x;
   const int64_t g = blockIdx.y;
   const int64_t ng = n * G + g;
+  const T_ACC mean_v = static_cast<T_ACC>(mean[ng]);
+  const T_ACC rstd_v = static_cast<T_ACC>(rstd[ng]);
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
@@ -116,7 +118,7 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
     const int64_t c = g * D + i;
     const T_ACC gamma_v =
         gamma == nullptr ? T_ACC(1) : static_cast<T_ACC>(gamma[c]);
-    sum1 += dY[index] * X[index] * gamma_v;
+    sum1 += dY[index] * (X[index] - mean_v) * gamma_v;
     sum2 += dY[index] * gamma_v;
   }
   if (blockDim.x <= C10_WARP_SIZE) {
@@ -130,12 +132,9 @@ __global__ void Compute1dBackwardFusedParamsCUDAKernel(
   }
   if (threadIdx.x == 0) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D);
-    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1) *
-        static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(rstd[ng]) *
-        static_cast<T_ACC>(rstd[ng]) * s;
+    const T_ACC x = -sum1 * rstd_v * rstd_v * rstd_v * s;
     c2[ng] = x;
-    c3[ng] = -x * static_cast<T_ACC>(mean[ng]) -
-        sum2 * static_cast<T_ACC>(rstd[ng]) * s;
+    c3[ng] = -x * mean_v - sum2 * rstd_v * s;
   }
 }
 
@@ -164,8 +163,8 @@ __global__ void GammaBeta1dBackwardCUDAKernel1(
       const T_ACC x_acc = static_cast<T_ACC>(X[nc]);
       sum1 += (dgamma == nullptr)
           ? T_ACC(0)
-          : ((dy_acc * x_acc - dy_acc * static_cast<T_ACC>(mean[ng])) *
-             static_cast<T_ACC>(rstd[ng]));
+          : dy_acc * (x_acc - static_cast<T_ACC>(mean[ng])) *
+              static_cast<T_ACC>(rstd[ng]);
       sum2 += (dbeta == nullptr) ? T_ACC(0) : dy_acc;
     }
     if (dgamma != nullptr) {
@@ -213,16 +212,16 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
       const T_ACC x1_acc = static_cast<T_ACC>(X[nc1]);
       dg_sum1 += dgamma == nullptr
           ? T_ACC(0)
-          : ((dy1_acc * x1_acc - dy1_acc * static_cast<T_ACC>(mean[ng1])) *
-             static_cast<T_ACC>(rstd[ng1]));
+          : dy1_acc * (x1_acc - static_cast<T_ACC>(mean[ng1])) *
+              static_cast<T_ACC>(rstd[ng1]);
       db_sum1 += dbeta == nullptr ? T_ACC(0) : dy1_acc;
       if (n2 < N) {
         const T_ACC dy2_acc = static_cast<T_ACC>(dY[nc2]);
         const T_ACC x2_acc = static_cast<T_ACC>(X[nc2]);
         dg_sum2 += dgamma == nullptr
             ? T_ACC(0)
-            : ((dy2_acc * x2_acc - dy2_acc * static_cast<T_ACC>(mean[ng2])) *
-               static_cast<T_ACC>(rstd[ng2]));
+            : dy2_acc * (x2_acc - static_cast<T_ACC>(mean[ng2])) *
+                static_cast<T_ACC>(rstd[ng2]);
         db_sum2 += dbeta == nullptr ? T_ACC(0) : dy2_acc;
       }
     }
@@ -272,18 +271,24 @@ __global__ void GammaBeta1dBackwardCUDAKernel2(
 
 template <typename T>
 __global__ void ComputeInternalGradientsCUDAKernel(
+    int64_t C,
     int64_t HxW,
+    int64_t group,
     const T* dY,
     const T* X,
+    const T* mean,
     acc_type<T, true>* ds,
     acc_type<T, true>* db) {
   using T_ACC = acc_type<T, true>;
   const int64_t nc = blockIdx.x;
+  const int64_t ng = nc / (C / group);
+  const T_ACC mean_v = static_cast<T_ACC>(mean[ng]);
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t hw = threadIdx.x; hw < HxW; hw += blockDim.x) {
     const int64_t index = nc * HxW + hw;
-    sum1 += static_cast<T_ACC>(dY[index]) * static_cast<T_ACC>(X[index]);
+    sum1 +=
+        static_cast<T_ACC>(dY[index]) * (static_cast<T_ACC>(X[index]) - mean_v);
     sum2 += static_cast<T_ACC>(dY[index]);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
@@ -319,6 +324,8 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
   const int64_t n = blockIdx.x;
   const int64_t g = blockIdx.y;
   const int64_t ng = n * G + g;
+  const T_ACC mean_v = static_cast<T_ACC>(mean[ng]);
+  const T_ACC rstd_v = static_cast<T_ACC>(rstd[ng]);
   T_ACC sum1 = 0;
   T_ACC sum2 = 0;
   for (int64_t i = threadIdx.x; i < D; i += blockDim.x) {
@@ -340,12 +347,9 @@ __global__ void ComputeBackwardFusedParamsCUDAKernel(
   }
   if (threadIdx.x == 0) {
     const T_ACC s = T_ACC(1) / static_cast<T_ACC>(D * HxW);
-    const T_ACC x = (sum2 * static_cast<T_ACC>(mean[ng]) - sum1) *
-        static_cast<T_ACC>(rstd[ng]) * static_cast<T_ACC>(rstd[ng]) *
-        static_cast<T_ACC>(rstd[ng]) * s;
+    const T_ACC x = -sum1 * rstd_v * rstd_v * rstd_v * s;
     c2[ng] = x;
-    c3[ng] = -x * static_cast<T_ACC>(mean[ng]) -
-        sum2 * static_cast<T_ACC>(rstd[ng]) * s;
+    c3[ng] = -x * mean_v - sum2 * rstd_v * s;
   }
 }
 
@@ -354,7 +358,6 @@ __global__ void GammaBetaBackwardCUDAKernel1(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
     const T* rstd,
     const acc_type<T, true>* ds,
     const acc_type<T, true>* db,
@@ -370,10 +373,8 @@ __global__ void GammaBetaBackwardCUDAKernel1(
     for (int64_t n = 0; n < N; ++n) {
       const int64_t nc = n * C + c;
       const int64_t ng = n * G + c / D;
-      sum1 += (dgamma == nullptr)
-          ? T_ACC(0)
-          : ((ds[nc] - db[nc] * static_cast<T_ACC>(mean[ng])) *
-             static_cast<T_ACC>(rstd[ng]));
+      sum1 += (dgamma == nullptr) ? T_ACC(0)
+                                  : ds[nc] * static_cast<T_ACC>(rstd[ng]);
       sum2 += (dbeta == nullptr) ? T_ACC(0) : db[nc];
     }
     if (dgamma != nullptr) {
@@ -390,7 +391,6 @@ __global__ void GammaBetaBackwardCUDAKernel2(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
     const T* rstd,
     const acc_type<T, true>* ds,
     const acc_type<T, true>* db,
@@ -417,16 +417,12 @@ __global__ void GammaBetaBackwardCUDAKernel2(
       const int64_t nc2 = n2 * C + c;
       const int64_t ng1 = n1 * G + c / D;
       const int64_t ng2 = n2 * G + c / D;
-      dg_sum1 += dgamma == nullptr
-          ? T_ACC(0)
-          : ((ds[nc1] - db[nc1] * static_cast<T_ACC>(mean[ng1])) *
-             static_cast<T_ACC>(rstd[ng1]));
+      dg_sum1 += dgamma == nullptr ? T_ACC(0)
+                                   : ds[nc1] * static_cast<T_ACC>(rstd[ng1]);
       db_sum1 += dbeta == nullptr ? T_ACC(0) : db[nc1];
       if (n2 < N) {
-        dg_sum2 += dgamma == nullptr
-            ? T_ACC(0)
-            : ((ds[nc2] - db[nc2] * static_cast<T_ACC>(mean[ng2])) *
-               static_cast<T_ACC>(rstd[ng2]));
+        dg_sum2 += dgamma == nullptr ? T_ACC(0)
+                                     : ds[nc2] * static_cast<T_ACC>(rstd[ng2]);
         db_sum2 += dbeta == nullptr ? T_ACC(0) : db[nc2];
       }
     }
@@ -847,7 +843,7 @@ void GroupNormBackwardKernelImplInternal(
       ? C10_WARP_SIZE
       : cuda_utils::kCUDABlockReduceNumThreads;
   ComputeInternalGradientsCUDAKernel<T><<<N * C, num_threads, 0, cuda_stream>>>(
-      HxW, dY_data, X_data, ds_data, db_data);
+      C, HxW, G, dY_data, X_data, mean_data, ds_data, db_data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   if (dX.defined()) {
@@ -927,15 +923,7 @@ void GroupNormBackwardKernelImplInternal(
       // For small batch size, do colwise reduce directly.
       const int64_t B = (C + kCUDANumThreads - 1) / kCUDANumThreads;
       GammaBetaBackwardCUDAKernel1<T><<<B, kCUDANumThreads, 0, cuda_stream>>>(
-          N,
-          C,
-          G,
-          mean_data,
-          rstd_data,
-          ds_data,
-          db_data,
-          dgamma_data,
-          dbeta_data);
+          N, C, G, rstd_data, ds_data, db_data, dgamma_data, dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       const int64_t B = (C + kReduceTileSize - 1) / kReduceTileSize;
@@ -946,15 +934,7 @@ void GroupNormBackwardKernelImplInternal(
       constexpr int kThreadY = kReduceTileSize / 2;
       GammaBetaBackwardCUDAKernel2<T>
           <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
-              N,
-              C,
-              G,
-              mean_data,
-              rstd_data,
-              ds_data,
-              db_data,
-              dgamma_data,
-              dbeta_data);
+              N, C, G, rstd_data, ds_data, db_data, dgamma_data, dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }

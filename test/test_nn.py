@@ -12946,27 +12946,42 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_GroupNorm_numeric(self, device):
         def group_norm_ref(X, gamma, beta, groups, channels, eps):
-            batch_size = X.size()[0]
-            X_view = X.view(batch_size, groups, -1)
-            mean = X_view.mean(dim=-1, keepdim=True)
-            var = X_view.var(dim=-1, unbiased=False, keepdim=True)
-            Y = ((X_view - mean) / torch.sqrt(var + eps)).view(
-                batch_size, channels, -1)
-            Y = Y * gamma.view(channels, 1) + beta.view(channels, 1)
-            return Y.view(*X.size())
+            with torch.no_grad():
+                batch_size = X.size()[0]
+                X_view = X.view(batch_size, groups, -1)
+                mean = X_view.mean(dim=-1, keepdim=True)
+                var = X_view.var(dim=-1, unbiased=False, keepdim=True)
+                Y = ((X_view - mean) / torch.sqrt(var + eps)).view(
+                    batch_size, channels, -1)
+                Y = Y * gamma.view(channels, 1) + beta.view(channels, 1)
+                return Y.view(*X.size())
 
         batch_size = 1
         groups = 2
         channels = 8
         group_norm = nn.GroupNorm(groups, channels).float().to(device)
         X = torch.rand(batch_size, channels, 256, 256, 72,
-                       dtype=torch.float32, device=device)
+                       dtype=torch.float32, device=device, requires_grad=True)
 
         Y = group_norm(X)
         Y_ref = group_norm_ref(
             X, group_norm.weight.data, group_norm.bias.data, groups,
             channels, group_norm.eps)
         self.assertEqual(Y, Y_ref, rtol=0, atol=1e-5)
+
+        # grad test
+        group_norm_double = nn.GroupNorm(groups, channels).double().to(device)
+        X_double = X.detach().clone().double().requires_grad_(True)
+        Y_double = group_norm_double(X_double)
+
+        dY = torch.randn_like(Y)
+        Y.backward(dY, retain_graph=True)
+        Y_double.backward(dY.double(), retain_graph=True)
+
+        self.assertEqual(X.grad, X_double.grad.float(), rtol=1e-5, atol=1e-5)
+        self.assertEqual(group_norm.weight.grad,
+                         group_norm_double.weight.grad.float(),
+                         rtol=1e-5, atol=1e-5)
 
         if self.device_type == 'cuda':
             group_norm.cpu()

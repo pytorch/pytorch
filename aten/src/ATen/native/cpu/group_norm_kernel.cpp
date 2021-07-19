@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <numeric>
+#include <tuple>
 
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
@@ -107,38 +108,19 @@ void ComputeInternalGradients(
     int64_t N,
     int64_t C,
     int64_t HxW,
+    int64_t G,
     const T* dY,
     const T* X,
+    const T* mean,
     T* ds,
     T* db) {
   at::parallel_for(0, N * C, 1, [=](int64_t start, int64_t end) {
-    constexpr int64_t K = vec::Vectorized<T>::size();
-    const int64_t inner_size = HxW / K * K;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> ds_arr;
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<T, K> db_arr;
     for (int64_t i = start; i < end; ++i) {
       const T* dY_ptr = dY + i * HxW;
       const T* X_ptr = X + i * HxW;
-      vec::Vectorized<T> ds_vec(0);
-      vec::Vectorized<T> db_vec(0);
-      for (int64_t j = 0; j < inner_size; j += K) {
-        const vec::Vectorized<T> dy_vec = vec::Vectorized<T>::loadu(dY_ptr + j);
-        const vec::Vectorized<T> x_vec = vec::Vectorized<T>::loadu(X_ptr + j);
-        ds_vec = ds_vec + dy_vec * x_vec;
-        db_vec = db_vec + dy_vec;
-      }
-      ds_vec.store(ds_arr.data());
-      db_vec.store(db_arr.data());
-      T ds_val = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
-      T db_val = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
-      for (int64_t j = inner_size; j < HxW; ++j) {
-        ds_val += dY_ptr[j] * X_ptr[j];
-        db_val += dY_ptr[j];
-      }
-      ds[i] = ds_val;
-      db[i] = db_val;
+      const T mean_val = mean[i / (C / G)];
+      std::tie(ds[i], db[i]) = utils::RowwiseMomentsInternalGradients<T>(
+          dY_ptr, X_ptr, /*gamma=*/nullptr, mean_val, HxW);
     }
   });
 }
@@ -190,8 +172,7 @@ void GroupNormInputBackward(
         ds_val += ds_ptr[j] * gamma_v;
         db_val += db_ptr[j] * gamma_v;
       }
-      const T c2 =
-          (db_val * mean[i] - ds_val) * rstd[i] * rstd[i] * rstd[i] * s;
+      const T c2 = -ds_val * rstd[i] * rstd[i] * rstd[i] * s;
       const T c3 = -c2 * mean[i] - db_val * rstd[i] * s;
       for (int64_t j = 0; j < D; ++j) {
         const int64_t c = g * D + j;
@@ -212,10 +193,8 @@ void GammaBackward(
     int64_t N,
     int64_t C,
     int64_t group,
-    const T* mean,
     const T* rstd,
     const T* ds,
-    const T* db,
     T* dgamma) {
   const int64_t G = group;
   const int64_t D = C / G;
@@ -226,11 +205,10 @@ void GammaBackward(
     }
     for (int64_t i = 0; i < N * G; ++i) {
       const T* ds_ptr = ds + i * D;
-      const T* db_ptr = db + i * D;
       const int64_t g = i % G;
       for (int64_t j = start; j < end; ++j) {
         const int64_t c = g * D + j;
-        dgamma[c] += (ds_ptr[j] - db_ptr[j] * mean[i]) * rstd[i];
+        dgamma[c] += ds_ptr[j] * rstd[i];
       }
     }
   });
@@ -283,7 +261,8 @@ void GroupNormBackwardKernelImplInternal(
   T* ds_data = ds.data_ptr<T>();
   T* db_data = db.data_ptr<T>();
 
-  ComputeInternalGradients<T>(N, C, HxW, dY_data, X_data, ds_data, db_data);
+  ComputeInternalGradients<T>(
+      N, C, HxW, group, dY_data, X_data, mean_data, ds_data, db_data);
 
   if (dX_data != nullptr) {
     GroupNormInputBackward<T>(
@@ -301,8 +280,7 @@ void GroupNormBackwardKernelImplInternal(
         dX_data);
   }
   if (dgamma_data != nullptr) {
-    GammaBackward<T>(
-        N, C, group, mean_data, rstd_data, ds_data, db_data, dgamma_data);
+    GammaBackward<T>(N, C, group, rstd_data, ds_data, dgamma_data);
   }
   if (dbeta_data != nullptr) {
     BetaBackward<T>(N, C, db_data, dbeta_data);

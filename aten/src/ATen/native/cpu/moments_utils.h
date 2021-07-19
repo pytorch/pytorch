@@ -26,7 +26,7 @@ void AddMoments(
     T& m1,
     T& m2) {
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c = n == 0 ? T(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const T delta = m1_add - m1;
   m1 += c * delta;
   m2 += m2_add + delta * delta * c * static_cast<T>(m0);
@@ -43,7 +43,7 @@ void AddMomentsVec(
     vec::Vectorized<T>& m2) {
   using Vec = vec::Vectorized<T>;
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c = n == 0 ? T(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const Vec c_vec(c);
   const Vec delta = m1_add - m1;
   m1 += c_vec * delta;
@@ -140,6 +140,112 @@ std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
     return RowwiseMomentsImpl<T, 32>(X, N, ddof);
   } else {
     return RowwiseMomentsImpl<T, 64>(X, N, ddof);
+  }
+}
+
+template <typename T, int64_t kMaxDepth>
+std::pair<T, T> RowwiseMomentsInternalGradientsImpl(
+    const T* dY,
+    const T* X,
+    const T* gamma,
+    T mean,
+    int64_t N) {
+  using Vec = vec::Vectorized<T>;
+
+  constexpr int64_t kVecSize = Vec::size();
+  const int64_t n = N / kVecSize;
+  const int64_t m = divup(n, kChunkSize);
+  const int64_t depth = CeilLog2(m);
+
+  const Vec kZeroVec(T(0));
+  const Vec mean_vec(mean);
+  c10::SmallVector<Vec, kMaxDepth> ds_stk(depth, kZeroVec);
+  c10::SmallVector<Vec, kMaxDepth> db_stk(depth, kZeroVec);
+
+  for (int64_t i = 0; i < m; ++i) {
+    const T* dY_ptr = dY + i * kChunkSize * kVecSize;
+    const T* X_ptr = X + i * kChunkSize * kVecSize;
+    const T* gamma_ptr =
+        gamma == nullptr ? nullptr : gamma + i * kChunkSize * kVecSize;
+    const int64_t m0 = std::min(kChunkSize, n - i * kChunkSize);
+    Vec ds_vec(0);
+    Vec db_vec(0);
+    if (gamma_ptr == nullptr) {
+      for (int64_t j = 0; j < m0; ++j) {
+        const Vec dy_vec = Vec::loadu(dY_ptr + j * kVecSize);
+        const Vec x_vec = Vec::loadu(X_ptr + j * kVecSize);
+        ds_vec += dy_vec * (x_vec - mean_vec);
+        db_vec += dy_vec;
+      }
+    } else {
+      for (int64_t j = 0; j < m0; ++j) {
+        const Vec dy_vec = Vec::loadu(dY_ptr + j * kVecSize);
+        const Vec x_vec = Vec::loadu(X_ptr + j * kVecSize);
+        const Vec gamma_vec = Vec::loadu(gamma_ptr + j * kVecSize);
+        ds_vec += dy_vec * (x_vec - mean_vec) * gamma_vec;
+        db_vec += dy_vec * gamma_vec;
+      }
+    }
+    ds_stk[0] += ds_vec;
+    db_stk[0] += db_vec;
+    int64_t mask = i + 1;
+    for (int64_t j = 1; j < depth && (mask & 1) == 0; ++j) {
+      ds_stk[j] += ds_stk[j - 1];
+      db_stk[j] += db_stk[j - 1];
+      ds_stk[j - 1] = kZeroVec;
+      db_stk[j - 1] = kZeroVec;
+      mask >>= 1;
+    }
+  }
+  for (int64_t i = 1; i < depth; ++i) {
+    ds_stk[0] += ds_stk[i];
+    db_stk[0] += db_stk[i];
+  }
+
+  std::array<T, kVecSize> ds_arr{};
+  std::array<T, kVecSize> db_arr{};
+  ds_stk[0].store(ds_arr.data());
+  db_stk[0].store(db_arr.data());
+
+  T ds = std::accumulate(ds_arr.cbegin(), ds_arr.cend(), T(0));
+  T db = std::accumulate(db_arr.cbegin(), db_arr.cend(), T(0));
+  if (gamma == nullptr) {
+    for (int64_t i = n * kVecSize; i < N; ++i) {
+      ds += dY[i] * (X[i] - mean);
+      db += dY[i];
+    }
+  } else {
+    for (int64_t i = n * kVecSize; i < N; ++i) {
+      ds += dY[i] * (X[i] - mean) * gamma[i];
+      db += dY[i] * gamma[i];
+    }
+  }
+
+  return std::make_pair(ds, db);
+}
+
+template <typename T>
+std::pair<T, T> RowwiseMomentsInternalGradients(
+    const T* dY,
+    const T* X,
+    const T* gamma,
+    T mean,
+    int64_t N) {
+  using Vec = vec::Vectorized<T>;
+  constexpr int64_t kVecSize = Vec::size();
+  const int64_t n = N / kVecSize;
+  const int64_t m = divup(n, kChunkSize);
+  const int64_t depth = CeilLog2(m);
+  if (depth <= 4) {
+    return RowwiseMomentsInternalGradientsImpl<T, 4>(dY, X, gamma, mean, N);
+  } else if (depth <= 8) {
+    return RowwiseMomentsInternalGradientsImpl<T, 8>(dY, X, gamma, mean, N);
+  } else if (depth <= 16) {
+    return RowwiseMomentsInternalGradientsImpl<T, 16>(dY, X, gamma, mean, N);
+  } else if (depth <= 32) {
+    return RowwiseMomentsInternalGradientsImpl<T, 32>(dY, X, gamma, mean, N);
+  } else {
+    return RowwiseMomentsInternalGradientsImpl<T, 64>(dY, X, gamma, mean, N);
   }
 }
 
