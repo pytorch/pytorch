@@ -2448,8 +2448,8 @@ class TestQuantizedOps(TestCase):
         ).eval()
 
         test_cases = itertools.product(('fbgemm', 'qnnpack'), ('fbgemm', 'qnnpack'))
+        old_engine = torch.backends.quantized.engine
         for backend_qengine, qconfig_qengine in test_cases:
-
             if backend_qengine == 'fbgemm' and qconfig_qengine == 'qnnpack':
                 torch.backends.quantized.engine = backend_qengine
                 m_copy = copy.deepcopy(m)
@@ -2473,6 +2473,8 @@ class TestQuantizedOps(TestCase):
                 mc = torch.quantization.convert(mp)
                 # success = no error thrown on line below
                 mc(torch.randn(1, 1, 1, 1))
+
+        torch.backends.quantized.engine = old_engine
 
 
     @override_qengines
