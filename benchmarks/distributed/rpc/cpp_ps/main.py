@@ -16,6 +16,8 @@ BATCH_SIZE = 64
 parser = argparse.ArgumentParser(description='C++ PS Demo')
 parser.add_argument('--world_size', type=int, default=3)
 parser.add_argument('--use_rpc', action="store_true", default=False)
+parser.add_argument('--backend', type=str, default='NCCL')
+
 
 args = parser.parse_args()
 
@@ -96,7 +98,7 @@ def run(rank, world_size, num_gpu_per_node=8):
     if rank != 0:
         # create process group across DDP processes
         torch.distributed.init_process_group(
-            "nccl",
+            args.backend,
             init_method="tcp://localhost:29501",
             rank=rank - 1,
             world_size=world_size - 1
@@ -105,7 +107,10 @@ def run(rank, world_size, num_gpu_per_node=8):
     rpc.api._barrier([f"worker{r}" for r in range(world_size)])
 
     if rank == 0:
-        print(f"{args.world_size - 1} trainers, using {'RPC' if args.use_rpc else 'NCCL'}")
+        print(
+            f"{args.world_size - 1} trainers, "
+            f"using {'RPC' if args.use_rpc else args.backend}"
+        )
         ps = PyParameterServer(world_size - 1, N_BUCKETS)
         ps_rref = rpc.RRef(ps)
 
