@@ -1,12 +1,13 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, List, NamedTuple
+from types import TracebackType
+from typing import Any, List, NamedTuple, Optional, Type
 
 import torch
 import torch.distributed as dist
 
 
-class _JoinHook(ABC):
+class _JoinHook():
     r"""
     This defines a join hook, which provides two entry points in the join
     context manager: a main hook, which is called repeatedly while there exists
@@ -19,15 +20,15 @@ class _JoinHook(ABC):
     ``process_group()`` to provide the device and process group information,
     respectively, which are needed for the join context manager implementation.
     """
-    def main_hook(self):
+    def main_hook(self) -> None:
         r"""
         This hook is called repeatedly while there exists a non-joined process
-        to shadow collective communications in the forward pass, backward pass,
-        and optimizer.
+        to shadow collective communications in one training iteration (i.e. in
+        one forward pass, backward pass, and optimizer step).
         """
         ...
 
-    def post_hook(self, is_last_joiner: bool):
+    def post_hook(self, is_last_joiner: bool) -> None:
         r"""
         This hook is called after all processes have joined. It is passed an
         additional ``bool`` argument ``is_last_joiner``, which indicates if the
@@ -43,8 +44,10 @@ class _JoinHook(ABC):
 class _Joinable(ABC):
     r"""
     This defines an abstract base class for joinable classes. A joinable class
-    (inheriting from :class:`_Joinable`) should implement a private
-    ``_join_hook()`` method that returns a :class:`_JoinHook` instance.
+    (inheriting from :class:`_Joinable`) should implement :meth:`_join_hook()`,
+    which returns a :class:`_JoinHook` instance, in addition to
+    :meth:`_join_device()` and :meth:`_join_process_group()` that return device
+    and process group information, respectively.
     """
     @abstractmethod
     def __init__(self):
@@ -69,7 +72,7 @@ class _Joinable(ABC):
     def _join_device(self) -> torch.device:
         r"""
         Returns the device from which to perform collective communications
-        needed for the join context manager implementation itself.
+        needed by the join context manager implementation itself.
         """
         ...
 
@@ -77,7 +80,8 @@ class _Joinable(ABC):
     @abstractmethod
     def _join_process_group(self) -> Any:
         r"""
-        Returns the process group for join-related collective communications.
+        Returns the process group for the collective communications needed by
+        the join context manager itself.
         """
         ...
 
@@ -124,7 +128,7 @@ class _Join():
         the ``_JoinHook`` objects are the same. If there are multiple
         ``_JoinHook`` objects, then the ``device`` of the first is used. The
         process group and device information is used for checking for non-
-        joined processes and for notifying processes to terminate if
+        joined processes and for notifying processes to throw an exception if
         ``throw_on_early_termination`` is enabled, both of which using an all-
         reduce.
 
@@ -141,6 +145,29 @@ class _Join():
         throw_on_early_termination (bool): a flag controlling whether to throw an
             exception upon detecting uneven inputs (default: ``False``).
 
+    Example::
+
+        >>> import os
+        >>> import torch
+        >>> import torch.distributed as dist
+        >>> import torch.multiprocessing as mp
+        >>> import torch.nn.parallel.DistributedDataParallel as DDP
+        >>> import torch.distributed.optim.ZeroRedundancyOptimizer as ZeRO
+        >>> from torch.distributed.algorithms.join import Join
+        >>>
+        >>> # On each spawned worker
+        >>> def worker(rank):
+        >>>     dist.init_process_group("nccl", rank=rank, world_size=2)
+        >>>     model = DDP(torch.nn.Linear(1, 1).to(rank), device_ids=[rank])
+        >>>     optim = ZeRO(model.parameters(), torch.optim.Adam, lr=0.01)
+        >>>     # Rank 1 gets one more input than rank 0
+        >>>     inputs = [torch.tensor([1.]).to(rank) for _ in range(10 + rank)]
+        >>>     with Join([model, optim]):
+        >>>         for input in inputs:
+        >>>             loss = model(input).sum()
+        >>>             loss.backward()
+        >>>             optim.step()
+        >>>     # All ranks reach here without hanging/erroring
     """
     def __init__(
         self,
@@ -158,7 +185,7 @@ class _Join():
         self._set_joinable_configs()
         self._extract_dist_info()
 
-    def _set_joinable_configs(self):
+    def _set_joinable_configs(self) -> None:
         r"""
         Sets the :class:`_JoinConfig` of each participating :class:`_Joinable`.
         """
@@ -172,19 +199,19 @@ class _Join():
             )
             is_first_joinable = False
 
-    def _extract_dist_info(self):
+    def _extract_dist_info(self) -> None:
         r"""
-        Extracts the process group and device information from the join hooks.
+        Extracts the process group and device information from the joinables.
+        If there are multiple joinables, then the context manager uses the
+        first specified device.
 
         Preconditions:
-            ``self._join_hooks`` is not ``None`` and is non-empty.
+            ``self._joinables`` is not ``None`` and is non-empty.
 
         Raises:
             ValueError
                 If there are multiple conflicting ``process_group`` attributes
-                among the ``_JoinHook`` objects.
-
-        NOTE: The context manager uses the first specified device.
+                among the ``_Joinable`` objects.
         """
         process_group = None
         device = None
@@ -202,14 +229,19 @@ class _Join():
     def __enter__(self):
         ...
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(
+        self,
+        type: Optional[Type[BaseException]],
+        value: Optional[BaseException],
+        traceback: Optional[TracebackType]
+    ):
         r"""
         Repeatedly runs the main hooks until all processes join; then, runs
         the post-hooks.
 
         Raises:
             RuntimeError
-                If ``throw_on_early_termination`` is enabled.
+                If ``throw_on_early_termination=True``.
         """
         if not self._enable or type:
             return  # propagate the exception directly if one was raised

@@ -323,6 +323,11 @@
   mat2: self.transpose(1, 2).conj().bmm(grad)
   result: self_t.bmm(mat2_p) + self_p.bmm(mat2_t)
 
+- name: _bmm(Tensor self, Tensor mat2, *, bool deterministic=False) -> Tensor
+  self: at::_bmm(grad, mat2.transpose(1, 2), deterministic)
+  mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
+  result: at::_bmm(self_t, mat2_p, deterministic) + at::_bmm(self_p, mat2_t, deterministic)
+
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
   tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)

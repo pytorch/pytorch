@@ -646,6 +646,53 @@ TEST(OptimizeConcatTest, UseVariadicCat) {
       ->run(*graph);
 }
 
+TEST(OptimizeConcatTest, UseVariadicCatReplaceMultiple) {
+  auto graph = std::make_shared<Graph>();
+
+  const std::string input =
+      R"IR(
+        graph(%0: Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
+              %3: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
+          %10 : int = prim::Constant[value=0]()
+          %input1 : Tensor[] = prim::ListConstruct(%0, %1)
+          %concat1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input1, %10)
+          %input2 : Tensor[] = prim::ListConstruct(%2, %3)
+          %concat2 : Float(64, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = aten::cat(%input2, %10)
+          return (%concat1, %concat2)
+      )IR";
+  parseIR(input, graph.get());
+  std::vector<at::Tensor> inputs = {
+      at::rand({64, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU),
+      at::rand({32, 56, 56}, at::kCPU)};
+  auto orig_outputs = runGraph(graph, inputs);
+
+  ASSERT_TRUE(UseVariadicCat(graph));
+  graph->lint();
+  auto opt_outputs = runGraph(graph, inputs);
+
+  checkOutputs(orig_outputs, opt_outputs);
+
+  // After full concat optimization we should have the following graph:
+  //
+  //  graph(%0 : ...,
+  //        %1 : ...,
+  //        %2 : ...,
+  //        %3 : ....):
+  //    %zero : int = prim:Constant[value=0]()
+  //    %varcat1 : Tensor = prim::Concat(%0, %1, %zero)
+  //    %varcat2 : Tensor = prim::Concat(%2, %3, %zero)
+  //    return (%varcat1, %varcat2)
+  testing::FileCheck()
+      .check_count("= prim::Concat(", 2, /*exactly*/ true)
+      ->check_count("= aten::cat(", 0, /*exactly*/ true)
+      ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
+      ->run(*graph);
+}
+
 TEST(OptimizeConcatTest, UseVariadicCatWithMultipleListUses) {
   auto graph = std::make_shared<Graph>();
 
