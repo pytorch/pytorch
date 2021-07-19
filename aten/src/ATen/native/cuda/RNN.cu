@@ -78,11 +78,13 @@ T sigmoid(T in)  {
   return one / (one + ::exp(-in));
 }
 
+static constexpr int MAX_NUM_THREADS = 256;
+
 namespace kernel {
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(128, 4)
+C10_LAUNCH_BOUNDS_2(MAX_NUM_THREADS / 2, 4)
 #endif
 __global__ void lstm_cell_forward(
             TensorInfo<scalar_t, index_type> input,
@@ -169,7 +171,7 @@ __global__ void lstm_cell_forward(
 
 template <typename scalar_t, typename accscalar_t, typename index_type, int indexing_kind>
 #if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_2(256, 4)
+C10_LAUNCH_BOUNDS_2(MAX_NUM_THREADS, 4)
 #endif
 __global__ void lstm_cell_backward(
               TensorInfo<scalar_t, index_type> storage,
@@ -362,7 +364,7 @@ void lstm_forward_impl(const Tensor& input_gates, const Tensor& hidden_gates,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
-  getLaunchConfig(&block, &grid, numel, 128);
+  getLaunchConfig(&block, &grid, numel, MAX_NUM_THREADS / 2);
 
   auto input_gatesI = getTensorInfo<scalar_t, index_type>(input_gates);
   auto hidden_gatesI = getTensorInfo<scalar_t, index_type>(hidden_gates);
@@ -398,7 +400,7 @@ void lstm_backward_impl(const Tensor& grad_hy, const Tensor& grad_cy,
 
   dim3 block, grid;
   int64_t numel = cx.numel();
-  getLaunchConfig(&block, &grid, numel, 256);
+  getLaunchConfig(&block, &grid, numel, MAX_NUM_THREADS);
 
   auto grad_hyI = tryGetTensorInfo<scalar_t, index_type>(grad_hy);
   auto grad_cyI = tryGetTensorInfo<scalar_t, index_type>(grad_cy);
