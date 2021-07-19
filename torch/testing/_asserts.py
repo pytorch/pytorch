@@ -9,7 +9,7 @@ from torch import Tensor
 
 from ._core import _unravel_index
 
-__all__ = ["assert_close"]
+__all__ = ["assert_close", "assert_allclose"]
 
 
 class _TestingErrorMeta(NamedTuple):
@@ -980,3 +980,23 @@ def assert_close(
     )
     if error_meta:
         raise error_meta.to_error()
+
+
+def _tmp_process_input(input: Any) -> Any:
+    if not isinstance(input, torch.Tensor):
+        return input
+
+    if input.is_quantized:
+        return input.int_repr().to(torch.int32)
+
+    if input.dtype == torch.bool:
+        return input.to(torch.int64)
+
+    return input
+
+
+def assert_allclose(actual: Any, expected: Any, check_stride: bool = False, **kwargs: Any) -> None:
+    # TODO: remove this as soon as https://github.com/pytorch/pytorch/pull/58926 is landed
+    actual = _tmp_process_input(actual)
+    expected = _tmp_process_input(expected)
+    return assert_close(actual, expected, check_stride=check_stride, **kwargs)
