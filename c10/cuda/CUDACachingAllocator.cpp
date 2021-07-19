@@ -1169,8 +1169,7 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] =
-        true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
