@@ -557,9 +557,9 @@ class TestPeephole(JitTestCase):
 
     def test_peephole_arith(self):
         @torch.jit.script
-        def foo(input: List[int]):
-            _1 = torch.add(input[1], 2)
-            _3 = torch.add(input[3], 2)
+        def foo(input0: int, input1: int, input2: int, input3: int):
+            _1 = torch.add(input1, 2)
+            _3 = torch.add(input3, 2)
             _5 = torch.add(1, torch.sub(_1, 3) // 1)
             _6 = torch.add(1 * torch.sub(_3, 3) // 1, 1) / 1
             return [_5, int(_6)]
@@ -568,7 +568,6 @@ class TestPeephole(JitTestCase):
                    .check("aten::mul").check("aten::floordiv") \
                    .check("aten::div").run(foo.graph)
         self.run_pass("peephole", foo.graph)
-        FileCheck().check_not("aten::add").check_not("aten::sub") \
-                   .check_not("aten::mul").check_not("aten::floordiv") \
-                   .check_not("aten::div").run(foo.graph)
-        self.assertEqual(foo([0, 1, 2, 3]), [1, 3])
+        FileCheck().check("graph").check("):").check_next("aten::Int") \
+                   .check_next("ListConstruct").check_next("return").run(foo.graph)
+        self.assertEqual(foo(0, 1, 2, 3), [1, 3])
