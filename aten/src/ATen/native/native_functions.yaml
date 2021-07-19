@@ -8063,6 +8063,16 @@
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
 
+- func: _convert_coo_to_csr.Tensor(Tensor self, Scalar size, *, bool out_int32=False) -> Tensor
+  dispatch:
+    CPU: _convert_coo_to_csr_cpu
+    CUDA: _convert_coo_to_csr_cuda
+
+- func: _convert_coo_to_csr.Tensor_out(Tensor self, Scalar size, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: _convert_coo_to_csr_out_cpu
+    CUDA: _convert_coo_to_csr_out_cuda
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
