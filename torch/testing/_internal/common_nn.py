@@ -1248,6 +1248,16 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_fn(input, parameters, module):
+    """Reference function for modules supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    single_batch_input = input.unsqueeze(0)
+    with freeze_rng_state():
+        return module(single_batch_input).squeeze(0)
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -3190,6 +3200,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
         constructor_args=(1,),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(1)',
         input_fn=lambda: torch.rand(1, 3, 5),
@@ -3790,6 +3808,34 @@ for padding_mode, cpp_padding_mode in zip(
                 tf32_precision=0.05
             ),
         )
+
+# Check that non linear activations work with no batch dimensions
+non_linear_activations_no_batch = [
+    'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
+    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU',
+    'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
+    'Tanhshrink', 'Threshold'
+]
+non_linear_activations_extra_info: Dict[str, dict] = {
+    'CELU': {'constructor_args': (2.,)},
+    'Threshold': {'constructor_args': (2., 1.)},
+    'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False},
+    'Hardswish': {'check_gradgrad': False, 'check_jit': False},
+    # For RRelu, test that compare CPU and GPU results fail because RNG
+    # is different between CPU and GPU
+    'RReLU': {'test_cuda': False},
+}
+for non_linear_activation in non_linear_activations_no_batch:
+    activation_test_info = dict(
+        module_name=non_linear_activation,
+        input_size=(3,),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+        test_cpp_api_parity=False,
+    )
+    extra_info = non_linear_activations_extra_info.get(non_linear_activation, {})
+    activation_test_info.update(extra_info)
+    new_module_tests.append(activation_test_info)
 
 
 def kldivloss_reference(input, target, reduction='mean'):
