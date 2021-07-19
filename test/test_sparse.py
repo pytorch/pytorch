@@ -6,8 +6,7 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, make_tensor, \
-    DeterministicGuard
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -1104,11 +1103,8 @@ class TestSparse(TestCase):
 
             a = torch.stack(a_list).cuda()
             b = torch.stack(b_list).cuda()
-            with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-                torch.use_deterministic_algorithms(False)
-                ab_nondeterministic = torch.bmm(a, b)
-                torch.use_deterministic_algorithms(True)
-                ab_deterministic = torch.bmm(a, b)
+            ab_nondeterministic = torch._bmm(a, b, deterministic=False)
+            ab_deterministic = torch._bmm(a, b, deterministic=True)
             diff_abs = (ab_deterministic - ab_nondeterministic).abs()
             diff_rel = diff_abs / ab_deterministic.abs()
             diff_rel[torch.isnan(diff_rel)] = 0
