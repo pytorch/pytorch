@@ -63,7 +63,7 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
 
 } // namespace
 
-void layer_norm_cpu_out(
+void layer_norm_impl_out(
     at::Tensor& out,
     at::Tensor& mean,
     at::Tensor& rstd,

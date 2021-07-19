@@ -1389,7 +1389,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
     at::Tensor mean = create_empty_from({M}, *X);
     at::Tensor rstd = create_empty_from({M}, *X);
 
-    at::native::layer_norm_cpu_out(
+    at::native::layer_norm_impl_out(
         output, mean, rstd, input, normalized_shape, *gamma, *beta, eps, M, N);
   };
 });
