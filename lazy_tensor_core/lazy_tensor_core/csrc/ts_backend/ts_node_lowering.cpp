@@ -116,7 +116,10 @@ class TSNodeLowering : public NodeLowering {
         return ir::ops::Permute::MakePermuteShape(argument.shape(),
                                                   permute->dims());
       }
-      case at::aten::pow: {
+      // activation and unary op do not change shape
+      case at::aten::pow:
+      case at::aten::relu:
+      case at::aten::relu_: {
         const ir::Output& argument = node->operand(0);
         return argument.shape();
       }

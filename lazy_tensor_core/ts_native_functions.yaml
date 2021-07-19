@@ -32,6 +32,8 @@ supported:
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
+  - relu
+  - relu_
   - repeat
   - select.int
   - slice.Tensor

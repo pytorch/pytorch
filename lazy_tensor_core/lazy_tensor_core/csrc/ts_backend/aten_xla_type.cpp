@@ -760,6 +760,19 @@ at::Tensor XLANativeFunctions::permute(const at::Tensor& self,
       LazyTensor::permute(self_tensor, Helpers::I64List(dims)));
 }
 
+at::Tensor XLANativeFunctions::relu(const at::Tensor& self) {
+  LTC_FN_COUNTER("xla::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::relu(bridge::GetLtcTensor(self)));
+}
+
+at::Tensor& XLANativeFunctions::relu_(at::Tensor& self) {
+  LTC_FN_COUNTER("xla::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::relu_(self_tensor);
+  return self;
+}
+
 at::Tensor XLANativeFunctions::repeat(const at::Tensor& self,
                                       at::IntArrayRef repeats) {
   LTC_FN_COUNTER("xla::");
