@@ -2403,8 +2403,7 @@ Example::
     >>> y = torch.conj(x)
     >>> y.is_conj()
     True
-
-""")
+""".format(**common_args))
 
 add_docstr(torch.resolve_conj,
            r"""
@@ -2427,8 +2426,7 @@ Example::
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
     >>> z.is_conj()
     False
-
-""")
+""".format(**common_args))
 
 add_docstr(torch.resolve_neg,
            r"""
@@ -3193,7 +3191,7 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
-""")
+""".format(**common_args))
 
 add_docstr(torch.vdot,
            r"""
@@ -4422,7 +4420,7 @@ Example::
 
     >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
     tensor([False,  True,  False,  True,  False])
-""")
+""".format(**common_args))
 
 add_docstr(torch.isposinf,
            r"""
@@ -6341,7 +6339,7 @@ Args:
 
 Keyword args:
     {out}
-""")
+""".format(**common_args))
 
 add_docstr(torch.matmul,
            r"""
@@ -7230,7 +7228,7 @@ Example:
     torch.Size([2, 3, 5])
     >>> torch.permute(x, (2, 0, 1)).size()
     torch.Size([5, 2, 3])
-""")
+""".format(**common_args))
 
 add_docstr(torch.poisson,
            r"""
