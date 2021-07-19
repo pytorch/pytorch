@@ -556,6 +556,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.kron: lambda input, other: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
+        torch.layer_norm_new: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.ldexp: lambda input, other, out=None: -1,
         torch.le: lambda input, other, out=None: -1,
