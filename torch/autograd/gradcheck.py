@@ -1360,7 +1360,7 @@ def gradgradcheck(
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(
+            y = torch.randn_like(
                 x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
