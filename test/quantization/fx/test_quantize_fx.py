@@ -3151,17 +3151,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def _test_binary_op_int8_impl(self, binary_op, ibinary_op, quantized_op):
         data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
                 torch.randn(1, 1, 1, 1, dtype=torch.float))
-        quantized_node = ns.call_function(quantized_op)
-        options = itertools.product([True, False], [True, False])
+        options = itertools.product([True, False], [True, False], [True, False])
         quant_type = QuantType.STATIC
         # testing for default int8 static quant
-        for is_inplace, is_scalar in options:
+        for is_inplace, is_scalar, is_reference in options:
+            if is_reference:
+                node_list = [
+                    ns.call_method("dequantize"),
+                    ns.call_function(binary_op),
+                    ns.call_function(torch.quantize_per_tensor)
+                ]
+                quantized_node = None
+            else:
+                node_list = None
+                quantized_node = ns.call_function(quantized_op)
+
             self.checkGraphModeFxOp(
-                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
+                BinaryOp(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type,
+                quantized_node, expected_node_list=node_list, is_reference=is_reference)
             # This tests the binary op should be quantized even when it is not feed with a
             # quantized input
             self.checkGraphModeFxOp(
-                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar), data, quant_type, quantized_node)
+                BinaryOpNonQuantizedInput(binary_op, ibinary_op, is_inplace, is_scalar),
+                data, quant_type, quantized_node,
+                expected_node_list=node_list, is_reference=is_reference)
 
 
     def _test_binary_op_float16_impl(self, binary_op, ibinary_op):

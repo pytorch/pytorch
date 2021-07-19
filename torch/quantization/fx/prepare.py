@@ -24,6 +24,7 @@ from .quantization_patterns import (
     QuantizeHandler,
     CatQuantizeHandler,
     CopyNodeQuantizeHandler,
+    BinaryOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -923,10 +924,11 @@ def insert_observers_for_model(
                         node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
+                    # TODO: add is_like_copy_node method in quantizehandler
                     is_like_copy_node = \
                         (qhandler is not None and (
                             isinstance(qhandler, CopyNodeQuantizeHandler)
-                        ))
+                        ) or isinstance(qhandler, BinaryOpQuantizeHandler) and qhandler.num_tensor_args == 1)
 
                     if is_last_node_of_pattern:
                         # this returns the new observer node if it was needed

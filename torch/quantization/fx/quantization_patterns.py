@@ -183,6 +183,10 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
 }
 binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
     torch.bmm: binary_op_int8_dtypes,
+    operator.add: binary_op_int8_dtypes,
+    torch.add: binary_op_int8_dtypes,
+    operator.mul: binary_op_int8_dtypes,
+    torch.mul: binary_op_int8_dtypes,
 }
 
 
@@ -259,7 +263,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         prepare step.
         """
         if self.num_tensor_args == 1:
-            return activation_dtype(qconfig) == torch.float16
+            # return activation_dtype(qconfig) == torch.float16
+            return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
             return True
         else:
@@ -290,10 +295,13 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
                 dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
-                args = load_arg(quantized=[torch.quint8, torch.qint8])(node.args)
-                args = load_arg(quantized=torch.float)(node.args)
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.binary_op_node.args)
+                args = load_arg(quantized=torch.float)(self.binary_op_node.args)
+                kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
+                op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
+                env[self.binary_op_node.name][torch.float] = op_out
+                if self.relu_node:
+                    op_out = quantized_graph.node_copy(self.relu_node, load_arg(quantized=torch.float))
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
