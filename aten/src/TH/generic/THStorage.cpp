@@ -126,16 +126,16 @@ void THStorage_(fill)(THStorage *storage, scalar_t value)
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, scalar_t value)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = self->nbytes() / type_meta.itemsize();
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = self->nbytes() / type_meta.itemsize();
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
