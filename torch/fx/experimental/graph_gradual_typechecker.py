@@ -7,7 +7,6 @@ from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
 
-
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
 
@@ -23,7 +22,7 @@ def expand_to_tensor_dim(t, n):
         return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
         if len(t.__args__) != n:
-            raise TypeError(f'Cannot extend tensor dimension. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
+            raise TypeError(f'Cannot extend tensor. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}')
         return t
     else:
         raise TypeError(f'Cannot match the type {t}')
@@ -208,11 +207,10 @@ def bn2d_inference_rule(n: Node, module_instance):
         raise TypeError(f'Cannot apply {module_instance} with input type {arg_type} and existing type {n.type} on {n}')
 
 
-def calculate(d_in, module_instance, index):
+def calculate_out_dimension(d_in, module_instance, index):
     """
     For calculating h_in and w_out.
     """
-
     padding = (module_instance.padding, module_instance.padding) \
         if isinstance(module_instance.padding, int) else module_instance.padding
     kernel_size = (module_instance.kernel_size, module_instance.kernel_size)\
@@ -269,12 +267,11 @@ def conv2d_inference_rule(n: Node, module_instance):
     if is_consistent(arg_type.__args__[1], module_instance.in_channels):
         w_in = arg_type.__args__[3]
         h_in = arg_type.__args__[2]
-        h_out = calculate(h_in, module_instance, 0)
-        w_out = calculate(w_in, module_instance, 1)
+        h_out = calculate_out_dimension(h_in, module_instance, 0)
+        w_out = calculate_out_dimension(w_in, module_instance, 1)
         new_type = TensorType((arg_type.__args__[0], module_instance.out_channels, h_out, w_out))
         gub = get_greatest_upper_bound(new_type, curr_node_type)
         n.type = gub
-
         return n.type
     else:
         raise TypeError(f'Cannot apply {module_instance} with input type { arg_type} and existing type {n.type} on {n}')
@@ -300,8 +297,10 @@ def maxpool2d_check(typ, module_instance):
     if len(new_type_list) == 4 or len(new_type_list) == 3:
         w_in = new_type_list[-1]
         h_in = new_type_list[-2]
-        h_out = calculate(h_in, module_instance, 0)
-        w_out = calculate(w_in, module_instance, 1)
+
+        h_out = calculate_out_dimension(h_in, module_instance, 0)
+        w_out = calculate_out_dimension(w_in, module_instance, 1)
+
         new_type_list[-1] = w_out
         new_type_list[-2] = h_out
         return TensorType(tuple(new_type_list))
@@ -360,7 +359,6 @@ def linear_inference_rule(n: Node, module_instance):
     return n.type
 
 
-
 def adaptiveavgpool2d_check(tensor_type, module_instance):
     output_size = module_instance.output_size
     if isinstance(output_size, int):
@@ -397,6 +395,50 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
         n.type = get_greatest_upper_bound(n.type, output_type)
     return n.type
 
+def flatten_check(tensor_type, start_dim, end_dim):
+    l = len(tensor_type.__args__)
+
+    start_dim = l if start_dim == -1 else start_dim
+    end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
+
+    if 0 <= start_dim <= (l - 1) and 0 <= end_dim <= l and start_dim < end_dim:
+        my_args = list(tensor_type.__args__)
+        lhs = my_args[0:start_dim]
+        rhs = my_args[end_dim:]
+        mid = my_args[start_dim:end_dim]
+        if Dyn in mid:
+            mid = [Dyn]
+        else:
+            mid = [reduce(lambda x, y: x * y, my_args[start_dim:end_dim])]
+        new_type_list = lhs + mid + rhs
+        return TensorType(tuple(new_type_list))
+    else:
+        raise TypeError(f'Incompatable dimentions {start_dim}, {end_dim - 1} in type {tensor_type}')
+
+@register_inference_rule(torch.flatten)
+def flatten_inference_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+
+    # set the default start and end dims
+    start_dim = 1
+    end_dim = -1
+
+    if len(n.args) > 1:
+        assert isinstance(n.args[1], int)
+        start_dim = n.args[1]
+
+    if len(n.args) > 2:
+        assert isinstance(n.args[2], int)
+        end_dim = n.args[2]
+
+    if n.args[0].type == Dyn and isinstance(n.type, TensorType):
+        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+
+    if isinstance(n.args[0].type, TensorType):
+        output_type = flatten_check(n.args[0].type, start_dim, end_dim)
+        n.type = get_greatest_upper_bound(output_type , n.type)
+
+    return n.type
 
 class GraphTypeChecker:
     def __init__(self, env, traced):
@@ -424,6 +466,13 @@ class GraphTypeChecker:
         - Reshape
         - Transpose
         - Add
+        - Relu
+        - conv2d
+        - batchnorm2d
+        - flatten
+        - maxpool2d
+        - adaptiveavgpool2d
+        - linear
         """
         if n.type is None:
             n.type = Dyn
@@ -438,7 +487,7 @@ class GraphTypeChecker:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         if n.op == 'call_module':
-            module_instance = getattr(self.traced, str(n.target))
+            module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(module_instance)](n, module_instance)
             else:
