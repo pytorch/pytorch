@@ -829,6 +829,10 @@ def get_world_size(group=None):
 def isend(tensor, dst, group=None, tag=0):
     """
     Sends a tensor asynchronously.
+    
+    .. warning::
+        Modifying ``tensor`` before the request completes causes undefined
+        behavior.
 
     Args:
         tensor (Tensor): Tensor to send.
