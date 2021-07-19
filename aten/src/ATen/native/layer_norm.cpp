@@ -59,7 +59,7 @@ std::tuple<
     c10::MaybeOwned<Tensor>,
     Tensor,
     Tensor>
-boiler_plate(
+layer_init(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
@@ -96,7 +96,7 @@ Tensor& layer_norm_new_out(
   int64_t M, N;
   Tensor mean, rstd;
   std::tie(X, M, N, gamma, beta, mean, rstd) =
-      boiler_plate(input, normalized_shape, weight_opt, bias_opt);
+      layer_init(input, normalized_shape, weight_opt, bias_opt);
   layer_norm_impl_out(
       out, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return out;
@@ -112,7 +112,7 @@ std::tuple<Tensor, Tensor, Tensor> _layer_norm(
   int64_t M, N;
   Tensor mean, rstd;
   std::tie(X, M, N, gamma, beta, mean, rstd) =
-      boiler_plate(input, normalized_shape, weight_opt, bias_opt);
+      layer_init(input, normalized_shape, weight_opt, bias_opt);
   Tensor Y = at::native::empty_like(
       *X,
       c10::nullopt /* dtype */,
