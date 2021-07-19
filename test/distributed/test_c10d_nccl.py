@@ -910,20 +910,43 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             output = fc3(output)
             loss = criterion(output, target)
             loss.backward()
-        # First test that finding unused params under these conditions correctly
-        # marks parameter corresponding to fc3 as unused, since it was not used
-        # in DDP forward pass. Note that the above usage is not a recommended
-        # way of using DDP, if a module is wrapped within DDP, it should either
-        # stay unused or be used within DDP module itself.
-        test_find_unused_parameters(
-            True, gradient_as_bucket_view=gradient_as_bucket_view,
-        )
+
+        # First test that finding unused params under these conditions is to
+        # trigger an error when `backward` is called (because fc3 is an unused
+        # parameter and will therefore be marked ready twice).
+        try:
+            test_find_unused_parameters(
+                True, gradient_as_bucket_view=gradient_as_bucket_view
+            )
+        except Exception as ex:
+            self.assertTrue(
+                str(ex).startswith(
+                    "Expected to mark a variable ready only once.",
+                )
+            )
+            unused_index = 2
+            unused_index_str = f"Parameter at index {unused_index}"
+            model = ddp_model.module
+            for module_name, module in model.named_modules():
+                if module == model.fc3:
+                    for parameter_name, _ in module.named_parameters(
+                            recurse=False
+                    ):
+                        unused_fqn = f"{module_name}.{parameter_name}"
+                        # Only one such parameter in model.fc3, since bias=False
+                        break
+
+            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+                unused_index_str += f" with name {unused_fqn}"
+
+            self.assertTrue(unused_index_str in str(ex))
+        else:
+            self.fail("Expected exception")
 
         dist.barrier(process_group)
 
-        # if find_unused_parameters=False, this would normally result in an
-        # error, but since fc3 does get used in a way DDP does not know about,
-        # autograd hooks are indeed called as expected.
+        # Then test that the default behavior can be overridden by setting
+        # `find_unused_parameters=False`.
         try:
             test_find_unused_parameters(
                 False, gradient_as_bucket_view=gradient_as_bucket_view
@@ -1024,7 +1047,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # Compute loss and gradients for both outputs
         output1, output2 = model(input)
         loss1 = criterion(output1, target)
-        loss1.backward(retain_graph=True)
+        loss1.backward()
         loss2 = criterion(output2, target)
         loss2.backward()
 
@@ -1087,8 +1110,9 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         check_no_grads()
 
     def _test_accumulate_gradients_module(self, gradient_as_bucket_view=False):
-        # Test gradient accumulation via model.no_sync context manager, which is
-        # the supported way of implementing gradient accumulation.
+        # This is NOT the recommended way to implement accumulating grads, but
+        # we would like to make sure DDP does not mess up with the underlying
+        # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1117,13 +1141,12 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             step_model(model, input, target)
 
             if iteration % 2 == 0:
-                # Skip gradients sync using no_sync context manager.
-                with ddp_model.no_sync():
-                    step_model(
-                        ddp_model,
-                        input[self.rank: (self.rank + 1)],
-                        target[self.rank: (self.rank + 1)],
-                    )
+                # Skip gradients sync without calling prepare_for_backward
+                step_model(
+                    ddp_model.module,
+                    input[self.rank: (self.rank + 1)],
+                    target[self.rank: (self.rank + 1)],
+                )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
