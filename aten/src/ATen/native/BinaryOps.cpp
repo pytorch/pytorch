@@ -100,6 +100,10 @@ TORCH_META_FUNC2(bitwise_right_shift, Tensor) (
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
@@ -280,6 +284,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmin_out, fmin_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(fmod_out, fmod_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp_out, logaddexp_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(logaddexp2_out, logaddexp2_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(gcd_out, gcd_stub);
@@ -1089,23 +1094,6 @@ Tensor min(const Tensor& self, const Tensor& other) {
   return at::minimum(self, other);
 }
 
-Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
-
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmin_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor fmin(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
-
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmin_stub(iter.device_type(), iter);
-  return iter.output();
-}
-
 Tensor floor_divide(const Tensor& self, const Scalar& other) {
   return at::floor_divide(self, wrapped_scalar_tensor(other));
 }
@@ -1114,33 +1102,19 @@ Tensor& floor_divide_(Tensor& self, const Scalar& other) {
   return at::floor_divide_out(self, self, wrapped_scalar_tensor(other));
 }
 
-Tensor& fmod_out(const Tensor& self, const Tensor& other, Tensor & result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmod_stub(iter.device_type(), iter);
-  return result;
-}
-
 Tensor& fmod_out(const Tensor& self, const Scalar& other, Tensor & result) {
-  return native::fmod_out(self, wrapped_scalar_tensor(other), result);
-}
-
-Tensor fmod(const Tensor& self, const Tensor & other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-  fmod_stub(iter.device_type(), iter);
-  return iter.output();
+  // redispatch
+  return at::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor fmod(const Tensor& self, const Scalar& other) {
-  return native::fmod(self, wrapped_scalar_tensor(other));
-}
-
-Tensor& fmod_(Tensor& self, const Tensor& other) {
-  return native::fmod_out(self, other, self);
+  // redispatch
+  return at::fmod(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_(Tensor& self, const Scalar& other) {
-  return native::fmod_(self, wrapped_scalar_tensor(other));
+  // redispatch
+  return self.fmod_(wrapped_scalar_tensor(other));
 }
 
 // Note: this function is only for testing.
