@@ -7314,6 +7314,11 @@ class DistributedTest:
                     ):
                         self.assertEqual(p, p_static)
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
         def test_ddp_returns_tensor_with_no_grad(self):
             # Tests case where module returns tensor that does not require grad.
             torch.cuda.set_device(self.rank)
