@@ -9,7 +9,6 @@ from torch.nn.modules.conv import Conv2d
 from torch.fx.experimental.refinement_types import Equality
 from unification import Var  # type: ignore
 
-
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
     return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
@@ -109,9 +108,11 @@ def add_inference_rule(n: Node):
     (new_t1, new_t2) = broadcast_types(t1, t2)
 
     if new_t1 != t1:
+        assert hasattr(n.args[0], 'broadcast')
         n.args[0].broadcast = True
 
     if new_t2 != t2:
+        assert hasattr(n.args[1], 'broadcast')
         n.args[1].broadcast = True
 
     n.args[0].type = new_t1
@@ -593,7 +594,7 @@ def flatten_refinement_rule(n: Node):
 class Refine:
     """
     Symbolic shape inference.
-    Generates constraitns over type variables.
+    Generates constraints over type variables.
     Currently all constraints are equality constraints.
     """
     def __init__(self, traced):
