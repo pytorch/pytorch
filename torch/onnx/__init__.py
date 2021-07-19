@@ -104,15 +104,14 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             be exported. Set this to False if you want to export an untrained model.
             In this case, the exported model will first take all of its parameters
             as arguments, with the ordering as specified by ``model.state_dict().values()``.
-            This helps in stripping parameters from the model so that large models could be export
-            successfully. Besides this, if this is False, no matter the model will be export in
-            inference mode or training mode, the optimization which may adjust graph inputs will
+            This helps in stripping parameters from the model which is useful for training.
+            Besides, if this is False, any optimization that may adjust graph inputs will
             be skipped - for example, Conv and BatchNorm fusion.
         verbose (bool, default False): if True, prints a description of the
             model being exported to stdout.
         training (enum, default TrainingMode.EVAL):
             * ``TrainingMode.EVAL``: export the model in inference mode. If export_params = False
-              or keep_initializers_as_inputs = True, the optimization that might adjust graph
+              or keep_initializers_as_inputs = True, optimizations that might adjust graph
               inputs will be skipped (e.g., fusing Conv and BatchNorm ops).
             * ``TrainingMode.PRESERVE``: export the model in inference mode if model.training is
               False and in training mode if model.training is True.
@@ -275,7 +274,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If False, then initializers are not added as inputs to the graph, and only
             the non-parameter inputs are added as inputs. Meanwhile, the optimization
             that might adjust graph inputs will be skipped (e.g., fusing Conv and
-            BatchNorm ops), even the user export this model in inference mode.
+            BatchNorm ops), even when the user export this model in inference mode.
 
             This may allow for better optimizations (e.g. constant folding) by
             backends/runtimes.
