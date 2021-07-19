@@ -20,6 +20,7 @@ struct PySavedVariableHooks : public SavedVariableHooks {
 private:
   PyObject* pack_hook_;
   PyObject* unpack_hook_;
+  PyObject* data_ = nullptr;
 };
 
 }}
