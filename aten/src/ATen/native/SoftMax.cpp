@@ -117,16 +117,9 @@ void host_softmax_backward(
 }
 } // namespace
 
-Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
+Tensor& softmax_cpu_out(const Tensor& input_, const int64_t dim_, const bool half_to_float, Tensor& output) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
-  Tensor output = at::native::empty_like(
-      input,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
   if (input.numel() == 0) {
@@ -145,7 +138,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   return output;
 }
 
-Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
+Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
   TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
   auto input = input_.contiguous();
   Tensor output = at::native::empty_like(
@@ -154,7 +147,14 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
       c10::nullopt /* layout */,
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      at::MemoryFormat::Contiguous);
+  softmax_cpu_out(input_, dim_, half_to_float, output);
+  return output;
+}
+
+Tensor& log_softmax_cpu_out(const Tensor& input_, const int64_t dim_, const bool half_to_float, Tensor& output) {
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
+  auto input = input_.contiguous();
   int64_t dim = maybe_wrap_dim(dim_, input.dim());
 
   if (input.numel() == 0) {
@@ -174,6 +174,21 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half
   }
   return output;
 }
+
+Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
+  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
+  auto input = input_.contiguous();
+  Tensor output = at::native::empty_like(
+      input,
+      c10::nullopt /* dtype */,
+      c10::nullopt /* layout */,
+      c10::nullopt /* device */,
+      c10::nullopt /* pin_memory */,
+      at::MemoryFormat::Contiguous);
+  log_softmax_cpu_out(input_, dim_, half_to_float, output);
+  return output;
+}
+
 
 Tensor softmax_backward_cpu(
     const Tensor& grad_,
