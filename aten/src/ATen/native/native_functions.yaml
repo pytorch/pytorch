@@ -275,11 +275,6 @@
   dispatch:
     CPU, CUDA: view_as_real
 
-- func: _view_as_real_physical(Tensor(a) self) -> Tensor(a)
-  variants: function
-  dispatch:
-    CPU, CUDA: _view_as_real_physical
-
 - func: view_as_complex(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:
@@ -336,6 +331,14 @@
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
+
+- func: resolve_neg(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+
+- func: _neg_view(Tensor(a) self) -> Tensor(a)
+  variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: _neg_view
 
 - func: acos(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -414,6 +417,16 @@
   variants: function
   dispatch:
     CPU: add_relu_out
+
+- func: _add_relu.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_relu
+
+- func: _add_relu_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: add_relu_
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -2315,6 +2328,11 @@
   device_guard: False
   manual_cpp_binding: True
 
+- func: is_neg(Tensor self) -> bool
+  variants: function, method
+  device_guard: False
+  manual_cpp_binding: True
+
 - func: isreal(Tensor self) -> Tensor
   variants: function, method
 
@@ -3236,9 +3254,19 @@
 
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
+  dispatch:
+    CUDA: is_pinned_cuda
+    CompositeExplicitAutograd: is_pinned_default
 
+# TODO: add a copy kwarg that guarantees that the tensor is put into fresh
+# pinned memory
 - func: pin_memory(Tensor(a) self, Device? device=None) -> Tensor(a)
   variants: method
+
+# Unlike pin_memory, this is guaranteed to give a new non-aliasing tensor
+- func: _pin_memory(Tensor self, Device? device=None) -> Tensor
+  dispatch:
+    CUDA: _pin_memory_cuda
 
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
@@ -5957,18 +5985,6 @@
     CPU: lerp_cpu_tensor_
     CUDA: lerp_cuda_tensor_
 
-- func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CPU, CUDA: fmod_
-
-- func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CPU, CUDA: fmod_
-
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
@@ -6425,14 +6441,14 @@
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: index_select_out_cpu_
-    CUDA: index_select_out_cuda
+    CPU, QuantizedCPU: index_select_out_cpu_
+    CUDA, QuantizedCUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: index_select_cpu_
-    CUDA: index_select_cuda
+    CPU, QuantizedCPU: index_select_cpu_
+    CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
@@ -6905,24 +6921,37 @@
 - func: fmod.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: fmod_out
+    CompositeExplicitAutograd: fmod_out
 
 - func: fmod.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: fmod
+    CompositeExplicitAutograd: fmod
+
+- func: fmod_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  dispatch:
+    CompositeExplicitAutograd: fmod_
 
 - func: fmod.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: fmod_out
 
 - func: fmod.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
+  structured_delegate: fmod.Tensor_out
   variants: method, function
-  dispatch:
-    CPU, CUDA: fmod
+
+
+- func: fmod_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: method
+  structured_delegate: fmod.Tensor_out
 
 - func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -9733,6 +9762,36 @@
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
 
+- func: special_xlogy(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.self_scalar(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.other_scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
 - func: special_zeta(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special
@@ -9829,6 +9888,13 @@
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
+- func: special_polygamma(int n, Tensor self) -> Tensor
+  python_module: special
+  variants: function, method
+
+- func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
 - func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   python_module: special
   variants: function
@@ -9865,6 +9931,10 @@
   variants: function
 
 - func: special_log1p.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+
+- func: special_log_softmax(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
   python_module: special
   variants: function
 
