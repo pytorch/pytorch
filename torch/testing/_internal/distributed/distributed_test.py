@@ -7234,9 +7234,12 @@ class DistributedTest:
                     self.net1 = nn.Linear(10, 10, bias=False)
                     self.net2 = nn.Linear(10, 10)
 
-                def forward(self, x, find_unused):
+                def forward(self, x, find_unused, dynamic):
                     if find_unused:
-                        return self.net2(x)
+                        if dynamic:
+                            return self.net2(self.net1(x))
+                        else:
+                            return self.net2(x)
                     else:
                         return self.net2(self.net1(x))
 
@@ -7251,10 +7254,23 @@ class DistributedTest:
                 )
                 inp = torch.randn(1, 10, device='cuda')
                 for _ in range(6):
-                    out = ddp(inp, find_unused)
+                    out = ddp(inp, find_unused=find_unused, dynamic=False)
                     loss = out.sum()
                     loss.backward()
                     self.assertTrue(ddp.reducer._ddp_graph_static())
+
+            # Set of unused parameters dynamically change
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+            inp = torch.randn(1, 10, device='cuda')
+            for i in range(6):
+                out = ddp(inp, find_unused=True, dynamic=i % 2 == 0)
+                loss = out.sum()
+                loss.backward()
+            self.assertFalse(ddp.reducer._ddp_graph_static())
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
