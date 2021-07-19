@@ -1412,6 +1412,8 @@ class TestCase(expecttest.TestCase):
                     dtype = torch.float64
                 elif isinstance(x, int) or isinstance(y, int):
                     dtype = torch.int64
+                elif isinstance(x, np.uint8) or isinstance(x, np.uint8):
+                    dtype = torch.uint8
                 elif isinstance(x, (bool, np.bool_)) or isinstance(y, (bool, np.bool_)):
                     dtype = torch.bool
                 else:

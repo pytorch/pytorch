@@ -636,6 +636,9 @@ def generate_tensor_like_override_tests(cls):
                 self.assertTrue(WRAPPED_TRIGGERED_IMPLS[func]._triggered)
                 return
 
+            if isinstance(ret, torch.Tensor):
+                ret = ret.item()
+
             self.assertEqual(ret, -1)
 
         return test
