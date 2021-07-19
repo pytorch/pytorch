@@ -1357,7 +1357,7 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta, alpha=alpha))
 
-    return list(generator()) 
+    return list(generator())
 
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [(((S, S), (S, S), (S, S)), False),
