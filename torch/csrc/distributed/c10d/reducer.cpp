@@ -450,13 +450,16 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
   for (size_t i = 0; i < buckets_.size(); ++i) {
+    auto& bucket = buckets_[i];
+    auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
       i,
-      return_zero_tensors ? at::zeros_like(buckets_[i].replicas[0].contents)
-                            : buckets_[i].replicas[0].contents,
-      buckets_[i].replicas[0].offsets,
-      buckets_[i].replicas[0].lengths,
-      buckets_[i].replicas[0].sizes_vec
+      return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
+                            : bucket.replicas[0].contents,
+      bucket.replicas[0].offsets,
+      bucket.replicas[0].lengths,
+      bucket.replicas[0].sizes_vec,
+      variables_for_bucket
     );
   }
   return gradBuckets;
@@ -845,6 +848,8 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
     //
     tensors.push_back(replica.contents);
   }
+
+  auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
   GradBucket grad_bucket(
       next_bucket_,
       tensors[0],
@@ -852,8 +857,42 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       // mode, there is always only one replica in the bucket.
       bucket.replicas[0].offsets,
       bucket.replicas[0].lengths,
-      bucket.replicas[0].sizes_vec);
+      bucket.replicas[0].sizes_vec,
+      variables_for_bucket);
   bucket.future_work = run_comm_hook(grad_bucket);
+}
+
+std::vector<at::Tensor> Reducer::get_variables_for_bucket(
+    size_t bucket_index,
+    const Bucket& bucket) const {
+  // Check if we have cached mapping previously.
+  if (has_rebuilt_bucket_ &&
+      cached_variables_for_bucket_.find(bucket_index) !=
+          cached_variables_for_bucket_.end()) {
+     return cached_variables_for_bucket_[bucket_index];
+  }
+  std::vector<at::Tensor> variables_for_bucket;
+  variables_for_bucket.reserve(bucket.variable_indices.size());
+  for (const auto& variable_index : bucket.variable_indices) {
+    auto& replica = bucket.replicas[0];
+    // Grab bucket index where gradient is located using variable_locators_.
+    auto& bucket_index_for_variable = variable_locators_[variable_index];
+    // Grab the actual model parameter.
+    auto& variable =
+        replica.variables[bucket_index_for_variable.intra_bucket_index];
+    variables_for_bucket.emplace_back(variable);
+  }
+
+  if (has_rebuilt_bucket_) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        cached_variables_for_bucket_.find(bucket_index) ==
+        cached_variables_for_bucket_.end());
+    cached_variables_for_bucket_.insert(
+        {bucket_index, std::move(variables_for_bucket)});
+    return cached_variables_for_bucket_[bucket_index];
+  } else {
+    return variables_for_bucket;
+  }
 }
 
 // Called when the bucket at the specified index is ready to be reduced.
