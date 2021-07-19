@@ -6834,8 +6834,11 @@
 
 - func: signbit(Tensor self) -> Tensor
   variants: function, method
+  structured_delegate: signbit.out
 
 - func: signbit.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
     CPU: signbit_out
     CUDA: signbit_out
