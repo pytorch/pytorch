@@ -57,7 +57,7 @@ C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominat
 }
 
 //template for changing MAX_NUM_THREADS based on op dtype
-template <typename T> 
+template <typename T>
 struct mnt_wrapper {
   static constexpr int MAX_NUM_THREADS = 512;
 };
