@@ -213,7 +213,8 @@ at::Tensor _to_copy(
     auto self_fw_grad = generated::details::toNonOptFwGrad(self);
     auto new_fw_grad = at::_to_copy(
         self_fw_grad, dtype, layout, device, pin_memory, non_blocking, memory_format);
-    self._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
+    // The hardcoded 0 here will need to be updated once we support multiple levels.
+    result._set_fw_grad(new_fw_grad, /* level */ 0, /* is_inplace_op */ false);
   }
 
   return result;
