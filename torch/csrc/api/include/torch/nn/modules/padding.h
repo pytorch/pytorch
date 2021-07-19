@@ -81,6 +81,33 @@ class TORCH_API ReflectionPad2dImpl : public ReflectionPadImpl<2, ReflectionPad2
 /// module storage semantics.
 TORCH_MODULE(ReflectionPad2d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ReflectionPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies ReflectionPad over a 3-D input.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.ReflectionPad3d to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::ReflectionPad3dOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// ReflectionPad3d model(ReflectionPad3dOptions(1));
+/// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0, 1, 2}));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_API ReflectionPad3dImpl : public ReflectionPadImpl<3, ReflectionPad3dImpl> {
+ public:
+  using ReflectionPadImpl<3, ReflectionPad3dImpl>::ReflectionPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ReflectionPad3dImpl`.
+/// See the documentation for `ReflectionPad3dImpl` class to learn what methods it
+/// provides, and examples of how to use `ReflectionPad3d` with `torch::nn::ReflectionPad3dOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(ReflectionPad3d);
+
 // ============================================================================
 
 /// Base class for all (dimension-specialized) ReplicationPad modules.

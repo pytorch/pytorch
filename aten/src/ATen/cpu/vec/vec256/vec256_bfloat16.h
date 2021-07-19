@@ -16,11 +16,15 @@ namespace {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
+static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
+  o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
+}
+
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i lo = _mm256_extractf128_si256(a, 0);
   __m128i hi = _mm256_extractf128_si256(a, 1);
-  o1 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(lo), 16));
-  o2 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(hi), 16));
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
 }
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
@@ -197,19 +201,19 @@ public:
     }
     return b;
   }
-  Vectorized<BFloat16> map(const __m256 (*vop)(__m256)) const {
+  Vectorized<BFloat16> map(const __m256 (*const vop)(__m256)) const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto o1 = vop(lo);
-    auto o2 = vop(hi);
+    const auto o1 = vop(lo);
+    const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> abs() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto mask = _mm256_set1_ps(-0.f);
-    auto o1 = _mm256_andnot_ps(mask, lo);
-    auto o2 = _mm256_andnot_ps(mask, hi);
+    const auto mask = _mm256_set1_ps(-0.f);
+    const auto o1 = _mm256_andnot_ps(mask, lo);
+    const auto o2 = _mm256_andnot_ps(mask, hi);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> angle() const {
@@ -328,17 +332,17 @@ public:
   Vectorized<BFloat16> i0e() const {
     __m256 lo, hi;
     cvtbf16_fp32(values, lo, hi);
-    auto sz = size();
+    constexpr auto sz = size();
     __at_align32__ float tmp1[sz / 2], tmp2[sz / 2];
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
     _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
 
-    for (decltype(sz) i = 0; i < sz / 2; i++) {
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
     }
-    auto o1 = _mm256_loadu_ps(tmp1);
-    auto o2 = _mm256_loadu_ps(tmp2);
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
     return cvtfp32_bf16(o1, o2);
   }
   Vectorized<BFloat16> igamma(const Vectorized<BFloat16> &x) const {
@@ -701,6 +705,39 @@ Vectorized<BFloat16> inline fmadd(const Vectorized<BFloat16>& a,
   auto o1 = _mm256_fmadd_ps(a_lo, b_lo, c_lo);
   auto o2 = _mm256_fmadd_ps(a_hi, b_hi, c_hi);
   return cvtfp32_bf16(o1, o2);
+}
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
+  __m256 o1, o2;
+  cvtbf16_fp32(__m256i(a), o1, o2);
+  return std::make_tuple(o1, o2);
+}
+
+inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
+ return cvtfp32_bf16(__m256(a), __m256(b));
+}
+
+#else //defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
+  constexpr int64_t K = Vectorized<BFloat16>::size();
+  __at_align32__ float arr[K];
+  __at_align32__ BFloat16 arr2[K];
+  a.store(arr2);
+  convert(arr2, arr, K);
+  return std::make_tuple(
+      Vectorized<float>::loadu(arr),
+      Vectorized<float>::loadu(arr + Vectorized<float>::size()));
+}
+
+inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
+  constexpr int64_t K = Vectorized<BFloat16>::size();
+  __at_align32__ float arr[K];
+  __at_align32__ BFloat16 arr2[K];
+  a.store(arr);
+  b.store(arr + Vectorized<float>::size());
+  convert(arr, arr2, K);
+  return Vectorized<BFloat16>::loadu(arr2);
 }
 
 #endif

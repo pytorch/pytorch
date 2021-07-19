@@ -1,4 +1,4 @@
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNFullyConnectedOp.h>
 #import <ATen/native/metal/mpscnn/MPSCNNNeuronOp.h>
 
@@ -28,12 +28,12 @@
                                                  Bias:(float*)b
                                                  Desc:desc];
     fc = [[MPSCNNFullyConnected alloc]
-        initWithDevice:[MPSCNNContext sharedInstance].device
+        initWithDevice:[MetalContext sharedInstance].device
                weights:ds];
   } else {
 #if TARGET_OS_IPHONE
     fc = [[MPSCNNFullyConnected alloc]
-               initWithDevice:[MPSCNNContext sharedInstance].device
+               initWithDevice:[MetalContext sharedInstance].device
         convolutionDescriptor:desc
                 kernelWeights:w
                     biasTerms:b

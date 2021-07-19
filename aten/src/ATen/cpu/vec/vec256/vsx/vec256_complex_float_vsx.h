@@ -220,7 +220,7 @@ class Vectorized<ComplexFlt> {
   const ComplexFlt& operator[](int idx) const = delete;
   ComplexFlt& operator[](int idx) = delete;
 
-  Vectorized<ComplexFlt> map(ComplexFlt (*f)(ComplexFlt)) const {
+  Vectorized<ComplexFlt> map(ComplexFlt (*const f)(ComplexFlt)) const {
     __at_align32__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
@@ -229,7 +229,7 @@ class Vectorized<ComplexFlt> {
     return loadu(tmp);
   }
 
-  Vectorized<ComplexFlt> map(ComplexFlt (*f)(const ComplexFlt&)) const {
+  Vectorized<ComplexFlt> map(ComplexFlt (*const f)(const ComplexFlt&)) const {
     __at_align32__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {

@@ -3,14 +3,14 @@ import torch.nn.quantized._reference as nnqr
 import torch.nn.functional as F
 
 class ConvReLU1d(nnqr.Conv1d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU1d
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()
         weight_dequant = self._qweight.dequantize()
         float_result = F.conv1d(
-            x_dequant, weight_dequant, self._bias, self._conv1d_stride,
-            self._conv1d_padding, self._conv1d_dilation, self.groups)
+            x_dequant, weight_dequant, self._bias, self._conv1d_stride,  # type: ignore[has-type]
+            self._conv1d_padding, self._conv1d_dilation, self.groups)  # type: ignore[has-type]
         float_result = F.relu(float_result, inplace=True)
         # NEEDFIX: we don't have dtype in the Linear module APIs right now!
         result = torch.quantize_per_tensor(
@@ -22,7 +22,7 @@ class ConvReLU1d(nnqr.Conv1d):
 
 
 class ConvReLU2d(nnqr.Conv2d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d  # type: ignore[assignment]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()
@@ -40,7 +40,7 @@ class ConvReLU2d(nnqr.Conv2d):
         return "QuantizedConvReLU2d(Reference)"
 
 class ConvReLU3d(nnqr.Conv3d):
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d  # type: ignore[assignment]
+    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU3d
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_dequant = x.dequantize()

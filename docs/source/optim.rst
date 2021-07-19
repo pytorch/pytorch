@@ -132,6 +132,8 @@ Algorithms
     Adamax
     ASGD
     LBFGS
+    NAdam
+    RAdam
     RMSprop
     Rprop
     SGD

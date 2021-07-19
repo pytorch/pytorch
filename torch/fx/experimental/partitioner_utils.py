@@ -93,6 +93,8 @@ class PartitionerConfig(NamedTuple):
     node_to_latency_mapping: Dict[Node, NodeLatency] = {}
     node_to_partition_mapping: Dict[Node, int] = {}
     partition_to_logical_device_mapping: Dict[int, List[int]] = {}
+    # Saturate host by replicating partitions to the remaining idle devices.
+    saturate_host: bool = False
 
 
 def get_extra_size_of(node: Node, nodes: Set[Node]) -> int:

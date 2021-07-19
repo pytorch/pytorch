@@ -38,6 +38,8 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
         nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
+        This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
+        argument < -1.
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -91,11 +93,11 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             dill_function = dill.dumps(self.fn)
         else:
             dill_function = self.fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        state = (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
@@ -150,7 +152,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
-@functional_datapipe('transforms')
+@functional_datapipe('legacy_transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 
