@@ -336,7 +336,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
             )
 
 
-class BatchNorm2d(_LazyNormBase, _BatchNorm):
+class BatchNorm2d(_BatchNorm):
     r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
@@ -441,7 +441,7 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
             raise ValueError("expected 4D input (got {}D input)".format(input.dim()))
 
 
-class BatchNorm3d(_LazyNormBase, _BatchNorm):
+class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing
