@@ -265,7 +265,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
-
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
