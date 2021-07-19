@@ -204,7 +204,6 @@ struct NanSumCastLoadPolicy {
   }
 
   static acc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    using vec_t = Vectorized<scalar_t>;
     auto val = CastLoadPolicy<scalar_t, acc_t>::load(data, stride, index);
     return at::_isnan(val) ? acc_t(0) : val;
   }
