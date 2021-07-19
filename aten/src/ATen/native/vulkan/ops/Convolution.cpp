@@ -651,6 +651,15 @@ void Conv2dOpContext::conv2d_sliding_window(
       },
     };
 
+    uvec3 global_size = v_output.extents();
+    if (method_ == Conv2dPointwise) {
+      global_size = {
+        safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
+        safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::height], INT64_C(2))),
+        v_output.extents().data[2u]
+      };
+    }
+
     context->dispatch(
         command_buffer,
         {
@@ -661,7 +670,7 @@ void Conv2dOpContext::conv2d_sliding_window(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         shader,
-        v_output.extents(),
+        global_size,
         context->gpu().adapter->local_work_group_size(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
@@ -836,7 +845,7 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
       break;
     case Conv2dPointwise:
       conv2d_sliding_window(
-        VK_KERNEL(conv2d_pw),
+        VK_KERNEL(conv2d_pw_2x2),
         v_output,
         v_input);
       break;
