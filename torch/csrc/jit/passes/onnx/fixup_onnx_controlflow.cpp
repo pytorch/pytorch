@@ -383,8 +383,8 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
   };
 
   auto mergeTensorType = [&findCommonShape](
-                             const TensorTypePtr a,
-                             const TensorTypePtr b) -> TensorTypePtr {
+                             TensorTypePtr a,
+                             TensorTypePtr b) -> TensorTypePtr {
     if (a && b) {
       const auto& a_shape = a->symbolic_sizes();
       const auto& b_shape = b->symbolic_sizes();
@@ -399,8 +399,8 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
   };
 
   auto mergeListType = [&mergeTensorType](
-                           const ListTypePtr a,
-                           const ListTypePtr b) -> ListTypePtr {
+                           ListTypePtr a,
+                           ListTypePtr b) -> ListTypePtr {
     if (a && b) {
       auto a_tensor_type = a->getElementType()->cast<TensorType>();
       auto b_tensor_type = b->getElementType()->cast<TensorType>();
