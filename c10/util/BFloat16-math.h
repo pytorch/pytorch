@@ -105,10 +105,8 @@ C10_HOST_DEVICE inline c10::BFloat16 nextafter(
   // get a mask to get the sign bit i.e. MSB
   int_repr_t sign_mask = int_repr_t{1} << (bits - 1);
 
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__) || defined(_MSC_VER)
   if (from != from || to != to) {
-#elif defined(_MSC_VER)
-  if (isnan(from) || isnan(to)) {
 #else
   if (std::isnan(from) || std::isnan(to)) {
 #endif
