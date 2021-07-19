@@ -37,8 +37,8 @@ class TestNNAPI(TestCase):
         return convert_model_to_nnapi(traced_module, args)
 
     # Created for subclasses to set can_run_nnapi (eg TestNnapiBackend)
-    def set_can_run_nnapi(self, bool):
-        self.can_run_nnapi = bool
+    def set_can_run_nnapi(self, can_run):
+        self.can_run_nnapi = can_run
 
     def check(
         self,

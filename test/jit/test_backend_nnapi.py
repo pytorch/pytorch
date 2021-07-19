@@ -13,7 +13,6 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     TEST_WITH_ROCM,
-    skipIfRocm,
 )
 
 # Make the helper files in test/ importable
