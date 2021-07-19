@@ -1422,12 +1422,7 @@ class TestCase(expecttest.TestCase):
             try:
                 x = torch.as_tensor(x, dtype=dtype)
                 y = torch.as_tensor(y, dtype=dtype)
-            except Exception as error:
-                # Integers >= 2 ** 64 cannot be compared with torch.testing.assert_close, because it internally
-                # converts all input to tensors
-                if not (isinstance(error, RuntimeError) and str(error) == "Overflow when unpacking long"):
-                    raise error
-
+            except Exception:
                 return super().assertEqual(
                     x.item() if isinstance(x, torch.Tensor) else x,
                     y.item() if isinstance(y, torch.Tensor) else y,
