@@ -1,5 +1,6 @@
+import contextlib
 import os
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
@@ -165,64 +166,144 @@ class TestJoin(MultiProcessTestCase):
 
     def construct_uneven_inputs(self, base, offset, device=None):
         r"""
-        Returns uneven inputs: rank i gets ``base`` + i * ``offset``-many
-        inputs.
+        Returns uneven inputs: rank i gets ``base`` + i * ``offset`` inputs.
         """
         if device is None:
             device = self.device
         return [torch.zeros(1, device=device) for _ in range(base + self.rank * offset)]
 
     def construct_even_inputs(self, base, device=None):
-        r"""Returns even inputs: each rank gets ``base``-many inputs."""
+        r"""Returns even inputs: each rank gets ``base`` inputs."""
         if device is None:
             device = self.device
         return [torch.zeros(1, device=device) for _ in range(base)]
+
+    @property
+    def base_num_inputs(self):
+        r"""Base number of inputs to be used by all ranks."""
+        return 3
+
+    @property
+    def offset(self):
+        r"""Rank i gets i * ``offset`` additional inputs."""
+        return 1
+
+    def _test_joinable_base(
+        self,
+        uneven_inputs: bool,
+        num_joinables: int,
+        enable: bool,
+        throw_on_early_termination: bool,
+        num_allreduces: int,
+        run_post_hooks: bool,
+        expected_total: Optional[int] = None,
+    ):
+        r"""
+        Skeleton for all :class:`_Join` tests.
+
+        Arguments:
+            uneven_inputs (bool): ``True`` to use uneven inputs; ``False``
+                otherwise.
+            num_joinables (int): number of :class:`AllReducer` s to construct.
+            enable (bool): ``True`` to enable the join context manager;
+                ``False`` otherwise.
+            throw_on_early_termination (bool): ``True`` to raise an exception
+                upon detecting uneven inputs; ``False`` otherwise.
+            num_allreduces (int): number of all-reduces to perform per input.
+            run_post_hooks (bool): ``True`` to run post-hooks; ``False``
+                otherwise.
+            expected_total (Optional[int]): ``None`` to not check the expected
+                all-reduce total; otherwise, the expected total; default is
+                ``None``.
+        """
+        self.dist_init(self.rank, self.world_size)
+
+        allreducers = [
+            AllReducer(self.device, self.process_group)
+            for _ in range(num_joinables)
+        ]
+        for allreducer in allreducers:
+            self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
+
+        inputs = self.construct_uneven_inputs(self.base_num_inputs, self.offset) \
+            if uneven_inputs \
+            else self.construct_even_inputs(self.base_num_inputs)
+        allreduce_total = 0
+
+        # Expect a `RuntimeError` if `throw_on_early_termination=True`
+        # Rank 0 exhausts its inputs first
+        expected_msg = "Rank 0 exhausted all inputs." if self.rank == 0 \
+            else "Detected at least one rank that exhausted inputs. " \
+            "Throwing across all ranks."
+        with self.assertRaisesRegex(
+            RuntimeError,
+            expected_msg
+        ) if throw_on_early_termination else contextlib.suppress():
+            with _Join(
+                allreducers,
+                enable=enable,
+                throw_on_early_termination=throw_on_early_termination,
+                num_allreduces=num_allreduces,
+                run_post_hooks=run_post_hooks
+            ):
+                for _ in inputs:
+                    for allreducer in allreducers:
+                        allreduce_total += allreducer(num_allreduces)
+
+        # Check `expected_total` if not `None`
+        if expected_total:
+            self.assertEqual(allreduce_total, expected_total)
+
+        # All `AllReduce` instances should receive the updated
+        # `post_hook_tensor` from the last-joined process
+        if run_post_hooks:
+            for allreducer in allreducers:
+                self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_main_hooks(self):
         r"""Tests the main hooks of a single :class:`_Joinable`."""
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
-
-        allreducer = AllReducer(self.device, self.process_group)
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        allreduce_total = 0
-        with _Join([allreducer]):
-            for _ in inputs:
-                allreduce_total += allreducer()
-
+        num_joinables = 1
+        num_allreduces = 1
+        run_post_hooks = False
         # Non-joined processes all-reduce a 1, so this rank's all-reduce total
         # should be precisely equal to the total number of inputs processed
         # before it joined
-        expected_total = self.world_size * BASE_NUM_INPUTS
+        expected_total = self.world_size * self.base_num_inputs
         # Rank i runs for i additional iterations
         for num_joined in range(1, self.rank + 1):
-            expected_total += (self.world_size - num_joined) * OFFSET
-        self.assertEqual(allreduce_total, expected_total)
+            expected_total += (self.world_size - num_joined) * self.offset
+
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_post_hooks(self):
         r"""Tests the post-hooks of a single :class:`_Joinable`."""
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
+        num_joinables = 1
+        num_allreduces = 0  # set to 0 to skip the main hooks
+        run_post_hooks = False
 
-        allreducer = AllReducer(self.device, self.process_group)
-        self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
-
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        with _Join([allreducer], run_post_hooks=True):
-            for _ in inputs:
-                allreducer()
-
-        # All processes should receive the updated `post_hook_tensor` from the
-        # last-joined process
-        self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=None
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -236,24 +317,23 @@ class TestJoin(MultiProcessTestCase):
         ``test_single_joinable_post_hooks()`` into a single test to ensure that
         main hooks and post-hooks operate correctly together.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
+        num_joinables = 1
+        num_allreduces = 1
+        run_post_hooks = True
 
-        allreducer = AllReducer(self.device, self.process_group)
-        self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
-
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        allreduce_total = 0
-        with _Join([allreducer], run_post_hooks=True):
-            for _ in inputs:
-                allreduce_total += allreducer()
-
-        expected_total = self.world_size * BASE_NUM_INPUTS
+        expected_total = self.world_size * self.base_num_inputs
         for num_joined in range(1, self.rank + 1):
-            expected_total += (self.world_size - num_joined) * OFFSET
-        self.assertEqual(allreduce_total, expected_total)
-        self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
+            expected_total += (self.world_size - num_joined) * self.offset
+
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -266,51 +346,48 @@ class TestJoin(MultiProcessTestCase):
         This generalizes ``test_single_joinable()`` to multiple
         :class:`_Joinable` s.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
-        NUM_JOINABLES = 3
+        num_joinables = 3
+        num_allreduces = 1
+        run_post_hooks = True
 
-        allreducers = [
-            AllReducer(self.device, self.process_group)
-            for _ in range(NUM_JOINABLES)
-        ]
-        for allreducer in allreducers:
-            self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
-
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        allreduce_total = 0
-        with _Join(allreducers, run_post_hooks=True):
-            for _ in inputs:
-                for allreducer in allreducers:
-                    allreduce_total += allreducer()
-
-        expected_total = self.world_size * BASE_NUM_INPUTS
+        expected_total = self.world_size * self.base_num_inputs
         for num_joined in range(1, self.rank + 1):
-            expected_total += (self.world_size - num_joined) * OFFSET
+            expected_total += (self.world_size - num_joined) * self.offset
         # The expected total is now multiplied by a factor of `NUM_JOINABLES`
-        expected_total *= NUM_JOINABLES
-        self.assertEqual(allreduce_total, expected_total)
-        for allreducer in allreducers:
-            self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
+        expected_total *= num_joinables
+
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
     )
     def test_single_joinable_disable(self):
         r"""Tests ``enable=False`` for a single :class:`_Joinable`."""
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
+        num_joinables = 1
+        num_allreduces = 1
+        uneven_inputs = False
+        enable = False
+        run_post_hooks = False
 
-        allreducer = AllReducer(self.device, self.process_group)
-        inputs = self.construct_even_inputs(BASE_NUM_INPUTS)
-        allreduce_total = 0
-        with _Join([allreducer], enable=False):
-            for _ in inputs:
-                allreduce_total += allreducer()
+        expected_total = self.world_size * self.base_num_inputs
 
-        expected_total = self.world_size * BASE_NUM_INPUTS
-        self.assertEqual(allreduce_total, expected_total)
+        self._test_joinable_base(
+            uneven_inputs=uneven_inputs,
+            num_joinables=num_joinables,
+            enable=enable,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -322,23 +399,23 @@ class TestJoin(MultiProcessTestCase):
         This generalizes ``test_single_joinable_disable`` to multiple
         :class:`_Joinable` s.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        NUM_JOINABLES = 3
+        num_joinables = 3
+        num_allreduces = 1
+        uneven_inputs = False
+        enable = False
+        run_post_hooks = False
 
-        allreducers = [
-            AllReducer(self.device, self.process_group)
-            for _ in range(NUM_JOINABLES)
-        ]
-        inputs = self.construct_even_inputs(BASE_NUM_INPUTS)
-        allreduce_total = 0
-        with _Join(allreducers, enable=False):
-            for _ in inputs:
-                for allreducer in allreducers:
-                    allreduce_total += allreducer()
+        expected_total = self.world_size * self.base_num_inputs * num_joinables
 
-        expected_total = self.world_size * BASE_NUM_INPUTS * NUM_JOINABLES
-        self.assertEqual(allreduce_total, expected_total)
+        self._test_joinable_base(
+            uneven_inputs=uneven_inputs,
+            num_joinables=num_joinables,
+            enable=enable,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -348,17 +425,20 @@ class TestJoin(MultiProcessTestCase):
         Tests ``throw_on_early_termination=True`` for a single
         :class:`_Joinable`.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
+        num_joinables = 1
+        num_allreduces = 1
+        throw_on_early_termination = True
+        run_post_hooks = False
 
-        allreducer = AllReducer(self.device, self.process_group)
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        allreduce_total = 0
-        with self.assertRaises(RuntimeError):
-            with _Join([allreducer], throw_on_early_termination=True):
-                for _ in inputs:
-                    allreduce_total += allreducer()
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=throw_on_early_termination,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=None
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -371,22 +451,20 @@ class TestJoin(MultiProcessTestCase):
         This generalizes ``test_single_joinable_throw`` to multiple
         :class:`_Joinable` s.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
-        NUM_JOINABLES = 3
+        num_joinables = 3
+        num_allreduces = 1
+        throw_on_early_termination = True
+        run_post_hooks = False
 
-        allreducers = [
-            AllReducer(self.device, self.process_group)
-            for _ in range(NUM_JOINABLES)
-        ]
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        allreduce_total = 0
-        with self.assertRaises(RuntimeError):
-            with _Join(allreducers, throw_on_early_termination=True):
-                for _ in inputs:
-                    for allreducer in allreducers:
-                        allreduce_total += allreducer()
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=throw_on_early_termination,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=None
+        )
 
     @require_n_gpus_for_nccl_backend(
         WORLD_SIZE, BACKEND
@@ -395,26 +473,25 @@ class TestJoin(MultiProcessTestCase):
         r"""
         Tests passing keyword arguments to the context manager.
         """
-        self.dist_init(self.rank, self.world_size)
-        BASE_NUM_INPUTS = 3
-        OFFSET = 1
-        NUM_ALLREDUCES = 2
+        num_joinables = 1
+        num_allreduces = 2
+        run_post_hooks = False
 
-        allreducer = AllReducer(self.device, self.process_group)
-        inputs = self.construct_uneven_inputs(BASE_NUM_INPUTS, OFFSET)
-        # Perform `NUM_ALLREDUCES` all-reduces per iteration
-        allreduce_total = 0
-        with _Join([allreducer], num_allreduces=NUM_ALLREDUCES):
-            for _ in inputs:
-                allreduce_total += allreducer(NUM_ALLREDUCES)
-
-        expected_total = self.world_size * BASE_NUM_INPUTS
+        expected_total = self.world_size * self.base_num_inputs
         for num_joined in range(1, self.rank + 1):
-            expected_total += (self.world_size - num_joined) * OFFSET
+            expected_total += (self.world_size - num_joined) * self.offset
         # The expected total is now multiplied by a factor of `NUM_ALLREDUCES`
-        expected_total *= NUM_ALLREDUCES
-        self.assertEqual(allreduce_total, expected_total)
+        expected_total *= num_allreduces
 
+        self._test_joinable_base(
+            uneven_inputs=True,
+            num_joinables=num_joinables,
+            enable=True,
+            throw_on_early_termination=False,
+            num_allreduces=num_allreduces,
+            run_post_hooks=run_post_hooks,
+            expected_total=expected_total
+        )
 
 if __name__ == "__main__":
     run_tests()
