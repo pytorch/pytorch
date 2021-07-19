@@ -168,6 +168,11 @@ class TORCH_API Reducer {
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
 
+  // When graph is not explicitly set by user as static and has unused
+  // parameters, this will return whether the graph has been static until the
+  // current iteration, which means unused params set has not changed.
+  bool ddp_graph_static();
+
  protected:
   // Forward declaration.
   struct Bucket;
@@ -193,6 +198,13 @@ class TORCH_API Reducer {
   const bool find_unused_parameters_;
   const bool gradient_as_bucket_view_;
   std::vector<size_t> unused_parameters_;
+  // Previous iteration's unused params, used for checking if unused parameters
+  // change between iterations. Only filled during the first backwards call.
+  std::vector<size_t> prev_iteration_unused_parameters_;
+  // Whether graph is static or not. When user does not explicitly set static
+  // graph, the only possible dynamism is set of unused parameters changing
+  // between iterations which is tracked by this flag.
+  bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
