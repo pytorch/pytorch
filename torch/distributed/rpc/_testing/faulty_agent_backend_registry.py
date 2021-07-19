@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import torch
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.distributed_c10d as dc10d
