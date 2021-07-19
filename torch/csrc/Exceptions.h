@@ -164,7 +164,7 @@ struct python_error : public std::exception {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
+  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions)
   virtual const char* what() const noexcept override {
     return message.c_str();
   }
