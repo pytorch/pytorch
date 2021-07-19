@@ -423,7 +423,7 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_EQ(tensor1.device(), at::kCPU);
   ASSERT_FALSE(tensor1.requires_grad());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(tensor1.is_pinned());
+  ASSERT_FALSE(tensor1.is_pinned());
 #endif // ATEN_CPU_STATIC_DISPATCH
 
   if (torch::cuda::is_available()) {
@@ -454,11 +454,7 @@ TEST(BasicTest, FactoryMethodsTest) {
     // This is a bug
     // Issue https://github.com/pytorch/pytorch/issues/30405
     ASSERT_FALSE(tensor1.requires_grad());
-
-    // This will cause an exception
-    // Issue https://github.com/pytorch/pytorch/issues/30405
-    // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_ANY_THROW(tensor1.is_pinned());
+    ASSERT_FALSE(tensor1.is_pinned());
   }
 
   // Test _like variants
