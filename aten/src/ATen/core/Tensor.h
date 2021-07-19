@@ -29,18 +29,6 @@ class TORCH_API OptionalTensorRef {
     return *this;
   }
 
-  // Implementation of move constructor is the same as copy constructor.
-  // rhs has a non-owning reference, so it doesn't need to be cleared.
-  OptionalTensorRef(OptionalTensorRef&& rhs) : OptionalTensorRef(rhs.ref_) {}
-
-  OptionalTensorRef& operator=(OptionalTensorRef&& rhs) {
-    // Implementation of move assignment operator is the same as copy assignment
-    // operator. rhs has a non-owning reference, so it doesn't need to be
-    // cleared.
-    *this = rhs;
-    return *this;
-  }
-
   bool has_value() const {
     return ref_.defined();
   }
