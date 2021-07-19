@@ -91,7 +91,7 @@ inline c10::BFloat16 fmod(c10::BFloat16 a, c10::BFloat16 b) {
   return std::fmod(float(a), float(b));
 }
 
-inline c10::BFloat16 nextafter(c10::BFloat16 from, c10::BFloat16 to) {
+C10_HOST_DEVICE inline c10::BFloat16 nextafter(c10::BFloat16 from, c10::BFloat16 to) {
   using int_repr_t = uint16_t;
   using float_t = c10::BFloat16;
   constexpr uint8_t bits = 16;
@@ -103,7 +103,7 @@ inline c10::BFloat16 nextafter(c10::BFloat16 from, c10::BFloat16 to) {
   // get a mask to get the sign bit i.e. MSB
   int_repr_t sign_mask = int_repr_t{1} << (bits - 1);
 
-  if (at::_isnan(from) || at::_isnan(to)) {
+  if (std::isnan(from) || std::isnan(to)) {
     return from;
   }
 
