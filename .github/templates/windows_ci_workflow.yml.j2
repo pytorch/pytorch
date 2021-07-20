@@ -217,7 +217,7 @@ jobs:
 {%- else %}
     if: always()
 {%- endif %}
-    needs: [generate-test-matrix, test, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

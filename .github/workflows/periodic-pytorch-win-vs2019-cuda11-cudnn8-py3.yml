@@ -187,7 +187,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, generate-test-matrix, ]
+    needs: [generate-test-matrix, test, ]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
