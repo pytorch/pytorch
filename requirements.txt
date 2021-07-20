@@ -9,3 +9,4 @@ setuptools
 six
 typing_extensions
 dataclasses; python_version<"3.7"
+expecttest
