@@ -981,7 +981,7 @@ class TestFusedObsFakeQuant(TestCase):
         in_running_min_op = torch.tensor(float("inf"), device=device)
         in_running_max_ref = out_running_max_ref = float("-inf")
         in_running_max_op = torch.tensor(float("-inf"), device=device)
-        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        avg_const = 0.01
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
         observer_on = fake_quant_on = 0
@@ -999,11 +999,11 @@ class TestFusedObsFakeQuant(TestCase):
                 x,
                 torch.tensor(observer_on, device=device),
                 torch.tensor(fake_quant_on, device=device),
-                avg_const,
                 in_running_min_op,
                 in_running_max_op,
                 scale,
                 zero_point,
+                avg_const,
                 0,
                 255,
                 0,
@@ -1054,7 +1054,7 @@ class TestFusedObsFakeQuant(TestCase):
         in_running_min_op = torch.empty(m, device=device).fill_(float("inf"))
         in_running_max_ref = torch.empty(m, device=device).fill_(float("-inf"))
         in_running_max_op = torch.empty(m, device=device).fill_(float("-inf"))
-        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        avg_const = 0.01
 
         scale = torch.empty(m, device=device).fill_(0.1)
         zero_point = torch.empty(m, dtype=torch.int, device=device).fill_(0)
@@ -1074,11 +1074,11 @@ class TestFusedObsFakeQuant(TestCase):
                 x,
                 torch.tensor(observer_on, device=device),
                 torch.tensor(fake_quant_on, device=device),
-                avg_const,
                 in_running_min_op,
                 in_running_max_op,
                 scale,
                 zero_point,
+                avg_const,
                 0,
                 255,
                 0,
@@ -1120,7 +1120,7 @@ class TestFusedObsFakeQuant(TestCase):
 
         x = torch.randn(input_shape, device=device, requires_grad=True)
 
-        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        avg_const = 0.01
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
@@ -1140,11 +1140,11 @@ class TestFusedObsFakeQuant(TestCase):
             x,
             torch.tensor(1, device=device),
             torch.tensor(1, device=device),
-            avg_const,
             torch.tensor(x_min, device=device),
             torch.tensor(x_max, device=device),
             scale,
             zero_point,
+            avg_const,
             0,
             255,
             0,
@@ -1170,7 +1170,7 @@ class TestFusedObsFakeQuant(TestCase):
 
         x = torch.randn(input_shape, device=device, requires_grad=True)
 
-        avg_const = torch.tensor(0.01, dtype=torch.float, device=device)
+        avg_const = 0.01
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
@@ -1185,11 +1185,11 @@ class TestFusedObsFakeQuant(TestCase):
             x,
             torch.tensor(0, device=device),
             torch.tensor(0, device=device),
-            avg_const,
             torch.tensor(x_min, device=device),
             torch.tensor(x_max, device=device),
             scale,
             zero_point,
+            avg_const,
             0,
             255,
             0,
