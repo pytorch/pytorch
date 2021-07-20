@@ -146,6 +146,8 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   TORCH_CHECK(!self.is_conj(),
     "torch.Tensor.view is not supported for conjugate view tensors when converting to non-complex dtype.");
+  TORCH_CHECK(!self.is_neg(),
+    "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(
       std::move(storage), self.key_set(), type_meta);
