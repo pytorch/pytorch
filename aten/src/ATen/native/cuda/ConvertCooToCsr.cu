@@ -11,8 +11,8 @@ template <typename input_t, typename output_t>
 __global__ void convert_coo_to_csr_cuda_kernel(
     output_t* data_out,
     const input_t* data_in,
-    int64_t size,
-    int64_t numel) {
+    const int64_t size,
+    const int64_t numel) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
   if (tid == 0) {
@@ -31,7 +31,7 @@ template <typename input_t, typename output_t>
 void convert_coo_to_csr_cuda(
     Tensor& result,
     const Tensor& input,
-    const Scalar& size) {
+    const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
@@ -41,10 +41,11 @@ void convert_coo_to_csr_cuda(
     return;
   }
 
+  // Run (numel + 1) threads...
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
   int64_t BLOCKS = (numel + THREADS) / THREADS;
-
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
+
   convert_coo_to_csr_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(
       data_out, data_in, size, numel);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -53,8 +54,8 @@ void convert_coo_to_csr_cuda(
 void dispatch(
     Tensor& result,
     const Tensor& input,
-    const Scalar& size,
-    bool out_int32) {
+    const int64_t size,
+    const bool out_int32) {
   if (!out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(
         input.scalar_type(), "convert_coo_to_csr_cuda", [&] {
@@ -73,20 +74,38 @@ void dispatch(
 Tensor& _convert_coo_to_csr_out_cuda(
     const Tensor& self,
     const Scalar& size,
-    bool out_int32,
+    const bool out_int32,
     Tensor& result) {
-  dispatch(result, self, size, out_int32);
+  TORCH_CHECK(
+      self.dim() == 1,
+      "Input needs to be 1-dimensional, but got ",
+      self.dim(),
+      " dimensions");
+  TORCH_CHECK(
+      result.dim() == 1,
+      "Output needs to be 1-dimensional, but got ",
+      result.dim(),
+      " dimensions");
+  TORCH_CHECK(
+      result.numel() == size.to<int64_t>() + 1,
+      "Output needs ",
+      size.to<int64_t>() + 1,
+      " elements, but got ",
+      result.numel(),
+      " elements");
+
+  dispatch(result, self, size.to<int64_t>(), out_int32);
   return result;
 }
 
 Tensor _convert_coo_to_csr_cuda(
     const Tensor& self,
     const Scalar& size,
-    bool out_int32) {
+    const bool out_int32) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
-  Tensor result = at::empty({size + 1}, options, MemoryFormat::Contiguous);
+  Tensor result = at::empty({size.to<int64_t>() + 1}, options);
   at::native::_convert_coo_to_csr_out_cuda(self, size, out_int32, result);
   return result;
 }

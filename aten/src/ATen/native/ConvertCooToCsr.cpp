@@ -1,4 +1,4 @@
-#include <ATen/Aten.h>
+#include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 
@@ -13,7 +13,7 @@ template <typename input_t, typename output_t>
 void convert_coo_to_csr_cpu(
     Tensor& result,
     const Tensor& input,
-    const Scalar& size) {
+    const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
@@ -42,7 +42,7 @@ void convert_coo_to_csr_cpu(
 void dispatch(
     Tensor& result,
     const Tensor& input,
-    const Scalar& size,
+    const int64_t size,
     bool out_int32) {
   if (!out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(
@@ -64,7 +64,25 @@ Tensor& _convert_coo_to_csr_out_cpu(
     const Scalar& size,
     bool out_int32,
     Tensor& result) {
-  dispatch(result, self, size, out_int32);
+  TORCH_CHECK(
+      self.dim() == 1,
+      "Input needs to be 1-dimensional, but got ",
+      self.dim(),
+      " dimensions");
+  TORCH_CHECK(
+      result.dim() == 1,
+      "Output needs to be 1-dimensional, but got ",
+      result.dim(),
+      " dimensions");
+  TORCH_CHECK(
+      result.numel() == size.to<int64_t>() + 1,
+      "Output needs ",
+      size.to<int64_t>() + 1,
+      " elements, but got ",
+      result.numel(),
+      " elements");
+
+  dispatch(result, self, size.to<int64_t>(), out_int32);
   return result;
 }
 
@@ -75,7 +93,7 @@ Tensor _convert_coo_to_csr_cpu(
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
-  Tensor result = at::empty({size + 1}, options, MemoryFormat::Contiguous);
+  Tensor result = at::empty({size.to<int64_t>() + 1}, options);
   at::native::_convert_coo_to_csr_out_cpu(self, size, out_int32, result);
   return result;
 }
