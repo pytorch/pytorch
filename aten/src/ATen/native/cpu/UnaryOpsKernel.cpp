@@ -340,7 +340,7 @@ static void cosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void acosh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -348,7 +348,7 @@ static void acosh_kernel(TensorIteratorBase& iter) {
 }
 
 static void asinh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -356,7 +356,7 @@ static void asinh_kernel(TensorIteratorBase& iter) {
 }
 
 static void atanh_kernel(TensorIteratorBase& iter) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), "atanh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "atanh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::atanh(a); });
@@ -364,7 +364,7 @@ static void atanh_kernel(TensorIteratorBase& iter) {
 }
 
 static void digamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.common_dtype(), "digamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "digamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
@@ -372,7 +372,7 @@ static void digamma_kernel(TensorIteratorBase& iter) {
 }
 
 static void trigamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "trigamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "trigamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return trigamma(a); });
@@ -382,7 +382,7 @@ static void trigamma_kernel(TensorIteratorBase& iter) {
 static void exp2_kernel(TensorIteratorBase& iter) {
   // Supports only floating types as std::exp2 doesn't have
   // complex overloads.
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "exp2", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "exp2", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::exp2(a); });
@@ -395,7 +395,7 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   } else if (n == 1) {
     trigamma_kernel(iter);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
           iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
     });
