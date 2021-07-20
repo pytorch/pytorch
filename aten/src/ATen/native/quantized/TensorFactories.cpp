@@ -59,7 +59,7 @@ Tensor empty_per_channel_affine_quantized(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
   QuantizerPtr quantizer = make_per_channel_affine_quantizer(
-          scales, zero_points, axis, typeMetaToScalarType(options.dtype()));
+          scales.to(options.device()), zero_points.to(options.device()), axis, typeMetaToScalarType(options.dtype()));
   return new_qtensor(
       size,
       options,
