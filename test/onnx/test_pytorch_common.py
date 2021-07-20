@@ -75,21 +75,17 @@ def skipForAllOpsetVersions():
         return wrapper
     return skip_dec
 
-# Enables tests for scripting, instead of only tracing the model.
-def enableScriptTest():
-    def script_dec(func):
-        def wrapper(self):
-            self.is_script_test_enabled = True
-            return func(self)
-        return wrapper
-    return script_dec
-
-
 # Disable tests for scripting.
-def disableScriptTest():
+def skipScriptTest(unsupported_opset_versions=None):
     def script_dec(func):
         def wrapper(self):
-            self.is_script_test_enabled = False
+            if unsupported_opset_versions is None:
+                self.is_script_test_enabled = False
+            else:
+                if self.opset_version in unsupported_opset_versions:
+                    self.is_script_test_enabled = False
+                else:
+                    self.is_script_test_enabled = True
             return func(self)
         return wrapper
     return script_dec
