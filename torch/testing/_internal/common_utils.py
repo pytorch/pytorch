@@ -2490,3 +2490,42 @@ def has_breakpad() -> bool:
         return True
     except RuntimeError as e:
         return False
+
+def sandcastle_skip(reason):
+    """
+    Similar to unittest.skip, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if IS_SANDCASTLE:
+                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return
+            else:
+                raise unittest.SkipTest(reason)
+        return wrapper
+
+    return decorator
+
+def sandcastle_skip_if(condition, reason):
+    """
+    Similar to unittest.skipIf, however in the sandcastle environment it just
+    "passes" the test instead to avoid creating tasks complaining about tests
+    skipping continuously.
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if condition:
+                if IS_SANDCASTLE:
+                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                    return
+                else:
+                    raise unittest.SkipTest(reason)
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator

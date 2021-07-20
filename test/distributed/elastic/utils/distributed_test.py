@@ -27,7 +27,10 @@ def _create_c10d_store_mp(is_server, server_addr, port, world_size):
     store.set(f"test_key/{os.getpid()}", "test_value".encode("UTF-8"))
 
 
-@unittest.skipIf(IS_WINDOWS or IS_MACOS, "tests incompatible with tsan or asan")
+if IS_WINDOWS or IS_MACOS:
+    print("tests incompatible with tsan or asan", file=sys.stderr)
+    sys.exit(0)
+
 class DistributedUtilTest(unittest.TestCase):
     def test_create_store_single_server(self):
         store = create_c10d_store(is_server=True, server_addr=socket.gethostname())

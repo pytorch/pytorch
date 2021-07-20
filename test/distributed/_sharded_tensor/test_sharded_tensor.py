@@ -1,4 +1,5 @@
 from functools import wraps
+import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
@@ -16,7 +17,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
-import unittest
+
+if TEST_WITH_ASAN:
+    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    sys.exit(0)
 
 class ShardedTensorTestBase(object):
 
@@ -69,9 +73,6 @@ def with_comms(func):
     return wrapper
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
-)
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
     @with_comms
@@ -421,9 +422,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{shard_rank}/cuda:{shard_rank}', shard_metadata.placement)
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
-)
 class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
 
     @with_comms

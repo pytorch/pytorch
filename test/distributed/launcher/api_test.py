@@ -32,6 +32,7 @@ from torch.distributed.launcher.api import (
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
+    sandcastle_skip_if,
 )
 
 
@@ -126,7 +127,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_script_python(self):
@@ -143,7 +144,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_script_python_local_rank_transfer(self):
@@ -160,7 +161,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_script_bash(self):
@@ -175,7 +176,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_function(self):
@@ -191,7 +192,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_dist_sum_with_static_rdzv(self):
@@ -222,7 +223,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         TEST_WITH_ASAN or TEST_WITH_TSAN, "tests incompatible with tsan or asan"
     )
     def test_launch_elastic(self):
