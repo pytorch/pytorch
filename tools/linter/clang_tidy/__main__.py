@@ -9,6 +9,7 @@ from typing import List
 
 from tools.linter.clang_tidy.run import run
 from tools.linter.clang_tidy.generate_build_files import generate_build_files
+from tools.linter.install.clang_tidy import INSTALLATION_PATH
 
 
 def clang_search_dirs() -> List[str]:
@@ -75,15 +76,19 @@ DEFAULTS = {
     ],
     "paths": ["torch/csrc/"],
     "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
+    "clang-tidy-exe": INSTALLATION_PATH,
+    "parallel": True,
+    "compile-commands-dir": "build",
+    "config-file": ".clang-tidy",
 }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Clang-Tidy (on your Git changes)")
+    parser = argparse.ArgumentParser(description="clang-tidy wrapper script")
     parser.add_argument(
         "-e",
         "--clang-tidy-exe",
-        default="clang-tidy",
+        default=DEFAULTS["clang-tidy-exe"],
         help="Path to clang-tidy executable",
     )
     parser.add_argument(
@@ -106,7 +111,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-c",
         "--compile-commands-dir",
-        default="build",
+        default=DEFAULTS["compile-commands-dir"],
         help="Path to the folder containing compile_commands.json",
     )
     parser.add_argument(
@@ -129,6 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument(
         "--config-file",
+        default=DEFAULTS["config-file"],
         help="Path to a clang-tidy config file. Defaults to '.clang-tidy'.",
     )
     parser.add_argument(
@@ -141,6 +147,7 @@ def parse_args() -> argparse.Namespace:
         "-j",
         "--parallel",
         action="store_true",
+        default=DEFAULTS["parallel"],
         help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
     parser.add_argument(
@@ -168,26 +175,26 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    if not pathlib.Path("build").exists():
-        generate_build_files()
     options = parse_args()
 
+    if not pathlib.Path("build").exists():
+        generate_build_files()
+
     # Check if clang-tidy executable exists
-    exists = os.access(options.clang_tidy_exe, os.X_OK) or shutil.which(
-        options.clang_tidy_exe
-    )
+    exists = os.access(options.clang_tidy_exe, os.X_OK)
+
     if not exists:
         msg = (
-            "Could not find 'clang-tidy' binary\n"
+            "Could not find '.clang-tidy-bin/clang-tidy'\n"
             "You can install it by running:\n"
             "   python3 tools/linter/install/clang_tidy.py"
         )
-        print(msg)
-        exit(1)
+        raise RuntimeError(msg)
 
     return_code = run(options)
     if return_code != 0:
         raise RuntimeError("Warnings found in clang-tidy output!")
 
 
-main()
+if __name__ == "__main__":
+    main()
