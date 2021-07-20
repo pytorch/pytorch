@@ -326,6 +326,7 @@ jobs:
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
       - name: Fetch PR diff
+        if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -356,7 +357,6 @@ jobs:
           python3 -m tools.linter.clang_tidy \
             --paths torch/csrc/fx \
             --clang-tidy-exe "$(which clang-tidy)" \
-            --diff-file pr.diff \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
       - name: Annotate output
