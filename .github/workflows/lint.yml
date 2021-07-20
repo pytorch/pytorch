@@ -308,7 +308,6 @@ jobs:
           fi
 
   clang-tidy:
-    if: github.event_name == 'pull_request'
     runs-on: linux.2xlarge
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
@@ -327,6 +326,7 @@ jobs:
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
       - name: Fetch PR diff
+        if: github.event_name == 'pull_request'
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -337,6 +337,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
       - name: Run clang-tidy
+        if: github.event_name == 'pull_request'
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -345,7 +346,21 @@ jobs:
             --clang-tidy-exe "$(which clang-tidy)" \
             --diff-file pr.diff \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
+      # Run clang-tidy on a smaller subset of the codebase on master until we
+      # make the repository clang-tidy clean
+      - name: Run clang-tidy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+
+          python3 -m tools.linter.clang_tidy \
+            --paths torch/csrc/fx \
+            --clang-tidy-exe "$(which clang-tidy)" \
+            --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
+
       - name: Annotate output
+        if: github.event_name == 'pull_request'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
