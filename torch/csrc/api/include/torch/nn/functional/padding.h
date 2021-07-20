@@ -44,7 +44,7 @@ inline Tensor pad(const Tensor& input,
       "Padding mode \"",
       torch::enumtype::get_enum_name(mode),
       "\" doesn't take in value argument");
-    if (pad.size() == 2 and (input.dim() == 2 or input.dim() == 3)) {
+    if (pad.size() == 2 && (input.dim() == 2 || input.dim() == 3)) {
       if (c10::get_if<enumtype::kReflect>(&mode)) {
         return torch::reflection_pad1d(input, pad);
       } else if (c10::get_if<enumtype::kReplicate>(&mode)) {
