@@ -55,6 +55,7 @@ class TestFunctionalOptimParity(TestCase):
 
         t1 = torch.randn(3, 3)
         for _ in range(10):
+            raise ValueError("test to confirm it runs in OSS CI") # @nocommit
             module_optim.zero_grad()
             module_functional.zero_grad()
             # Forward + Backward
