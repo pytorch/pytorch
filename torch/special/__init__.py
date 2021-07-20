@@ -691,7 +691,7 @@ Example::
 
 gammaincc = _add_docstr(_special.special_gammaincc,
                         r"""
-igammac(input, other, *, out=None) -> Tensor
+gammaincc(input, other, *, out=None) -> Tensor
 
 Computes the regularized upper incomplete gamma function:
 
