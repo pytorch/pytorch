@@ -190,6 +190,60 @@ TEST(BackendTest, TestComposite) {
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
+TEST(BackendTest, TestCompositeWithSetStates) {
+  // Two submodules with same module name but different forward and other
+  // functions should be serialized and loaded correctly.
+
+  // This test checks the numerical value of the saved and loaded lite module
+  //  with that of a JIT module.
+  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
+  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
+  fake_dict.insert("", "");
+  compile_spec.insert("forward", fake_dict);
+  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
+
+  Module sub1("m_add");
+  sub1.define(R"(
+    def forward(self, x, y):
+      return x + y
+  )");
+  auto lowered_sub1 = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", sub1, compile_spec, any_dict_ty);
+
+  Module sub2("m_add");
+  sub2.define(R"(
+    def forward(self, x, y):
+      return x - y
+  )");
+  auto lowered_sub2 = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", sub2, compile_spec, any_dict_ty);
+
+  Module c("C");
+  c.register_module("Add", lowered_sub1);
+  c.register_module("Sub", lowered_sub2);
+  c.define(R"(
+    def forward(self, a, b, s:int):
+      c = self.Add.forward(a, b)
+      d = self.Sub.forward(a, b)
+      y = s * (c * d)
+      return y
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::ones({}));
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(3);
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  std::cout << res_jit.toTensor();
+  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
