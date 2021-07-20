@@ -38,6 +38,7 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
+import textwrap
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
@@ -2490,3 +2491,47 @@ def has_breakpad() -> bool:
         return True
     except RuntimeError as e:
         return False
+
+
+class TestLogger:
+    """
+    Context manager to log information and print it in case of exception.
+
+    A fresh TestLogger() is automatically attached to each instantiated test
+    and made available as self.logger. Its content is printed only in case of
+    test failure.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self._buf = io.StringIO()
+
+    def print(self, *args, **kwargs):
+        print(*args, **kwargs, file=self._buf)
+
+    def get_content(self):
+        return self._buf.getvalue()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, etype, evalue, tb):
+        """
+        In case of exception, augment its message with the TestLogger content
+        """
+        if not etype:
+            return
+        content = self.get_content()
+        if not content:
+            return
+        content = content.rstrip('\n')
+        old_msg = evalue.args[0]
+        lines = []
+        lines.append(old_msg)
+        lines.append('~~~~~~~~ TestLogger ~~~~~~~~')
+        lines.append(textwrap.indent(content, '    '))
+        lines.append('~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+        new_msg = '\n'.join(lines)
+        evalue.args = (new_msg,)

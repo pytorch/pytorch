@@ -622,6 +622,44 @@ if __name__ == '__main__':
             self.assertTrue(set(dtypes) == set(dynamic_dtypes))
             self.assertTrue(set(dtypes) == set(dynamic_dispatch.dispatch_fn()))
 
+    def test_logger(self):
+        self.logger.print('Hello')
+        self.logger.print('World')
+        self.assertEqual(self.logger.get_content(), 'Hello\nWorld\n')
+        self.logger.reset()
+        self.assertEqual(self.logger.get_content(), '')
+        self.logger.print('Foo Bar')
+        self.assertEqual(self.logger.get_content(), 'Foo Bar\n')
+        with self.assertRaisesRegex(ValueError, 'Foo Bar') as exc:
+            with self.logger:
+                raise ValueError('Hello')
+
+    def test_logger_reporting(self):
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python3
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+
+class TestLogger(TestCase):
+
+    def test_passing(self, device):
+        self.logger.print('Hello world, I am inside test_passing')
+
+    def test_failing(self, device):
+        self.logger.print('Too bad, test_failing is about to fail')
+        raise Exception('failing on purpose')
+
+instantiate_device_type_tests(TestLogger, globals(), only_for='cpu')
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        self.assertIn('Exception: failing on purpose', stderr)
+        self.assertIn('~~~ TestLogger ~~~', stderr)
+        self.assertIn('    Too bad, test_failing is about to fail', stderr)
+
 instantiate_device_type_tests(TestTesting, globals())
 
 
