@@ -5851,6 +5851,30 @@ for shape in [(1,), ()]:
             g.sum().backward()
             self.assertEqual(6 * 8 * a, a.grad)
 
+    def test_graph_save_on_cpu(self):
+        a = torch.randn(5, requires_grad=True)
+        with torch.autograd.graph.save_on_cpu():
+            y = a * a
+        self.assertEqual(a, y.grad_fn._saved_self)
+        self.assertEqual(a, y.grad_fn._saved_other)
+        y.sum().backward()
+        self.assertEqual(2 * a, a.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_graph_save_on_cpu_cuda(self):
+        a = torch.randn(5, requires_grad=True, device="cuda")
+        with torch.autograd.graph.save_on_cpu():
+            y = a * a
+        self.assertTrue(y.is_cuda)
+        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        self.assertTrue(y.grad_fn._saved_self.is_cuda)
+        after = CudaMemoryLeakCheck.get_cuda_memory_usage()
+        self.assertGreater(after, before)
+        self.assertEqual(a, y.grad_fn._saved_self)
+        self.assertEqual(a, y.grad_fn._saved_other)
+        y.sum().backward()
+        self.assertEqual(2 * a, a.grad)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
