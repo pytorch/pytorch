@@ -12,7 +12,7 @@ __global__ void convert_coo_to_csr_cuda_kernel(
     output_t* data_out,
     const input_t* data_in,
     int64_t size,
-    int64_t numel_in) {
+    int64_t numel) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
   if (tid == 0) {
@@ -32,11 +32,11 @@ void convert_coo_to_csr_cuda(
     Tensor& result,
     const Tensor& input,
     const Scalar& size) {
-  int64_t numel_in = input.numel();
+  int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
-  if (numel_in == 0) {
+  if (numel == 0) {
     result.zero_();
     return;
   }
@@ -46,7 +46,7 @@ void convert_coo_to_csr_cuda(
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
   convert_coo_to_csr_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(
-      data_out, data_in, size, numel_in);
+      data_out, data_in, size, numel);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

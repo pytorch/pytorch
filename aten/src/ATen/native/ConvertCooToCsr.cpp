@@ -14,11 +14,11 @@ void convert_coo_to_csr_cpu(
     Tensor& result,
     const Tensor& input,
     const Scalar& size) {
-  int64_t numel_in = input.numel();
+  int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
-  if (numel_in == 0) {
+  if (numel == 0) {
     result.zero_();
     return;
   }
