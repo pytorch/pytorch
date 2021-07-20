@@ -1441,8 +1441,9 @@ void ONNXShapeTypeInference(
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char type_err[] = "TypeInferenceError";
       if ((strstr(ex.what(), shape_err) == nullptr) &&
-          (strstr(ex.what(), type_err) == nullptr))
+          (strstr(ex.what(), type_err) == nullptr)) {
         throw;
+      }
     }
     GRAPH_DEBUG(
         "ONNX graph after shape inference: ", prettyPrint(*model_proto));
