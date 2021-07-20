@@ -14,6 +14,7 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/native/cuda/TensorModeKernel.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
@@ -105,9 +106,8 @@ void calculate_mode(
 
   AT_CUDA_CHECK(cudaMemcpyAsync(
       values_data, &mode, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      indices_data, &index, sizeof(scalar_t), cudaMemcpyHostToDevice, stream));
-  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  //memcpy_and_sync will synchronize results
+  at::cuda::memcpy_and_sync(indices_data, &index, sizeof(scalar_t), cudaMemcpyHostToDevice, stream);
 }
 
 template <typename scalar_t>

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh> //for MAX_DIMS
 #include <ATen/cuda/cub.cuh>
@@ -61,9 +62,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   auto temp_storage = allocator.allocate(temp_storage_bytes);
   cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   int num_nonzeros_h;
-  C10_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
-  //need to synchronize to make sure data is available on the host
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  at::cuda::memcpy_and_sync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream);
   //expected output size is num_nonzeros x ndim
   //we are producing output with size {num_nonzeros, ndim} and strides {num_nonzeros, 1} (that is, transposed ndim x num_nonzeros output)
   //we are able to directly use passed output with this size and strides, and we can also (per contract)

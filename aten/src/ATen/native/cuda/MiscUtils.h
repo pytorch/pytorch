@@ -2,6 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <THC/THC.h>  // for USE_MAGMA
 
@@ -75,14 +76,14 @@ struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
     if (stream != at::cuda::getDefaultCUDAStream()) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+      at::cuda::stream_synchronize(stream);
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
     auto default_stream = at::cuda::getDefaultCUDAStream();
     if (at::cuda::getCurrentCUDAStream() != default_stream) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+      at::cuda::stream_synchronize(default_stream);
     }
   }
 };
