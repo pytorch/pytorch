@@ -37,10 +37,6 @@ jobs:
     env:
       JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -126,10 +122,6 @@ jobs:
       run:
         working-directory: pytorch-${{ github.run_id }}
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:

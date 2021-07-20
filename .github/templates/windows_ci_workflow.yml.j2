@@ -48,10 +48,6 @@ jobs:
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -146,10 +142,6 @@ jobs:
       run:
         working-directory: pytorch-${{ github.run_id }}
     steps:
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
