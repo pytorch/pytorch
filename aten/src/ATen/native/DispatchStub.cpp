@@ -117,10 +117,7 @@ void* DispatchStubImpl::choose_cpu_impl(
   (void)capability;
 #ifdef HAVE_AVX512_CPU_DEFINITION
   if (capability >= static_cast<int>(CPUCapability::AVX512)) {
-    // nansum currently doesn't have AVX512 kernels, as even with AVX2,
-    // it has poor accuracy with Float16 (GH issue 59415), and even poorer
-    // with AVX512. Until its accuracy is improved, it would be dispatched to
-    // AVX2 kernels. Quantization kernels have also been disabled on Windows
+    // Quantization kernels have also been disabled on Windows
     // for AVX512 because some of their tests are flaky on Windows.
     // Ideally, we should have AVX512 kernels for all kernels.
     if (C10_UNLIKELY(!AVX512)) {
