@@ -285,13 +285,9 @@ class ParameterProxy(Proxy):
     def __repr__(self) -> str:
         return f'ParameterProxy({self.name})'
 
-
-
-    def __getattr__(self, k):
-        if k == 'shape':
-            return getattr(self.param, k)
-        else:
-            return super().__getattr__(k)
+    @property
+    def shape(self):
+        return self.param.shape
 
 
 for method in magic_methods:
