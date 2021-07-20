@@ -2,21 +2,14 @@
 set -e
 
 echo "Running pre-commit flake8"
-python tools/linter/flake8_hook.py
+python3 tools/linter/flake8_hook.py
 
 if [ $(which clang-tidy) ]
 then
   echo "Running pre-commit clang-tidy"
   git diff HEAD > pr.diff
-  python tools/linter/clang_tidy \
-    --paths torch/csrc \
-    --diff-file "pr.diff" \
-    -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
-    -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
-    -g"-torch/csrc/jit/serialization/onnx.cpp" \
-    -g"-torch/csrc/jit/serialization/export.cpp" \
-    -g"-torch/csrc/jit/serialization/import.cpp" \
-    -j
+  python3 -m tools.linter.clang_tidy --diff-file "pr.diff"
+  rm pr.diff
 else
   echo "WARNING: Couldn't find clang-tidy executable."
   echo "  Please install it if you want local clang-tidy checks."
