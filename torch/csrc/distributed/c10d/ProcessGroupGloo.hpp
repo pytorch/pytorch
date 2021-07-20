@@ -94,6 +94,7 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
     c10::intrusive_ptr<at::ivalue::Future> future_;
+    std::function<void()> recordFunctionBeforeCallback_;
   };
 
   // Wrap c10d store as Gloo store
