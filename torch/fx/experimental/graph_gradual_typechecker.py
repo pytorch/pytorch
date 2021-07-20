@@ -534,8 +534,6 @@ def first_one(n: Node):
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
 @register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
-@register_refinement_rule(torch.add)
-@register_refinement_rule(operator.add)
 def all_eq(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
@@ -544,6 +542,23 @@ def all_eq(n: Node):
         args2 = n.type.__args__
         return [Equality(args1[i], args2[i]) for i in range(len(args1))]
 
+@register_refinement_rule(torch.add)
+@register_refinement_rule(operator.add)
+def add_eq(n: Node):
+    res = []
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        arg_type1 = n.args[0].type
+        arg_type2 = n.args[0].type
+        if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
+            args1 = arg_type1.__args__
+            args2 = arg_type2.__args__
+            args3 = n.type.__args__
+            r = []
+            for x, y, z in zip(args1, args2, args3):
+                if args1 == args2:
+                    r.append(Equality(x, z))
+            res = r
+    return res
 
 @register_refinement_rule(torch.nn.MaxPool2d)
 def first_two(n: Node):
