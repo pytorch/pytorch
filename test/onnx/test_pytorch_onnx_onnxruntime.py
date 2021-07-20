@@ -15,7 +15,7 @@ from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength
 from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence,
                                                        RnnModelWithPackedSequenceWithState,
                                                        RnnModelWithPackedSequenceWithoutState)
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, 
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
                                  skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
 from test_pytorch_common import BATCH_SIZE
