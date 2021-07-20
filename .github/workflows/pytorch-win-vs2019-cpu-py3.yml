@@ -24,6 +24,7 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
 
+
 concurrency:
   group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -31,6 +32,9 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
     steps:
@@ -42,6 +46,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -110,6 +115,9 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -119,6 +127,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
