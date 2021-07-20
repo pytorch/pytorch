@@ -1,4 +1,5 @@
 from torch.testing._internal.jit_utils import JitTestCase
+import ctypes
 import os
 import sys
 import unittest
@@ -31,8 +32,9 @@ if __name__ == "__main__":
 Unit Tests for Nnapi backend with delegate
 """
 # This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
-                 "Non-portable load_library call used in test")
+@unittest.skipIf(not os.path.exists(Path(__file__).resolve().parent.parent.parent
+                 / 'build' / 'lib' / 'libnnapi_backend.so'),
+                 "Skipping the test as libnnapi_backend.so was not found")
 class NnapiBackendPReLUTest(JitTestCase):
     """
     Test lowering a simple PRelU module to Nnapi backend.
@@ -58,7 +60,7 @@ class NnapiBackendPReLUTest(JitTestCase):
         else:
             self.can_run_nnapi = False
 
-    def test_execution(self):
+    def test_conversion(self):
         # Save default dtype
         module = torch.nn.PReLU()
         default_dtype = module.weight.dtype
@@ -80,8 +82,9 @@ class NnapiBackendPReLUTest(JitTestCase):
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 # Second skip is because ASAN is currently causing an error.
 # It is still unclear how to resolve this. T95764916
-@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
-                 "Non-portable load_library call used in test")
+@unittest.skipIf(not os.path.exists(Path(__file__).resolve().parent.parent.parent
+                 / 'build' / 'lib' / 'libnnapi_backend.so'),
+                 "Skipping the test as libnnapi_backend.so was not found")
 @unittest.skipIf(TEST_WITH_ASAN, "Unresolved bug with ASAN")
 class TestNnapiBackend(JitTestCase):
     """
@@ -97,5 +100,5 @@ class TestNnapiBackend(JitTestCase):
             self.prelu_test.setUp()
 
     @skipIfRocm
-    def test_execution(self):
-        self.prelu_test.test_execution()
+    def test_conversion(self):
+        self.prelu_test.test_conversion()
