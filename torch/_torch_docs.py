@@ -10806,7 +10806,7 @@ add_docstr(torch.trapezoid,
            r"""
 trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 
-Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>_ along
+Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
 used to specify arbitrary spacing along :attr:`dim`.
@@ -10922,7 +10922,7 @@ add_docstr(torch.cumulative_trapezoid,
 cumulative_trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 
 Cumulatively computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_
-along ::attr:`dim`. By default the spacing between elements is assumed to be 1, but
+along :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
 used to specify arbitrary spacing along :attr:`dim`.
 
@@ -10941,6 +10941,7 @@ Keyword arguments:
         The last (inner-most) dimension by default.
 
 Examples::
+
     >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
     >>> y = torch.tensor([1, 5, 10])
     >>> torch.cumulative_trapezoid(y)
