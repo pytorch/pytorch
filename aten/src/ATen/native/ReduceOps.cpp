@@ -123,6 +123,12 @@ TORCH_META_FUNC(cumsum)
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
+    // This check is still here because the inline version of structured kernels
+    // does not do any checks on 'set_output'.
+    TORCH_CHECK_VALUE(
+        out_dtype == result.scalar_type(),
+        "cumsum(): provided dtype must match dtype of result tensor. Got: ",
+        toString(out_dtype), ". Expected: ", toString(result.scalar_type()));
   } else {
     auto is_integral = at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
