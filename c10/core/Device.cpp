@@ -30,7 +30,7 @@ namespace c10 {
 namespace {
 DeviceType parse_type(const std::string& device_string) {
   static const std::array<
-      std::pair<std::string, DeviceType>,
+      std::pair<const char*, DeviceType>,
       static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
       types = {{
           {"cpu", DeviceType::CPU},
@@ -53,8 +53,8 @@ DeviceType parse_type(const std::string& device_string) {
   auto device = std::find_if(
       types.begin(),
       types.end(),
-      [device_string](const std::pair<std::string, DeviceType>& p) {
-        return p.first == device_string;
+      [&device_string](const std::pair<const char*, DeviceType>& p) {
+        return p.first && p.first == device_string;
       });
   if (device != types.end()) {
     return device->second;

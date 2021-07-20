@@ -1001,7 +1001,9 @@ Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int6
       "buffer length (", len, " bytes)");
 
   auto offset_buf = static_cast<char*>(buf) + offset;
-  auto options = TensorOptions().dtype(dtype).device(c10::kCPU);
+  auto options = TensorOptions()
+      .dtype(dtype)
+      .device(c10::kCPU);
 
   auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
                     .options(options)
@@ -1010,7 +1012,7 @@ Tensor tensor_frombuffer(PyObject* buffer, ScalarType dtype, int64_t count, int6
                       Py_DECREF(obj);
                     })
                     .make_tensor();
-  tensor.requires_grad_(requires_grad);
+  tensor.set_requires_grad(requires_grad);
   return tensor;
 }
 

@@ -471,7 +471,7 @@ static PyObject * THPVariable_frombuffer(PyObject* self_, PyObject* args, PyObje
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "frombuffer(PyObject* buffer, ScalarType dtype=None, int64_t count=-1, int64_t offset=0, *, bool requires_grad=False)",
+    "frombuffer(PyObject* buffer, *, ScalarType dtype, int64_t count=-1, int64_t offset=0, bool requires_grad=False)",
   }, /*traceable=*/false);
 
   PyObject* ret = nullptr;

@@ -37,14 +37,12 @@ class TestBufferProtocol(common.TestCase):
         self.assertEqual(numpy_frombuffer.__array_interface__["data"][0], torch_frombuffer.data_ptr())
         return (numpy_original, torch_frombuffer)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_same_type(self, device, dtype):
         self._run_test((), dtype)
         self._run_test((4,), dtype)
         self._run_test((10, 10), dtype)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_requires_grad(self, device, dtype):
         def _run_test_and_check_grad(requires_grad, *args, **kwargs):
@@ -52,15 +50,14 @@ class TestBufferProtocol(common.TestCase):
             _, tensor = self._run_test(*args, **kwargs)
             self.assertTrue(tensor.requires_grad == requires_grad)
 
-        if dtype.is_floating_point or dtype.is_complex:
-            _run_test_and_check_grad(True, (), dtype)
-            _run_test_and_check_grad(True, (4,), dtype)
-            _run_test_and_check_grad(True, (10, 10), dtype)
+        requires_grad = dtype.is_floating_point or dtype.is_complex
+        _run_test_and_check_grad(requires_grad, (), dtype)
+        _run_test_and_check_grad(requires_grad, (4,), dtype)
+        _run_test_and_check_grad(requires_grad, (10, 10), dtype)
         _run_test_and_check_grad(False, (), dtype)
         _run_test_and_check_grad(False, (4,), dtype)
         _run_test_and_check_grad(False, (10, 10), dtype)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_with_offset(self, device, dtype):
         # Offset should be valid whenever there is, at least,
@@ -68,7 +65,6 @@ class TestBufferProtocol(common.TestCase):
         for i in range(SIZE):
             self._run_test(SHAPE, dtype, first=i)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_with_count(self, device, dtype):
         # Count should be valid for any valid in the interval
@@ -77,7 +73,6 @@ class TestBufferProtocol(common.TestCase):
             if i != 0:
                 self._run_test(SHAPE, dtype, count=i)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_with_count_and_offset(self, device, dtype):
         # Explicit default count [-1, 1, 2, ..., len]
@@ -94,7 +89,6 @@ class TestBufferProtocol(common.TestCase):
             for j in range(SIZE - i + 1):
                 self._run_test(SHAPE, dtype, count=i, first=j)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_invalid_positional_args(self, device, dtype):
         bytes = get_dtype_size(dtype)
@@ -103,7 +97,7 @@ class TestBufferProtocol(common.TestCase):
         with self.assertRaisesRegex(ValueError,
                                     r"both buffer length \(0\) and count"):
             empty = numpy.array([])
-            torch.frombuffer(empty)
+            torch.frombuffer(empty, dtype=dtype)
         # Count equals 0
         with self.assertRaisesRegex(ValueError,
                                     r"both buffer length .* and count \(0\)"):
@@ -132,7 +126,6 @@ class TestBufferProtocol(common.TestCase):
                                         rf"buffer length \({in_bytes} bytes\)"):
                 self._run_test(SHAPE, dtype, count=count, first=first)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_shared_buffer(self, device, dtype):
         x = common.make_tensor((1,), device, dtype)
@@ -156,14 +149,16 @@ class TestBufferProtocol(common.TestCase):
                 self.assertEqual(arr[first:last], tensor)
                 self.assertTrue((tensor == x).all().item())
 
-    @onlyCPU
+                # Modify the first value in the array
+                arr[first] = x.item() - 1
+                self.assertEqual(arr[first:last], tensor)
+
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_not_a_buffer(self, device, dtype):
         with self.assertRaisesRegex(ValueError,
                                     r"object does not implement Python buffer protocol."):
             torch.frombuffer([1, 2, 3, 4], dtype=dtype)
 
-    @onlyCPU
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_non_writable_buffer(self, device, dtype):
         numpy_arr = common.make_tensor((1,), device, dtype).numpy()
@@ -171,6 +166,13 @@ class TestBufferProtocol(common.TestCase):
         with self.assertWarnsOnceRegex(UserWarning,
                                        r"The given buffer is not writable."):
             torch.frombuffer(byte_arr, dtype=dtype)
+
+    def test_byte_to_int(self):
+        byte_array = numpy.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=numpy.byte)
+        tensor = torch.frombuffer(byte_array, dtype=torch.int32)
+        self.assertEqual(tensor.numel(), 2)
+        # Assuming little endian machine
+        self.assertSequenceEqual(tensor, [255, 255])
 
 def getaddr(a):
     if isinstance(a, torch.Tensor):
@@ -414,7 +416,7 @@ class TestAsArray(common.TestCase):
                                     "can't alias arbitrary sequence"):
             torch.asarray(original.tolist(), copy=False)
 
-instantiate_device_type_tests(TestBufferProtocol, globals())
+instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 instantiate_device_type_tests(TestAsArray, globals())
 
 if __name__ == "__main__":
