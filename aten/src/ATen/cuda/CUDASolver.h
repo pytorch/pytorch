@@ -31,7 +31,7 @@ void getrf<c10::complex<float>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<float>));
 
 
 #define CUDASOLVER_GETRS_ARGTYPES(Dtype)  \
-    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info, cublasOperation_t trans
+    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info
 
 template<class Dtype>
 void getrs(CUDASOLVER_GETRS_ARGTYPES(Dtype)) {

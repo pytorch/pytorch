@@ -1,3 +1,5 @@
+#ifdef USE_TENSORPIPE
+
 #include <torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -149,3 +151,5 @@ MessageType FaultyTensorPipeAgent::messageStringToType(
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_TENSORPIPE
+
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
@@ -104,3 +106,5 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

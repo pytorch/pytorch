@@ -222,7 +222,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
  protected:
   // TensorPipe write function that could be used to write response
-  // messages by server, and write request messages by client.
+  // messages by server, and write request messages by client. This
+  // is a protected method since it is overwritten by FaultyTensorPipeAgent
   virtual void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
       c10::intrusive_ptr<Message> message,

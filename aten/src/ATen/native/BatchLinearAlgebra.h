@@ -231,12 +231,4 @@ using lu_solve_fn = void (*)(
     const Tensor& /*pivots*/);
 DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
-using lu_solve_trans_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
-    const Tensor& /*pivots*/,
-    char /*trans*/);
-DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
-
-
 }} // namespace at::native
