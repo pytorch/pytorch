@@ -592,6 +592,7 @@ class TestForeach(TestCase):
             self.assertEqual(actual, tensors1)
 
     @onlyCUDA
+    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_tensors_on_different_devices(self, device, dtype, op):
         # tensors1: ['cuda', 'cpu]
@@ -601,23 +602,14 @@ class TestForeach(TestCase):
         _cpu_tensors = op.sample_inputs('cpu', dtype, 3, same_size=True)
         tensors1, tensors2, tensors3 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
-        foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
-        native_op, native_op_ = op.ref, op.ref_inplace
-        try:
-            actual = foreach_op(tensors1, tensors2, tensors3)
-        except RuntimeError as e:
-            with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
-        else:
-            expected = [native_op(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors2, tensors3)]
-            self.assertEqual(expected, actual)
-        try:
-            foreach_op_(tensors1, tensors2, tensors3)
-        except RuntimeError as e:
-            with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                [native_op_(t1, t2, t3) for t1, t2, t3 in zip(tensors1, tensors3, tensors3)]
-        else:
-            self.assertEqual(expected, tensors1)
+        foreach_op, foreach_op_, native_op = op.method_variant, op.inplace_variant, op.ref
+        actual = foreach_op(tensors1, tensors2, tensors3)
+        expected = [native_op(*_cuda_tensors), native_op(*_cpu_tensors)]
+        self.assertEqual(expected, actual)
+
+        # note(mkozuki): Limiting dtypes to FP32&FP64, we can safely run inplace ops.
+        foreach_op_(tensors1, tensors2, tensors3)
+        self.assertEqual(expected, tensors1)
 
 
 instantiate_device_type_tests(TestForeach, globals())
