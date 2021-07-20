@@ -7,7 +7,7 @@ from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
 from torch.fx.experimental.refinement_types import Equality
-from unification import Var  # type: ignore
+from unification import Var  # type: ignore[import]
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
