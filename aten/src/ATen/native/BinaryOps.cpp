@@ -131,6 +131,10 @@ TORCH_META_FUNC2(bitwise_or, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(bitwise_xor, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
@@ -371,6 +375,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& other, const Tensor
 }
 
 CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_or_out, bitwise_or_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(bitwise_xor_out, bitwise_xor_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(maximum_out, maximum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(minimum_out, minimum_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(fmax_out, fmax_stub);
@@ -791,33 +796,16 @@ Tensor& __ior__(Tensor& self, const Scalar& other) {
   return self.bitwise_or_(other);
 }
 
-Tensor& bitwise_xor_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  bitwise_xor_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor bitwise_xor(const Tensor& self, const Tensor& other) {
-  Tensor result = at::empty({0}, self.options());
-  at::bitwise_xor_out(result, self, other);
-  return result;
-}
-
-Tensor& bitwise_xor_(Tensor& self, const Tensor& other) {
-  return at::bitwise_xor_out(self, self, other);
-}
-
 Tensor& bitwise_xor_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::bitwise_xor_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor bitwise_xor(const Tensor& self, const Scalar& other) {
-  Tensor result = at::empty({0}, self.options());
-  return at::bitwise_xor_out(result, self, other);
+  return at::bitwise_xor(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& bitwise_xor_(Tensor& self, const Scalar& other) {
-  return at::bitwise_xor_out(self, self, other);
+  return self.bitwise_xor_(wrapped_scalar_tensor(other));
 }
 
 // Legacy xor interfaces. They are aliased to bitwise_xor* functions

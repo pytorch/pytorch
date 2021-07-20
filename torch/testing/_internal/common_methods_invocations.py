@@ -6615,7 +6615,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,),
     OpInfo('__rxor__',
            op=torch.Tensor.__rxor__,
-           dtypes=integral_types_and(),
+           dtypes=integral_types_and(torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
