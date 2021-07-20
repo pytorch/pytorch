@@ -56,6 +56,7 @@ TESTS = [
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
     'distributed/test_pg_wrapper',
+    'distributed/algorithms/test_join',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
