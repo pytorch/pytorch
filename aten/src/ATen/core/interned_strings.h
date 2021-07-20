@@ -321,6 +321,8 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, polygamma)                 \
+  _(aten, special_polygamma)         \
   _(aten, lgamma)                    \
   _(aten, special_gammaln)           \
   _(aten, logsumexp)                 \
