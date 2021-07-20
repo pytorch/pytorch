@@ -68,7 +68,7 @@ class CIFlowConfig:
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''
-        self.root_job = ''
+        self.root_job_condition = ''
 
     def __post_init__(self) -> None:
         if not self.enabled:
