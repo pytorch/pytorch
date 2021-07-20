@@ -118,6 +118,7 @@ TORCH_META_FUNC(argmin)
 
 void meta_func_cum_ops(
     impl::MetaBase& meta,
+    const char* name,
     const Tensor& self,
     int64_t dim,
     c10::optional<ScalarType> dtype) {
@@ -126,6 +127,12 @@ void meta_func_cum_ops(
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
+    // This check is still here because the inline version of structured kernels
+    // does not do any checks on 'set_output'.
+    TORCH_CHECK_VALUE(
+        out_dtype == result.scalar_type(),
+        name, "(): provided dtype must match dtype of result tensor. Got: ",
+        toString(out_dtype), ". Expected: ", toString(result.scalar_type()));
   } else {
     auto is_integral = at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
@@ -137,12 +144,12 @@ void meta_func_cum_ops(
 
 TORCH_META_FUNC(cumsum)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  meta_func_cum_ops(*this, self, dim, dtype);
+  meta_func_cum_ops(*this, "cumsum", self, dim, dtype);
 }
 
 TORCH_META_FUNC(cumprod)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
-  meta_func_cum_ops(*this, self, dim, dtype);
+  meta_func_cum_ops(*this, "cumprod", self, dim, dtype);
 }
 
 } // namespace meta
@@ -1758,7 +1765,7 @@ Tensor cumprod(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype)
   return at::cumprod(self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumprod_(Tensor& self, Dimname dim, c10::optional<ScalarType> dtype) {
-    return native::cumprod_(self, dimname_to_position(self, dim), dtype);
+  return at::cumprod_out(self, self, dimname_to_position(self, dim), dtype);
 }
 Tensor& cumprod_out(const Tensor& self, Dimname dim, c10::optional<ScalarType> dtype, Tensor& result) {
   return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
