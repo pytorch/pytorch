@@ -180,6 +180,8 @@ class TestPublicBindings(unittest.TestCase):
             "ScriptDict",
             "ScriptDictIterator",
             "ScriptDictKeyIterator",
+            "ScriptList",
+            "ScriptListIterator",
             "ScriptFunction",
             "ScriptMethod",
             "ScriptModule",
