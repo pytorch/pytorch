@@ -17,10 +17,10 @@ from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled, inference_mode
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
-from .saved_variable_default_hooks import saved_tensors_default_hooks
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
 from . import forward_ad
+from . import saved_variable_default_hooks as graph
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 

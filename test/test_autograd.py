@@ -5771,7 +5771,7 @@ for shape in [(1,), ()]:
         self.assertEqual(a.grad, y)
 
     def test_default_saved_variable_hooks_saved_original(self):
-        with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a * a
         self.assertEqual(a, y.grad_fn._saved_self)
@@ -5779,7 +5779,7 @@ for shape in [(1,), ()]:
         y.sum().backward()
         self.assertEqual(2 * a, a.grad)
 
-        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x / 2):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x / 2):
             a = torch.randn(5, requires_grad=True)
             y = a * a
         self.assertEqual(a, y.grad_fn._saved_self)
@@ -5787,7 +5787,7 @@ for shape in [(1,), ()]:
         y.sum().backward()
         self.assertEqual(2 * a, a.grad)
 
-        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a * a
         self.assertEqual(2 * a, y.grad_fn._saved_self)
@@ -5804,7 +5804,7 @@ for shape in [(1,), ()]:
         self.assertEqual(2 * a, a.grad)
 
     def test_default_saved_variable_hooks_did_not_save_original(self):
-        with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = torch.exp(a)
         self.assertEqual(y, y.grad_fn._saved_result)
@@ -5813,12 +5813,12 @@ for shape in [(1,), ()]:
 
     def test_double_default_saved_variable_hooks_should_fail(self):
         with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
-            with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
-                with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+            with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+                with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
                     pass
 
     def test_default_saved_variable_hooks_double_backward(self):
-        with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
@@ -5826,7 +5826,7 @@ for shape in [(1,), ()]:
             g.sum().backward()
             self.assertEqual(6 * a, a.grad)
 
-        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
@@ -5837,13 +5837,13 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
         y = a ** 3
         s = torch.sum(y)
-        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
             g, = torch.autograd.grad(s, (a, ), create_graph=True)
             g.sum().backward()
             # factor 4 because pow_backward is grad * (exp * self.pow(exp - 1))
             self.assertEqual(6 * 4 * a, a.grad)
 
-        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
+        with torch.autograd.graph.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = a ** 3
             s = torch.sum(y)
