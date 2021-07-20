@@ -498,7 +498,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             conv_name_0:
                 ((nn.Conv2d, torch.quantization.MinMaxObserver), (nn.Conv2d, nn.Conv2d)),
             mul_name_0: ((torch.mul, torch.quantization.MinMaxObserver), (toq.mul, toq.mul)),
-            relu_name_0: ((F.relu, F.relu), (F.relu, F.relu)),
+            relu_name_0: ((F.relu, torch.quantization.MinMaxObserver), (F.relu, F.relu)),
             sigmoid_name_0:
                 ((torch.sigmoid, torch.sigmoid), (torch.sigmoid, torch.sigmoid)),
         }
