@@ -45,9 +45,9 @@ class TestCppExtensionJIT(common.TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
-        super().setUp()
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
