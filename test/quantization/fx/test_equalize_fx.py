@@ -11,7 +11,9 @@ from torch.quantization.fx._equalize import (
     _WeightEqualizationObserver,
     calculate_equalization_scale,
     default_equalization_qconfig,
-    _convert_equalization_ref
+    _convert_equalization_ref,
+    get_layer_sqnr_dict,
+    get_equalization_qconfig_dict,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -727,3 +729,48 @@ class TestEqualizeFx(QuantizationTestCase):
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
             self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
+
+    def test_selective_equalization(self):
+        """ Tests that we are able to run numeric suite on the equalized model
+        and construct a valid equalization_qconfig_dict equalizing only the top
+        4 layers with the highest quantization errors.
+        """
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bot = torch.nn.Sequential(
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                )
+                self.top = torch.nn.Sequential(
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                    torch.nn.Linear(5, 5),
+                )
+
+            def forward(self, x):
+                x = self.bot(x)
+                x = self.top(x)
+                return x
+
+        m = M().eval()
+        x = torch.tensor([[0.2210, 0.5978, 0.9566, 0.9819, 0.2622],
+                          [0.0419, 0.4006, 0.3301, 0.1499, 0.6311],
+                          [0.7917, 0.2115, 0.9522, 0.8471, 0.2574],
+                          [0.3072, 0.4854, 0.3492, 0.9208, 0.7026],
+                          [0.0204, 0.4286, 0.3436, 0.0790, 0.5233]])
+
+        prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        prepared(x)
+        equalized = convert_fx(prepared)
+
+        layer_to_sqnr_dict = get_layer_sqnr_dict(m, equalized, x)
+        eq_qconfig_dict = get_equalization_qconfig_dict(layer_to_sqnr_dict, equalized, 4)
+
+        # Modules with highest quantization error -- hard coded to be ['top.1', 'top.2', 'top.0', 'bot.3']
+        module_names = list(map(lambda item: item[0], eq_qconfig_dict['module_name']))
+        self.assertEqual(module_names, ['top.1', 'top.2', 'top.0', 'bot.3'])
