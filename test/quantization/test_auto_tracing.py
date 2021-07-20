@@ -30,7 +30,7 @@ class TestAutoTracing(QuantizationTestCase):
         model_fp32.eval()
 
         # model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-        model_fp32.qconfig = torch.quantization.QConfig(activation=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8),
+        model_fp32.qconfig = torch.quantization.QConfig(activation=torch.quantization.MinMaxObserver.with_args(dtype=torch.quint8),
                                                         weight=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8))
 
         model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
@@ -38,18 +38,20 @@ class TestAutoTracing(QuantizationTestCase):
         model_fp32_prepared = _quantize_dynamic_tracing.prepare(model_fp32_fused)
         # print(model_fp32_prepared)
 
-        input_fp32 = torch.randn(4, 1, 4, 4)
+        input_fp32 = torch.randn(1, 1, 2, 2)
         model_fp32_prepared(input_fp32)
 
-        input_fp32 = torch.randn(4, 1, 4, 4)
+        input_fp32 = torch.randn(1, 1, 2, 2)
         model_fp32_prepared(input_fp32)
+        print(model_fp32_prepared._auto_quantization_state.op_observers)
 
         model_int8 = _quantize_dynamic_tracing.convert(model_fp32_prepared)
         print(model_int8)
         input_q = torch.quantize_per_tensor(input_fp32, 0.1, 0, torch.quint8)
-        model_int8(input_q)
+        out = model_int8(input_q)
+        print(out)
 
-        input_q2 = torch.quantize_per_tensor(torch.randn(4, 1, 4, 4), 0.1, 0, torch.quint8)
+        input_q2 = torch.quantize_per_tensor(torch.randn(1, 1, 2, 2), 0.1, 0, torch.quint8)
         out = model_int8(input_q2)
 
         traced_model_int8 = torch.jit.trace(model_int8, (input_q,), check_trace=False)

@@ -1,80 +1,14 @@
 import torch
-from typing import Callable, List, Tuple
-from ..observer import ObserverBase
 import copy
 import operator
 import torch.fx
 from torch.fx.node import map_aggregate
 
-
-fp32_to_int8_fun_mapping = {
-    torch.Tensor.add: torch.ops.quantized.add,
-    torch.add: torch.ops.quantized.add,
-    operator.add: torch.ops.quantized.add,
-    torch.Tensor.mul: torch.ops.quantized.mul,
-    torch.mul: torch.ops.quantized.mul,
-    operator.mul: torch.ops.quantized.mul,
-    torch.cat: torch.ops.quantized.cat,
-}
+from .quantization_state import (
+    AutoQuantizationState,
+)
 
 
-def _raise_obs_not_found_error(func):
-    raise RuntimeError(
-        f'Encountered arithmetic operation {torch.typename(func)} but we have '
-        f'encountered fewer arithmetic operations in previous calibration runs. '
-        f'This likely indicates that the program contains dynamic control flow. '
-        f' Quantization is not defined over dynamic control flow!')
-
-def _raise_obs_op_mismatch(func, prev_op):
-    raise RuntimeError(
-        f'Encountered arithmetic operation {torch.typename(func)} but previously '
-        f'recorded operation was {torch.typename(prev_op)}!. This likely indicates '
-        f'that the program contains dynamic control flow. Quantization is not '
-        f'defined over dynamic control flow!')
-
-
-class ArithmeticObservers(object):
-    idx : int
-    op_observers : List[Tuple[ObserverBase, Callable]]
-
-    def __init__(self):
-        self.idx = 0
-        self.op_observers = []
-
-    def insert_observer(self, op, activation_ctr):
-        self.op_observers.insert(self.idx, (activation_ctr(), op))
-
-    def get_next(self, op):
-        observer, func = self.op_observers[self.idx]
-        self.idx += 1
-        return observer, func
-
-
-class AllModuleTracer(torch.fx.Tracer):
-    def is_leaf_module(self, m, module_qualified_name) -> bool:
-        return True
-
-    def create_node(self, kind, target, args, kwargs, name=None, type_expr=None):
-        if target == operator.add:
-            target = torch.add
-        if target == operator.mul:
-            target = torch.mul
-        if target in fp32_to_int8_fun_mapping:
-            try:
-                first_call = False
-                observer, prev_op = self.root._arithmetic_observers.get_next(  # type: ignore[union-attr, operator]
-                    target)
-            except IndexError:
-                _raise_obs_not_found_error(target)
-            if prev_op != target:
-                _raise_obs_op_mismatch(target, prev_op)
-            scale, zp = observer.calculate_qparams()
-            kwargs.update({'scale': scale.item(), 'zero_point': int(zp.item())})
-            target = fp32_to_int8_fun_mapping[target]
-        return super().create_node(kind, target, args, kwargs, name, type_expr)
-
-
-# TODO(future PR): add serialization support
 def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -108,25 +42,13 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
                 with torch._C.DisableTorchFunction():
-                    output = func(*args, **kwargs).as_subclass(QuantizationInterceptionProxy)
+                    output = func(*args, **kwargs).as_subclass(
+                        QuantizationInterceptionProxy)
 
             if cur_module and cur_module in modules_to_introspect:
-                # TODO(future PR): abstract the quantization related logic away
-                # from this file
-                if func in {torch.Tensor.add, torch.Tensor.mul, torch.add, torch.mul,
-                            torch.cat}:
-                    try:
-                        if first_call:
-                            cur_module._arithmetic_observers.insert_observer(
-                                func, cur_module.qconfig.activation)
-                        observer, prev_op = cur_module._arithmetic_observers.get_next(func)
-                    except IndexError:
-                        _raise_obs_not_found_error(func)
-                    if prev_op != func:
-                        _raise_obs_op_mismatch(func, prev_op)
-                    assert isinstance(output, torch.Tensor)
-                    observer(output)
-
+                output = \
+                    cur_module._auto_quantization_state.after_observed_function_hook(
+                        func, output, first_call)
             return output
 
         def __repr__(self):
@@ -147,7 +69,7 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
 
         `cur_module` keeps track of the current module in the stack.
 
-        During the fist call, an `ArithmeticObservers` object is created and
+        During the fist call, an `AutoQuantizationState` object is created and
         attached to the current module.
 
         Tensor arguments are converted to `QuantizationInterceptionProxy`
@@ -178,11 +100,11 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
                     # TODO: is this valid?
                     if hasattr(v, 'qconfig'):
                         if first_call:
-                            v._arithmetic_observers = ArithmeticObservers()
+                            v._auto_quantization_state = AutoQuantizationState(v.qconfig)
                             modules_to_introspect.add(v)
                         else:
-                            assert hasattr(v, '_arithmetic_observers')
-                            v._arithmetic_observers.idx = 0
+                            assert hasattr(v, '_auto_quantization_state')
+                            v._auto_quantization_state.reset_to_new_call()
 
                 return super().__call__(*new_input, **new_kwargs)
             finally:
@@ -193,6 +115,21 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     model.__class__ = QuantizationInterceptionModule
 
     return model
+
+
+class AllModuleTracer(torch.fx.Tracer):
+    def is_leaf_module(self, m, module_qualified_name) -> bool:
+        return True
+
+    def create_node(self, kind, target, args, kwargs, name=None, type_expr=None):
+        if target == operator.add:
+            target = torch.add
+        if target == operator.mul:
+            target = torch.mul
+        target, args, kwargs = \
+            self.root._auto_quantization_state.maybe_update_func_args_kwargs_for_quantized_inference(
+                target, args, kwargs, unwrap_scale_zp=True)
+        return super().create_node(kind, target, args, kwargs, name, type_expr)
 
 
 # TODO(future PR): add serialization support
@@ -225,20 +162,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         a.__class__ = QuantizationDispatchProxy
             torch.fx.node.map_aggregate(args, check)
             torch.fx.node.map_aggregate(kwargs, check)
-            if quantized_arg_present and cur_module and hasattr(cur_module, '_arithmetic_observers'):
-                # TODO(future PR): abstract quantization related logic away
-                # from this file
-                if func in fp32_to_int8_fun_mapping:
-                    try:
-                        observer, prev_op = cur_module._arithmetic_observers.get_next(func)
-                    except IndexError:
-                        _raise_obs_not_found_error(func)
-                    if prev_op != func:
-                        _raise_obs_op_mismatch(func, prev_op)
-
-                    scale, zp = observer.calculate_qparams()
-                    kwargs.update({'scale': scale, 'zero_point': zp})
-                    func = fp32_to_int8_fun_mapping[func]
+            if quantized_arg_present and cur_module and hasattr(cur_module, '_auto_quantization_state'):
+                func, args, kwargs = \
+                    cur_module._auto_quantization_state.maybe_update_func_args_kwargs_for_quantized_inference(func, args, kwargs)
 
             return super().__torch_function__(func, types, args, kwargs)
 
@@ -246,10 +172,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return f'QuantizationDispatchProxy({super().__repr__()})'
 
         def __add__(self, other):
-            return self.__torch_function__(torch.add, [type(self), type(other)], (self, other), {})
+            return self.__torch_function__(
+                torch.add, [type(self), type(other)], (self, other), {})
 
         def __mul__(self, other):
-            return self.__torch_function__(torch.mul, [type(self), type(other)], (self, other), {})
+            return self.__torch_function__(
+                torch.mul, [type(self), type(other)], (self, other), {})
 
     cur_module = None
 
@@ -265,7 +193,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         Tensor arguments are converted to `QuantizationDispatchProxy`, which
         knows how to dynamically call quantized ops from fp32 equivalents, and
-        look up scale and zero_point when necessary from the `ArithmeticObservers`
+        look up scale and zero_point when necessary from the `AutoQuantizationState`
         object attached to the current module.
         """
 
@@ -286,8 +214,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
             try:
                 for k, v in self.named_modules():
-                    if hasattr(v, '_arithmetic_observers'):
-                        v._arithmetic_observers.idx = 0
+                    if hasattr(v, '_auto_quantization_state'):
+                        v._auto_quantization_state.reset_to_new_call()
                 rv = super().__call__(*new_input, **new_kwargs)
 
                 def unwrap_proxy(a):
@@ -307,9 +235,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 for name, child in mod.named_children():
                     setattr(copied, name, rewrite_helper(child))
 
-                if hasattr(mod, '_arithmetic_observers') and \
-                        len(mod._arithmetic_observers.op_observers) != 0:  # type: ignore[union-attr, arg-type]
-                    copied._arithmetic_observers.idx = 0  # type: ignore[union-attr]
+                if hasattr(mod, '_auto_quantization_state') and \
+                        len(mod._auto_quantization_state.op_observers) != 0:  # type: ignore[union-attr, arg-type]
+                    copied._auto_quantization_state.reset_to_new_call()  # type: ignore[union-attr]
 
                     graph = AllModuleTracer().trace(copied)
                     return torch.fx.GraphModule(copied, graph, copied.__class__.__name__)
