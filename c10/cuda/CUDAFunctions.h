@@ -36,13 +36,19 @@ C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
 
-//the subsequent functions are defined in the header because for performance reasons we want them to be inline
-C10_CUDA_API void __inline__ memcpy_and_sync(void * dst, void * src, int64_t nbytes, cudaMemcpyKind kind, cudaStream_t stream){
+// the subsequent functions are defined in the header because for performance
+// reasons we want them to be inline
+C10_CUDA_API void __inline__ memcpy_and_sync(
+    void* dst,
+    void* src,
+    int64_t nbytes,
+    cudaMemcpyKind kind,
+    cudaStream_t stream) {
 #if HIP_VERSION >= 301
-    C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
-    C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 #endif
 }
 
