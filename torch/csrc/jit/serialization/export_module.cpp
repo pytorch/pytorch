@@ -285,7 +285,6 @@ void setstateTuple(
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    // const auto qn = setstate.qualname().qualifiedName();
     const auto qn = uniquer.getUniqueName(obj->type()).qualifiedName() + "." +
         setstate.name();
     if (qn_cache.find(qn) != qn_cache.end()) {
