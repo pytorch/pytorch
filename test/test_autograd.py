@@ -1,12 +1,14 @@
 import gc
-import sys
 import io
 import math
+import os
 import random
+import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
+import uuid
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
@@ -5811,11 +5813,29 @@ for shape in [(1,), ()]:
         y.sum().backward()
         self.assertEqual(a.grad, y)
 
-    def test_double_default_saved_variable_hooks_should_fail(self):
+    def test_setting_default_saved_variable_hooks_twice_should_fail(self):
         with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
             with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
                 with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
                     pass
+
+    def test_saving_variable_to_disk(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            def pack(x):
+                name = os.path.join(tmp_dir, str(uuid.uuid4()))
+                torch.save(x, name)
+                return name
+
+            def unpack(name):
+                return torch.load(name)
+
+            a = torch.ones(5, requires_grad=True)
+            with torch.autograd.graph.saved_tensors_default_hooks(pack, unpack):
+                y = a * a
+            self.assertEqual(a, y.grad_fn._saved_self)
+
+            y.sum().backward()
+            self.assertEqual(2 * a, a.grad)
 
     def test_default_saved_variable_hooks_double_backward(self):
         with torch.autograd.graph.saved_tensors_default_hooks(lambda x: x, lambda x: x):
