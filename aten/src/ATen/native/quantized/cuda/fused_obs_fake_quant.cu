@@ -160,6 +160,7 @@ void _calculate_moving_average(
         running_max_data,
         averaging_const,
         1 /*size*/);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -187,7 +188,7 @@ void _calc_moving_avg_qparams_helper(
         qmin,
         qmax,
         size,
-        symmetric_quant /*preserve_sparsity*/,
+        symmetric_quant,
         scale_ptr,
         zp_ptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -199,8 +200,8 @@ void _calc_moving_avg_qparams_helper(
         running_max_data,
         qmin,
         qmax,
-        /*size=*/1,
-        symmetric_quant, /*preserve_sparsity=*/
+        1, // size
+        symmetric_quant, // preserve_sparsity
         scale_ptr,
         zp_ptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -248,11 +249,10 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
         zp_ptr,
         qmin,
         qmax,
-        symmetric_quant, /* preserve_sparsity */
+        symmetric_quant,
         size,
         per_row_fq);
 
-    at::Tensor output = at::empty_like(x, x.options(), MemoryFormat::Preserve);
     if (per_row_fq) {
       return at::fake_quantize_per_channel_affine_cachemask(
           x, scale, zero_point, 0, qmin, qmax);
