@@ -2,10 +2,7 @@
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc
-import torch.distributed.distributed_c10d as dc10d
 from torch.distributed.rpc import constants as rpc_constants
-
-from datetime import timedelta
 
 def _init_process_group(store, rank, world_size):
     # Initialize ProcessGroup.
