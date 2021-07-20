@@ -61,6 +61,7 @@ def PyTorchLinuxWorkflow(
     enable_slow_test: YamlShellBool = "''",
     num_test_shards: int = 1,
     is_scheduled: Optional[str] = None,
+    is_libtorch: bool = False,
     exclude_test: bool = False,
 ) -> PyTorchWorkflow:
     return {
@@ -76,7 +77,8 @@ def PyTorchLinuxWorkflow(
         "enable_nogpu_no_avx2_test": enable_nogpu_no_avx2_test,
         "enable_slow_test": enable_slow_test,
         "num_test_shards": num_test_shards,
-        "exclude_test": exclude_test,
+        "is_libtorch": is_libtorch,
+        "exclude_test": is_libtorch or exclude_test,   # libtorch is build only
     }
 
 
@@ -181,16 +183,23 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
     ),
     PyTorchLinuxWorkflow(
+        build_environment="pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        is_libtorch=True,
+    ),
+    PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
-    #     test_runner_type=LINUX_CUDA_TEST_RUNNER,
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        is_libtorch=True,
+    ),
     PyTorchLinuxWorkflow(
         build_environment="periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
@@ -198,13 +207,13 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
     ),
-    # PyTorchLinuxWorkflow(
-    #     build_environment="periodic-pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
-    #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
-    #     test_runner_type=LINUX_CUDA_TEST_RUNNER,
-    #     exclude_test=True,
-    #     is_scheduled="45 0,4,8,12,16,20 * * *",
-    # ),
+    PyTorchLinuxWorkflow(
+        build_environment="periodic-pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        is_libtorch=True,
+        is_scheduled="45 0,4,8,12,16,20 * * *",
+    ),
     # PyTorchLinuxWorkflow(
     #     build_environment="pytorch-linux-bionic-py3.6-clang9-noarch",
     #     docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-py3.6-clang9",

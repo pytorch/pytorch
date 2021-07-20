@@ -552,6 +552,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/data/samplers/sequential.cpp",
     "torch/csrc/api/src/data/samplers/stream.cpp",
     "torch/csrc/api/src/enum.cpp",
+    "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/api/src/serialize.cpp",
     "torch/csrc/api/src/nn/init.cpp",
