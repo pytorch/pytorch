@@ -4,8 +4,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import collections
-import contextlib
 import copy
+import io
 import logging
 from itertools import chain
 from typing import Any, Callable, Dict, List, Optional, Type
@@ -53,6 +53,46 @@ def _is_trainable(param: torch.Tensor) -> bool:
     requiring a gradient.
     """
     return param.requires_grad
+
+
+def _broadcast_object(
+    obj: Any, src_rank: int,
+    group: object = dist.group.WORLD,
+    device: torch.device = torch.device("cpu")
+) -> Any:
+    r"""
+    Broadcasts an object to the given group, sending the object if called from
+    the source rank and receiving the object otherwise.
+
+    Arguments:
+        obj: object to broadcast; only used if called on the source rank.
+        src_rank (int): source rank.
+        group (``ProcessGroup``, optional): group used for the broadcast
+            (default: ``dist.group.WORLD``).
+        device (``torch.device``, optional): device to send from or receive
+            to (default: ``torch.device("cpu")``).
+
+    Returns:
+        The broadcasted object.
+    """
+    if dist.get_rank() == src_rank:
+        # Send the object
+        buffer = io.BytesIO()
+        torch.save(obj, buffer)
+        data = bytearray(buffer.getbuffer())
+        length_tensor = torch.LongTensor([len(data)]).to(device)
+        data_send_tensor = torch.ByteTensor(data).to(device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
+    else:
+        # Receive the object
+        length_tensor = torch.LongTensor([0]).to(device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=device)
+        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
+        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
+        obj = torch.load(buffer, map_location=device)
+    return obj
 
 
 def _get_global_rank(group: Any, rank: int) -> int:
@@ -259,56 +299,51 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._sync_param_groups(self.param_groups, self.optim.param_groups)
 
         # Pull the sharded state from all ranks and store them in rank order
+        empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._default_device)
+
         # NOTE: We wastefully use `broadcast()` (e.g. instead of `gather()`)
         # due to compatibility issues with NCCL backend; a possible follow-up
         # is to move all sharded state management to RPC RRef
         self._all_state_dicts = []
-        # Set `map_location` to CPU to save one GPU -> CPU transfer
-        map_location = torch.device("cpu")
-        is_gpu_device = self._default_device.type == "cuda"
-        # TODO: Once the minimum supported version is Python 3.7, replace
-        # `contextlib.suppress()` with `contextlib.nullcontext()`
-        with torch.cuda.device(self._default_device) if is_gpu_device else contextlib.suppress():
-            for rank in range(self.world_size):
-                global_rank = _get_global_rank(self.process_group, rank)
-                if self.rank == to:
-                    # Consolidate all local `state_dict`s on this rank, storing on
-                    # CPU to save GPU memory
-                    if rank == self.rank:
-                        # Directly append own optimizer state
-                        self._all_state_dicts.append(
-                            _recursive_copy_to_device(self.optim.state_dict(), non_blocking=True, device=torch.device("cpu"))
-                        )
-                    else:
-                        # Receive the optimizer state from the source rank
-                        local_state_dict_list = [None]
-                        dist.broadcast_object_list(
-                            local_state_dict_list,
-                            src=global_rank,
-                            group=self.process_group,
-                            map_location=map_location
-                        )
-                        local_state_dict = local_state_dict_list[0]
-                        self._all_state_dicts.append(
-                            _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu"))
-                        )
+        for rank in range(self.world_size):
+            global_rank = _get_global_rank(self.process_group, rank)
+            if self.rank == to:
+                # Consolidate all local `state_dict`s on this rank, storing on
+                # CPU to save GPU memory
+                if rank == self.rank:
+                    # Directly append own optimizer state
+                    self._all_state_dicts.append(
+                        _recursive_copy_to_device(self.optim.state_dict(), non_blocking=True, device=torch.device("cpu"),)
+                    )
                 else:
-                    if rank == self.rank:
-                        # Send the optimizer state to the target rank
-                        dist.broadcast_object_list(
-                            [self.optim.state_dict()],
-                            src=self.global_rank,
-                            group=self.process_group
-                        )
-                    elif rank != to:
-                        # Discard the received object; `broadcast()` is used for
-                        # compatibility reasons
-                        dist.broadcast_object_list(
-                            [None],
-                            src=global_rank,
-                            group=self.process_group,
-                            map_location=map_location
-                        )
+                    # Receive the optimizer state from the source rank
+                    local_state_dict = _broadcast_object(
+                        empty_messenger,
+                        src_rank=global_rank,
+                        group=self.process_group,
+                        device=self._default_device,
+                    )
+                    self._all_state_dicts.append(
+                        _recursive_copy_to_device(local_state_dict, non_blocking=True, device=torch.device("cpu"))
+                    )
+            else:
+                if rank == self.rank:
+                    # Send the optimizer state to the target rank
+                    _ = _broadcast_object(
+                        self.optim.state_dict(),
+                        src_rank=self.global_rank,
+                        group=self.process_group,
+                        device=self._default_device,
+                    )
+                elif rank != to:
+                    # Discard the received object; `broadcast()` is used for
+                    # compatibility reasons
+                    _ = _broadcast_object(
+                        empty_messenger,
+                        src_rank=global_rank,
+                        group=self.process_group,
+                        device=self._default_device,
+                    )
 
     def _partition_parameters(self) -> List[List[Dict]]:
         r"""
