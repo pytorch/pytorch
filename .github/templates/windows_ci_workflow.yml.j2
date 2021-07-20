@@ -92,12 +92,15 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      - name: Cleanup build-results
+      - name: Cleanup build-results and workspaces
+        if: always()
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
+          rm -rf .
 
   generate-test-matrix:
 {%- if only_build_on_pull_request %}
@@ -202,6 +205,12 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Cleanup workspace
+        if: always()
+        shell: bash
+        # Should remove the entirety of pytorch-${{ github.run_id }}
+        run: |
+          rm -rf .
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
