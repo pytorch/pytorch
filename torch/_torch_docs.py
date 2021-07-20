@@ -1490,16 +1490,51 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks. Each chunk is a view of
+Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
 
-Last chunk will be smaller if the tensor size along the given dimension
-:attr:`dim` is not divisible by :attr:`chunks`.
+
+.. note::
+
+    This function may return less then the specified number of chunks!
+
+.. seealso::
+
+    :func:`torch.tensor_split` a function that always returns exactly the specified number of chunks
+
+If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
+all returned chunks will be the same size.
+If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
+all returned chunks will be the same size, except the last one.
+If such division is not possible, this function may return less
+than the specified number of chunks.
 
 Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
+
+Example::
+    >>> torch.arange(11).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10]))
+    >>> torch.arange(12).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10, 11]))
+    >>> torch.arange(13).chunk(6)
+    (tensor([0, 1, 2]),
+     tensor([3, 4, 5]),
+     tensor([6, 7, 8]),
+     tensor([ 9, 10, 11]),
+     tensor([12]))
 """)
 
 add_docstr(torch.unsafe_chunk,
@@ -2429,6 +2464,30 @@ Example::
     False
 
 """)
+
+add_docstr(torch.resolve_neg,
+           r"""
+resolve_neg(input) -> Tensor
+
+Returns a new tensor with materialized negation if :attr:`input`'s negative bit is set to `True`,
+else returns :attr:`input`. The output tensor will always have its negative bit set to `False`.
+Args:
+    {input}
+
+Example::
+
+    >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+    >>> y = x.conj()
+    >>> z = y.imag
+    >>> z.is_neg()
+    True
+    >>> out = y.resolve_neg()
+    >>> out
+    tensor([-1, -2, -3])
+    >>> out.is_neg()
+    False
+
+""".format(**common_args))
 
 add_docstr(torch.copysign,
            r"""
@@ -5082,43 +5141,8 @@ add_docstr(torch.xlogy,
            r"""
 xlogy(input, other, *, out=None) -> Tensor
 
-Computes ``input * log(other)`` with the following cases.
-
-.. math::
-    \text{out}_{i} = \begin{cases}
-        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
-        0 & \text{if } \text{input}_{i} = 0.0 \\
-        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
-    \end{cases}
-
-Similar to SciPy's `scipy.special.xlogy`.
-
-""" + r"""
-
-Args:
-    input (Number or Tensor) : Multiplier
-    other (Number or Tensor) : Argument
-
-.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> x = torch.zeros(5,)
-    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
-    >>> torch.xlogy(x, y)
-    tensor([0., 0., 0., 0., nan])
-    >>> x = torch.tensor([1, 2, 3])
-    >>> y = torch.tensor([3, 2, 1])
-    >>> torch.xlogy(x, y)
-    tensor([1.0986, 1.3863, 0.0000])
-    >>> torch.xlogy(x, 4)
-    tensor([1.3863, 2.7726, 4.1589])
-    >>> torch.xlogy(2, y)
-    tensor([2.1972, 1.3863, 0.0000])
-""".format(**common_args))
+Alias for :func:`torch.special.xlogy`.
+""")
 
 add_docstr(torch.logical_and,
            r"""
@@ -5312,12 +5336,13 @@ Args:
 Keyword args:
     {out}
 
-
 Example::
 
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
-    tensor([ 0.8442,  1.4322,  0.8711])
+    tensor([1.4907, 1.0593, 1.5696])
+    >>> torch.dist(torch.logsumexp(a, 1), torch.log(torch.sum(torch.exp(a), 1)))
+    tensor(1.6859e-07)
 """.format(**multi_dim_common))
 
 add_docstr(torch.lstsq,
@@ -7273,33 +7298,7 @@ add_docstr(torch.polygamma,
            r"""
 polygamma(n, input, *, out=None) -> Tensor
 
-Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
-:math:`n \geq 0` is called the order of the polygamma function.
-
-.. math::
-    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
-
-.. note::
-    This function is implemented only for nonnegative integers :math:`n \geq 0`.
-""" + """
-Args:
-    n (int): the order of the polygamma function
-    {input}
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.tensor([1, 0.5])
-    >>> torch.polygamma(1, a)
-    tensor([1.64493, 4.9348])
-    >>> torch.polygamma(2, a)
-    tensor([ -2.4041, -16.8288])
-    >>> torch.polygamma(3, a)
-    tensor([ 6.4939, 97.4091])
-    >>> torch.polygamma(4, a)
-    tensor([ -24.8863, -771.4742])
+Alias for :func:`torch.special.polygamma`.
 """.format(**common_args))
 
 add_docstr(torch.positive,
@@ -8426,8 +8425,6 @@ A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
 
-.. warning:: `stable=True` only works on the CPU for now.
-
 Args:
     {input}
     dim (int, optional): the dimension to sort along
@@ -9010,9 +9007,9 @@ always be real-valued, even if :attr:`input` is complex.
                default value for both is `True`, so the default behavior is
                effectively the opposite.
              * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns
-               `Vh`, that is, `Vᴴ`.
+               `Vᴴ`.
              * If :attr:`compute_uv` is `False`, :func:`torch.svd` returns zero-filled
-               tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
+               tensors for `U` and `Vᴴ`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
