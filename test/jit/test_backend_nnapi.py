@@ -56,7 +56,7 @@ class TestNnapiBackend(TestNNAPI):
         super().set_can_run_nnapi(False)
 
     # Override
-    def call_convert_to_nnapi(self, traced_module, args):
+    def call_lowering_to_nnapi(self, traced_module, args):
         compile_spec = {"forward": {"inputs": args}}
         return torch._C._jit_to_backend("nnapi", traced_module, compile_spec)
 
@@ -67,9 +67,9 @@ class TestNnapiBackend(TestNNAPI):
         traced = torch.jit.trace(module, args)
 
         # Argument input is a single Tensor
-        self.call_convert_to_nnapi(traced, args)
+        self.call_lowering_to_nnapi(traced, args)
         # Argument input is a Tensor in a list
-        self.call_convert_to_nnapi(traced, [args])
+        self.call_lowering_to_nnapi(traced, [args])
 
     def tearDown(self):
         # Change dtype back to default (Otherwise, other unit tests will complain)
