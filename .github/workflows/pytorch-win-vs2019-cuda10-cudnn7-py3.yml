@@ -5,7 +5,6 @@ name: Windows CI (pytorch-win-vs2019-cuda10-cudnn7-py3)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master

@@ -5,7 +5,9 @@ name: Windows CI (!{{ build_environment }})
 on:
 {%- if on_pull_request %}
   pull_request:
+{%- if ciflow_config.enabled %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif %}
 {%- endif %}
 {%- if is_scheduled %}
   schedule:
