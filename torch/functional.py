@@ -1632,8 +1632,8 @@ lu.__doc__ = _lu_impl.__doc__
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
 
-def result_type(*arrays_and_dtypes):
-    """result_type(*arrays_and_dtypes) -> dtype
+def result_type(*arrays_and_dtypes: Union[Tensor, torch.dtype, bool, int, float, complex]) -> torch.dtype:
+    """result_type(*arrays_and_dtypes: Union[Tensor, dtype, bool, int, float, complex]) -> dtype
 
 Returns the :class:`torch.dtype` that would result from performing an arithmetic
 operation on the provided input tensors. See type promotion :ref:`documentation <type-promotion-doc>`
@@ -1653,7 +1653,7 @@ Example::
 """
 
     tensors = []
-    scalars = []
+    scalars: List[Union[bool, int, float, complex]] = []
     dtypes = []
     for x in arrays_and_dtypes:
         if isinstance(x, (bool, int, float, complex)):
@@ -1663,12 +1663,12 @@ Example::
         else:
             tensors.append(x)
     if tensors:
-        dtypes.append(_VF.result_type(tensors))
+        dtypes.append(_VF.result_type(tensors))  # type: ignore[attr-defined]
     if scalars:
-        scalar_dtype = _VF._result_type_scalars(scalars)
+        scalar_dtype = _VF._result_type_scalars(scalars)  # type: ignore[arg-type]
         if dtypes:
             tensor_dtype = _VF._result_type_dtypes(dtypes)
-            return _VF.result_type(_VF.tensor([], dtype=tensor_dtype),
+            return _VF.result_type(_VF.tensor([], dtype=tensor_dtype),  # type: ignore[attr-defined]
                                    _VF.tensor(0, dtype=scalar_dtype).item())
         else:
             return scalar_dtype

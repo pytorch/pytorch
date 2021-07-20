@@ -117,6 +117,7 @@ blocklist = [
     'div_out',
     'true_divide', 'true_divide_', 'true_divide_out',
     'floor_divide', 'floor_divide_', 'floor_divide_out',
+    'result_type',
 ]
 
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
