@@ -62,7 +62,7 @@ popd
 
 # TODO CHANGE THIS BACK Clone the Builder master repo
 # retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
-retry git clone -q https://github.com/janeyx99/builder.git "$BUILDER_ROOT" -b conda-11.3
+retry git clone -q https://github.com/janeyx99/builder.git "$BUILDER_ROOT" -b update-windows-conda113
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
