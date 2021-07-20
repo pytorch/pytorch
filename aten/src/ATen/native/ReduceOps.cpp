@@ -122,6 +122,9 @@ void meta_func_cum_ops(
     const Tensor& self,
     int64_t dim,
     c10::optional<ScalarType> dtype) {
+  // Checking whether 'dim' is valid.
+  maybe_wrap_dim(dim, self.dim());
+
   const auto& result = meta.maybe_get_output();
   ScalarType out_dtype;
 
@@ -139,7 +142,6 @@ void meta_func_cum_ops(
   }
 
   meta.set_output(self.sizes(), self.options().dtype(out_dtype));
-  namedinference::propagate_names(result, self);
 }
 
 TORCH_META_FUNC(cumsum)
