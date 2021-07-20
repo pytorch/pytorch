@@ -5692,6 +5692,8 @@
 
 - func: bitwise_and.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
     CPU, CUDA: bitwise_and_out
@@ -5700,19 +5702,18 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_and_out
+    CompositeExplicitAutograd: bitwise_and_out
 
 - func: bitwise_and.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: bitwise_and
+    CompositeExplicitAutograd: bitwise_and
 
 - func: bitwise_and.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU, CUDA: bitwise_and
+  structured_delegate: bitwise_and.Tensor_out
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5721,6 +5722,7 @@
 - func: bitwise_and_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  structured_delegate: bitwise_and.Tensor_out
 
 - func: __and__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5740,6 +5742,8 @@
 
 - func: bitwise_or.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
     CPU, CUDA: bitwise_or_out
@@ -5748,7 +5752,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_or_out
+    CompositeExplicitAutograd: bitwise_or_out
 
 - func: bitwise_or.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5757,6 +5761,7 @@
 - func: bitwise_or.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  structured_delegate: bitwise_or.Tensor_out
 
 - func: bitwise_or_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5765,6 +5770,7 @@
 - func: bitwise_or_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  structured_delegate: bitwise_or.Tensor_out
 
 - func: __or__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5784,6 +5790,8 @@
 
 - func: bitwise_xor.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   variants: function
   dispatch:
     CPU, CUDA: bitwise_xor_out
@@ -5792,7 +5800,7 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: bitwise_xor_out
+    CompositeExplicitAutograd: bitwise_xor_out
 
 - func: bitwise_xor.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5801,6 +5809,7 @@
 - func: bitwise_xor.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
+  structured_delegate: bitwise_xor.Tensor_out
 
 - func: bitwise_xor_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5809,6 +5818,7 @@
 - func: bitwise_xor_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  structured_delegate: bitwise_xor.Tensor_out
 
 - func: __xor__.Scalar(Tensor self, Scalar other) -> Tensor
   device_check: NoCheck   # TensorIterator

@@ -487,9 +487,8 @@ std::vector<int64_t> ComputeShapeFromReshape(
 c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (auto it = reshape.begin(); it != reshape.end(); ++it) {
-    if (*it < 0) {
+  for (const auto& it : reshape) {
+    if (it < 0) {
       return c10::nullopt;
     }
   }
@@ -530,9 +529,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
   TORCH_INTERNAL_ASSERT(
       input_shape.size() == reshape.size(),
       "ONNX Tile input shapes do not match.");
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (auto it = reshape.begin(); it != reshape.end(); ++it) {
-    if (*it < 0) {
+  for (const auto& it : reshape) {
+    if (it < 0) {
       return c10::nullopt;
     }
   }
