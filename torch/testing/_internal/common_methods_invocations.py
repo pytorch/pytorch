@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (dtypesIfCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -2291,6 +2291,18 @@ def sample_inputs_outer(op_info, device, dtype, requires_grad, **kwargs):
     arg_b = make_tensor((M,), device, dtype, requires_grad=requires_grad)
     inputs.append(SampleInput(arg_a, args=(arg_b,)))
     return inputs
+
+
+def sample_inputs_igamma_igammac(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, low=1e-3)
+    cases = (((S, S), (S, S)),)
+
+    def generator():
+        for shape, other_shape in cases:
+            yield SampleInput(make_arg(shape, requires_grad=requires_grad), args=(make_arg(other_shape, requires_grad=False),))
+
+    return list(generator())
+
 
 def sample_inputs_dist(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6299,6 +6311,44 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('igamma',
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           aliases=('torch.special.gammainc',),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igamma',
+           variant_test_name='grad_other',
+           op=lambda self, other, **kwargs: torch.igamma(other, self, **kwargs),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types(),
+           backward_dtypesIfCUDA=floating_types(),
+           supports_inplace_autograd=False,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+           ),
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igammac',
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           aliases=('torch.special.gammaincc',),
+           dtypesIfCUDA=floating_types(),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_igamma_igammac),
+    OpInfo('igammac',
+           variant_test_name='grad_other',
+           op=lambda self, other, **kwargs: torch.igammac(other, self, **kwargs),
+           dtypes=floating_types_and(torch.bfloat16, torch.float16),
+           backward_dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types(),
+           backward_dtypesIfCUDA=floating_types(),
+           supports_inplace_autograd=False,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+           ),
+           sample_inputs_func=sample_inputs_igamma_igammac),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
