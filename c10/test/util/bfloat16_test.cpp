@@ -152,14 +152,15 @@ TEST(BFloat16Math, Subtraction) {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BFloat16Math, NextAfter) {
   auto from_bits = c10::BFloat16::from_bits();
-  c10::BFloat16 zero{0};
-  c10::BFloat16 one{1};
-  c10::BFloat16 two{2};
-  c10::BFloat16 max = std::numeric_limits<c10::BFloat16>::max();
-  c10::BFloat16 lowest = std::numeric_limits<c10::BFloat16>::lowest();
-  c10::BFloat16 inf = std::numeric_limits<c10::BFloat16>::infinity();
-  c10::BFloat16 nan = std::numeric_limits<c10::BFloat16>::quiet_NaN();
-  c10::BFloat16 denorm_min = std::numeric_limits<c10::BFloat16>::denorm_min();
+  const c10::BFloat16 zero{0};
+  const c10::BFloat16 one{1};
+  const c10::BFloat16 two{2};
+  const c10::BFloat16 max = std::numeric_limits<c10::BFloat16>::max();
+  const c10::BFloat16 lowest = std::numeric_limits<c10::BFloat16>::lowest();
+  const c10::BFloat16 inf = std::numeric_limits<c10::BFloat16>::infinity();
+  const c10::BFloat16 nan = std::numeric_limits<c10::BFloat16>::quiet_NaN();
+  const c10::BFloat16 denorm_min = std::numeric_limits<c10::BFloat16>::denorm_min();
+  const uint16_t unsigned_one = 1U;
 
   auto check_nextafter =
       [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
@@ -182,14 +183,14 @@ TEST(BFloat16Math, NextAfter) {
   check_nextafter(zero, -zero, /*expected=*/-zero);
 
   check_nextafter(one, one, /*expected=*/one);
-  check_nextafter(one, zero, /*expected=*/{one.x - uint16_t{1}, from_bits});
-  check_nextafter(one, two, /*expected=*/{one.x + uint16_t{1}, from_bits});
+  check_nextafter(one, zero, /*expected=*/{one.x - unsigned_one, from_bits});
+  check_nextafter(one, two, /*expected=*/{one.x + unsigned_one, from_bits});
 
-  check_nextafter(two, -one, /*expected=*/{two.x - uint16_t{1}, from_bits});
+  check_nextafter(two, -one, /*expected=*/{two.x - unsigned_one, from_bits});
 
   check_nextafter(-one, -one, /*expected=*/-one);
-  check_nextafter(-one, zero, /*expected=*/{(-one).x - uint16_t{1}, from_bits});
-  check_nextafter(-one, -two, /*expected=*/{(-one).x + uint16_t{1}, from_bits});
+  check_nextafter(-one, zero, /*expected=*/{(-one).x - unsigned_one, from_bits});
+  check_nextafter(-one, -two, /*expected=*/{(-one).x + unsigned_one, from_bits});
 
   check_nextafter(nan, one, /*expected=*/nan);
   check_nextafter(zero, nan, /*expected=*/nan);
