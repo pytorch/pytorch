@@ -78,7 +78,7 @@ DECLARE_DISPATCH(binary_fn_double, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn_double, huber_stub);
 DECLARE_DISPATCH(structured_binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
-DECLARE_DISPATCH(binary_fn, tanh_backward_stub);
+DECLARE_DISPATCH(structured_binary_fn, tanh_backward_stub);
 DECLARE_DISPATCH(binary_fn, mse_stub);
 DECLARE_DISPATCH(structured_binary_fn, fmod_stub);
 DECLARE_DISPATCH(structured_binary_fn, logaddexp_stub);
