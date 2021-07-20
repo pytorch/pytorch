@@ -2,11 +2,7 @@
 
 #include <ATen/CPUFunctions.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/native/IndexingUtils.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>

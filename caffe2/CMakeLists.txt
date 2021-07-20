@@ -565,6 +565,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/runtime/memory_planner.cpp
     )
 
     # Disable legacy import of building without Caffe2 support
