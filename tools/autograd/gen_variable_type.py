@@ -249,7 +249,7 @@ std::shared_ptr<${op}> grad_fn;
 
 SETUP_ANY_REQUIRES_GRAD = CodeTemplate("""\
 auto _any_requires_grad = compute_requires_grad( ${args_with_derivatives} );
-(void)_any_requires_grad;
+${extra_differentiability_conditions}(void)_any_requires_grad;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
@@ -799,8 +799,14 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return ''
 
     def emit_any_requires_grad() -> List[str]:
+        extra_condition = ''
+        if fn.info and fn.info.output_differentiability_conditions:
+            assert len(fn.info.output_differentiability_conditions) == 1
+            extra_condition = \
+                f'_any_requires_grad &= ({fn.info.output_differentiability_conditions[0]});\n'
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
-            args_with_derivatives=[arg.name for arg in args_with_derivatives]), ]
+            args_with_derivatives=[arg.name for arg in args_with_derivatives],
+            extra_differentiability_conditions=extra_condition),]
 
     def emit_check_inplace() -> List[str]:
         if not inplace:
@@ -827,6 +833,10 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                        'formula has been defined for it. This case should only happen for function that '
                                        'take a single TensorList as input. All other cases are not supported right now.')
                 requires_fw_grad = "true"
+            if fn.info and fn.info.output_differentiability_conditions:
+                assert len(fn.info.output_differentiability_conditions) == 1
+                requires_fw_grad = \
+                    f'({requires_fw_grad}) && ({fn.info.output_differentiability_conditions[0]})'
             unpacked_arguments = ""
             for inp in differentiable_inputs:
                 if inp.name in derivative.required_inputs_fw_grad:

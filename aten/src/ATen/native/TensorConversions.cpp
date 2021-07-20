@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -35,15 +36,14 @@ Tensor _to_copy(
     .dtype(dtype)
     .layout(layout)
     .device(device)
-    .pinned_memory(pin_memory)
-    .memory_format(optional_memory_format);
+    .pinned_memory(pin_memory);
 
   if (options.has_device()) {
     options = options.device(ensure_has_index(options.device()));
   }
-  options = self.options().merge_in(options);
-
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
+  // memory_format is handled separately due to MemoryFormat::Preserve logic
+  options = self.options().merge_in(options).memory_format(c10::nullopt);
+  auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
                   (options.layout() == c10::kStrided));
@@ -53,13 +53,16 @@ Tensor _to_copy(
       Tensor r;
       if (self.is_quantized()) {
         r = at::empty_quantized(self.sizes(), self, options);
+        at::QuantizerPtr quantizer = r.quantizer();
+        r.copy_(self, non_blocking);
+        set_quantizer_(r, quantizer);
       } else {
         r = at::empty_strided(
             self.sizes(),
             self.strides(),
-            options.memory_format(c10::nullopt).pinned_memory(pin_out));
+            options.pinned_memory(pin_out));
+        r.copy_(self, non_blocking);
       }
-      r.copy_(self, non_blocking);
       return r;
     } else {
       memory_format = self.suggest_memory_format();
@@ -103,7 +106,7 @@ static inline Tensor to_impl(
   }
 
   return at::_to_copy(
-      self, dtype, layout, device, pin_memory, non_blocking, memory_format);
+      self, dtype, layout, device, pin_memory, non_blocking, optional_memory_format);
 }
 
 Tensor to(
