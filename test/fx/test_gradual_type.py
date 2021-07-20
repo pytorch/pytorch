@@ -860,10 +860,10 @@ class TypeCheckerTest(unittest.TestCase):
 
         infer_symbolic_types(traced)
 
-        my_types = iter([TensorType[(2, 2, Var(8), 4)],
-                         TensorType[(2, 2, Var(8), 4)],
-                         TensorType[(2, 2, Var(8), 4)],
-                         TensorType[(2, 2, Var(8), 4)]])
+        my_types = iter([TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)]])
 
         for n in graph.nodes:
             assert n.type == next(my_types)
