@@ -671,7 +671,7 @@ void huber_kernel(TensorIterator& iter, double delta) {
   });
 }
 
-void sigmoid_backward_kernel(TensorIterator& iter) {
+void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
       auto one_vec = Vectorized<scalar_t>(scalar_t{1});
