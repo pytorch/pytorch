@@ -5811,6 +5811,12 @@ for shape in [(1,), ()]:
         y.sum().backward()
         self.assertEqual(a.grad, y)
 
+    def test_double_default_saved_variable_hooks_should_fail(self):
+        with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
+            with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+                with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+                    pass
+
     def test_default_saved_variable_hooks_double_backward(self):
         with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
