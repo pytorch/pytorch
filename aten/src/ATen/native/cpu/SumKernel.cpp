@@ -103,7 +103,6 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 template <>
 struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   using vec_t = Vectorized<c10::BFloat16>;
@@ -114,14 +113,12 @@ struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m256i*>(data + stride * index);
-    __m256i values = _mm256_loadu_si256(ptr);
-    __m256 first, second;
-    cvtbf16_fp32(values, first, second);
-    return _mm256_add_ps(first, second);
+    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    vacc_t first, second;
+    vec::load_fp32_from_bf16(ptr, first, second);
+    return first + second;
   }
 };
-#endif
 
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
 template <typename vec_t, typename vacc_t>
@@ -148,7 +145,6 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 template <>
 struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   using vec_t = Vectorized<c10::BFloat16>;
@@ -159,14 +155,12 @@ struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
   }
 
   static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const __m128i*>(data + stride * index);
-    __m128i bf_vals = _mm_loadu_si128(ptr);
-    __m256 f_vals;
-    cvtbf16_fp32(bf_vals, f_vals);
-    return f_vals;
+    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    vacc_t values;
+    vec::load_fp32_from_bf16(ptr, values);
+    return values;
   }
 };
-#endif
 
 template <typename scalar_t>
 struct OuterSumCastLoadPolicy<scalar_t, scalar_t>:
