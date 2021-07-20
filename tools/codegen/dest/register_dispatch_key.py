@@ -356,10 +356,12 @@ if (strides.empty()) {
             else:
                 expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
                     "options.device_opt(), options.pinned_memory_opt()"
+                empty_init = ""
                 if self.backend_index.dispatch_key == DispatchKey.CPU:
                     empty_impl = "at::native::empty_cpu"
                     empty_strided_impl = "at::native::empty_strided_cpu"
                 elif self.backend_index.dispatch_key == DispatchKey.CUDA:
+                    empty_init = "globalContext().lazyInitCUDA();"
                     empty_impl = "at::native::empty_cuda"
                     empty_strided_impl = "at::native::empty_strided_cuda"
                 elif self.backend_index.dispatch_key == DispatchKey.CompositeExplicitAutograd:
@@ -368,6 +370,7 @@ if (strides.empty()) {
                 else:
                     raise AssertionError("unsupported dispatch key")
                 return f"""{maybe_set_guard_line}
+{empty_init}
 if (strides.empty()) {{
     outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
 }} else {{
