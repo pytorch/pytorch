@@ -15,7 +15,6 @@ import traceback
 import warnings
 import unittest
 from math import sqrt
-from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -111,7 +110,7 @@ class TestFX(JitTestCase):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
         torch_root = site.getsitepackages()[0]
-        p = torch_root / 'torch' / 'lib' / 'libtorchbind_test.so'
+        p = torch_root + 'torch/lib/libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):

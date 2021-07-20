@@ -32,8 +32,8 @@ class TestTorchbind(JitTestCase):
             p = torch_root / 'lib' / 'libtorchbind_test.so'
         else:
             torch_root = site.getsitepackages()[0]
-            p = torch_root / 'torch' / 'lib' / 'libtorchbind_test.so'
-            torch.ops.load_library(str(p))
+            p = torch_root + 'torch/lib/libtorchbind_test.so'
+        torch.ops.load_library(str(p))
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):
