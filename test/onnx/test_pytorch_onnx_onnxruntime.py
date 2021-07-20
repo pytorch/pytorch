@@ -7683,9 +7683,9 @@ class TestONNXRuntime(unittest.TestCase):
                 self.bn2 = torch.nn.BatchNorm2d(3, affine=False)
                 self.cv2 = torch.nn.Conv2d(3, 3, 10)
                 self.bn3 = torch.nn.BatchNorm2d(3, affine=True)
+                self.bn3.eval()
 
             def forward(self, x):
-                self.bn3.eval()
                 x = self.bn1(x)
                 x = self.cv1(x)
                 x = self.bn2(x)
@@ -7708,9 +7708,9 @@ class TestONNXRuntime(unittest.TestCase):
                 self.bn2 = torch.nn.BatchNorm2d(3, affine=False)
                 self.cv2 = torch.nn.Conv2d(3, 3, 10)
                 self.bn3 = torch.nn.BatchNorm2d(3, affine=True)
+                self.bn3.train()
 
             def forward(self, x):
-                self.bn3.train()
                 x = self.bn1(x)
                 x = self.cv1(x)
                 x = self.bn2(x)
