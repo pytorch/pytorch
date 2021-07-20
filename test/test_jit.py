@@ -8,7 +8,7 @@ from jit.test_tracer import TestTracer, TestMixTracingScripting  # noqa: F401
 from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
-# from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
+from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
 from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
@@ -31,7 +31,7 @@ from jit.test_python_bindings import TestPythonBindings  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
-# from jit.test_torchbind import TestTorchbind  # noqa: F401
+from jit.test_torchbind import TestTorchbind  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401

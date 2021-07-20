@@ -1,5 +1,6 @@
 import io
 import os
+import site
 import sys
 import copy
 import unittest
@@ -30,9 +31,9 @@ class TestTorchbind(JitTestCase):
             torch_root = Path(torch.__file__).resolve().parent
             p = torch_root / 'lib' / 'libtorchbind_test.so'
         else:
-            torch_root = Path(__file__).resolve().parent.parent.parent
-            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+            torch_root = site.getsitepackages()[0]
+            p = torch_root / 'torch' / 'lib' / 'libtorchbind_test.so'
+            torch.ops.load_library(str(p))
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):

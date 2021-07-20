@@ -8,6 +8,7 @@ import numbers
 import operator
 import os
 import pickle
+import site
 import sys
 import torch
 import traceback
@@ -109,8 +110,8 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        torch_root = site.getsitepackages()[0]
+        p = torch_root / 'torch' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):

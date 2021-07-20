@@ -1,6 +1,7 @@
 from torch.testing._internal.jit_utils import JitTestCase
 import io
 import os
+import site
 import sys
 import unittest
 
@@ -74,8 +75,8 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
+        torch_root = site.getsitepackages()[0]
+        p = torch_root / 'torch' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
@@ -492,8 +493,8 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
+        torch_root = site.getsitepackages()[0]
+        p = torch_root / 'torch' / 'lib' / 'libbackend_with_compiler.so'
         torch.ops.load_library(str(p))
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
