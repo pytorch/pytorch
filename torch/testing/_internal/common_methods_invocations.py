@@ -1353,7 +1353,9 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     def generator():
         for input_shape, batch1_shape, batch2_shape, beta, alpha in test_cases:
             if dtype.is_complex:
-                beta, alpha = beta * (1 + 2j), alpha * (2 + 3j)  # type: ignore[assignment]
+                beta_complex, alpha_complex = beta * (1 + 2j), alpha * (2 + 3j)
+                yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
+                                  kwargs=dict(beta=beta_complex, alpha=alpha_complex))
             yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
                               kwargs=dict(beta=beta, alpha=alpha))
 
@@ -4924,7 +4926,7 @@ op_db: List[OpInfo] = [
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.3e-05),
-                                      torch.complex64: tol(atol=1e-05, rtol=2.2e-04)}),
+                                      torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_reference_testing')],
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
