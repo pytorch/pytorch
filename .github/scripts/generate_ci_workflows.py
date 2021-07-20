@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 import jinja2
 from typing_extensions import Literal
@@ -11,10 +10,20 @@ YamlShellBool = Literal["''", 1]
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
+
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
+WINDOWS_RUNNERS = [
+    WINDOWS_CPU_TEST_RUNNER,
+    WINDOWS_CUDA_TEST_RUNNER,
+]
+
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
+LINUX_RUNNERS = [
+    LINUX_CPU_TEST_RUNNER,
+    LINUX_CUDA_TEST_RUNNER,
+]
 
 
 @dataclass
@@ -50,12 +59,12 @@ class CIWorkflow:
 
     def assert_valid(self) -> None:
         assert self.arch in ['linux', 'windows'], f"invalid arch: {self.arch}, must be one of ['linux','windows']"
+
+        err_message = f"invalid test_runner_type for {self.arch}: {self.test_runner_type}"
         if self.arch == 'linux':
-            assert self.test_runner_type in [LINUX_CPU_TEST_RUNNER,
-                                             LINUX_CUDA_TEST_RUNNER], f"invalid test_runner_type for linux: {self.test_runner_type}"
+            assert self.test_runner_type in LINUX_RUNNERS, err_message
         if self.arch == 'windows':
-            assert self.test_runner_type in [WINDOWS_CPU_TEST_RUNNER,
-                                             WINDOWS_CUDA_TEST_RUNNER], f"invalid test_runner_type for windows: {self.test_runner_type}"
+            assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/{workflow.build_environment}.yml"
