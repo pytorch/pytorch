@@ -221,6 +221,16 @@ if(INTERN_BUILD_ATEN_OPS)
       message(STATUS ${generated_cpp})
       message(FATAL_ERROR "Failed to get generated_cpp list")
   endif()
+
+  set(GEN_COMMAND2
+          "${PYTHON_EXECUTABLE}" -m tools.codegen.gen --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen --do_sed
+          )
+
+  #  message(FATAL_ERROR "sed ${GEN_COMMAND}")
+  execute_process(
+          COMMAND ${GEN_COMMAND2}
+          WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+  )
   # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)

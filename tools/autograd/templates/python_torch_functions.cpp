@@ -32,6 +32,7 @@
 #include "torch/csrc/utils/cuda_lazy_init.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Functions_Delta.h>
 
 #include <functional>
 #include <initializer_list>

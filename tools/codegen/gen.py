@@ -1,4 +1,3 @@
-import os
 from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence
 from typing_extensions import Literal
 import yaml
@@ -812,6 +811,7 @@ class FileManager:
                 old_contents = f.read()
         except IOError:
             old_contents = None
+        # print("writing", filename, contents == old_contents)
         if contents != old_contents:
             with open(filename, 'w') as f:
                 f.write(contents)
@@ -939,7 +939,15 @@ def main() -> None:
         action='store_true',
         help='force it to generate schema-only registrations for all ops, including'
              'those that are not listed on --op_registration_whitelist')
+    parser.add_argument(
+        '--do_sed',
+        action='store_true')
+
     options = parser.parse_args()
+    if options.do_sed:
+        do_sed(options.install_dir)
+        return
+
 
     selector = get_custom_build_selector(
         options.op_registration_whitelist,
@@ -949,8 +957,23 @@ def main() -> None:
     native_yaml_path = os.path.join(options.source_path, 'native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
-    grouped_native_functions = get_grouped_native_functions(native_functions)
+
+    old_native_yaml_path = os.path.join(options.source_path, 'native/old_native_functions.yaml')
+    purely_positive_delta = False
+    all_native_functions = native_functions
+    grouped_native_functions = all_grouped_native_functions = get_grouped_native_functions(native_functions)
     structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
+    if os.path.isfile(old_native_yaml_path):
+        old_parsed_yaml = parse_native_yaml(old_native_yaml_path)
+        old_native_functions, old_backend_indices = old_parsed_yaml.native_functions, old_parsed_yaml.backend_indices
+        if len(set(native_functions) - set(old_native_functions)) > 0 and len(set(old_native_functions) - set(native_functions)) == 0:
+            purely_positive_delta = True
+            native_functions = list(set(native_functions) - set(old_native_functions))
+            grouped_native_functions = get_grouped_native_functions(native_functions)
+            structured_native_functions = [g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)]
+    else:
+        open(old_native_yaml_path, "w").write(open(native_yaml_path, "r").read())
+
 
     template_dir = os.path.join(options.source_path, "templates")
 
@@ -1018,6 +1041,7 @@ def main() -> None:
     if options.static_dispatch_backend:
         static_dispatch_idx = backend_indices[DispatchKey.parse(options.static_dispatch_backend)]
 
+    delta_header_install_dirs = {}
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
@@ -1038,7 +1062,7 @@ def main() -> None:
                     rocm=options.rocm,
                     cpp_namespace='at::native',
                     class_method_name=None),
-                grouped_native_functions
+                all_grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
@@ -1048,7 +1072,7 @@ def main() -> None:
                     rocm=options.rocm,
                     cpp_namespace='at::native',
                     class_method_name=None),
-                grouped_native_functions
+                all_grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
                 dest.RegisterDispatchKey(
@@ -1058,7 +1082,7 @@ def main() -> None:
                     rocm=options.rocm,
                     cpp_namespace='at::native',
                     class_method_name=None),
-                grouped_native_functions
+                all_grouped_native_functions
             )),
         })
 
@@ -1073,7 +1097,7 @@ def main() -> None:
                 'dispatch_key': str(dispatch_key),
                 'inline_headers_for_nonstatic_build': inl_headers,
             })
-            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+            fm.write_with_template(f'{dispatch_key}Functions_inl{"_Delta" if purely_positive_delta else ""}.h', 'DispatchKeyFunctions_inl.h', lambda: {
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_declarations': list(concatMap(
                     dest.RegisterDispatchKey(
@@ -1086,64 +1110,78 @@ def main() -> None:
                     grouped_native_functions
                 )),
             })
+            if purely_positive_delta:
+                delta_header_install_dirs[f'{dispatch_key}Functions_inl'] = fm.install_dir
 
         del fm
 
     # BackendSelect is generated specially
     cpu_fm.write('RegisterBackendSelect.cpp', lambda: {
         'backend_select_method_definitions':
-            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), all_native_functions)),
         'backend_select_function_registrations':
-            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
+            list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), all_native_functions)),
     })
 
-    cpu_fm.write('NativeMetaFunctions.h', lambda: {
+    cpu_fm.write_with_template(f'NativeMetaFunctions{"_Delta" if purely_positive_delta else ""}.h', 'NativeMetaFunctions.h', lambda: {
         'declarations': list(mapMaybe(compute_meta_function_declaration, structured_native_functions)),
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['NativeMetaFunctions'] = cpu_fm.install_dir
 
     schema_selector = selector
     if options.force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
     cpu_fm.write('RegisterSchema.cpp', lambda: {
-        'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+        'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), all_native_functions)),
     })
 
     cpu_fm.write('Operators.cpp', lambda: {
         'definitions': list(mapMaybe(ComputeOperators(
-            Target.DEFINITION), native_functions)),
+            Target.DEFINITION), all_native_functions)),
     })
-    cpu_fm.write('Operators.h', lambda: {
+    cpu_fm.write(f'Operators{"_Delta" if purely_positive_delta else ""}.h', lambda: {
         'declarations': list(mapMaybe(ComputeOperators(
             Target.DECLARATION), native_functions)),
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['Operators'] = cpu_fm.install_dir
 
-    cpu_fm.write('Functions.h', lambda: {
+    open(f"{cpu_fm.install_dir}/Functions_Delta.h", "w").close()
+    cpu_fm.write(f'Functions{"_Delta" if purely_positive_delta else ""}.h',lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'function_definitions': list(mapMaybe(ComputeFunction(
             static_dispatch_backend_index=static_dispatch_idx), native_functions)),
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['Functions'] = cpu_fm.install_dir
 
     cpu_fm.write('Functions.cpp', lambda: {})
 
     core_fm.write('TensorBody.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
-            target=Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+            target=Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), all_native_functions)),
         'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(
-            target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+            target=Target.DEFINITION, static_dispatch_backend_index=static_dispatch_idx), all_native_functions)),
     })
+    # if purely_positive_delta:
+    #     delta_header_install_dirs['TensorBody'] = core_fm.install_dir
 
     core_fm.write('TensorMethods.cpp', lambda: {})
 
-    cpu_fm.write('RedispatchFunctions.h', lambda: {
+    cpu_fm.write(f'RedispatchFunctions{"_Delta" if purely_positive_delta else ""}.h', lambda: {
         'function_redispatch_definitions': list(mapMaybe(ComputeRedispatchFunction(), native_functions)),
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['RedispatchFunctions'] = cpu_fm.install_dir
 
     core_fm.write('ATenOpList.cpp', lambda: {
-        'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
+        'aten_ops': list(mapMaybe(compute_aten_op, all_native_functions)),
     })
 
-    cpu_fm.write('NativeFunctions.h', lambda: {
+    open(f"{cpu_fm.install_dir}/NativeFunctions_Delta.h", "w").close()
+    cpu_fm.write_with_template(f'NativeFunctions{"_Delta" if purely_positive_delta else ""}.h', 'NativeFunctions.h', lambda: {
         'native_function_declarations': list(concatMap(
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
@@ -1153,16 +1191,52 @@ def main() -> None:
                 backend_indices.values()))),
             grouped_native_functions)),
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['NativeFunctions'] = cpu_fm.install_dir
 
-    cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]))
-    cpu_fm.write('RegistrationDeclarations.h', lambda: {
+    cpu_fm.write('Declarations.yaml', lambda: format_yaml([compute_declaration_yaml(f) for f in all_native_functions]))
+
+    cpu_fm.write_with_template(f'RegistrationDeclarations{"_Delta" if purely_positive_delta else ""}.h', 'RegistrationDeclarations.h', lambda: {
         'registration_declarations': [compute_registration_declarations(f, backend_indices) for f in native_functions],
     })
+    if purely_positive_delta:
+        delta_header_install_dirs['RegistrationDeclarations'] = cpu_fm.install_dir
 
     if options.output_dependencies:
         cpu_fm.write_outputs(options.output_dependencies)
         core_fm.write_outputs(f"{options.output_dependencies}-core")
         cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
+
+    if purely_positive_delta:
+        json.dump(delta_header_install_dirs, open(f"{options.install_dir}/delta_header_install_dirs.json", "w"))
+
+import os, fnmatch
+def find_replace(directory, find, replace, file_pattern):
+    for path, dirs, files in os.walk(os.path.abspath(directory)):
+        for filename in fnmatch.filter(files, file_pattern):
+            filepath = os.path.join(path, filename)
+            with open(filepath) as f:
+                s = f.read()
+            if replace not in s:
+                s = s.replace(find, replace)
+                with open(filepath, "w") as f:
+                    f.write(s)
+
+def do_sed(delta_header_install_dirs_path):
+    fname = f"{delta_header_install_dirs_path}/delta_header_install_dirs.json"
+    if not os.path.isfile(fname):
+        return
+    delta_header_install_dirs = json.load(open(fname, "r"))
+    dirname = os.path.dirname(delta_header_install_dirs_path)
+    for header, install_path in delta_header_install_dirs.items():
+        find = f'#include <{install_path.replace(f"{dirname}/", "")}/{header}.h>'
+        replace = f'#include <{install_path.replace(f"{dirname}/", "")}/{header}.h>\n#include <{install_path.replace(f"{dirname}/", "")}/{header}_Delta.h>'
+        find_replace(dirname, find, replace, "*.cpp")
+        find_replace(dirname, find, replace, "*.cu")
+        find_replace(f"{delta_header_install_dirs_path}/../../../../torch/csrc/autograd/generated/", find, replace, "*.cpp")
+        find_replace(f"{delta_header_install_dirs_path}/../../../../torch/csrc/autograd/generated/", find, replace, "*.cu")
+
+
 
 if __name__ == '__main__':
     main()

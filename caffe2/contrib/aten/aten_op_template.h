@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <string>
 #include <ATen/ATen.h>
+#include <ATen/Functions_Delta.h>
 #include <c10/macros/Macros.h>
 #include <caffe2/core/context.h>
 #include <caffe2/core/operator.h>
