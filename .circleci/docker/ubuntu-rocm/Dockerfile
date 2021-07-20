@@ -56,6 +56,10 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+# Set AMD gpu targets to build for
+ARG PYTORCH_ROCM_ARCH "gfx900;gfx906"
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+
 # Install rocm
 ARG ROCM_VERSION
 ADD ./common/install_rocm.sh install_rocm.sh
