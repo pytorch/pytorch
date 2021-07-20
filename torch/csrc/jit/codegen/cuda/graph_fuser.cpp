@@ -856,6 +856,9 @@ struct CudaGraphFuser {
         continue;
       }
       if (n->kind() == prim::ConstantChunk) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input()) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
         sizes_node->i_(attr::dim, n->i(attr::dim));
@@ -902,6 +905,9 @@ struct CudaGraphFuser {
         Node* in2_const = graph->createClone(n->input(2)->node(), map_inputs);
         graph->insertNode(in2_const);
 
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         std::vector<Value*> inputs = {
             shape_of.at(n->input(0)), in1_const->output(), in2_const->output()};
         Node* size_node =
@@ -913,29 +919,56 @@ struct CudaGraphFuser {
       }
       // TODO: output(1) & output(2) should also be marked
       if (n->kind() == aten::native_layer_norm) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
         continue;
       }
       // TODO: output(1) & output(2) should also be marked
       if (n->kind() == aten::native_layer_norm_backward) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        if (shape_of.count(n->input(5)) > 0) {
+          shape_of.emplace(n->output(1), shape_of.at(n->input(5)));
+        }
+        if (shape_of.count(n->input(6)) > 0) {
+          shape_of.emplace(n->output(2), shape_of.at(n->input(6)));
+        }
         continue;
       }
       // TODO: output(1) & output(2) should also be marked
       if (n->kind() == aten::native_batch_norm) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
         continue;
       }
       // TODO: output(1) & output(2) should also be marked
       if (n->kind() == aten::native_batch_norm_backward) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(0)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
         shape_of.emplace(n->output(0), shape_of.at(n->input(0)));
+        if (shape_of.count(n->input(2)) > 0) {
+          shape_of.emplace(n->output(1), shape_of.at(n->input(2)));
+          // use shape of weight here for grad_bias
+          shape_of.emplace(n->output(2), shape_of.at(n->input(2)));
+        }
         continue;
       }
       auto tensor_inputs = filter(n->inputs(), [](Value* v) {
         return v->type()->isSubtypeOf(TensorType::get());
       });
-      auto shapes =
-          fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(v) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        return shape_of.at(v);
+      });
       AT_ASSERT(!shapes.empty());
       shape_of.emplace(
           n->output(0),
