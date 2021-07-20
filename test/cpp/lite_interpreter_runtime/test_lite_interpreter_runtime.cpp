@@ -175,6 +175,22 @@ Traceback of TorchScript (most recent call last):
 }
 
 TEST(RunTimeTest, ParseBytecode) {
+  // A simple example to show a simple bytecode that can be used independent of
+  // PyTorch TorchScript serialization (unpickler, etc) and operator library.
+  // It has basic control flow (if, else) and basic data orchestration (list
+  // construction). The original PyTorch program:
+
+  //  class Module(torch.nn.Module):
+  //
+  //    def __init__(self):
+  //      super().__init__()
+  //
+  //    def forward(self, x: int, h: int, xfirst: bool):
+  //      if xfirst:
+  //        return [x, h]
+  //      else:
+  //        return [h, x]
+
   // 1. Prepare for the bytecode. In reality it can be from a customized
   // deserializer.
   std::vector<IValue> instructions{
