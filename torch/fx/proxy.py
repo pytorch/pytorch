@@ -5,7 +5,7 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
@@ -29,7 +29,7 @@ class TracerBase:
 
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     proxy_factory_fn: Callable[[Node], Proxy]  = None):
+                     proxy_factory_fn: Callable[[Node], 'Proxy']  = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -242,6 +242,7 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
             return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
@@ -270,18 +271,21 @@ class Attribute(Proxy):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 
-        # a special proxy which lets "shape" attribute accesses pass through to the underlying
-        # module parameter object, so that if tests on parameter shapes can appear in foward()
-
-class FixedShapeParam(Proxy):
-    def __init__(self, node: Node, tracer, name, param):
+class ParameterProxy(Proxy):
+    """
+    a special proxy which lets "shape" attribute accesses pass through to the underlying
+    module parameter object, so that conditional tests on parameter shapes can be traced
+    """
+    def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
         assert(isinstance(param, torch.nn.Parameter))
         self.param = param
         self.name = name
 
     def __repr__(self) -> str:
-        return f'Parameter({self.name})'
+        return f'ParameterProxy({self.name})'
+
+
 
     def __getattr__(self, k):
         if k == 'shape':
