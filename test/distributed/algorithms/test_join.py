@@ -1,15 +1,21 @@
 import contextlib
 import os
+import sys
 from typing import Any, Optional
 
 import torch
 import torch.distributed as dist
+
+if not dist.is_available():
+    print("Distributed not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     require_n_gpus_for_nccl_backend,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = min(4, max(2, torch.cuda.device_count()))
@@ -130,7 +136,11 @@ class TestJoin(MultiProcessTestCase):
         super(TestJoin, self).setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
         os.environ["BACKEND"] = BACKEND
-        self._spawn_processes()
+        # torch and spawn have known issues with ASAN, so use fork instead
+        if TEST_WITH_ASAN:
+            self._fork_processes()
+        else:
+            self._spawn_processes()
 
     @property
     def device(self):
@@ -249,6 +259,9 @@ class TestJoin(MultiProcessTestCase):
                 for _ in inputs:
                     for allreducer in allreducers:
                         allreduce_total += allreducer(num_allreduces)
+
+        if throw_on_early_termination:
+            return
 
         # Check `expected_total` if not `None`
         if expected_total:
