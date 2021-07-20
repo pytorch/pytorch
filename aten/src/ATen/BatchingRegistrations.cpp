@@ -1166,6 +1166,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, const Scalar&)>(native::result_type));
   m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(const Scalar&, const Tensor&)>(native::result_type));
   m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(const Scalar&, const Scalar&)>(native::result_type));
+  m.impl("result_type.TensorList", static_cast<ScalarType (*)(TensorList)>(native::result_type));
 
 #undef BINARY_POINTWISE_VA
 #undef BINARY_POINTWISE
