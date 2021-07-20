@@ -46,14 +46,14 @@ bool memoryProfilingEnabled() {
 void reportMemoryUsageToProfiler(
     void* ptr,
     int64_t alloc_size,
-    int64_t allocated_size,
-    int64_t reserved_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
     Device device) {
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   if (reporter_ptr) {
     reporter_ptr->reportMemoryUsage(
-        ptr, alloc_size, allocated_size, reserved_size, device);
+        ptr, alloc_size, total_allocated, total_reserved, device);
   }
 }
 
