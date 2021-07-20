@@ -1322,10 +1322,9 @@
   dispatch:
     CUDA: cudnn_convolution_deprecated2
 
-- func: cudnn_convolution.deprecated3(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark) -> Tensor
-  dispatch:
-    CUDA: cudnn_convolution_deprecated3
-
+#- func: cudnn_convolution.deprecated3(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark) -> Tensor
+#  dispatch:
+#    CUDA: cudnn_convolution_deprecated3
 
 - func: cudnn_convolution(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
   dispatch:

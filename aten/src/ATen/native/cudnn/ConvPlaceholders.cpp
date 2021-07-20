@@ -150,14 +150,13 @@ Tensor cudnn_convolution_deprecated2(
   return at::cudnn_convolution(input_t, weight_t, padding, stride, dilation, groups, benchmark, deterministic, at::globalContext().allowTF32CuDNN());
 }
 
-Tensor cudnn_convolution_deprecated3(
-    const Tensor& input_t, const Tensor& weight_t,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups, bool benchmark)
-{
-  return at::cudnn_convolution(input_t, weight_t, padding, stride, dilation, groups, benchmark, true, at::globalContext().allowTF32CuDNN());
-}
-
+//Tensor cudnn_convolution_deprecated3(
+//    const Tensor& input_t, const Tensor& weight_t,
+//    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
+//    int64_t groups, bool benchmark)
+//{
+//  return at::cudnn_convolution(input_t, weight_t, padding, stride, dilation, groups, benchmark, true, at::globalContext().allowTF32CuDNN());
+//}
 
 // TODO (@zasdfgbnm): this is here only for compatibility, remove this in the future
 Tensor cudnn_convolution_transpose_deprecated(
