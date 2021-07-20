@@ -276,12 +276,17 @@ static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, con
   }
 }
 
+// Deduce the sizes for the result tensor and indices when result.numel() == 0 depending
+// on values of dim and keepdim for returning tensors containing reduction results.
+// This function should be called when you are reducing a zero-numel tensor and want to
+// resize the output and return it. This function exists for resizing zero-numel
+// tensors when the size of the reduction dimension is non-zero.
 static std::vector<int64_t> get_zero_numel_tensor_size(
     const Tensor& self,
     const int64_t dim,
     const bool keepdim,
     const char* fn_name) {
-  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() != 0.");
+  TORCH_INTERNAL_ASSERT(self.numel() == 0,  fn_name, ": Expected self.numel() == 0.");
   zero_numel_check_dims(self, dim, fn_name);
   std::vector<int64_t> sizes;
   if (keepdim) {
@@ -298,18 +303,6 @@ static std::vector<int64_t> get_zero_numel_tensor_size(
   return sizes;
 }
 
-// Resize the result tensor and indices when result.numel() == 0 depending on values of
-// dim and keepdim for returning tensors containing reduction results.
-// This function should be called when you are reducing a zero-numel tensor and want to
-// resize the output and return it. This function exists for resizing zero-numel
-// tensors when the size of the reduction dimension is non-zero.
-static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
-                                     const Tensor& self, const int64_t dim,
-                                     const bool keepdim, const char *fn_name) {
-  auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, fn_name);
-  at::native::resize_output(result, sizes);
-  at::native::resize_output(result_indices, sizes);
-}
 } // native
 
 namespace meta {

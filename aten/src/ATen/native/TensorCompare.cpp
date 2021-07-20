@@ -153,6 +153,12 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
       close.__ior__((self != self).__iand__(other != other));
   }
 
+  // In case of zero tolerances the closeness inequality degenerates to an equality check.
+  // In this case, the short-circuit prevents false positives as detailed in the paragraph below.
+  if (rtol == 0 && atol == 0){
+      return close;
+  }
+
   // Note [closeness error computation]
   // atol and rtol are provided as doubles, so the computation
   // rtol * other will produce a float or complex tensor.
@@ -416,7 +422,9 @@ std::tuple<Tensor &,Tensor &> mode_out(const Tensor& self, int64_t dim, bool kee
               indices.scalar_type(), "' for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(values, indices, self, dim, keepdim, "mode()");
+    auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, "mode()");
+    resize_output(values, sizes);
+    resize_output(indices, sizes);
     return std::tie(values, indices);
   }
   else if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
