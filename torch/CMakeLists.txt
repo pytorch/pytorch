@@ -363,3 +363,11 @@ add_custom_target(
   DEPENDS ${TORCH_SRC_DIR}/version.py
 )
 add_dependencies(torch_python gen_torch_version)
+
+# add Android Nnapi delegate library
+add_library(nnapi_backend SHARED
+        ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
+        ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+        )
+# Pybind11 requires explicit linking of the torch_python library
+target_link_libraries(nnapi_backend torch torch_python)
