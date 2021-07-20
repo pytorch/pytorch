@@ -149,7 +149,6 @@ class ShardedTensor(object):
 
         self._local_shards: List[Shard] = []
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
-        self._metadata: ShardedTensorMetadata = None
         if isinstance(self._sharding_spec, ChunkShardingSpec):
             self._init_chunked(
                 dims,
