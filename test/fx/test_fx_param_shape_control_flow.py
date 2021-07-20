@@ -40,23 +40,6 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         traced_graph = tracer.trace(mymod2)
 
         traced_mod = torch.fx.GraphModule(tracer.root, traced_graph)
-        code2 = traced_mod.code.split('\n')
-
-        # white box test (not just checking returned tensor values)
-        # the diff between two versions of the transformed Python code should be like this:
-        #   -    return mm
-        #  +   relu = torch.relu(mm);  mm = None
-        #  +   return relu
-        for _, s in enumerate(difflib.unified_diff(code, code2)):
-            if s[0] == '-' and s[1] != '-':
-                self.assertEqual(s, '-    return mm')
-                seen_delete = True
-            elif s[0] == '+' and s[1] != '+':
-                if seen_delete:
-                    self.assertTrue(s.startswith('+    relu = torch.relu(mm);  mm = None'))
-                    seen_delete = False
-                else:
-                    self.assertEqual(s, '+    return relu')
 
 
 if __name__ == '__main__':
