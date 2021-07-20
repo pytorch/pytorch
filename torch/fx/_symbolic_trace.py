@@ -489,10 +489,10 @@ class Tracer(TracerBase):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
-                        if not self.param_shapes_constant:
-                            val_proxy = self.create_proxy('get_attr', n, (), {})
-                        else:
-                            val_proxy = self.create_proxy('fixed_shape_param', n, (), {}, obj_proxied=attr_val)
+                        val_proxy = self.create_proxy(
+                            'get_attr', n, (), {},
+                            proxy_factory_fn = None if not  self.param_shapes_constant else
+                            lambda node : FixedShapeParam(node, n, attr_val) )
 
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]

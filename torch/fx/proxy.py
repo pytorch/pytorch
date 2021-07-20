@@ -27,13 +27,9 @@ class TracerBase:
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
-    def fixed_shape_param_proxy(self, node: Node, name,
-                                param: Optional[Any]) -> 'FixedShapeParam':
-        return FixedShapeParam(node, self, name, param)
-
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     obj_proxied: Optional[Any] = None):
+                     proxy_factory_fn: Callable[[Node], Proxy]  = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -52,14 +48,12 @@ class TracerBase:
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
 
-        node_kind = kind if kind != 'fixed_shape_param' else 'get_attr'
-        node = self.create_node(node_kind, target, args_, kwargs_, name, type_expr)
-        if kind != 'fixed_shape_param':
+        node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
+
+        if not proxy_factory_fn:
             proxy = self.proxy(node)
         else:
-            # a special proxy which lets "shape" attribute accesses pass through to the underlying
-            # module parameter object, so that if tests on parameter shapes can appear in foward()
-            proxy = self.fixed_shape_param_proxy(node, target, obj_proxied)
+            proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
@@ -275,6 +269,9 @@ class Attribute(Proxy):
     def __call__(self, *args, **kwargs):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
+
+        # a special proxy which lets "shape" attribute accesses pass through to the underlying
+        # module parameter object, so that if tests on parameter shapes can appear in foward()
 
 class FixedShapeParam(Proxy):
     def __init__(self, node: Node, tracer, name, param):
