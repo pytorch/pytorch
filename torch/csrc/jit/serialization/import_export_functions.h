@@ -8,18 +8,8 @@ std::string operator_str(
     const std::string& name,
     const std::string& overloadname);
 
-IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-IValue Table(const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
-}
+IValue Tup(std::vector<IValue> ivalues);
+IValue Table(const std::vector<std::pair<std::string, IValue>>& entries);
 
 } // namespace jit
 } // namespace torch
