@@ -213,11 +213,11 @@ uint64_t computeFlops(const std::string &op_name, const std::unordered_map<std::
       return 0;
     }
 
-    uint64_t gemm_multiply_factor = 0;
+    uint64_t gemm_multiply_factor = 2;
     if (op_name == kMMOp) {
-      gemm_multiply_factor = 2 * (overlap_dim - 1);
+      gemm_multiply_factor *= (overlap_dim - 1);
     } else if (op_name == kAddMMOp) {
-      gemm_multiply_factor = 2 * overlap_dim;
+      gemm_multiply_factor *= overlap_dim;
     }
 
     uint64_t prod_dim = 1;
