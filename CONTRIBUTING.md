@@ -102,7 +102,7 @@ cd pytorch
 ```bash
 git pull --rebase
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 ```
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
@@ -165,15 +165,15 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   git submodule deinit -f .
   git clean -xdf
   python setup.py clean
-  git submodule update --init --recursive # very important to sync the submodules
-  python setup.py develop                 # then try running the command again
+  git submodule update --init --recursive --jobs 0 # very important to sync the submodules
+  python setup.py develop                          # then try running the command again
   ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+* If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
   - If you encountered error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
@@ -348,7 +348,7 @@ in `test/test_jit.py`. Your command would be:
 python test/test_jit.py TestJit.test_Sequential
 ```
 
-The `hypothesis` library must be installed to run the tests. `mypy` is
+The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
@@ -852,13 +852,13 @@ object. Example of usage:
 
 ```
 $ gdb python
-GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+GNU gdb (GDB) 9.2
 [...]
 (gdb) # insert a breakpoint when we call .neg()
-(gdb) break at::native:neg
-No source file named at::native.
+(gdb) break at::Tensor::neg
+Function "at::Tensor::neg" not defined.
 Make breakpoint pending on future shared library load? (y or [n]) y
-Breakpoint 1 (at::native:neg) pending.
+Breakpoint 1 (at::Tensor::neg) pending.
 
 (gdb) run
 [...]
@@ -868,13 +868,15 @@ Breakpoint 1 (at::native:neg) pending.
 tensor([1., 2., 3., 4.], dtype=torch.float64)
 >>> t.neg()
 
-Breakpoint 1, at::native::neg (self=...) at [...]/pytorch/aten/src/ATen/native/UnaryOps.cpp:520
-520     Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
-(gdb) # the default repr of 'self' is not very useful
-(gdb) p self
-$1 = (const at::Tensor &) @0x7ffff72ed780: {impl_ = {target_ = 0x5555559df6e0}}
-(gdb) torch-tensor-repr self
-Python-level repr of self:
+Thread 1 "python" hit Breakpoint 1, at::Tensor::neg (this=0x7ffb118a9c88) at aten/src/ATen/core/TensorBody.h:3295
+3295    inline at::Tensor Tensor::neg() const {
+(gdb) # the default repr of 'this' is not very useful
+(gdb) p this
+$1 = (const at::Tensor * const) 0x7ffb118a9c88
+(gdb) p *this
+$2 = {impl_ = {target_ = 0x55629b5cd330}}
+(gdb) torch-tensor-repr *this
+Python-level repr of *this:
 tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
