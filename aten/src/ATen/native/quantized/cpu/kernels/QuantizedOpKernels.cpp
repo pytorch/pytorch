@@ -1925,7 +1925,7 @@ void qtopk_kernel(Tensor& values,
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       using underlying_t = typename scalar_t::underlying;
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
-      return topk_impl_loop<underlying_t>(
+      return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
           k, sizes[dim], largest, sorted, data, strides, n);
     };
