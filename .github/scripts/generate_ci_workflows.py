@@ -7,29 +7,30 @@ import jinja2
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
+Arch = Literal["windows", "linux"]
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
-WINDOWS_RUNNERS = [
+WINDOWS_RUNNERS = set([
     WINDOWS_CPU_TEST_RUNNER,
     WINDOWS_CUDA_TEST_RUNNER,
-]
+])
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
-LINUX_RUNNERS = [
+LINUX_RUNNERS = set([
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
-]
+])
 
 
 @dataclass
 class CIWorkflow:
     # Required fields
-    arch: str
+    arch: Arch
     build_environment: str
     test_runner_type: str
 
@@ -58,8 +59,6 @@ class CIWorkflow:
         self.only_build_on_pull_request = self.only_build_on_pull_request and self.on_pull_request
 
     def assert_valid(self) -> None:
-        assert self.arch in ['linux', 'windows'], f"invalid arch: {self.arch}, must be one of ['linux','windows']"
-
         err_message = f"invalid test_runner_type for {self.arch}: {self.test_runner_type}"
         if self.arch == 'linux':
             assert self.test_runner_type in LINUX_RUNNERS, err_message
