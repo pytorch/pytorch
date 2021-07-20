@@ -3277,7 +3277,7 @@ REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_stub,
                             fake_quant_tensor_cachemask_fn);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_AVX512_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
-                            fake_quantize_tensor_cachemask_tensor_qparams_fn);
+                            fake_quant_tensor_cachemask_tensor_qparams_fn);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_NO_AVX512_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                             qadaptive_avg_pool2d_fn);
