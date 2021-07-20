@@ -29,7 +29,7 @@ def _layer_norm_ref(axis, epsilon, X):
     Y = np.reshape(Y, X.shape)
     mean = np.reshape(mean, X.shape[:axis] + (1,))
     std = np.reshape(std, X.shape[:axis] + (1,))
-    return (torch.from_numpy(Y), torch.from_numpy(mean), torch.from_numpy(std))
+    return (Y, mean, std)
 
 
 def _layer_norm_with_affine_ref(axis, epsilon, X, gamma, beta):

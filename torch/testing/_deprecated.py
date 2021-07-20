@@ -20,7 +20,7 @@ __all__ = [
 def warn_deprecated(instructions: str) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
         msg = (
-                f"torch.testing.{fn.__name__} is deprecated and will be removed in a future release. "
+            f"torch.testing.{fn.__name__} is deprecated and will be removed in a future release. "
             f"{instructions.strip()}"
         )
 

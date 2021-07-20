@@ -876,7 +876,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x, y = torch.randn(3, 4), torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x, y), normalized(x, y))
+            torch.testing.assert_close(traced(x, y), normalized(x, y))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -891,7 +891,7 @@ terrible spacing
             traced = symbolic_trace(WrapperMod())
             normalized = NormalizeOperators(traced).transform()
             x = torch.randn(3, 4)
-            torch.testing.assert_allclose(traced(x), normalized(x))
+            torch.testing.assert_close(traced(x), normalized(x))
             self.assertFalse(
                 any(n.target in ops_to_test for n in normalized.graph.nodes)
             )
@@ -1413,12 +1413,12 @@ class {test_classname}(torch.nn.Module):
         with torch.no_grad():
             model = Foo().eval()
             optimized_model = optimization.optimize_for_inference(model)
-            torch.testing.assert_allclose(model(inp), optimized_model(inp))
+            torch.testing.assert_close(model(inp), optimized_model(inp))
 
             optimized_model2 = optimization.optimize_for_inference(
                 model, pass_config={"remove_dropout": False}
             )
-            torch.testing.assert_allclose(model(inp), optimized_model2(inp))
+            torch.testing.assert_close(model(inp), optimized_model2(inp))
 
     @skipIfNoTorchVision
     @skipIfNoMkldnn
@@ -1450,7 +1450,7 @@ class {test_classname}(torch.nn.Module):
 
                 orig_out = model(inp)
                 new_out = optimized_model(inp)
-                torch.testing.assert_allclose(orig_out, new_out)
+                torch.testing.assert_close(orig_out, new_out)
 
 
 class TestNormalizeOperators(JitTestCase):
