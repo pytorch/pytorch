@@ -1,4 +1,3 @@
-from torch.quantization.fx.graph_module import QuantizedGraphModule
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,6 +11,7 @@ from .utils import (
     maybe_get_next_module,
     _parent_name,
 )
+from .graph_module import QuantizedGraphModule
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
