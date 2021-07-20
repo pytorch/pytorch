@@ -23,12 +23,9 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
 
         # Test that we go down the True branch in forward
         x = torch.randn(10, 5)
+        torch.testing.assert_allclose(mymod(x), torch.mm(x, mymod.param))
         tracer = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph = tracer.trace(mymod)
-        traced_mod = torch.fx.GraphModule(tracer.root, traced_graph)
-        torch.testing.assert_allclose(mymod(x), torch.mm(x, mymod.param))
-        # save the transformed Python code for comparison below
-        code = traced_mod.code.split('\n')
 
         # Make a new module with different parameter shape to go down the different
         # code path
@@ -36,27 +33,11 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         x = torch.randn(10, 15)
         torch.testing.assert_allclose(mymod2(x), torch.relu(torch.mm(x, mymod2.param)))
 
-        tracer = torch.fx.Tracer(param_shapes_constant=True)
-        traced_graph = tracer.trace(mymod2)
+        tracer2 = torch.fx.Tracer(param_shapes_constant=True)
+        traced_graph2 = tracer2.trace(mymod2)
 
-        traced_mod = torch.fx.GraphModule(tracer.root, traced_graph)
-        code2 = traced_mod.code.split('\n')
-
-        # white box test (not just checking returned tensor values)
-        # the diff between two versions of the transformed Python code should be like this:
-        #   -    return mm
-        #  +   relu = torch.relu(mm);  mm = None
-        #  +   return relu
-        for _, s in enumerate(difflib.unified_diff(code, code2)):
-            if s[0] == '-' and s[1] != '-':
-                self.assertEqual(s, '-    return mm')
-                seen_delete = True
-            elif s[0] == '+' and s[1] != '+':
-                if seen_delete:
-                    self.assertTrue(s.startswith('+    relu = torch.relu(mm);  mm = None'))
-                    seen_delete = False
-                else:
-                    self.assertEqual(s, '+    return relu')
+        # the second graph has an exta relu function call node
+        assert(len(traced_graph2.nodes) > len(traced_graph.nodes))
 
 
 if __name__ == '__main__':

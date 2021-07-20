@@ -15,7 +15,7 @@ import sys
 from .node import Argument, map_aggregate, base_types
 from .graph import Graph, _PyTreeInfo
 from .graph_module import GraphModule
-from .proxy import TracerBase, Proxy
+from .proxy import TracerBase, Proxy, ParameterProxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -489,10 +489,10 @@ class Tracer(TracerBase):
             for n, p in self.root.named_parameters():
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
-                        if not self.param_shapes_constant:
-                            val_proxy = self.create_proxy('get_attr', n, (), {})
-                        else:
-                            val_proxy = self.create_proxy('fixed_shape_param', n, (), {}, obj_proxied=attr_val)
+                        val_proxy = self.create_proxy(
+                            'get_attr', n, (), {},
+                            proxy_factory_fn=None if not self.param_shapes_constant else
+                            lambda node : ParameterProxy(self, node, n, attr_val))
 
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]

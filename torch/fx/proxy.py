@@ -5,7 +5,7 @@ import operator
 import traceback
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
+from typing import Tuple, Dict, Optional, Iterable, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 
 class TracerBase:
@@ -27,13 +27,9 @@ class TracerBase:
     def proxy(self, node: Node) -> 'Proxy':
         return Proxy(node, self)
 
-    def fixed_shape_param_proxy(self, node: Node, name,
-                                param: Optional[Any]) -> 'FixedShapeParam':
-        return FixedShapeParam(node, self, name, param)
-
     def create_proxy(self, kind: str, target: Target, args: Tuple[Any, ...], kwargs: Dict[str, Any],
                      name: Optional[str] = None, type_expr : Optional[Any] = None,
-                     obj_proxied: Optional[Any] = None):
+                     proxy_factory_fn: Callable[[Node], 'Proxy'] = None):
         '''
         Create a Node from the given arguments, then return the Node
         wrapped in a Proxy object.
@@ -52,14 +48,12 @@ class TracerBase:
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
 
-        node_kind = kind if kind != 'fixed_shape_param' else 'get_attr'
-        node = self.create_node(node_kind, target, args_, kwargs_, name, type_expr)
-        if kind != 'fixed_shape_param':
+        node = self.create_node(kind, target, args_, kwargs_, name, type_expr)
+
+        if not proxy_factory_fn:
             proxy = self.proxy(node)
         else:
-            # a special proxy which lets "shape" attribute accesses pass through to the underlying
-            # module parameter object, so that if tests on parameter shapes can appear in foward()
-            proxy = self.fixed_shape_param_proxy(node, target, obj_proxied)
+            proxy = proxy_factory_fn(node)
 
         # Optionally set stack trace on the created Node for debugging purposes
         if self.record_stack_traces:
@@ -250,6 +244,7 @@ class Proxy:
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
+
         if isinstance(orig_method, torch._C.ScriptMethod):
             args = (orig_method.owner,) + args
             return self.tracer.create_proxy('call_method', orig_method.name, args, kwargs)
@@ -278,21 +273,23 @@ class Attribute(Proxy):
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 
-class FixedShapeParam(Proxy):
-    def __init__(self, node: Node, tracer, name, param):
+class ParameterProxy(Proxy):
+    """
+    a special proxy which lets "shape" attribute accesses pass through to the underlying
+    module parameter object, so that conditional tests on parameter shapes can be traced
+    """
+    def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
         assert(isinstance(param, torch.nn.Parameter))
         self.param = param
         self.name = name
 
     def __repr__(self) -> str:
-        return f'Parameter({self.name})'
+        return f'ParameterProxy({self.name})'
 
-    def __getattr__(self, k):
-        if k == 'shape':
-            return getattr(self.param, k)
-        else:
-            return super().__getattr__(k)
+    @property
+    def shape(self):
+        return self.param.shape
 
 
 for method in magic_methods:
