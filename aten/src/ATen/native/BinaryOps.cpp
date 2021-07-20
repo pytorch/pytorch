@@ -131,6 +131,10 @@ TORCH_META_FUNC2(fmod, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC2(xlogy, Tensor) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
 // These are normal binary ops that preserve dtype
 #define CREATE_BINARY_META_FUNC(func)                                 \
   TORCH_META_FUNC(func) (const Tensor& self, const Tensor& other) {   \
@@ -352,6 +356,7 @@ CREATE_BINARY_TORCH_IMPL_FUNC(igamma_out, igamma_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(igammac_out, igammac_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(nextafter_out, nextafter_stub);
 CREATE_BINARY_TORCH_IMPL_FUNC(remainder_out, remainder_stub);
+CREATE_BINARY_TORCH_IMPL_FUNC(xlogy_out, xlogy_stub);
 
 Tensor special_xlog1py(const Scalar& x, const Tensor& y) {
   return at::special_xlog1py(wrapped_scalar_tensor(x), y);
@@ -1159,25 +1164,12 @@ Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
 }
 
-Tensor& xlogy_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto iter = TensorIterator::binary_float_op(result, self, other);
-  xlogy_stub(iter.device_type(), iter);
-  return result;
-}
-
 Tensor& xlogy_out(const Scalar& self, const Tensor& other, Tensor& result) {
   return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
 Tensor& xlogy_out(const Tensor& self, const Scalar& other, Tensor& result) {
   return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
-}
-
-Tensor xlogy(const Tensor& x, const Tensor& y) {
-  Tensor result;
-  auto iter = TensorIterator::binary_float_op(result, x, y);
-  xlogy_stub(iter.device_type(), iter);
-  return iter.output();
 }
 
 Tensor xlogy(const Scalar& x, const Tensor& y) {
@@ -1188,12 +1180,8 @@ Tensor xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, wrapped_scalar_tensor(y));
 }
 
-Tensor& xlogy_(Tensor& x, const Tensor& y) {
-  return at::xlogy_out(x, x, y);
-}
-
 Tensor& xlogy_(Tensor& x, const Scalar& y) {
-  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
+  return at::xlogy_(x, wrapped_scalar_tensor(y));
 }
 
 Tensor& special_xlogy_out(const Tensor& self, const Tensor& other, Tensor& result) {
