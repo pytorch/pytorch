@@ -1,3 +1,4 @@
+#include <ATen/Aten.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 
