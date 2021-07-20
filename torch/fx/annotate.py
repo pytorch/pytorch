@@ -1,5 +1,6 @@
 from torch.fx.proxy import Proxy
 
+
 def annotate(val, type):
     # val could be either a regular value (not tracing)
     # or fx.Proxy (tracing)
