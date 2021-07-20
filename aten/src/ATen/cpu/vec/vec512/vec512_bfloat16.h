@@ -819,7 +819,7 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
  return cvtfp32_bf16(__m512(a), __m512(b));
 }
 
-#else //defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else //defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<BFloat16>& a) {
   constexpr int64_t K = Vectorized<BFloat16>::size();
@@ -840,6 +840,38 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
   b.store(arr + Vectorized<float>::size());
   convert(arr, arr2, K);
   return Vectorized<BFloat16>::loadu(arr2);
+}
+
+#endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
+  __m512 out_values;
+  cvtbf16_fp32(values, out_values);
+  out = out_values;
+}
+
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  auto vec = Vectorized<c10::BFloat16>::loadu(data);
+  __m512 out1_values, out2_values;
+  cvtbf16_fp32(vec, out1_values, out2_values);
+  out1 = out1_values;
+  out2 = out2_values;
+}
+#else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  __at_align__ float values[Vectorized<float>::size()];
+  for (int k = 0; k < Vectorized<float>::size(); ++k) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  load_fp32_from_bf16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_bf16(data, out2);
 }
 
 #endif

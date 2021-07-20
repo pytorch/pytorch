@@ -760,7 +760,7 @@ void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vec
 }
 #else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
-  __at_align32__ float values[Vectorized<float>::size()];
+  __at_align__ float values[Vectorized<float>::size()];
   for (int k = 0; k < Vectorized<float>::size(); ++k) {
     values[k] = data[k];
   }

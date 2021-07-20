@@ -58,7 +58,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX512) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<>
 inline Vectorized<float> cast<float, double>(const Vectorized<double>& src) {
@@ -69,29 +69,6 @@ template<>
 inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm512_castps_pd(src);
 }
-
-#if defined(CPU_CAPABILITY_AVX512)
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#define DEFINE_FLOAT_INT_CAST(int_t, float_t, float_ch)                   \
-template<>                                                                \
-inline  Vectorized<int_t> cast<int_t, float_t>(const Vectorized<float_t>& src) {  \
-  return _mm512_castp ## float_ch ## _si512(src);                         \
-}                                                                         \
-template<>                                                                \
-inline Vectorized<float_t> cast<float_t, int_t>(const Vectorized<int_t>& src) {   \
-  return _mm512_castsi512_p ## float_ch (src);                            \
-}
-
-DEFINE_FLOAT_INT_CAST(int64_t, double, d)
-DEFINE_FLOAT_INT_CAST(int32_t, double, d)
-DEFINE_FLOAT_INT_CAST(int16_t, double, d)
-DEFINE_FLOAT_INT_CAST(int64_t, float, s)
-DEFINE_FLOAT_INT_CAST(int32_t, float, s)
-DEFINE_FLOAT_INT_CAST(int16_t, float, s)
-
-#undef DEFINE_FLOAT_INT_CAST
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -212,8 +189,6 @@ inline deinterleave2<float>(const Vectorized<float>& a, const Vectorized<float>&
   return std::make_pair(_mm512_mask_permutex2var_ps(a, 0xffff, idx1, b),
                         _mm512_mask_permutex2var_ps(a, 0xffff, idx2, b));
 }
-
-#endif  // defined(CPU_CAPABILITY_AVX512)
 
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 

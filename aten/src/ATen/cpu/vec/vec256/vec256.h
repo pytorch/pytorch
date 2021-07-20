@@ -70,7 +70,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<>
 inline Vectorized<float> cast<float, double>(const Vectorized<double>& src) {
@@ -81,27 +81,6 @@ template<>
 inline Vectorized<double> cast<double, float>(const Vectorized<float>& src) {
   return _mm256_castps_pd(src);
 }
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CAST (AVX2) ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-#define DEFINE_FLOAT_INT_CAST(int_t, float_t, float_ch)            \
-template<>                                                         \
-inline  Vectorized<int_t> cast<int_t, float_t>(const Vectorized<float_t>& src) {   \
-  return _mm256_castp ## float_ch ## _si256(src);                  \
-}                                                                  \
-template<>                                                         \
-inline Vectorized<float_t> cast<float_t, int_t>(const Vectorized<int_t>& src) {   \
-  return _mm256_castsi256_p ## float_ch (src);                     \
-}
-
-DEFINE_FLOAT_INT_CAST(int64_t, double, d)
-DEFINE_FLOAT_INT_CAST(int32_t, double, d)
-DEFINE_FLOAT_INT_CAST(int16_t, double, d)
-DEFINE_FLOAT_INT_CAST(int64_t, float, s)
-DEFINE_FLOAT_INT_CAST(int32_t, float, s)
-DEFINE_FLOAT_INT_CAST(int16_t, float, s)
-
-#undef DEFINE_FLOAT_INT_CAST
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
