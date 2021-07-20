@@ -116,7 +116,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             input nodes of the graph, in order.
         output_names (list of str, default empty list): names to assign to the
             output nodes of the graph, in order.
-        operator_export_type (enum, default OperatorExportTypes.ONNX):
+        operator_export_type (enum, If None, default OperatorExportTypes.ONNX; If PyTorch was built with
+            ``-DPYTORCH_ONNX_CAFFE2_BUNDLE``, default OperatorExportTypes.ONNX_ATEN_FALLBACK):
             * ``OperatorExportTypes.ONNX``: Export all ops as regular ONNX ops
               (in the default opset domain).
             * ``OperatorExportTypes.ONNX_FALLTHROUGH``: Try to convert all ops
