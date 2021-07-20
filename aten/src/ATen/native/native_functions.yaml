@@ -5677,12 +5677,14 @@
   variants: function, method
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  structured_delegate: eq.Scalar_out
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
     CompositeExplicitAutograd: eq_
 
 - func: eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  structured_delegate: eq.Tensor_out
   device_check: NoCheck   # TensorIterator
   variants: method
   dispatch:
@@ -6180,29 +6182,33 @@
   variants: method
 
 - func: eq.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: eq_out
+    CPU, CUDA: eq_Scalar_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Scalar(Tensor self, Scalar other) -> Tensor
+  structured_delegate: eq.Scalar_out
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: eq
     QuantizedCPU: eq_quantized_cpu
 
 - func: eq.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CPU, CUDA: eq_out
+    CPU, CUDA: eq_Tensor_out
     QuantizedCPU: eq_out_quantized_cpu
 
 - func: eq.Tensor(Tensor self, Tensor other) -> Tensor
+  structured_delegate: eq.Tensor_out
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: eq
     QuantizedCPU: eq_quantized_cpu
 
 - func: ge.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)

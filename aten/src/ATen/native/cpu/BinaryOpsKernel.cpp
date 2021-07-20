@@ -500,7 +500,7 @@ void ge_kernel(TensorIterator& iter) {
   }
 }
 
-void eq_kernel(TensorIterator& iter) {
+void eq_kernel(TensorIteratorBase& iter) {
   // See Note [special-case bool outputs]
   if (iter.dtype() == ScalarType::Bool) {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "eq_cpu", [&]() {
