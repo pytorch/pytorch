@@ -10,7 +10,7 @@ namespace torch { namespace autograd {
     pack_hook_(pack_hook.release().ptr()),
     unpack_hook_(unpack_hook.release().ptr()) {}
 
-  void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
+  void PySavedVariableHooks::call_pack_hook(const at::Tensor &tensor) {
     py::gil_scoped_acquire acquire;
     auto pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     auto wrapped = THPVariable_Wrap(tensor);
