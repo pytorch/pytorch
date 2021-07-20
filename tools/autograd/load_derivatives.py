@@ -379,17 +379,17 @@ def create_differentiability_info(
     # NB: Removes 'output_differentiability' from defn dictionary
     #     `None` means all differentiable.
     output_differentiability = defn.pop('output_differentiability', None)
+    output_differentiability_conditions = None
     if output_differentiability and any([isinstance(diff, str) for diff in output_differentiability]):
         if len(output_differentiability) != 1:
-            raise RuntimeError(f'Not supported: output_differentiability must either '
+            raise RuntimeError(f'Not supported: for {specification} output_differentiability '
+                               f'must either '
                                f'be List[bool] or a List[str] where each str is a '
                                f'condition. In the case where it is a condition, '
                                f'we only support single-output functions. '
                                f'Please file us an issue. ')
         output_differentiability_conditions = [output_differentiability[0]]
         output_differentiability = [True]
-    else:
-        output_differentiability_conditions = None
 
     schema_function = functions_by_schema.get(specification)
     if not schema_function:

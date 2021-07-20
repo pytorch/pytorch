@@ -806,7 +806,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 f'_any_requires_grad &= ({fn.info.output_differentiability_conditions[0]});\n'
         return [SETUP_ANY_REQUIRES_GRAD.substitute(
             args_with_derivatives=[arg.name for arg in args_with_derivatives],
-            extra_differentiability_conditions=extra_condition),]
+            extra_differentiability_conditions=extra_condition)]
 
     def emit_check_inplace() -> List[str]:
         if not inplace:
