@@ -913,7 +913,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         x = torch.randn(5, 5, device=device)
         running_min_op = torch.tensor(float("inf"), device=device)
         running_max_op = torch.tensor(float("-inf"), device=device)
-        avg_const = torch.tensor([0.01], device=device)
+        avg_const = 0.01
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
@@ -931,11 +931,11 @@ class TestFusedObsFakeQuantModule(TestCase):
             x,
             mod.observer_enabled,
             mod.fake_quant_enabled,
-            avg_const,
             running_min_op,
             running_max_op,
             scale,
             zero_point,
+            avg_const,
             0,
             255,
             0,
@@ -961,11 +961,11 @@ class TestFusedObsFakeQuantModule(TestCase):
         # Set up the parameters
         running_min_op = torch.tensor(float("inf"), device=device)
         running_max_op = torch.tensor(float("-inf"), device=device)
-        avg_const = torch.tensor([0.01], device=device)
+        avg_const = 0.001
         scale = torch.tensor([1.0], device=device)
         zero_point = torch.tensor([0], dtype=torch.int, device=device)
 
-        mod = FusedMovingAvgObsFakeQuantize()
+        mod = FusedMovingAvgObsFakeQuantize(averaging_constant=0.001)
         mod.to(device)
         mod.observer_enabled[0] = 0
         mod.fake_quant_enabled[0] = 0
@@ -986,11 +986,11 @@ class TestFusedObsFakeQuantModule(TestCase):
                 x,
                 mod.observer_enabled,
                 mod.fake_quant_enabled,
-                avg_const,
                 running_min_op,
                 running_max_op,
                 scale,
                 zero_point,
+                avg_const,
                 0,
                 255,
                 0,
