@@ -12,12 +12,13 @@ class UCXError : public std::runtime_error {
 
 // Singleton object holding UCP objects
 class UCPContext {
-  static std::shared_ptr<UCPContext> instance;
+  static std::unique_ptr<UCPContext> instance;
   UCPContext();
 public:
   ucp_context_h context;
   ucp_worker_h worker;
   static UCPContext *get();
+  ~UCPContext();
 };
 
 #endif

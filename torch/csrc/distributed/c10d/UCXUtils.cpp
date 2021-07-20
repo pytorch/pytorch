@@ -21,7 +21,7 @@ UCPContext::UCPContext() {
   params.request_size = sizeof(bool);
   params.features = UCP_FEATURE_TAG;
   params.request_init = [](void* request) {
-    static_cast<bool *>(request) = false;
+    *static_cast<bool *>(request) = false;
   };
   params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);
@@ -47,9 +47,11 @@ UCPContext::~UCPContext() {
 
 UCPContext *UCPContext::get() {
   if (instance == nullptr) {
-    instance = std::make_shared<UCPContext>();
+    instance = std::unique_ptr<UCPContext>(new UCPContext());
   }
   return instance.get();
 }
+
+std::unique_ptr<UCPContext> UCPContext::instance;
 
 #endif
