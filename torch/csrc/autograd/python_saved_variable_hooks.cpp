@@ -62,6 +62,10 @@ namespace torch { namespace autograd {
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
+    py::gil_scoped_acquire acquire;
+    if (!pack_hook_ || !unpack_hook_) {
+      return nullptr;
+    }
     py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
     return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);

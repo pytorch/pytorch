@@ -5771,12 +5771,39 @@ for shape in [(1,), ()]:
         self.assertEqual(a.grad, y)
 
     def test_saved_variable_default_hooks(self):
+        # Saved original
+        with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+        self.assertEqual(a, y.grad_fn._saved_self)
+        self.assertEqual(a, y.grad_fn._saved_other)
+        #  y.sum().backward()
+        #  self.assertEqual(2 * a, a.grad)
+
+        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x):
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+        self.assertEqual(2 * a, y.grad_fn._saved_self)
+        self.assertEqual(2 * a, y.grad_fn._saved_other)
+        #  y.sum().backward()
+        #  self.assertEqual(4 * a, a.grad)
+
+        with torch.autograd.saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x / 2):
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+        self.assertEqual(a, y.grad_fn._saved_self)
+        self.assertEqual(a, y.grad_fn._saved_other)
+        #  y.sum().backward()
+        #  self.assertEqual(2 * a, a.grad)
+
+
+        # Did not save original
         with torch.autograd.saved_tensors_default_hooks(lambda x: x, lambda x: x):
             a = torch.randn(5, requires_grad=True)
             y = torch.exp(a)
-        y.sum().backward()
-
-
+        self.assertEqual(y, y.grad_fn._saved_result)
+        #  y.sum().backward()
+        #  self.assertEqual(a.grad, y)
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
