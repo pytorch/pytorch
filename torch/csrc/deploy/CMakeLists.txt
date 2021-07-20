@@ -37,7 +37,6 @@ set(INTERPRETER_TEST_SOURCES
 add_executable(test_deploy ${INTERPRETER_TEST_SOURCES})
 target_include_directories(test_deploy PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(test_deploy PUBLIC gtest dl torch_deploy)
-target_link_options(test_deploy PRIVATE -fPIC)
 
 add_library(test_deploy_lib SHARED test_deploy_lib.cpp)
 
