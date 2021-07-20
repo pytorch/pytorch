@@ -226,7 +226,6 @@ if(INTERN_BUILD_ATEN_OPS)
           "${PYTHON_EXECUTABLE}" -m tools.codegen.gen --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen --do_sed
           )
 
-  #  message(FATAL_ERROR "sed ${GEN_COMMAND}")
   execute_process(
           COMMAND ${GEN_COMMAND2}
           WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
