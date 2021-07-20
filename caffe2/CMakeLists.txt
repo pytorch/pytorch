@@ -771,7 +771,7 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
-if (USE_PRECOMPILED_HEADERS)
+if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
   # Exclude some files from using PCH
@@ -840,7 +840,7 @@ if(USE_ROCM)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
 
-  if (USE_PRECOMPILED_HEADERS)
+  if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
   endif()
@@ -882,8 +882,8 @@ elseif(USE_CUDA)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 
-  if (USE_PRECOMPILED_HEADERS)
-    if (BUILD_SPLIT_CUDA)
+  if(USE_PRECOMPILED_HEADERS)
+    if(BUILD_SPLIT_CUDA)
       target_precompile_headers(torch_cuda_cpp PRIVATE
           "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
           "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")

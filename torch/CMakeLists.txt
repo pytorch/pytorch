@@ -299,7 +299,7 @@ if(HAVE_SOVERSION)
 endif()
 add_dependencies(torch_python torch_python_stubs)
 
-if (USE_PRECOMPILED_HEADERS)
+if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
 endif()
