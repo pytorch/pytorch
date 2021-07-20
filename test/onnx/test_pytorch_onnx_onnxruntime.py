@@ -20,7 +20,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithState,
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
+                                 skipIfNoLapack, skipScriptTest, skipIfONNXShapeInference,
                                  skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
@@ -617,7 +617,7 @@ class TestONNXRuntime(unittest.TestCase):
                 [self.get_image("rgb_pytorch.png", (250, 380))])
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Faster RCNN model is not scriptable
+    @skipScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
         model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=False, min_size=200,
                                                                                  max_size=300)
@@ -664,7 +664,7 @@ class TestONNXRuntime(unittest.TestCase):
         assert torch.all(out2.eq(out_trace2))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=False, min_size=200,
                                                                              max_size=300)
@@ -705,7 +705,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     @unittest.skip("Failing, see https://github.com/pytorch/pytorch/issues/66528")
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_keypoint_rcnn(self):
         model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=False, min_size=200,
                                                                                      max_size=300)
@@ -726,7 +726,7 @@ class TestONNXRuntime(unittest.TestCase):
                       rtol=5e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_shufflenet_v2_dynamic_axes(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
@@ -736,15 +736,15 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"input_images": {0: "batch_size"}, "output": {0: "batch_size"}},
                       rtol=1e-3, atol=1e-5)
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
-    @disableScriptTest()  # scripting prim::unchecked_cast prim::setattr
+    @skipScriptTest()  # scripting prim::unchecked_cast prim::setattr
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
@@ -819,7 +819,7 @@ class TestONNXRuntime(unittest.TestCase):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
             def forward(self, x_in):
@@ -830,7 +830,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = {torch.tensor(1.): torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x, {}))
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
             def forward(self, x_in):
@@ -841,7 +841,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x, {}))
 
-    @disableScriptTest()  # User-defined class not supported
+    @skipScriptTest()   # User-defined class not supported
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
             tensor_out: torch.Tensor
@@ -910,7 +910,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
         self.run_test(NestedTupleModel(), input=(x, y))
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -923,7 +923,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_optional_inputs_with_mixed_optionals(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y:Optional[Tensor]=None, z:Optional[Tensor]=None):
@@ -945,7 +945,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_optional_inputs_with_mixed_optionals_script(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
@@ -967,7 +967,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_optional_inputs_with_all_optionals(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y: Optional[Tensor]=None, z: Optional[Tensor]=None):
@@ -982,7 +982,7 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_optional_inputs_with_all_optionals_script(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -999,7 +999,7 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_input_names_with_optional_args(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1047,7 +1047,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {"y": y, "z": None}, input_names=["input_y"])
         self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_input_names_with_optional_args_script(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1106,7 +1106,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(3, 4)
         self.run_test(Model(), (x, y), input_names=["x", "y"], output_names=["x_out", "y_out"])
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y:Optional[Tensor]):
@@ -1117,7 +1117,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(Model(), (x, None))
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_none_as_input_script(self):
         class Model(torch.nn.Module):
             def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3)):
@@ -1128,7 +1128,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(Model(), (x, None))
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_tuple_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y:Tuple[Optional[Tensor], Optional[Tensor]]):
@@ -1142,7 +1142,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_none_as_tuple_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y:Tuple[Optional[Tensor], Optional[Tensor]]=(torch.zeros(2, 3), torch.zeros(2, 3))):
@@ -1157,7 +1157,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
-    @disableScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
     def test_none_as_named_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -1171,7 +1171,7 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.randn(2, 3)
         self.run_test(Model(), (x, None, z))
 
-    @disableScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
+    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
     def test_none_as_named_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y:Optional[Tensor]=torch.ones(2, 3), z:Optional[Tensor]=torch.zeros(2, 3)):
@@ -1835,7 +1835,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_tuple_with_none_outputs(self):
         class TupleModel(torch.nn.Module):
             def forward(self, x):
@@ -2042,7 +2042,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(InputIndexSlice(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()  # scripting tuple/list append
+    @skipScriptTest()  # scripting tuple/list append
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -2080,7 +2080,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(DynamicSliceModel(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()   # scripting tuple/list append
+    @skipScriptTest()   # scripting tuple/list append
     def test_slice_dynamic_to_end(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -2280,7 +2280,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SizeModel(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # x.stride() not scriptable
+    @skipScriptTest()  # x.stride() not scriptable
     def test_as_strided(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -2293,7 +2293,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 8, 7)
         self.run_test(Model(), x)
 
-    @disableScriptTest()  # Ellipses followed by tensor indexing not scriptable
+    @skipScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_tensor_index_advanced_indexing_ellipsis(self):
         class MyModel(torch.nn.Module):
             def forward(self, input):
@@ -2469,7 +2469,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexPutModel10(), (x, ind, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Ellipses followed by tensor indexing not scriptable
+    @skipScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_index_put_ellipsis(self):
         class IndexPutModel(torch.nn.Module):
             def forward(self, x, update):
@@ -2589,7 +2589,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(CopyModel5(), (x, mask))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Model not scriptable (output with shape doesn't match the broadcast shape)
+    @skipScriptTest()  # Model not scriptable (output with shape doesn't match the broadcast shape)
     def test_copy_tracing(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, data):
@@ -2821,7 +2821,7 @@ class TestONNXRuntime(unittest.TestCase):
         self._interpolate_tests(True)
 
     @skipIfUnsupportedMaxOpsetVersion(8)
-    @disableScriptTest()  # Scripting supported for opsets > 8. See test_interpolate_upsample
+    @skipScriptTest()  # Scripting supported for opsets > 8. See test_interpolate_upsample
     def test_interpolate_upsample_trace(self):
         self._interpolate_tests(True)
 
@@ -2873,7 +2873,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x, y), input_names=["x", "y"], dynamic_axes={"x": [0, 1, 2, 3], "y": [0, 1]})
         self.run_test(MyModel(), (x, y), remained_onnx_input_idx=[0])
 
-    @disableScriptTest()  # scripting throws the ONNXRuntimeError
+    @skipScriptTest()  # scripting will throw the OnnxRuntimeError
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
         with self.assertRaises(RuntimeError) as cm:
@@ -3784,7 +3784,8 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
 
-    @disableScriptTest()  # Scripting error: Cannot instantiate nn module
+    @skipScriptTest()  # Scripting error: Cannot instantiate nn module
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
             def __init__(self):
@@ -4211,7 +4212,7 @@ class TestONNXRuntime(unittest.TestCase):
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
             batch_first = True if packed_sequence == 2 else False
@@ -4839,7 +4840,7 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.randn(1)
         self.run_test(LinearModel(), (x, y, z))
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
@@ -4863,7 +4864,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3, 5, requires_grad=True)
         self.run_test(model, x)
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_weight_norm_nodim(self):
         # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
@@ -4943,7 +4944,7 @@ class TestONNXRuntime(unittest.TestCase):
         i = 3
         self.run_test(torch.jit.script(M()), (x, y, i))
 
-    @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
+    @skipScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
         class NonzeroModel(torch.nn.Module):
@@ -5017,7 +5018,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
 
-    @disableScriptTest()  # scripting tests run for opsets > 11. See: test_split_script
+    @skipScriptTest()  # scripting tests run for opsets > 11. See: test_split_script
     def test_split(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
@@ -5064,7 +5065,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SplitModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input, split_sizes: List[int]):
@@ -5856,7 +5857,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(torch.jit.script(M()), (x))
 
 
-    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
+    @skipScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def forward(self, x):
@@ -5869,7 +5870,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
+    @skipScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
             def forward(self, x):
@@ -6385,7 +6386,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
-    @disableScriptTest()  # error in propagate as assign input shape
+    @skipScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode="sum", scale_grad_by_freq=True)
@@ -6429,7 +6430,7 @@ class TestONNXRuntime(unittest.TestCase):
         w = torch.randn(2, 3)
         self.run_test(model, (embedding_matrix, x, w))
 
-    @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
+    @skipScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(11)
     @unittest.skip("Due to ONNX Loop shape inference issue. "
                    "https://msdata.visualstudio.com/Vienna/_workitems/edit/1352001")
@@ -6649,6 +6650,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipScriptTest()  # Functional module not scriptable
     def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
@@ -7764,7 +7766,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Model(), (x, y, z))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting tests run for opsets > 11. See: test_where_condition_script
+    @skipScriptTest()  # scripting tests run for opsets > 11. See: test_where_condition_script
     def test_where_condition(self):
         class Model1(torch.nn.Module):
             def forward(self, input):
@@ -7860,7 +7862,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(MyModule(), x)
 
-    @disableScriptTest()  # Scripting fails for add lists for opsets < 11. Chek test_derive_index_scripting
+    @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Chek test_derive_index_scripting
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -7983,7 +7985,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(SplitModel(), x)
 
-    @disableScriptTest()  # Scripting fails to export dynamic split for opsets < 11
+    @skipScriptTest()  # Scripting fails to export dynamic split for opsets < 11
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
@@ -8275,7 +8277,7 @@ class TestONNXRuntime(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
-    @disableScriptTest()  # TODO: RuntimeError: Exporting the operator __is_ to ONNX is not supported
+    @skipScriptTest()  # TODO: RuntimeError: Exporting the operator __is_ to ONNX is not supported
     def test_transformer_encoder(self):
         from torch.nn import TransformerEncoderLayer, TransformerEncoder
 
@@ -8729,6 +8731,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Module(), (boxes, scores, idxs))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipScriptTest()
     def test_clip_boxes_to_image(self):
         boxes = torch.randn(5, 4) * 500
         boxes[:, 2:] += boxes[:, :2]
@@ -8801,7 +8804,7 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(input,), (input_test,)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_transform_images(self):
 
         class TransformModule(torch.nn.Module):
@@ -8829,7 +8832,7 @@ class TestONNXRuntime(unittest.TestCase):
         return features
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_rpn(self):
         set_rng_seed(0)
 
@@ -8859,7 +8862,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dict_check=False)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_multi_scale_roi_align(self):
         class TransformModule(torch.nn.Module):
             def __init__(self):
@@ -8886,7 +8889,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i, [boxes],), (i1, [boxes1],)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_roi_heads(self):
         class RoiHeadsModule(torch.nn.Module):
             def __init__(self):
@@ -9581,7 +9584,7 @@ class TestONNXRuntime(unittest.TestCase):
                          [0.1, 0.2, 0.3, 0.4], [0.1, 0.2, 0.3, 0.4]], dtype=torch.float)
         self.run_test(m, (x1, x2, y))
 
-    @disableScriptTest()
+    @skipScriptTest()
     def test_unsafe_chunk(self):
         class ChunkModel(torch.nn.Module):
             def forward(self, x):
@@ -9750,7 +9753,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ExpandModel(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # Test code not scriptable
+    @skipScriptTest()  # Test code not scriptable
     def test_symbolic_shape_inference_expand_2(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -9764,7 +9767,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x,), remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(10)
-    @disableScriptTest()  # Test code not scriptable
+    @skipScriptTest()  # Test code not scriptable
     def test_symbolic_shape_inference_slice(self):
         class M(torch.nn.Module):
             def forward(self, x, position_bias):
@@ -9787,7 +9790,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (position_bias,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_symbolic_shape_inference_time(self):
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         h0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
@@ -9847,7 +9850,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(module, (x, win_length))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_hann_window_default_values(self):
         class HannWindowModule(torch.nn.Module):
             def __init__(self):
@@ -9867,7 +9870,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(module, (x, win_length))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_tensordot_dim_count(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9892,7 +9895,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(12)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_tensordot_dynamic_dim(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9926,7 +9929,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M_ToDeviceDtype(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()
+    @skipScriptTest()
     def test_fill(self):
         class FillModule(torch.nn.Module):
             def forward(self, x, filled_value: int):
@@ -10116,7 +10119,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(M(), (x, y))
 
-    @disableScriptTest()
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal(self):
         class M(torch.nn.Module):
@@ -10128,7 +10131,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(M(), (torch.tensor([[[0.0], [10.0]], [[2.0], [8.0]], [[2.0], [8.0]]]), torch.tensor([[1.0], [3.0]])))
 
-    @disableScriptTest()
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal_correctness(self):
         class M(torch.nn.Module):
@@ -10153,7 +10156,7 @@ class TestONNXRuntime(unittest.TestCase):
         assert abs(abs(actual_std) - expected_std) <= expected_std * 0.1, \
                "the gap of variance between ort outputs and expected one is unacceptable."
 
-    @disableScriptTest()
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform(self):
         class M(torch.nn.Module):
@@ -10164,7 +10167,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (torch.tensor([[0.0], [6.0]]), torch.tensor([[1.0], [7.0]])))
         self.run_test(M(), (torch.tensor([1.0]), torch.tensor([[10.0], [7.0], [9.0], [20.0]])))
 
-    @disableScriptTest()
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform_correctness(self):
         class M(torch.nn.Module):
@@ -10276,7 +10279,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
     #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055382
     #   Operator aten::_pack_padded_sequence is not supported by exporter yet.
     #       - https://msdata.visualstudio.com/Vienna/_workitems/edit/1055384
-    @disableScriptTest()
+    @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def f(self):
         self.is_script_test_enabled = self.opset_version >= script_test_min_opset_version
