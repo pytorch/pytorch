@@ -6,7 +6,7 @@ import argparse
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
                                       PythonSignatureNativeFunctionPair)
-from tools.codegen.gen import FileManager
+from tools.codegen.gen import FileManager, parse_native_yaml
 from typing import Sequence, List, Dict
 
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
@@ -122,11 +122,14 @@ blocklist = [
 binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'truediv',
               'matmul', 'floordiv',
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
-              'and', 'or', 'xor',                   # logic
+              'and', 'or', 'xor', 'rand', 'ror', 'rxor',  # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
               'ior', 'irshift', 'isub', 'ixor', 'ifloordiv', 'imod',  # inplace ops
               )
-comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
+symmetric_comparison_ops = ('eq', 'ne')
+asymmetric_comparison_ops = ('ge', 'gt', 'lt', 'le')
+comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
+
 unary_ops = ('neg', 'abs', 'invert')
 to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
@@ -145,8 +148,11 @@ def sig_for_ops(opname: str) -> List[str]:
     if name in binary_ops:
         return ['def {}(self, other: Any) -> Tensor: ...'.format(opname)]
     elif name in comparison_ops:
-        # unsafe override https://github.com/python/mypy/issues/5704
-        return ['def {}(self, other: Any) -> Tensor: ...  # type: ignore[override]'.format(opname)]
+        sig = 'def {}(self, other: Any) -> Tensor: ...'.format(opname)
+        if name in symmetric_comparison_ops:
+            # unsafe override https://github.com/python/mypy/issues/5704
+            sig += '  # type: ignore[override]'
+        return [sig]
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
@@ -291,11 +297,17 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
-        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Tensor, col_indices: Tensor,'
-                               ' values: Tensor, size: Optional[_size]=None,'
+        'sparse_csr_tensor' : ['def sparse_csr_tensor(crow_indices: Union[Tensor, List],'
+                               'col_indices: Union[Tensor, List],'
+                               ' values: Union[Tensor, List], size: Optional[_size]=None,'
                                ' *, dtype: Optional[_dtype]=None,'
                                ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
         '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
+                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' requires_grad: bool = False) -> Tensor: ...'],
+        '_sparse_csr_tensor_unsafe': ['def _sparse_csr_tensor_unsafe(crow_indices: Union[Tensor, List],'
+                                      'col_indices: Union[Tensor, List],'
+                                      ' values: Union[Tensor, List], size: List[int],'
                                       ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
                                       ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
@@ -308,6 +320,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                    .format(FACTORY_PARAMS),
                    'def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                    .format(FACTORY_PARAMS)],
+        'linspace': ['def linspace(start: Number, end: Number, steps: Optional[_int]=None, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
+        'logspace': ['def logspace(start: Number, end: Number, steps: Optional[_int]=None, base: _float=10.0, *,'
+                     ' out: Optional[Tensor]=None, {}) -> Tensor: ...'.format(FACTORY_PARAMS)],
         'randint': ['def randint(low: _int, high: _int, size: _size, *,'
                     ' generator: Optional[Generator]=None, {}) -> Tensor: ...'
                     .format(FACTORY_PARAMS),
@@ -366,7 +382,10 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
             ' other: Union[Tensor, Number],'
             ' *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...'.format(binop))
 
-    function_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=False, pyi=True)
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    native_functions = list(filter(should_generate_py_binding, native_functions))
+
+    function_signatures = load_signatures(native_functions, deprecated_yaml_path, method=False, pyi=True)
     sig_groups = get_py_torch_functions(function_signatures)
     for group in sorted(sig_groups, key=lambda g: g.signature.name):
         name = group.signature.name
@@ -393,7 +412,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_tensor_method_hints: Dict[str, List[str]] = collections.defaultdict(list)
     unsorted_tensor_method_hints.update({
         'size': ['def size(self) -> Size: ...',
-                 'def size(self, _int) -> _int: ...'],
+                 'def size(self, dim: _int) -> _int: ...'],
         'stride': ['def stride(self) -> Tuple[_int]: ...',
                    'def stride(self, _int) -> _int: ...'],
         'new_ones': ['def new_ones(self, size: _size, {}) -> Tensor: ...'.
@@ -491,7 +510,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
 
     # pyi tensor methods don't currently include deprecated signatures for some reason
     # TODO: we should probably add them in
-    tensor_method_signatures = load_signatures(native_yaml_path, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
+    tensor_method_signatures = load_signatures(native_functions, deprecated_yaml_path, method=True, skip_deprecated=True, pyi=True)
     tensor_method_sig_groups = get_py_torch_functions(tensor_method_signatures, method=True)
 
     for group in sorted(tensor_method_sig_groups, key=lambda g: g.signature.name):

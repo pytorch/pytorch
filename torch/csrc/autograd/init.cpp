@@ -10,11 +10,20 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <c10/core/ScalarType.h>
 
 #include <set>
+
+struct DisableTorchDispatch {
+  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
+  }
+  c10::impl::ExcludeDispatchKeyGuard guard_;
+};
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   using namespace torch::autograd::profiler;
@@ -107,7 +116,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Metal", c10::DeviceType::Metal);
 
 #ifdef USE_KINETO
-  py::class_<KinetoEvent>(m, "KinetoEvent")
+  py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", &KinetoEvent::name)
       // PyTorch thread id of the start callback
@@ -185,7 +194,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       })
       .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
-  py::class_<ProfilerResult>(m, "ProfilerResult")
+  py::class_<ProfilerResult>(m, "_ProfilerResult")
     .def("events", &ProfilerResult::events)
     .def("legacy_events", &ProfilerResult::legacy_events)
     .def("save", &ProfilerResult::save);
@@ -212,7 +221,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif
   });
 
-  m.def("supported_kineto_activities", []() {
+  m.def("_supported_kineto_activities", []() {
     std::set<ActivityType> activities;
 #ifdef USE_KINETO
     activities.insert(ActivityType::CPU);
@@ -253,6 +262,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
+  py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
+      .def(py::init<>());
+
+  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+    .def(py::init([]()->torch::autograd::SavedVariable {
+      TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
+    }))
+    .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+        // Because we use a py::object, pybind will increment the refcount of the hook functions for us
+        s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
+    });
+
   Py_RETURN_TRUE;
 }
 
@@ -275,6 +296,57 @@ static PyObject * is_autocast_enabled(PyObject* _unused, PyObject *arg) {
   } else {
     Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::autocast::set_cpu_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_autocast_cpu_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::autocast::is_cpu_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_autocast_cpu_dtype(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!THPDtype_Check(arg)) {
+    throw TypeError(
+        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_cpu_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static const char* scalarTypeName(const at::ScalarType type) {
+  switch (type) {
+#define DEFINE_CASE(ctype, name) \
+  case at::ScalarType::name:     \
+    return #ctype;
+    AT_FORAUTOCAST_SCALAR_TYPES(DEFINE_CASE)
+#undef DEFINE_CASE
+    default:
+      throw std::runtime_error("unknown scalar type for autocast");
+  }
+}
+
+static PyObject * get_autocast_cpu_dtype(PyObject* _unused, PyObject *arg){
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
+  return THPDtype_New(current_dtype, scalarTypeName(current_dtype));
   END_HANDLE_TH_ERRORS
 }
 
@@ -377,6 +449,10 @@ static PyMethodDef methods[] = { // NOLINT
   {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
+  {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
+  {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
+  {"set_autocast_cpu_dtype", set_autocast_cpu_dtype, METH_O, nullptr},
+  {"get_autocast_cpu_dtype", get_autocast_cpu_dtype, METH_NOARGS, nullptr},
   {"autocast_increment_nesting", autocast_increment_nesting, METH_NOARGS, nullptr},
   {"autocast_decrement_nesting", autocast_decrement_nesting, METH_NOARGS, nullptr},
   {"set_anomaly_enabled", set_anomaly_mode_enabled, METH_O, nullptr},

@@ -4,7 +4,6 @@ from typing import (
 
 import torch
 import torch.nn.functional as F
-from torch.types import _size
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
@@ -156,34 +155,7 @@ def split(tensor, split_size_or_sections, dim=0):
     return tensor.split(split_size_or_sections, dim)
 
 
-if TYPE_CHECKING:
-    _Indices = _size
-else:
-    _Indices = List[int]
-
-
-# equivalent to itertools.product(indices)
-def _indices_product(indices: _Indices) -> List[List[int]]:
-    empty_list = torch.jit.annotate(List[int], [])
-    result = [empty_list]
-    for idx in indices:
-        result_temp = torch.jit.annotate(List[List[int]], [])
-        for res in result:
-            for i in range(idx):
-                result_temp.append(res + [i])
-        result = result_temp
-    return result
-
-
-def _index_tensor_with_indices_list(tensor, indices):
-    # type: (Tensor, List[int]) -> Tensor
-    out = tensor
-    for index in indices:
-        out = out[index]
-    return out
-
-
-def einsum(equation, *operands):
+def einsum(*args):
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -199,7 +171,7 @@ def einsum(equation, *operands):
 
     Equation:
 
-        The :attr:`equation` string specifies the subscripts (lower case letters `['a', 'z']`) for each dimension of
+        The :attr:`equation` string specifies the subscripts (letters in `[a-zA-Z]`) for each dimension of
         the input :attr:`operands` in the same order as the dimensions, separating subcripts for each operand by a
         comma (','), e.g. `'ij,jk'` specify subscripts for two 2D operands. The dimensions labeled with the same subscript
         must be broadcastable, that is, their size must either match or be `1`. The exception is if a subscript is
@@ -237,9 +209,17 @@ def einsum(equation, *operands):
         run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
         can optimize the formula for you.
 
+    .. note::
+
+        As of PyTorch 1.10 :func:`torch.einsum` also supports the sublist format (see examples below). In this format,
+        subscripts for each operand are specified by sublists, list of integers in the range [0, 52). These sublists
+        follow their operands, and an extra sublist can appear at the end of the input to specify the output's
+        subscripts., e.g. `torch.einsum(op1, sublist1, op2, sublist2, ..., [subslist_out])`. Python's `Ellipsis` object
+        may be provided in a sublist to enable broadcasting as described in the Equation section above.
+
     Args:
         equation (string): The subscripts for the Einstein summation.
-        operands (Tensor): The operands to compute the Einstein sum of.
+        operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
 
@@ -274,6 +254,17 @@ def einsum(equation, *operands):
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
+        # with sublist format and ellipsis
+        >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
+        tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
+                [-1.6706, -0.8097, -0.8025, -2.1183]],
+
+                [[ 4.2239,  0.3107, -0.5756, -0.2354],
+                [-1.4558, -0.3460,  1.5087, -0.8530]],
+
+                [[ 2.8153,  1.8787, -4.3839, -1.2112],
+                [ 0.3728, -2.1131,  0.0921,  0.8305]]])
+
         # batch permute
         >>> A = torch.randn(2, 3, 4, 5)
         >>> torch.einsum('...ij->...ji', A).shape
@@ -287,8 +278,43 @@ def einsum(equation, *operands):
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
     """
+    if len(args) < 2:
+        raise ValueError('einsum(): must specify the equation string and at least one operand, '
+                         'or at least one operand and its subscripts list')
+
+    equation = None
+    operands = None
+
+    if isinstance(args[0], torch.Tensor):
+        # Convert the subscript list format which is an interleaving of operand and its subscripts
+        # list with an optional output subscripts list at the end (see documentation for more details on this)
+        # to the equation string format by creating the equation string from the subscripts list and grouping the
+        # input operands into a tensorlist (List[Tensor]).
+        def parse_subscript(n: int) -> str:
+            if n == Ellipsis:
+                return '...'
+            if n >= 0 and n < 26:
+                return chr(ord('A') + n)
+            if n >= 26 and n < 52:
+                return chr(ord('a') + n - 26)
+            raise ValueError('einsum(): subscript in subscript list is not within the valid range [0, 52)')
+
+        # Parse subscripts for input operands
+        equation = ','.join(''.join(parse_subscript(s) for s in l) for l in args[1::2])
+
+        # Parse optional output subscripts (provided when the number of arguments is odd)
+        if len(args) % 2 == 1:
+            equation += '->' + ''.join(parse_subscript(s) for s in args[-1])
+            operands = args[:-1:2]
+        else:
+            operands = args[::2]
+    else:
+        equation = args[0]
+        operands = args[1:]
+
     if has_torch_function(operands):
         return handle_torch_function(einsum, operands, equation, *operands)
+
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
@@ -900,6 +926,12 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
 
+    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+        raise RuntimeError("tensordot expects dims to be int or "
+                           + "Tuple[List[int], List[int]] or "
+                           + "List[List[int]] containing two lists, but got "
+                           + f"dims={dims}")
+
     dims_a: List[int] = []
     dims_b: List[int] = []
 
@@ -924,9 +956,6 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-
-    if len(dims_a) == 0 or len(dims_b) == 0:
-        raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
 
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]
@@ -1260,7 +1289,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             :attr:`dim` = ``None`` and :attr:`out` = ``None``.
         dtype (:class:`torch.dtype`, optional): the desired data type of
             returned tensor. If specified, the input tensor is casted to
-            :attr:'dtype' while performing the operation. Default: None.
+            :attr:`dtype` while performing the operation. Default: None.
 
     .. note::
         Even though ``p='fro'`` supports any number of dimensions, the true

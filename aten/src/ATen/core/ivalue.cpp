@@ -39,6 +39,16 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
 
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    c10::string_view str_) {
+  return c10::make_intrusive<ConstantString>(std::string(str_));
+}
+
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+    const char* str_) {
+  return c10::make_intrusive<ConstantString>(std::string(str_));
+}
+
 bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
   return lhs.elements_.size() == rhs.elements_.size() &&
       // see [container equality]
@@ -278,11 +288,12 @@ IValue IValue::equals(const IValue& rhs) const {
       // In Python you're not supposed to do this comparison apparently. Not
       // sure if we should warn here or what
       return rhs.isNone();
-    case Tag::Tensor:
+    case Tag::Tensor: {
       if (!rhs.isTensor()) {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    }
     case Tag::Storage:
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
@@ -616,7 +627,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 
   if (v.isString()) {
       return [](const IValue& a, const IValue& b) {
-       return a.toString()->string() < b.toString()->string();
+       return a.toStringRef() < b.toStringRef();
       };
   }
 
@@ -934,18 +945,38 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractStorages(
     const at::IValue& value) {
-  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    data_ptrs.reserve(tensors.size());
+    size_t num_storages = 0;
     for (const at::Tensor& tensor : tensors) {
-      data_ptrs.emplace_back(tensor.storage().data_ptr());
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore num_storages needs to be
+        // incremented by 2.
+        num_storages += 2;
+      } else {
+        // A dense/strided tensor contains 1 storage.
+        num_storages += 1;
+      }
+    }
+    weakStorageImpls.reserve(num_storages);
+    for (const at::Tensor& tensor : tensors) {
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage.
+        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+      } else {
+        // A dense/strided tensor contains 1 storage
+        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+      }
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
@@ -954,11 +985,11 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
-  return data_ptrs;
+  return weakStorageImpls;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1060,7 +1091,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src.hasError()) {
         dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src.constValue(), src.dataPtrs());
+        dst->markCompleted(src.constValue(), src.storages());
       }
     }
   };

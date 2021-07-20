@@ -10,7 +10,9 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/frozen_ops_to_mkldnn.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
@@ -217,7 +219,8 @@ void Method::run(Stack& stack) {
   function_->run(stack);
 }
 
-IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs)
+    const {
   stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
@@ -232,6 +235,15 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
 
   function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
   return function_->runAsync(stack, std::move(taskLauncher));
+}
+
+void Method::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  TORCH_INTERNAL_ASSERT(function_);
+  argumentNamesOut.reserve(function_->getSchema().arguments().size());
+  for (auto& argument : function_->getSchema().arguments()) {
+    argumentNamesOut.push_back(argument.name());
+  }
 }
 
 IValue Module::operator()(std::vector<IValue> inputs) {
@@ -482,6 +494,18 @@ Module freeze(
   auto graph = module.get_method("forward").graph();
   OptimizeFrozenGraph(graph, optimize_numerics);
   return out_mod;
+}
+
+Module optimize_for_inference(Module& module) {
+  // not frozen yet
+  if (module._ivalue()->type()->hasAttribute("training")) {
+    auto mod = freeze(module, {}, true);
+  }
+
+  auto graph = module.get_method("forward").graph();
+  FuseFrozenConvAddRelu(graph);
+  ConvertFrozenOpsToMKLDNN(graph);
+  return module;
 }
 
 buffer_list Module::buffers(bool recurse) const {

@@ -38,7 +38,7 @@ targets.each do |target|
     end
 end
 puts "Installing the testing model..."
-model_path = File.expand_path("./model.pt")
+model_path = File.expand_path("./model.ptl")
 if not File.exist?(model_path)
    raise "model.pt can't be found!"
 end

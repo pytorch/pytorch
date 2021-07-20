@@ -3,15 +3,14 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
-#include <iostream>
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <pybind11/embed.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
+#include <pybind11/functional.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+
+#include <cassert>
+#include <cstdio>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -107,11 +106,16 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
 extern "C" PyObject* initModule(void);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules[];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* startup = R"RAW(
 import sys
+import importlib.abc
+import linecache
 
 # We need to register a custom meta path finder because we are registering
 # `torch._C` as a builtin module.
@@ -128,6 +132,28 @@ class F:
             return sys.meta_path[1].find_spec('torch._C', path=None, target=None)
         return None
 sys.meta_path.insert(0, F())
+
+class RegisterModuleImporter(importlib.abc.InspectLoader):
+    def __init__(self, find_module_source):
+        self.find_module_source = find_module_source
+
+    def create_module(self, spec):
+        return None
+
+    def get_source(self, name):
+        return self.find_module_source(name)
+
+    def exec_module(self, module):
+        filename = f"_deploy_internal.{module.__name__}"
+        linecache.lazycache(filename, module.__dict__)
+        code = compile(self.get_source(module.__name__), filename, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+
+    def find_spec(self, fullname, path, target=None):
+        r = self.find_module_source(fullname)
+        if r is not None:
+            return importlib.util.spec_from_loader(fullname, self)
+        return None
 
 # print("exec_prefix:", sys.base_exec_prefix)
 # print("_base_executable:", sys._base_executable)
@@ -230,11 +256,12 @@ using torch::deploy::PickledObject;
 // for these objects together makes it easier to see what is happening.
 struct ScopedAcquire {
   ScopedAcquire() {
-    PyGILState_Ensure();
+    gstate = PyGILState_Ensure();
   }
   ~ScopedAcquire() {
-    PyEval_SaveThread();
+    PyGILState_Release(gstate);
   }
+  PyGILState_STATE gstate;
 };
 
 struct InitLockAcquire {
@@ -243,11 +270,13 @@ struct InitLockAcquire {
     // init_lock -> GIL. Otherwise, the GIL can be released by the python
     // interpreter during initalization tasks, and then re-acquired. If another
     // thread grabs the GIL to do non-initialization tasks, then it might start
-    // initializing (GIL -> init_lock). To avoid this, releasethe GIL before
+    // initializing (GIL -> init_lock). To avoid this, release the GIL before
     // trying to get the init_lock and then reacquire it afterward.
-    PyEval_SaveThread();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    PyThreadState* _save;
+    _save = PyEval_SaveThread();
     init_lock.lock();
-    PyGILState_Ensure();
+    PyEval_RestoreThread(_save);
   }
   ~InitLockAcquire() {
     init_lock_.unlock();
@@ -324,6 +353,22 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
       exit(1); // can't use TORCH_INTERNAL_ASSERT because we are in a
                // non-throwing destructor.
     }
+  }
+
+  void set_find_module(
+      std::function<at::optional<std::string>(const std::string&)> find_module)
+      override {
+    std::function<py::object(const std::string&)> wrapped_find_module =
+        [=](const std::string& name) -> py::object {
+      auto r = find_module(name);
+      return r ? py::cast(*r) : py::none();
+    };
+    py::object register_module_importer =
+        py::module::import("__main__")
+            .attr("RegisterModuleImporter")(wrapped_find_module);
+    py::module::import("sys")
+        .attr("meta_path")
+        .attr("append")(register_module_importer);
   }
 
   torch::deploy::InterpreterSessionImpl* acquire_session() override;

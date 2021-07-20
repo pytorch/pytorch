@@ -29,10 +29,12 @@
 #define __ubsan_ignore_undefined__ __attribute__((no_sanitize("undefined")))
 #define __ubsan_ignore_signed_int_overflow__ \
   __attribute__((no_sanitize("signed-integer-overflow")))
+#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
 #define __ubsan_ignore_signed_int_overflow__
+#define __ubsan_ignore_function__
 #endif
 
 // Detect address sanitizer as some stuff doesn't work with it
@@ -312,7 +314,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__ANDROID__) || defined(__APPLE__) || \
+    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -333,6 +336,13 @@ __host__ __device__
 #else // __APPLE__, _MSC_VER
 #if defined(NDEBUG)
 extern "C" {
+#if defined(__SYCL_DEVICE_ONLY__)
+extern SYCL_EXTERNAL void __assert_fail(
+    const char* expr,
+    const char* file,
+    unsigned int line,
+    const char* func);
+#else // __SYCL_DEVICE_ONLY__
 #if (defined(__CUDA_ARCH__) && !(defined(__clang__) && defined(__CUDA__))) || \
     defined(__HIP_ARCH__) || defined(__HIP__)
 __host__ __device__
@@ -343,6 +353,7 @@ __host__ __device__
         const char* file,
         unsigned int line,
         const char* function) throw();
+#endif
 }
 #endif // NDEBUG
 #define CUDA_KERNEL_ASSERT(cond)                                         \
@@ -398,6 +409,12 @@ __host__ __device__
 #define C10_HOST_CONSTEXPR_VAR constexpr
 #endif
 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ <= 9200)
+#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92
+#else
+#define C10_HOST_CONSTEXPR_EXCEPT_CUDA92 constexpr
+#endif
+
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
     __GNUC__ < 6
 #define CONSTEXPR_EXCEPT_GCC5
@@ -411,17 +428,60 @@ __host__ __device__
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+// Note [static constexpr char* members for windows NVCC]
+// The Windows NVCC compiler doesn't handle static constexpr class members,
+// although it's fixed in a later version.
+// (see
+// https://developercommunity.visualstudio.com/t/intellisense-error-c11-static-constexpr-member-ini/245425)
+//
+// If we want to ensure that our field is static under all builds, then we need
+// to work around it specifically for windows NVCC by making it (a) const, (b)
+// defined outside of the class definition We need to define it outside of the
+// class definition because of the C++ standard; char* is not an integral type
+// (see
+// https://stackoverflow.com/questions/24278473/intellisense-a-member-of-type-const-char-const-cannot-have-an-in-class-in)
+//
+// So instead of this:
+// struct Foo {
+//     static constexpr const char* name = "foo";
+// }
+// In Windows NVCC, we end up with this:
+// struct Foo {
+//     static const char* name;
+// }
+// const char* Foo::name = "foo";
+//
+// This gives us a small perf hit for any code that wants to access these field
+// members, but right now it isn't used in any perf-critical code paths.
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #endif
 

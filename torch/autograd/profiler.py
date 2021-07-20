@@ -11,6 +11,7 @@ from typing import Dict, List, Tuple, Optional
 from warnings import warn
 
 import math
+import bisect
 
 try:
     # Available in Python >= 3.2
@@ -436,7 +437,7 @@ class profile(object):
                 use_gpu_fallback = False
                 if self.use_cuda:
                     if (ProfilerActivity.CUDA not in
-                            torch.autograd.supported_kineto_activities()):
+                            torch.autograd._supported_kineto_activities()):
                         warn("CUPTI tracing is not available, falling back to legacy CUDA profiling")
                         use_gpu_fallback = True
                     else:
@@ -1078,6 +1079,23 @@ class StringTable(defaultdict):
         self[key] = torch._C._demangle(key) if len(key) > 1 else key
         return self[key]
 
+class MemRecordsAcc:
+    """Acceleration structure for accessing mem_records in interval"""
+
+    def __init__(self, mem_records):
+        self._mem_records = mem_records
+        self._start_uses = []
+        self._indices = []
+        if len(mem_records) > 0:
+            tmp = sorted([(r[0].start_us(), i) for i, r in enumerate(mem_records)])
+            self._start_uses, self._indices = zip(*tmp)
+
+    def in_interval(self, start_us, end_us):
+        start_idx = bisect.bisect_left(self._start_uses, start_us)
+        end_idx = bisect.bisect_right(self._start_uses, end_us)
+        for i in range(start_idx, end_idx):
+            yield self._mem_records[self._indices[i]]
+
 def filter_stack_entry(entry):
     filtered_entries = [
         ("autograd/__init__", "_make_grads"),
@@ -1129,6 +1147,7 @@ def parse_kineto_results(result):
         if record.kind() == 'memory_alloc':
             mem_records.append([record, False])
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
+    mem_records_acc = MemRecordsAcc(mem_records)
 
     # Create and return FunctionEvent list
     function_events = []
@@ -1144,12 +1163,10 @@ def parse_kineto_results(result):
         cuda_memory_usage = 0
         if kineto_event.device_type() == DeviceType.CPU:
             # find the corresponding memory allocation events
-            for mem_record in mem_records:
-                if (mem_record[0].start_us() >= kineto_event.start_us() and
-                        mem_record[0].start_us() <= abs_end_us):
-                    cpu_memory_usage += mem_record[0].cpu_memory_usage()
-                    cuda_memory_usage += mem_record[0].cuda_memory_usage()
-                    mem_record[1] = True
+            for mem_record in mem_records_acc.in_interval(kineto_event.start_us(), abs_end_us):
+                cpu_memory_usage += mem_record[0].cpu_memory_usage()
+                cuda_memory_usage += mem_record[0].cuda_memory_usage()
+                mem_record[1] = True
 
         is_async = kineto_event.is_async() or (
             kineto_event.start_thread_id() != kineto_event.end_thread_id()

@@ -66,6 +66,12 @@ class PYBIND11_EXPORT PyRRef {
       bool retainGraph,
       const c10::intrusive_ptr<RRef>& rref);
 
+  // Specialization of backward if the rref is an OwnerRRef.
+  static void backwardOwnerRRef(
+      int64_t autogradContextId,
+      bool retainGraph,
+      IValue value);
+
  private:
   c10::intrusive_ptr<RRef> rref_;
   c10::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;

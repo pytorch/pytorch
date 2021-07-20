@@ -97,7 +97,7 @@ def supported_activities():
     This, in turn, results in including CUDA time in the profiler table output,
     but not in the JSON trace.
     """
-    return torch.autograd.supported_kineto_activities()
+    return torch.autograd._supported_kineto_activities()
 
 
 class profile(object):
@@ -143,6 +143,9 @@ class profile(object):
 
     .. note::
         Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
 
     Examples:
 

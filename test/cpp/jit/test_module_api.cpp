@@ -365,7 +365,10 @@ TEST(ModuleAPITest, Freezing) {
   auto frozen_mod = torch::jit::freeze(m);
   auto forward_g = frozen_mod.get_method("forward").graph();
   testing::FileCheck().check_not("GetAttr")->run(*forward_g);
-  ;
+
+  auto frozen_mod2 = torch::jit::optimize_for_inference(m);
+  forward_g = frozen_mod.get_method("forward").graph();
+  testing::FileCheck().check_not("GetAttr")->run(*forward_g);
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

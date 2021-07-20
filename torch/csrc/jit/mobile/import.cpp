@@ -216,8 +216,6 @@ class BytecodeDeserializer final {
   mobile::Module deserialize(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
-  std::unordered_map<std::string, std::string> deserializeMetadata(
-      c10::optional<at::Device> device);
   void deserialize_only_extra(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
@@ -230,8 +228,6 @@ class BytecodeDeserializer final {
       mobile::CompilationUnit& mcu);
   c10::IValue readArchive(
       const std::string& archive_name,
-      std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::unordered_map<std::string, std::string> readMobileMetadata(
       std::shared_ptr<mobile::CompilationUnit> mcu);
   /**
    * Loads operators by looking them up in the Dispatcher and returns
@@ -310,12 +306,12 @@ void BytecodeDeserializer::parseMethods(
       // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
           // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
       " and ",
-      caffe2::serialize::kProducedBytecodeVersion,
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
       "But the model version is ",
       model_version);
 
@@ -477,13 +473,6 @@ void BytecodeDeserializer::parseMethods(
   }
 }
 
-std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    deserializeMetadata(c10::optional<at::Device> device) {
-  device_ = device;
-  auto mcu = std::make_shared<mobile::CompilationUnit>();
-  return readMobileMetadata(mcu);
-}
-
 void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
@@ -529,28 +518,12 @@ mobile::Module BytecodeDeserializer::deserialize(
         readArchive("mobile_debug_handles", mcu).toTuple()->elements();
   }
   parseMethods(bvals, debug_handles, *mcu);
-  auto meta_dict = readMobileMetadata(mcu);
-  auto m = mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
+  auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
   MobileDebugTable debug_table = MobileDebugTable(reader_, compilation_unit_);
   m.setDebugTable(std::move(debug_table));
 #endif
   return m;
-}
-
-std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
-  std::unordered_map<std::string, std::string> res;
-  if (!reader_->hasRecord("metadata.pkl")) {
-    return res;
-  }
-  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (const auto& it : ivalue_dict) {
-    const auto key = it.key().toString()->string();
-    const auto value = it.value().toString()->string();
-    res[key] = value;
-  }
-  return res;
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
@@ -657,35 +630,47 @@ mobile::Module _load_for_mobile_impl(
   auto observer = torch::observerConfig().getModuleObserver();
   // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
   auto instance_key = std::rand();
+
+  std::unordered_map<std::string, std::string> metadata_map;
   if (observer) {
     observer->onEnterLoadModel(instance_key);
+    auto defaultExtraFileList = observer->getDefaultExtraFiles();
+    // Add files in defaultExtraFileList to fail_extra_files and extra_files
+    for (const auto& fileName : defaultExtraFileList) {
+      extra_files.insert(std::make_pair(fileName, ""));
+    }
   }
+
   const size_t model_size = rai != nullptr ? rai->size() : 0;
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader), module_load_options);
+
   std::string error_message;
   auto guard = c10::make_scope_exit([&]() {
     if (!observer) {
       return;
     }
+    deserializer.deserialize_only_extra(device, extra_files);
+
+    metadata_map = observer->processMetadataFromExtra(extra_files);
 
     observer->onFailLoadModel(
         instance_key,
         error_message.empty() ? "Unknown exception" : error_message.c_str(),
-        deserializer.deserializeMetadata(device));
+        metadata_map);
   });
 
   try {
     mobile::Module result = deserializer.deserialize(device, extra_files);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    copied_metadata["model_size"] = c10::guts::to_string(model_size);
     if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
+      // Add model_name and model_size to metadata_map
+      extra_files.insert(std::make_pair("model_name", result.name()));
+      extra_files.insert(
+          std::make_pair("model_size", c10::guts::to_string(model_size)));
+      metadata_map = observer->processMetadataFromExtra(extra_files);
+      observer->onExitLoadModel(instance_key, metadata_map);
     }
+    result.setMetadata(metadata_map);
     guard.release();
     return result;
   } catch (c10::Error& error) {

@@ -127,13 +127,12 @@ void RNNImplBase<Derived>::reset() {
         layer_params.emplace_back(w_hr);
         param_names.emplace_back("weight_hr_l{layer}{suffix}");
       }
-      for (size_t i = 0; i < param_names.size(); i++) {  // NOLINT(modernize-loop-convert)
-        std::string x = std::regex_replace(param_names[i], std::regex("\\{layer\\}"), c10::str(layer));
-        x = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
-        param_names[i] = x;
+      for(auto& param_name : param_names) {
+        std::string x = std::regex_replace(param_name, std::regex("\\{layer\\}"), c10::str(layer));
+        param_name = std::regex_replace(x, std::regex("\\{suffix\\}"), c10::str(suffix));
       }
 
-      for (size_t i = 0; i < param_names.size(); i++) {
+      for(const auto i : c10::irange(param_names.size())) {
         auto name = param_names[i];
         auto param = layer_params[i];
         this->register_parameter(name, param);

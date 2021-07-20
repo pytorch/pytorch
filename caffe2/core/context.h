@@ -63,7 +63,7 @@ class TORCH_API CPUContext final : public BaseContext {
 
   ~CPUContext() noexcept override {}
 
-  inline void SwitchToDevice(int /*stream_id*/) override {}
+  inline void SwitchToDevice(int64_t /*stream_id*/) override {}
 
   using BaseContext::SwitchToDevice;
 

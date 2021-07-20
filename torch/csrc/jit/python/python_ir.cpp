@@ -278,7 +278,6 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
-            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -570,6 +569,30 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
+      .def(
+          "getModuleHierarchy",
+          [](Node& n) {
+            if (!n.callstack().has_value()) {
+              return std::string();
+            }
+            InlinedCallStackPtr callstack_ptr = n.callstack().value();
+            std::string module_info;
+            for (auto& entry : callstack_ptr->vec()) {
+              const auto& opt_module_info =
+                  std::get<kModuleInstanceInfo>(entry);
+              if (opt_module_info.has_value()) {
+                const auto& module_instance_info = opt_module_info.value();
+                if (!module_info.empty()) {
+                  module_info.append(".");
+                }
+                module_info.append(
+                    utils::get_module_info(module_instance_info));
+              } else {
+                module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+              }
+            }
+            return module_info;
+          })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)
@@ -737,6 +760,31 @@ void initPythonIRBindings(PyObject* module_) {
               if (auto cs = ptt->sizes().concrete_sizes()) {
                 return py::cast(*cs);
               }
+            }
+            return py::none();
+          })
+      .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, std::vector<c10::optional<int64_t>> sizes) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withSymbolicShapes(sizes));
             }
             return py::none();
           })

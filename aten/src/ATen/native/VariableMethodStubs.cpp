@@ -40,6 +40,10 @@ void retain_grad(Tensor& self) {
   return self.retain_grad();
 }
 
+bool retains_grad(const Tensor& self) {
+  return self.retains_grad();
+}
+
 Tensor _fw_primal(const Tensor& self, int64_t level) {
   AT_ERROR("_fw_primal is not implemented for Tensor");
 }

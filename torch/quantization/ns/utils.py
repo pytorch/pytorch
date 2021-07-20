@@ -3,14 +3,20 @@ import operator
 
 import torch
 import torch.nn as nn
+import torch.nn.quantized as nnq
+import torch.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.quantization.fx.quantize import is_activation_post_process
+from torch.quantization.quantize import is_activation_post_process
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
 
-from .ns_types import NSNodeTargetType
+from .ns_types import NSNodeTargetType, NSResultsType
 
-from typing import Any, Tuple, Callable, Dict, Set, List
+from typing import Any, Tuple, Callable, Dict, Set, List, Optional, Union
 
 def getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
     """
@@ -70,9 +76,9 @@ def get_node_first_input_and_output_type(
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, logger_cls):  # type: ignore[arg-type]
-            # A logger's input and output type is the output type of
-            # the preceding node.
+        if isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase)):  # type: ignore[arg-type]
+            # A logger or observer's input and output type is the output
+            # type of the preceding node.
             first_arg = node.args[0]
             assert isinstance(first_arg, Node)
             _prev_node_input_type, prev_node_output_type = \
@@ -132,6 +138,87 @@ def get_node_first_input_and_output_type(
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
     else:
         return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
+
+def get_node_input_qparams(
+    node: Node,
+    gm: GraphModule,
+    node_type_to_io_type_map: Dict[str, Set[NSNodeTargetType]],
+) -> Optional[Tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
+    """
+    Returns the qparams (scale, zero_point) of the first input to `node`,
+    if they can be inferred from the graph.
+    """
+    prev_node = node.args[0]
+
+    if not isinstance(prev_node, Node):
+        return None
+
+    MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map['mods_io_type_fp32_or_int8']
+
+    def _get_scale_zp_from_function_args(node, gm, scale_arg_idx, zp_arg_idx):
+        scale_node, zp_node = node.args[scale_arg_idx], node.args[zp_arg_idx]
+        assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
+        assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
+        scale_obj = getattr_from_fqn(gm, scale_node.target)
+        zp_obj = getattr_from_fqn(gm, zp_node.target)
+        return (scale_obj, zp_obj)
+
+    if prev_node.op == 'call_function':
+
+        # quantize - read the args directly
+        if prev_node.target == torch.quantize_per_tensor:
+            return _get_scale_zp_from_function_args(prev_node, gm, 1, 2)
+        elif prev_node.target in (toq.add, toq.add_relu, toq.mul, toq.mul_relu):
+            return _get_scale_zp_from_function_args(prev_node, gm, 2, 3)
+
+        return None
+        # TODO(future PR): handle more functionals
+        # TODO(future PR): handle functional ops which inherit qparams from input
+
+    elif prev_node.op == 'call_module':
+
+        # get type of the module
+        assert isinstance(prev_node.target, str)
+        module_obj = getattr_from_fqn(gm, prev_node.target)
+        if isinstance(
+            module_obj,
+            (
+                nnq.Linear,
+                nnq.Conv1d,
+                nnq.Conv2d,
+                nniq.ConvReLU2d,
+                nnq.Conv3d,
+                nnq.BatchNorm2d,
+                nnq.BatchNorm3d,
+                nnq.ConvTranspose1d,
+                nnq.ConvTranspose2d,
+                nnq.ELU,
+                nnq.GroupNorm,
+                nnq.InstanceNorm1d,
+                nnq.InstanceNorm2d,
+                nnq.InstanceNorm3d,
+                nnq.LayerNorm,
+                nnq.Hardswish,
+                nnq.LeakyReLU,
+                nnq.ReLU6,
+                nniq.BNReLU2d,
+                nniq.BNReLU3d,
+                nniq.ConvReLU1d,
+                nniq.ConvReLU2d,
+                nniq.ConvReLU3d,
+                nniq.LinearReLU,
+            )
+        ):
+            return (module_obj.scale, module_obj.zero_point)  # type: ignore[return-value]
+
+        is_known_fp32_or_int8_input_module = any(
+            isinstance(module_obj, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+        )
+        if is_known_fp32_or_int8_input_module:
+            return get_node_input_qparams(
+                prev_node, gm, node_type_to_io_type_map)
+
+    return None
 
 def return_first_non_observer_node(
     node: Node,
@@ -227,3 +314,121 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
         target_mod = getattr_from_fqn(gm, node.target)
         target_type = str(type(target_mod))
     return target_type
+
+def rekey_logger_info_on_node_name_of_model(
+    results: NSResultsType,
+    model_name: str,
+) -> NSResultsType:
+    """
+    Rekeys the layer name of a results dictionary to use node names
+    from `model_name`.
+
+    For example, transforms
+
+        {'base_op_1_0': {'node_output': {'model_a':
+          [{'ref_node_name': 'linear1', ...}]}}}
+
+    into
+
+        {'linear1': {'node_output': {'model_a':
+          [{'ref_node_name': 'linear1', ...}]}}}
+
+    Note: we cannot use these node names directly because they are not
+    guaranteed to be consistent across models. This is why we extract
+    the results first and rekey afterwards.
+    """
+    new_results = {}
+    for old_layer_name, result_type_to_results in results.items():
+        new_layer_name = None
+        for _result_type, model_name_to_results in result_type_to_results.items():
+            for cur_model_name, list_of_results in model_name_to_results.items():
+                if cur_model_name == model_name:
+                    assert len(list_of_results)
+                    new_layer_name = list_of_results[0]['ref_node_name']
+                else:
+                    continue
+        if new_layer_name is not None:
+            new_results[new_layer_name] = result_type_to_results
+        else:
+            new_results[old_layer_name] = result_type_to_results
+    return new_results
+
+
+def maybe_add_missing_fqns(results: NSResultsType) -> None:
+    """
+    If `fqn` entries are filled in for one of the models in `results`, copies
+    them over to any models which do not have them filled out.
+
+    A common use case benefitting from this is comparing a model prepared by
+    quantization to a quantized model. In this case, the model prepared by
+    quantization would have `fqn` entries, and the quantized model would not.
+    """
+
+    # Check in the first result to find any model with fqn entries defined.
+    model_name_with_fqns = None
+    for layer_name, result_type_to_results in results.items():
+        for result_type, model_name_to_results in \
+                result_type_to_results.items():
+            for model_name, model_results in model_name_to_results.items():
+                if len(model_results) > 0:
+                    if model_results[0]['fqn'] is not None:
+                        model_name_with_fqns = model_name
+                        break
+            break
+        break
+
+    if model_name_with_fqns:
+        for layer_name, result_type_to_results in results.items():
+            for result_type, model_name_to_results in \
+                    result_type_to_results.items():
+                ref_model_results = model_name_to_results[model_name_with_fqns]
+                for model_name, model_results in model_name_to_results.items():
+                    if model_name == model_name_with_fqns:
+                        continue
+                    for i in range(len(model_results)):
+                        fqn = ref_model_results[i]['fqn']
+                        model_results[i]['fqn'] = fqn
+
+def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
+    def inner(*args, **kwargs):
+        a0, a1, *a_other = args
+
+        if isinstance(a0, tuple) and isinstance(a1, tuple):
+            results = []
+            for el0, el1 in zip(a0, a1):
+                new_args = (el0, el1, *a_other)
+                results.append(inner(*new_args, **kwargs))
+            return results
+
+        elif isinstance(a0, torch.Tensor) and isinstance(a1, torch.Tensor):
+            if a0.is_quantized:
+                a0 = a0.dequantize()
+            if a1.is_quantized:
+                a1 = a1.dequantize()
+
+        # for the purposes of this util, only handle floats
+        if a0.dtype != torch.float or a1.dtype != torch.float:
+            return None
+
+        new_args = (a0, a1, *a_other)
+        return f(*new_args, **kwargs)
+    return inner
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    Ps = torch.norm(x)
+    Pn = torch.norm(x - y)
+    return 20 * torch.log10(Ps / Pn)
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    # For convolutions, the shape of the quantized weight has one additional
+    # dimension compared to the shape of the fp32 weight. Match the shapes
+    # to enable cosine similarity comparison.
+    x = x.reshape(1, -1)
+    y = y.reshape(1, -1)
+    return torch.nn.functional.cosine_similarity(x, y)

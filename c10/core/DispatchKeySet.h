@@ -223,7 +223,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -234,7 +234,7 @@ constexpr DispatchKeySet default_included_set = DispatchKeySet({
 });
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
-    // DispatchKey::AutocastCPU,
+    DispatchKey::AutocastCPU,
     DispatchKey::AutocastCUDA,
 });
 
@@ -245,6 +245,7 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
     {DispatchKey::HIP,
+     DispatchKey::VE,
      DispatchKey::FPGA,
      DispatchKey::MSNPU,
      DispatchKey::Vulkan,
@@ -256,6 +257,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::SparseCPU,
      DispatchKey::SparseCUDA,
      DispatchKey::SparseHIP,
+     DispatchKey::SparseVE,
      DispatchKey::SparseCsrCPU,
      DispatchKey::SparseCsrCUDA,
      DispatchKey::Meta});

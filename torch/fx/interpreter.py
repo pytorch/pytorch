@@ -2,7 +2,7 @@ from .graph_module import GraphModule
 from .graph import Graph
 from .node import Argument, Node, Target, map_arg, map_aggregate
 from .proxy import Proxy
-from .symbolic_trace import Tracer
+from ._symbolic_trace import Tracer
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 class Interpreter:
@@ -408,6 +408,10 @@ class Transformer(Interpreter):
         assert isinstance(target, str)
         submod = self.fetch_attr(target)
         return self.tracer.call_module(submod, submod.forward, args, kwargs)
+
+    def call_function(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
+        # Override so that functions that were wrapped are still wrapped.
+        return self.tracer.create_proxy('call_function', target, args, kwargs)
 
     def transform(self) -> GraphModule:
         """

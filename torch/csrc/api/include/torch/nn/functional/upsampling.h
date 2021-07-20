@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/irange.h>
 #include <torch/nn/functional/pooling.h>
 #include <torch/nn/options/upsampling.h>
 
@@ -62,7 +63,7 @@ inline std::vector<int64_t> _interp_output_size(
   }
 
   std::vector<int64_t> ret;
-  for (int64_t i = 0; i < dim; i++) {
+  for (const auto i : c10::irange(dim)) {
     ret.emplace_back(static_cast<int64_t>(floor(input.size(i + 2) * scale_factors[i])));
   }
   return ret;

@@ -10,33 +10,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-# ---[ If running on Ubuntu, check system version and compiler version.
-if(EXISTS "/etc/os-release")
-  execute_process(COMMAND
-    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  execute_process(COMMAND
-    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  if(OS_RELEASE_ID STREQUAL "ubuntu")
-    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0")
-          message(FATAL_ERROR
-            "Please use GCC 6 or higher on Ubuntu 17.04 and higher. "
-            "For more information, see: "
-            "https://github.com/caffe2/caffe2/issues/1633"
-            )
-        endif()
-      endif()
-    endif()
-  endif()
-endif()
-
 if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
@@ -46,9 +19,15 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
     list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
   endif()
-  CHECK_C_SOURCE_RUNS("
-  int main() { return 0; }
-  " COMPILER_WORKS)
+  if(CMAKE_CROSSCOMPILING)
+    CHECK_C_SOURCE_COMPILES("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  else()
+    CHECK_C_SOURCE_RUNS("
+    int main() { return 0; }
+    " COMPILER_WORKS)
+  endif()
   if(NOT COMPILER_WORKS)
     # Force cmake to retest next time around
     unset(COMPILER_WORKS CACHE)
@@ -319,21 +298,23 @@ endif()
 # TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
 # Change if necessary on old platforms.
 if(USE_ASAN)
-  set(CAFFE2_ASAN_FLAG "-fsanitize=address -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_FLAG}")
+  set(CAFFE2_ASAN_COMPILER_FLAGS "-fsanitize=address -fPIE")
+  set(CAFFE2_ASAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
 endif()
 
 if(USE_TSAN)
-  set(CAFFE2_TSAN_FLAG "-fsanitize=thread -fPIE -pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_FLAG}")
+  set(CAFFE2_TSAN_COMPILER_FLAGS "-fsanitize=thread -fPIE")
+  set(CAFFE2_TSAN_LINKER_FLAGS "-pie")
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
 endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.

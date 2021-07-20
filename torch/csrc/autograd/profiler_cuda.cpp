@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/irange.h>
 #include <nvToolsExt.h>
 
 #include <sstream>
@@ -60,10 +61,12 @@ struct CUDAMethods : public CUDAStubs {
   }
 
   void nvtxMarkA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
   void nvtxRangePushA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 
@@ -75,7 +78,7 @@ struct CUDAMethods : public CUDAStubs {
     at::cuda::OptionalCUDAGuard device_guard;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int count = at::cuda::device_count();
-    for(int i = 0; i < count; i++) {
+    for(const auto i : c10::irange(count)) {
       device_guard.set_index(i);
       op(i);
     }
@@ -96,6 +99,7 @@ struct RegisterCUDAMethods {
     registerCUDAMethods(&methods);
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCUDAMethods reg;
 
 } // namespaces

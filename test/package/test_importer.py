@@ -45,7 +45,7 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
@@ -71,7 +71,7 @@ class TestImporter(PackageTestCase):
         import package_a
 
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.save_module(package_a.__name__)
 
         buffer.seek(0)
@@ -106,7 +106,9 @@ class TestImporter(PackageTestCase):
 
         dummy_importer_foo = DummyImporter("foo")
         dummy_importer_bar = DummyImporter("bar")
-        dummy_importer_not_found = DummyImporter("__main__")  # __main__ is used as a proxy for "not found" by CPython
+        dummy_importer_not_found = DummyImporter(
+            "__main__"
+        )  # __main__ is used as a proxy for "not found" by CPython
 
         foo_then_bar = OrderedImporter(dummy_importer_foo, dummy_importer_bar)
         self.assertEqual(foo_then_bar.whichmodule(DummyClass(), ""), "foo")
@@ -114,7 +116,9 @@ class TestImporter(PackageTestCase):
         bar_then_foo = OrderedImporter(dummy_importer_bar, dummy_importer_foo)
         self.assertEqual(bar_then_foo.whichmodule(DummyClass(), ""), "bar")
 
-        notfound_then_foo = OrderedImporter(dummy_importer_not_found, dummy_importer_foo)
+        notfound_then_foo = OrderedImporter(
+            dummy_importer_not_found, dummy_importer_foo
+        )
         self.assertEqual(notfound_then_foo.whichmodule(DummyClass(), ""), "foo")
 
     def test_package_importer_whichmodule_no_dunder_module(self):
@@ -131,7 +135,7 @@ class TestImporter(PackageTestCase):
 
         # Set up a PackageImporter which has a torch.float16 object pickled:
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as exporter:
+        with PackageExporter(buffer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_dtype)
         buffer.seek(0)
 
@@ -140,7 +144,7 @@ class TestImporter(PackageTestCase):
 
         # Re-save a package with only our PackageImporter as the importer
         buffer2 = BytesIO()
-        with PackageExporter(buffer2, verbose=False, importer=importer) as exporter:
+        with PackageExporter(buffer2, importer=importer) as exporter:
             exporter.save_pickle("foo", "foo.pkl", my_loaded_dtype)
 
         buffer2.seek(0)

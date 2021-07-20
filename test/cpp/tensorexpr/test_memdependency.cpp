@@ -2995,20 +2995,12 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* m = loops[0];
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* mo;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* mi;
-    loop.splitWithMask(m, 4, &mo, &mi);
+    loop.splitWithMask(m, 4);
   }
   {
     auto const& loops = loop.getLoopStmtsFor(CT);
     For* n = loops[2];
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* no;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* ni;
-    loop.splitWithMask(n, 16, &no, &ni);
+    loop.splitWithMask(n, 16);
   }
   // mo, mi, no, ni, k ->
   // mo, no, mi, ni, k
