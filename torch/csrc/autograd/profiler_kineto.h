@@ -246,6 +246,7 @@ struct TORCH_API KinetoEvent {
 struct TORCH_API ProfilerResult {
   ProfilerResult();
   ProfilerResult(
+      uint64_t start_time,
       std::vector<KinetoEvent> events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
   ~ProfilerResult();
