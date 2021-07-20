@@ -230,6 +230,7 @@ if(INTERN_BUILD_ATEN_OPS)
           COMMAND ${GEN_COMMAND2}
           WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
   )
+
   # FIXME: the file/variable name lists cpp, but these list both cpp and .h files
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt generated_cpp)
   file(READ ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt-cuda cuda_generated_cpp)
