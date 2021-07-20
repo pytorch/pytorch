@@ -14484,21 +14484,19 @@ dedent """
             torch.jit.script(test)
 
     def test_function_overload_misuse(self):
-        def wrong_decl_body(x: str) -> str:
-            return x + "0"
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
+            @torch.jit._overload
+            def wrong_decl_body(x: str) -> str:
+                return x + "0"
 
-        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement can be the body"):
-            torch.jit._overload(wrong_decl_body)
-
-        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement can be the body"):
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
             class MyClass:
                 @torch.jit._overload_method
                 def method(self):
                     return 0
 
         @torch.jit._overload
-        def null_overload(x: int) -> int:
-            pass
+        def null_overload(x: int) -> int: ...
 
         @torch.jit._overload
         def null_overload(x: str) -> str:  # noqa: F811
@@ -15479,7 +15477,6 @@ dedent """
 
             @torch.jit._overload_method
             def hi(self, x: Tensor): ...  # noqa: E704
-                pass
 
             def hi(self, x):  # noqa: F811
                 return 2

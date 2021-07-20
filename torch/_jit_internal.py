@@ -744,10 +744,17 @@ def get_overload_no_implementation_error_message(kind, obj):
 def _check_overload_body(func):
     parsed_def = parse_def(func)
     body = parsed_def.ast.body[0].body
-    if len(body) != 1 or not isinstance(body[0], ast.Pass):
-        msg = "Only `pass` statement can be the body of overload declaration:\n"
+
+    def is_pass(x):
+        return isinstance(x, ast.Pass)
+
+    def is_ellipsis(x):
+        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+
+    if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
+        msg = "Only `pass` statement or `...` can be the body of overload declaration:\n"
         msg += '\n'.join(parsed_def.source.split("\n")[:3])
-        msg += " <- Expecting `pass` here!\n" + _get_overload_example()
+        msg += " <- Expecting `pass` or `...` here!\n" + _get_overload_example()
         raise RuntimeError(msg)
 
 def _overload(func):
