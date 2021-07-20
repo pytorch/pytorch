@@ -6599,7 +6599,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::mul'],),
     OpInfo('__rand__',
            op=torch.Tensor.__rand__,
-           dtypes=integral_types_and(),
+           dtypes=integral_types_and(torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),

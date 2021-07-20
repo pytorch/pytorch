@@ -54,7 +54,7 @@ DECLARE_DISPATCH(structured_binary_fn, div_floor_stub);
 DECLARE_DISPATCH(structured_binary_fn, div_trunc_stub);
 DECLARE_DISPATCH(structured_binary_fn, atan2_stub);
 DECLARE_DISPATCH(structured_binary_fn, remainder_stub);
-DECLARE_DISPATCH(binary_fn, bitwise_and_stub);
+DECLARE_DISPATCH(structured_binary_fn, bitwise_and_stub);
 DECLARE_DISPATCH(structured_binary_fn, bitwise_or_stub);
 DECLARE_DISPATCH(structured_binary_fn, bitwise_xor_stub);
 DECLARE_DISPATCH(structured_binary_fn, lshift_stub);
