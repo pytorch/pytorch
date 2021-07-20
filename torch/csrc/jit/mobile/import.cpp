@@ -221,7 +221,7 @@ class BytecodeDeserializer final {
       const std::string& function_name,
       const at::optional<IValue>& schemaTable,
       const int64_t& model_version,
-      std::unique_ptr<mobile::Function>& function);
+      mobile::Function* function);
   /**
    * Loads operators by looking them up in the Dispatcher and returns
    * the set of operator names (with overload) that are not supported
@@ -242,9 +242,9 @@ BytecodeDeserializer::BytecodeDeserializer(
       module_load_options_(module_load_options) {}
 
 std::unordered_set<std::string> load_and_find_unsupported_operator_names(
-        const std::vector<IValue>& ops_list,
-        mobile::Function* function,
-        int64_t model_version) {
+    const std::vector<IValue>& ops_list,
+    mobile::Function* function,
+    int64_t model_version) {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
@@ -276,7 +276,6 @@ TypePtr BytecodeDeserializer::resolveTypeName(const c10::QualifiedName& qn) {
   return resolveTypeNameMobile(qn, compilation_unit_);
 }
 
-
 // It requires compilation_unit_ when parsing function schema. Keep it in
 // BytecodeDeserializer. It may be refacotred later to make it independent
 // of the specific BytecodeDeserializer, like parsing other tables
@@ -284,32 +283,29 @@ void BytecodeDeserializer::parseFunctionSchema(
     const std::string& function_name,
     const at::optional<IValue>& schemaTable,
     const int64_t& model_version,
-    std::unique_ptr<mobile::Function>& function) {
+    mobile::Function* function) {
   // function schema
   if (schemaTable) { // (schema is optional for back compat)
     auto parseArgList = [this](const std::vector<IValue>& argTables) {
       std::vector<c10::Argument> args;
       for (auto&& argTable : argTables) {
-        auto name =
-            expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
-                .toStringRef();
+        auto name = expect_field(argTable, "name", BYTECODE_INDEX_ARGUMENT_NAME)
+                        .toStringRef();
         const auto& type = resolveTypeName(
             (expect_field(argTable, "type", BYTECODE_INDEX_ARGUMENT_TYPE))
                 .toStringRef());
         auto default_value = expect_field(
-            argTable,
-            "default_value",
-            BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE)
-            .toIValue();
-        auto arg =
-            c10::Argument(name, type, c10::nullopt /*N*/, default_value);
+                                 argTable,
+                                 "default_value",
+                                 BYTECODE_INDEX_ARGUMENT_DEFAULT_VALUE)
+                                 .toIValue();
+        auto arg = c10::Argument(name, type, c10::nullopt /*N*/, default_value);
         args.emplace_back(std::move(arg));
       }
       return args;
     };
     const auto& arg_list =
-        expect_field(
-            *schemaTable, "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
+        expect_field(*schemaTable, "arguments", BYTECODE_INDEX_SCHEMA_ARGUMENTS)
             .toTuple()
             ->elements();
     const auto& ret_list =
@@ -331,14 +327,14 @@ void parseOperators(
     const IValue& codeTable,
     const int64_t& model_version,
     const uint64_t& module_load_options,
-    std::unique_ptr<mobile::Function>& function) {
+    mobile::Function* function) {
   const auto& ops_list =
       expect_field(codeTable, "operators", BYTECODE_INDEX_OPERATOR)
           .toTuple()
           ->elements();
   std::unordered_set<std::string> unsupported_op_names =
       load_and_find_unsupported_operator_names(
-          ops_list, function.get(), model_version);
+          ops_list, function, model_version);
   if ((module_load_options & MobileModuleLoadOptions::OPERATOR_CHECK) &&
       !unsupported_op_names.empty()) {
     print_unsupported_ops_and_throw(unsupported_op_names);
@@ -394,24 +390,25 @@ void BytecodeDeserializer::parseMethods(
         function_name,
         codeTable,
         has_debug_handles ? (*debug_handles)[i] : IValue(),
-        function);
+        function.get());
 
-    parseOperators(codeTable, model_version, module_load_options_, function);
+    parseOperators(
+        codeTable, model_version, module_load_options_, function.get());
 
-    parseConstants(codeTable, function);
+    parseConstants(codeTable, function.get());
 
-    parseTypes(codeTable, function);
+    parseTypes(codeTable, function.get());
 
-    parseRegisterSize(codeTable, function);
+    parseRegisterSize(codeTable, function.get());
 
     auto schemaTable = // older files do not store function schema
         (model_version > 0x4L || (model_version == 0x4L && m_tuple.size() >= 3))
         ? at::optional<IValue>{m_tuple[2]}
         : at::nullopt;
-    parseFunctionSchema(function_name, schemaTable, model_version, function);
+    parseFunctionSchema(
+        function_name, schemaTable, model_version, function.get());
 
     mcu.register_function(std::move(function));
-
   }
 }
 

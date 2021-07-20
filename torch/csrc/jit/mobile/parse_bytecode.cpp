@@ -1,7 +1,7 @@
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
-#include <ATen/core/ivalue.h>
 #include <torch/custom_class_detail.h>
 
 namespace torch {
@@ -25,15 +25,13 @@ IValue expect_field(
 
 namespace mobile {
 
-namespace {
+namespace {} // namespace
 
-} // namespace
-
-void parseInstructions(const std::string& function_name,
-                       const IValue& codeTable,
-                       const IValue& debug_handles_element,
-                       std::unique_ptr<mobile::Function>& function) {
-
+void parseInstructions(
+    const std::string& function_name,
+    const IValue& codeTable,
+    const IValue& debug_handles_element,
+    mobile::Function* function) {
   const auto& ins_list =
       expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
           .toTuple()
@@ -51,13 +49,13 @@ void parseInstructions(const std::string& function_name,
         "The function names in the bytecode table and the debug info table do not match.");
     IValue debug_handles_table = debug_handles_m_tuple[1];
     debug_handles_list = (expect_field(
-        debug_handles_table,
-        "function_debug_handles",
-        BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
-        .toTuple()
-        ->elements())[0]
-        .toList()
-        .vec();
+                              debug_handles_table,
+                              "function_debug_handles",
+                              BYTECODE_INDEX_MODULE_DEBUG_HANDLES)
+                              .toTuple()
+                              ->elements())[0]
+                             .toList()
+                             .vec();
     TORCH_CHECK(
         debug_handles_list.size() == ins_list.size(),
         "The numbers of instructions and debug handles strings do not match.");
@@ -81,9 +79,7 @@ void parseInstructions(const std::string& function_name,
   }
 }
 
-void parseConstants(
-    const IValue& codeTable,
-    std::unique_ptr<mobile::Function>& function) {
+void parseConstants(const IValue& codeTable, mobile::Function* function) {
   const auto& consts_list =
       expect_field(codeTable, "constants", BYTECODE_INDEX_CONSTANT)
           .toTuple()
@@ -93,13 +89,10 @@ void parseConstants(
   }
 }
 
-void parseTypes(
-    const IValue& codeTable,
-    std::unique_ptr<mobile::Function>& function) {
-  const auto& types_list =
-      expect_field(codeTable, "types", BYTECODE_INDEX_TYPE)
-          .toTuple()
-          ->elements();
+void parseTypes(const IValue& codeTable, mobile::Function* function) {
+  const auto& types_list = expect_field(codeTable, "types", BYTECODE_INDEX_TYPE)
+                               .toTuple()
+                               ->elements();
   static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
   for (const auto& t : types_list) {
     c10::QualifiedName qn(t.toStringRef());
@@ -117,9 +110,7 @@ void parseTypes(
   }
 }
 
-void parseRegisterSize(
-    const IValue& codeTable,
-    std::unique_ptr<mobile::Function>& function) {
+void parseRegisterSize(const IValue& codeTable, mobile::Function* function) {
   const auto& register_size =
       expect_field(codeTable, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
           .toInt();

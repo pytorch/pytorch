@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 
 #include <unordered_set>
 
@@ -171,6 +173,65 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(mlm.forward(inputs), error_pattern);
 }
+
+TEST(RunTimeTest, ParseBytecode) {
+  // 1. Prepare for the bytecode. In reality it can be from a customized
+  // deserializer.
+  std::vector<IValue> instructions{
+      Tup({"STOREN", 1, 4}),
+      Tup({"DROPR", 1, 0}),
+      Tup({"MOVE", 4, 0}),
+      Tup({"JF", 5, 0}),
+      Tup({"LOAD", 2, 0}),
+      Tup({"LOAD", 3, 0}),
+      Tup({"LIST_CONSTRUCT", 0, 2}),
+      Tup({"JMP", 4, 0}),
+      Tup({"LOAD", 3, 0}),
+      Tup({"LOAD", 2, 0}),
+      Tup({"LIST_CONSTRUCT", 1, 2}),
+      Tup({"STORE", 5, 0}),
+      Tup({"DROPR", 3, 0}),
+      Tup({"DROPR", 2, 0}),
+      Tup({"MOVE", 5, 0}),
+      Tup({"RET", 0, 0}),
+  };
+  std::vector<IValue> operators; // empty for this example
+  std::vector<IValue> constants; // empty for this example
+
+  std::vector<IValue> types{"List[int]", "List[int]"};
+  auto codeTable = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", 5}});
+
+  // 2. Parse the function
+  std::string function_name("test_functoin");
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
+  parseInstructions(function_name, codeTable, IValue(), function.get());
+  parseConstants(codeTable, function.get());
+  parseTypes(codeTable, function.get());
+  parseRegisterSize(codeTable, function.get());
+
+  // 3. Prepare for inputs and run the function
+  // Note that the first input is reserved for Module object.
+  // Since this is a function test and Module object is not required,
+  // a dummy IValue (0) is added here.
+  std::vector<IValue> inputs{0, 1, 2, true};
+  function->run(inputs);
+  auto output = inputs[0].toList();
+  ASSERT_EQ(output[0], 1);
+  ASSERT_EQ(output[1], 2);
+
+  std::vector<IValue> inputs1{0, 1, 2, false};
+  function->run(inputs1);
+  auto output1 = inputs1[0].toList();
+  ASSERT_EQ(output1[0], 2);
+  ASSERT_EQ(output1[1], 1);
+}
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

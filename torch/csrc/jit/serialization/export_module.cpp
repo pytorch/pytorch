@@ -16,6 +16,7 @@
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -41,20 +42,6 @@ namespace {
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
-}
-
-static IValue Tup(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
-static IValue Table(
-    const std::vector<std::pair<std::string, IValue>>& entries) {
-  std::vector<IValue> ivalue_entries;
-  ivalue_entries.reserve(entries.size());
-  for (const auto& e : entries) {
-    ivalue_entries.push_back(Tup({e.first, e.second}));
-  }
-  return Tup(std::move(ivalue_entries));
 }
 
 std::pair<IValue, IValue> getFunctionTuple(
