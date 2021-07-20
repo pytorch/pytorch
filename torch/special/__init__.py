@@ -657,6 +657,7 @@ Computes the `multivariate log-gamma function
 where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
 
 All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
+""" + """
 
 Args:
     input (Tensor): the tensor to compute the multivariate log-gamma function
