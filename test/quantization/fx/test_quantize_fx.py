@@ -527,7 +527,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nnqd.Linear),
+                ns.call_module(nn.Linear) if is_reference else ns.call_module(nnqd.Linear),
                 None,
             ),
             (
@@ -535,7 +535,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 LinearModule,
                 (),
                 (linear_module_input,),
-                ns.call_module(nnqr.Linear if is_reference else nnq.Linear),
+                ns.call_module(nn.Linear if is_reference else nnq.Linear),
                 None,
             ),
         ]
@@ -3336,7 +3336,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def _test_quantized_add_mul_qat(self, model, expected_node_occurrence):
         qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
         mp = torch.quantization.quantize_fx.prepare_qat_fx(model, qconfig_dict)
-        print(mp)
         self.checkGraphModuleNodes(
             mp, expected_node_occurrence=expected_node_occurrence)
 
