@@ -52,9 +52,9 @@ class TestCppExtensionJIT(common.TestCase):
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     def tearDown(self):
+        super().tearDown()
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
-        super().tearDown()
 
     @classmethod
     def setUpClass(cls):
