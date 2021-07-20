@@ -364,8 +364,10 @@ add_custom_target(
 )
 add_dependencies(torch_python gen_torch_version)
 
+# Skip building this library under MacOS, since it is currently failing to build on Mac
+# Github issue #61930
 if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-  # add Android Nnapi delegate library
+  # Add Android Nnapi delegate library
   add_library(nnapi_backend SHARED
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp

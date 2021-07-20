@@ -9,10 +9,6 @@ import torch._C
 from pathlib import Path
 
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
     TEST_WITH_ASAN
