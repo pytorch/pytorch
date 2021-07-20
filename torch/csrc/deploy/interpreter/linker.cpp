@@ -29,16 +29,15 @@
  * SUCH DAMAGE.
  */
 
-#include <assert.h>
 #include <dlfcn.h>
 #include <elf.h>
-#include <errno.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <libgen.h>
-#include <limits.h>
+#include <climits>
 #include <link.h>
-#include <stdint.h>
-#include <string.h>
+#include <cstdint>
+#include <cstring>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -81,10 +80,10 @@ std::vector<std::string> split_path(const std::string& s, char delim) {
     // non-zero amount of chars
     const char* next = strchr(cur, delim);
     if (!next) {
-      result.push_back(std::string(cur, end));
+      result.emplace_back(std::string(cur, end));
       break;
     }
-    result.push_back(std::string(cur, next));
+    result.emplace_back(std::string(cur, next));
     cur = next + 1;
   }
   return result;
@@ -108,6 +107,7 @@ void replace_all(
 std::string resolve_path(const std::string& origin, const std::string& t) {
   std::string result = t;
   replace_all(result, "$ORIGIN", origin);
+  // NOLINTNEXTLINE
   char buf[PATH_MAX];
   char* resolved = realpath(result.c_str(), buf);
   if (!resolved) {
@@ -117,6 +117,7 @@ std::string resolve_path(const std::string& origin, const std::string& t) {
 }
 
 std::string resolve_origin(const std::string& so_name) {
+  // NOLINTNEXTLINE
   char origin[PATH_MAX];
   realpath(so_name.c_str(), origin);
   dirname(origin);
@@ -221,7 +222,7 @@ struct MemFile {
     fd_ = open(filename_, O_RDONLY);
     DEPLOY_CHECK(
         fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
-    struct stat s;
+    struct stat s = {0};
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
       DEPLOY_ERROR("failed to stat {}: {}", filename_, strerror(errno));
@@ -287,10 +288,12 @@ struct CustomLibraryImpl;
 
 struct TLSMemory {
   TLSMemory(std::shared_ptr<CustomLibraryImpl> file, size_t size)
+      // NOLINTNEXTLINE
       : file_(std::move(file)), mem_(malloc(size)) {}
   std::shared_ptr<CustomLibraryImpl> file_;
   void* mem_;
   ~TLSMemory() {
+    // NOLINTNEXTLINE
     free(mem_);
   }
 };
@@ -329,6 +332,7 @@ struct DeployModuleInfo {
 };
 
 extern "C" {
+// NOLINTNEXTLINE
 DeployModuleInfo __deploy_module_info;
 }
 
@@ -433,8 +437,8 @@ std::pair<const char*, std::vector<const char*>> load_needed_from_elf_file(
 // and other information in the PT_DYNAMIC segment.
 struct ElfDynamicInfo {
   std::string name_;
-  const Elf64_Dyn* dynamic_;
-  Elf64_Addr load_bias_;
+  const Elf64_Dyn* dynamic_ = nullptr;
+  Elf64_Addr load_bias_ = 0;
   const Elf64_Sym* symtab_ = nullptr;
   const char* strtab_ = nullptr;
   size_t strtab_size_ = 0;
@@ -448,12 +452,12 @@ struct ElfDynamicInfo {
   linker_dtor_function_t* fini_array_ = nullptr;
   size_t n_init_array_ = 0;
   size_t n_fini_array_ = 0;
-  size_t gnu_nbucket_;
+  size_t gnu_nbucket_ = 0;
   uint32_t* gnu_bucket_ = nullptr;
-  uint32_t* gnu_chain_;
-  uint32_t gnu_maskwords_;
-  uint32_t gnu_shift2_;
-  Elf64_Addr* gnu_bloom_filter_;
+  uint32_t* gnu_chain_ = nullptr;
+  uint32_t gnu_maskwords_ = 0;
+  uint32_t gnu_shift2_ = 0;
+  Elf64_Addr* gnu_bloom_filter_ = nullptr;
   std::string runpath_;
   std::vector<const char*> needed_;
 
@@ -697,7 +701,7 @@ at::optional<TLSIndex> SystemLibraryImpl::tls_sym(const char* name) const {
     return slow_find_tls_symbol_offset(name);
   }
 
-  struct link_map* lm = 0;
+  struct link_map* lm = nullptr;
   DEPLOY_CHECK(
       0 == dlinfo(handle_, RTLD_DI_LINKMAP, &lm), "failed to query dlinfo");
   std::cout << "TLS dlinfo LOOKUP " << lm->l_name << " " << name << " "
@@ -808,6 +812,7 @@ void resolve_needed_libraries(
       search_path.begin() + search_path_start_size, search_path.end());
 }
 
+// NOLINTNEXTLINE
 extern "C" void* __dso_handle;
 
 struct __attribute__((visibility("hidden"))) CustomLibraryImpl
@@ -853,7 +858,8 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   }
 
   void reserve_address_space() {
-    Elf64_Addr min_vaddr, max_vaddr;
+    Elf64_Addr min_vaddr = 0;
+    Elf64_Addr max_vaddr = 0;
     mapped_size_ = phdr_table_get_load_size(
         program_headers_, n_program_headers_, &min_vaddr, &max_vaddr);
     mapped_library_ = mmap(
@@ -1167,7 +1173,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     initialize();
   }
 
-  ~CustomLibraryImpl() {
+  ~CustomLibraryImpl() override {
     // std::cout << "LINKER IS UNLOADING: " << name_ << "\n";
     if (initialized_) {
       finalize();
@@ -1219,26 +1225,26 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
 
  private:
   MemFile contents_;
-  const char* data_;
-  const Elf64_Ehdr* header_;
-  const Elf64_Phdr* program_headers_;
-  const EH_Frame_HDR* eh_frame_hdr_;
-  void* eh_frame_;
-  size_t n_program_headers_;
-  void* mapped_library_;
-  size_t mapped_size_;
-  Elf64_Addr load_bias_;
-  Elf64_Dyn* dynamic_;
+  const char* data_ = nullptr;
+  const Elf64_Ehdr* header_ = nullptr;
+  const Elf64_Phdr* program_headers_ = nullptr;
+  const EH_Frame_HDR* eh_frame_hdr_ = nullptr;
+  void* eh_frame_ = nullptr;
+  size_t n_program_headers_ = 0;
+  void* mapped_library_ = nullptr;
+  size_t mapped_size_ = 0;
+  Elf64_Addr load_bias_ = 0;
+  Elf64_Dyn* dynamic_ = nullptr;
   ElfDynamicInfo dyninfo_;
   std::string name_;
-  int argc_;
-  const char** argv_;
+  int argc_ = 0;
+  const char** argv_ = nullptr;
   bool initialized_ = false;
 
-  pthread_key_t tls_key_;
-  void* tls_initalization_image_;
-  size_t tls_file_size_;
-  size_t tls_mem_size_;
+  pthread_key_t tls_key_ = 0;
+  void* tls_initalization_image_ = nullptr;
+  size_t tls_file_size_ = 0;
+  size_t tls_mem_size_ = 0;
 
   std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
 };

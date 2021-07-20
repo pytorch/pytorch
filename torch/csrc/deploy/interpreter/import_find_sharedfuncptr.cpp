@@ -5,8 +5,9 @@ using torch::deploy::CustomLibrary;
 using torch::deploy::CustomLibraryPtr;
 using torch::deploy::SystemLibrary;
 
+// NOLINTNEXTLINE
 std::vector<CustomLibraryPtr> loaded_files_;
-
+// NOLINTNEXTLINE
 static void* deploy_self = nullptr;
 
 extern "C" {
@@ -15,7 +16,7 @@ __attribute__((visibility("default"))) void deploy_set_self(void* v) {
   deploy_self = v;
 }
 
-typedef void (*dl_funcptr)(void);
+typedef void (*dl_funcptr)();
 extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
     const char* prefix,
     const char* shortname,

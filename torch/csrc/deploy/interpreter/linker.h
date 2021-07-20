@@ -18,12 +18,12 @@ struct TLSIndex {
 };
 
 struct SymbolProvider {
-  SymbolProvider() {}
+  SymbolProvider() = default;
   virtual at::optional<Elf64_Addr> sym(const char* name) const = 0;
   virtual at::optional<TLSIndex> tls_sym(const char* name) const = 0;
   SymbolProvider(const SymbolProvider&) = delete;
   SymbolProvider& operator=(const SymbolProvider&) = delete;
-  virtual ~SymbolProvider() {}
+  virtual ~SymbolProvider() = default;
 };
 
 // RAII wrapper around dlopen

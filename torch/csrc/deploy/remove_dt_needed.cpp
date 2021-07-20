@@ -1,9 +1,9 @@
 #include <elf.h>
-#include <errno.h>
+#include <cerrno>
 #include <fcntl.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -20,6 +20,7 @@
     ERROR(fmt, ##__VA_ARGS__); \
   }
 
+// NOLINTNEXTLINE
 int main(int argc, const char** argv) {
   if (argc != 3) {
     std::cout << "usage: " << argv[0] << " <input_library> <result_library>\n";
@@ -28,7 +29,7 @@ int main(int argc, const char** argv) {
   const char* filename = argv[1];
   int fd_ = open(filename, O_RDWR);
   CHECK(fd_ != -1, "failed to open {}: {}", filename, strerror(errno));
-  struct stat s;
+  struct stat s = {0};
   if (-1 == fstat(fd_, &s)) {
     close(fd_); // destructors don't run during exceptions
     ERROR("failed to stat {}: {}", filename, strerror(errno));
@@ -71,11 +72,11 @@ int main(int argc, const char** argv) {
       *w++ = e;
     }
   }
-  int nwritten = w - dynamic;
+  auto nwritten = w - dynamic;
   memset(w, 0, sizeof(Elf64_Dyn) * (entries.size() - nwritten));
 
   FILE* dst = fopen(argv[2], "w");
-  CHECK(dst != NULL, "{}: {}", argv[2], strerror(errno));
+  CHECK(dst != nullptr, "{}: {}", argv[2], strerror(errno));
   fwrite(mem, n_bytes, 1, dst);
   fclose(dst);
   munmap(mem, n_bytes);
