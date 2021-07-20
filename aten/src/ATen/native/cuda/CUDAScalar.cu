@@ -2,8 +2,6 @@
 #include <ATen/NativeFunctions.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDARTWrappers.h>
-
 
 namespace at {
 namespace native {

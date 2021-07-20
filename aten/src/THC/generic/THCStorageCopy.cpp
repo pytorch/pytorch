@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
-#include <ATen/cuda/CUDARTWrappers.h>
+#include <c10/cuda/CUDAFunctions.h>
 
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {

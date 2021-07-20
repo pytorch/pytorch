@@ -2,7 +2,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <THC/THC.h>  // for USE_MAGMA
 

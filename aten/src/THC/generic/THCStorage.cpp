@@ -4,7 +4,6 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
-#include <ATen/cuda/CUDARTWrappers.h>
 
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)

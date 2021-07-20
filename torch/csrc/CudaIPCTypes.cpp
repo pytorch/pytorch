@@ -1,6 +1,5 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <ATen/MapAllocator.h>
-#include <ATen/cuda/CUDARTWrappers.h>
 #include <map>
 #include <mutex>
 #include <random>

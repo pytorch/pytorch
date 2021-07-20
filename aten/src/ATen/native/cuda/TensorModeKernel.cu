@@ -14,7 +14,6 @@
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/native/cuda/TensorModeKernel.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
