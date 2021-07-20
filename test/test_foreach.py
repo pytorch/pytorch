@@ -7,7 +7,6 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
-from torch._six import inf, nan
 from torch.testing._internal.common_methods_invocations import \
     (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db, make_tensor)
 
@@ -375,25 +374,6 @@ class TestForeach(TestCase):
                 torch.tensor([float('inf')], device=device, dtype=dtype),
                 torch.tensor([float('inf')], device=device, dtype=dtype),
                 torch.tensor([float('nan')], device=device, dtype=dtype)
-            ],
-        )
-        self._minmax_test(op, inputs, True, 1)
-
-    @ops(foreach_minmax_op_db)
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_bfloat16=True, include_half=True))
-    def test_minmax_inf_nan(self, device, dtype, op):
-        inputs = (
-            [
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([-inf], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype)
-            ],
-            [
-                torch.tensor([-inf], device=device, dtype=dtype),
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([inf], device=device, dtype=dtype),
-                torch.tensor([nan], device=device, dtype=dtype)
             ],
         )
         self._minmax_test(op, inputs, True, 1)
