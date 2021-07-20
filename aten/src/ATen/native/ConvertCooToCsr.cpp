@@ -23,7 +23,7 @@ void convert_coo_to_csr_cpu(
     return;
   }
 
-  for (int64_t i = 0; i < data_in[0]; i++)
+  for (int64_t i = 0; i <= data_in[0]; i++)
     data_out[i] = (output_t)0;
 
   at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
