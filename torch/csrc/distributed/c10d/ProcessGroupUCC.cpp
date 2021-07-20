@@ -2,15 +2,59 @@
 
 #ifdef USE_C10D_UCC
 
+static void check_tensor(const std::vector<at::Tensor>& tensors) {
+  TORCH_CHECK(tensors.size() == 1, "ProcessGroupUCC takes 1 tensor");
+  TORCH_CHECK(tensors[0].is_contiguous(), "ProcessGroupUCC input tensor has to be contiguous");
+  TORCH_CHECK(!tensors[0].is_sparse(), "ProcessGroupUCC input tensor has to be dense");
+  // TODO: check cuda case
+}
+
 namespace c10d {
 
 ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
     int rank,
-    int size) : ProcessGroup(rank, size) {
+    int size) : ProcessGroup(rank, size), store(store) {
 }
 
-ProcessGroupUCC::~ProcessGroupUCC() {}
+ProcessGroupUCC::~ProcessGroupUCC() {
+  for (int i = 0; i < ucp_endpoints.size(); i++) {
+    ucp_ep_destroy(ucp_endpoints[i]);
+  }
+}
+
+void ProcessGroupUCC::lazyInitUCX() {
+  if (ucp_endpoints.size() > 0) {
+    return;  // already initialized
+  }
+
+  UCPContext *ucp_context = UCPContext::get();
+  ucs_status_t st;
+  ucp_address_t* local_addr;
+  size_t local_addr_len;
+
+  st = ucp_worker_get_address(ucp_context->worker, &local_addr, &local_addr_len);
+  if (st != UCS_OK) {
+    throw UCXError(std::string("Failed to get worker address: ") + ucs_status_string(st));
+  }
+  std::vector<uint8_t> val = std::vector<uint8_t>(
+      reinterpret_cast<uint8_t*>(local_addr),
+      reinterpret_cast<uint8_t*>(local_addr) + local_addr_len);
+  store->set("ucp_address:" + std::to_string(rank_), val);
+  ucp_worker_release_address(ucp_context->worker, local_addr);
+
+  ucp_endpoints.resize(size_);
+  for (int i = 0; i < size_; i++) {
+    std::vector<uint8_t> peer_addr = store->get("ucp_address:" + std::to_string(i));
+    ucp_ep_params_t ep_params;
+    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+    ep_params.address = reinterpret_cast<ucp_address_t*>(peer_addr.data());
+    st = ucp_ep_create(ucp_context->worker, &ep_params, &(ucp_endpoints[i]));
+    if (st != UCS_OK) {
+      throw UCXError(std::string("Failed to create endpoint: ") + ucs_status_string(st));
+    }
+  }
+}
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::broadcast(
     std::vector<at::Tensor>& tensors,
@@ -81,18 +125,40 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
 };
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */,
-    int /* unused */) {
+    std::vector<at::Tensor>& tensors,
+    int dstRank,
+    int tag) {
   TORCH_CHECK(false, "ProcessGroupUCC does not support send");
-};
+  // check_tensor(tensors);
+  // auto& tensor = tensors[0];
+  // lazyInit();
+
+  // ucc_coll_req_h request = comm->send_nb(
+  //     eps[dstRank],
+  //     tensor.data_ptr(),
+  //     ucs_mtype_map.at(tensor.device().type()),
+  //     tensor.numel() * tensor.element_size(),
+  //     tag);
+  // return comm->enqueue_p2p(OpType::SEND, request);
+}
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */,
-    int /* unused */) {
+    std::vector<at::Tensor>& tensors,
+    int srcRank,
+    int tag) {
   TORCH_CHECK(false, "ProcessGroupUCC does not support recv");
-};
+  // check_tensor(tensors);
+  // auto& tensor = tensors[0];
+  // lazyInit();
+
+  // ucp_tag_t ucp_tag;
+  // ucc_coll_req_h request = comm->recv_nb(
+  //     tensor.data_ptr(),
+  //     ucs_mtype_map.at(tensor.device().type()),
+  //     tensor.numel() * tensor.element_size(),
+  //     tag);
+  // return comm->enqueue_p2p(OpType::RECV, request);
+}
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
     std::vector<at::Tensor>& /* unused */,

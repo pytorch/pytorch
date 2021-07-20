@@ -4,6 +4,7 @@
 
 #include <c10d/Store.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include <c10d/UCXUtils.hpp>
 
 namespace c10d {
 
@@ -133,6 +134,11 @@ public:
 
   c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+private:
+  c10::intrusive_ptr<Store> store;
+  void lazyInitUCX();
+  std::vector<ucp_ep_h> ucp_endpoints = {};
 };
 
 } // namespace c10d
