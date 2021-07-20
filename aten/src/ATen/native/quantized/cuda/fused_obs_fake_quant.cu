@@ -92,7 +92,7 @@ __global__ void MovingAverageMinMax(
     const float* x_max,
     float* running_min,
     float* running_max,
-    const float* averaging_const,
+    const float averaging_const,
     const int size) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -103,11 +103,11 @@ __global__ void MovingAverageMinMax(
 
       float adjusted_min = ::isinf(running_min[i])
           ? curr_min
-          : (running_min[i]) + *averaging_const * (curr_min - (running_min[i]));
+          : (running_min[i]) + averaging_const * (curr_min - (running_min[i]));
 
       float adjusted_max = ::isinf(running_max[i])
           ? curr_max
-          : (running_max[i]) + *averaging_const * (curr_max - (running_max[i]));
+          : (running_max[i]) + averaging_const * (curr_max - (running_max[i]));
 
       running_min[i] = adjusted_min;
       running_max[i] = adjusted_max;
@@ -118,9 +118,9 @@ __global__ void MovingAverageMinMax(
 void _calculate_moving_average(
     const at::Tensor& x,
     const at::Tensor& observer_on,
-    const at::Tensor& averaging_constant,
     at::Tensor& running_min,
     at::Tensor& running_max,
+    const float averaging_const,
     const int64_t size,
     bool per_row_fq) {
   at::Tensor x_min, x_max;
@@ -128,7 +128,6 @@ void _calculate_moving_average(
   int64_t* observer_on_data = observer_on.data_ptr<int64_t>();
   float* running_min_data = running_min.data_ptr<float>();
   float* running_max_data = running_max.data_ptr<float>();
-  float* averaging_const = averaging_constant.data_ptr<float>();
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (per_row_fq) {
@@ -218,11 +217,11 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     const at::Tensor& x,
     const at::Tensor& observer_on,
     const at::Tensor& fake_quant_on,
-    const at::Tensor& averaging_const,
     at::Tensor& running_min,
     at::Tensor& running_max,
     at::Tensor& scale,
     at::Tensor& zero_point,
+    const double averaging_const,
     const int64_t qmin,
     const int64_t qmax,
     const int64_t ch_axis,
@@ -233,9 +232,9 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   _calculate_moving_average(
       x_contig,
       observer_on,
-      averaging_const,
       running_min,
       running_max,
+      averaging_const,
       size,
       per_row_fq);
 

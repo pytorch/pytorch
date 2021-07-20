@@ -12,9 +12,9 @@
 namespace {
 void calculate_moving_average(
     const at::Tensor& x,
-    const at::Tensor& averaging_const,
     at::Tensor& running_min,
     at::Tensor& running_max,
+    float averaging_const,
     bool per_row_fake_quant,
     int ch_axis) {
   at::Tensor x_min, x_max;
@@ -31,14 +31,13 @@ void calculate_moving_average(
   // Moving Average Min/Max observer for input tensor
   float* running_min_val = running_min.data_ptr<float>();
   float* running_max_val = running_max.data_ptr<float>();
-  float* averaging_const_val = averaging_const.data_ptr<float>();
   for (const auto i : c10::irange(x_min.numel())) {
     running_min_val[i] = std::isinf(running_min_val[i]) ? min_curr_val[i]
                                                         : running_min_val[i] +
-            *averaging_const_val * (min_curr_val[i] - running_min_val[i]);
+            averaging_const * (min_curr_val[i] - running_min_val[i]);
     running_max_val[i] = std::isinf(running_max_val[i]) ? max_curr_val[i]
                                                         : running_max_val[i] +
-            *averaging_const_val * (max_curr_val[i] - running_max_val[i]);
+            averaging_const * (max_curr_val[i] - running_max_val[i]);
   }
 
   return;
@@ -135,11 +134,11 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const at::Tensor& self,
     const at::Tensor& observer_on,
     const at::Tensor& fake_quant_on,
-    const at::Tensor& averaging_const,
     at::Tensor& running_min,
     at::Tensor& running_max,
     at::Tensor& scale,
     at::Tensor& zero_point,
+    const double averaging_const,
     const int64_t quant_min,
     const int64_t quant_max,
     const int64_t ch_axis,
@@ -150,9 +149,9 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
   if (observe) {
     calculate_moving_average(
         self,
-        averaging_const,
         running_min,
         running_max,
+        averaging_const,
         per_row_fake_quant,
         ch_axis);
   }
@@ -179,11 +178,11 @@ at::Tensor fused_moving_avg_obs_fake_quant(
     const at::Tensor& self,
     const at::Tensor& observer_on,
     const at::Tensor& fake_quant_on,
-    const at::Tensor& averaging_const,
     at::Tensor& running_min,
     at::Tensor& running_max,
     at::Tensor& scale,
     at::Tensor& zero_point,
+    const double averaging_const,
     const int64_t quant_min,
     const int64_t quant_max,
     const int64_t ch_axis,
@@ -193,11 +192,11 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       self,
       observer_on,
       fake_quant_on,
-      averaging_const,
       running_min,
       running_max,
       scale,
       zero_point,
+      averaging_const,
       quant_min,
       quant_max,
       ch_axis,
