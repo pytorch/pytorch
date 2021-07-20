@@ -18,8 +18,7 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 try:
-    import unification
-    unification
+    from unification import Var
     HAS_UNIFICATION = True
 except ImportError:
     HAS_UNIFICATION = False
@@ -827,6 +826,8 @@ class TypeCheckerTest(unittest.TestCase):
         # apply shape inference to graph and check
         # that the batch size is equal across all layers
         infer_symbolic_types(gm_static)
+        # infer_symbolic_types(gm_static)
+
         batch_sizes = []
         for n in gm_static.graph.nodes:
             assert isinstance(n.type, TensorType)
@@ -859,15 +860,13 @@ class TypeCheckerTest(unittest.TestCase):
 
         infer_symbolic_types(traced)
 
-        my_types = []
+        my_types = iter([TensorType[(2, 2, Var(8), 4)],
+                         TensorType[(2, 2, Var(8), 4)],
+                         TensorType[(2, 2, Var(8), 4)],
+                         TensorType[(2, 2, Var(8), 4)]])
 
         for n in graph.nodes:
-            my_types.append(n.type)
-
-        assert my_types[0] == my_types[1]
-        assert my_types[1] == my_types[2]
-        assert my_types[2] == my_types[3]
-
+            assert n.type == next(my_types)
 
 if __name__ == '__main__':
     unittest.main()

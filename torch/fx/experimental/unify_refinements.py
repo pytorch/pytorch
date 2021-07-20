@@ -1,11 +1,11 @@
 from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.tensor_type import TensorType
-from copy import deepcopy
 
 try:
     from unification import unify, Var  # type: ignore[import]
 except ImportError:
     pass
+
 
 def infer_symbolic_types(traced):
     """
@@ -17,6 +17,7 @@ def infer_symbolic_types(traced):
     r.refine()
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)
+
 
 def convert_eq(list_of_eq):
     """
@@ -64,15 +65,19 @@ def substitute_all_types(graph, mapping):
     till reaching a fixed point. If the input and output graph
     are the same, we converge.
     """
-    old_graph = deepcopy(graph)
-    while True:
-        for n in graph.nodes:
-            n.type = substitute_solution_one_type(mapping, n.type)
-        if check_for_type_equality(old_graph, graph):
-            break
-        else:
-            old_graph = deepcopy(graph)
+    flag = True
+    while flag:
+        flag = False
+        for k in mapping:
+            old_mapping_val = mapping[k]
+            if mapping[k] in mapping.keys():
+                new_key = mapping[k]
+                mapping[k] = mapping[new_key]
+            if old_mapping_val != mapping[k]:
+                flag = True
 
+    for n in graph.nodes:
+        n.type = substitute_solution_one_type(mapping, n.type)
 
 def check_for_type_equality(g1, g2):
     """
