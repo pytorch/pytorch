@@ -51,7 +51,7 @@ namespace torch { namespace autograd {
   PyObject* PyDefaultSavedVariableHooks::unpack_hook_ = nullptr;
 
   void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
-    TORCH_CHECK(!pack_hook_ && unpack_hook_,
+    TORCH_CHECK(!pack_hook_ && !unpack_hook_,
         "Setting default hooks but they have already been set. "
         "Hint: only one pair of hooks is allowed at a time.");
     pack_hook_ = pack_hook.release().ptr();
