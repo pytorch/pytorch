@@ -111,17 +111,23 @@ def add_inference_rule(n: Node):
 
     (new_t1, new_t2) = broadcast_types(t1, t2)
 
-    if new_t1 != t1:
-        n.args[0].broadcast = True  # type:ignore[attr-defined]
+    if new_t1 != t1 or new_t2 != t2:
+        n.meta['broadcast'] = True
+        n.meta[str(n.args[0])] = new_t1
+        n.meta[str(n.args[0])] = new_t2
 
-    if new_t2 != t2:
-        n.args[1].broadcast = True  # type:ignore[attr-defined]
+    # Todo: maybe figure out that broadcasting definitely did not happen?
+    else:
+        n.meta['broadcast'] = False
 
-    n.args[0].type = new_t1
-    n.args[1].type = new_t2
+    new_t1 = t1 if not n.meta['broadcast'] else new_t1
+    new_t2 = t2 if not n.meta['broadcast'] else new_t2
 
     if is_consistent(new_t1, new_t2):
-        # we return the more precise type
+        # we return the less precise type because
+        # broadcasting may have happened
+        # for operands with shape [1,2,Dyn] and [1,2,1]
+        # we have to assign the node [1,2,Dyn]
         if is_more_precise(new_t1, new_t2):
             n.type = new_t2
         else:
@@ -501,8 +507,6 @@ class GraphTypeChecker:
         - adaptiveavgpool2d
         - linear
         """
-        n.broadcast = False  # type:ignore[attr-defined]
-
         if n.type is None:
             n.type = Dyn
 
@@ -543,8 +547,6 @@ def first_one(n: Node):
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
 @register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
-@register_refinement_rule(torch.add)
-@register_refinement_rule(operator.add)
 def all_eq(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
@@ -553,6 +555,23 @@ def all_eq(n: Node):
         args2 = n.type.__args__
         return [Equality(args1[i], args2[i]) for i in range(len(args1))]
 
+@register_refinement_rule(torch.add)
+@register_refinement_rule(operator.add)
+def add_eq(n: Node):
+    res = []
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        arg_type1 = n.args[0].type
+        arg_type2 = n.args[0].type
+        if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
+            args1 = arg_type1.__args__
+            args2 = arg_type2.__args__
+            args3 = n.type.__args__
+            r = []
+            for x, y, z in zip(args1, args2, args3):
+                if args1 == args2:
+                    r.append(Equality(x, z))
+            res = r
+    return res
 
 @register_refinement_rule(torch.nn.MaxPool2d)
 def first_two(n: Node):
