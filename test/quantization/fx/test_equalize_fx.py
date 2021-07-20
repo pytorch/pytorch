@@ -729,6 +729,7 @@ class TestEqualizeFx(QuantizationTestCase):
             equalized_and_quantized_output = equalized_and_quantized(x)
             self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
 
+    @skipIfNoFBGEMM
     def test_selective_equalization(self):
         """ Tests that we are able to run numeric suite on the equalized model
         and construct a valid equalization_qconfig_dict equalizing only the top

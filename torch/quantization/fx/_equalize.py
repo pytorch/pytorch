@@ -811,7 +811,9 @@ def selctive_equalization_with_numeric_suite(
     prepare_custom_config_dict: Dict[str, Any] = None,
     convert_custom_config_dict: Dict[str, Any] = None,
 ) -> QuantizedGraphModule:
-    """ Selectively equalizes the given float model with the following steps:
+    """ Selectively equalizes the given float model and returns a equalized and
+    quantized model with the following steps:
+
       1. Quantize the float model
       2. Run the Numeric Suite between the float and quantized model to obtain the
          SQNR for each layer
