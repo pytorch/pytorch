@@ -648,7 +648,7 @@ multigammaln = _add_docstr(_special.special_multigammaln,
 multigammaln(input, p, *, out=None) -> Tensor
 
 Computes the `multivariate log-gamma function
-<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
+<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_ with dimension
 :math:`p` element-wise, given by
 
 .. math::
@@ -674,4 +674,4 @@ Example::
     >>> torch.special.multigammaln(a, 2)
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
-""")
+""".format(**common_args))
