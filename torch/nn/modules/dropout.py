@@ -215,8 +215,8 @@ class FeatureAlphaDropout(_DropoutNd):
             in-place
 
     Shape:
-        - Input: :math:`(N, C, D, H, W)`
-        - Output: :math:`(N, C, D, H, W)` (same shape as input)
+        - Input: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)`.
+        - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input).
 
     Examples::
 
