@@ -56,7 +56,8 @@ class CIFlowConfig:
     def gen_root_job(self) -> None:
         conditions = [
             f"github.event_name == '{self.trigger_action}'",
-            f"env.GITHUB_ACTOR == '{self.trigger_actor}'",
+            # Once we're ready, we can enable the trigger_actor check for probot
+            # f"env.GITHUB_ACTOR == '{self.trigger_actor}'",
         ] + [
             f"contains(github.event.pull_request.labels.*.name, '{label}')"
             for label in self.labels
