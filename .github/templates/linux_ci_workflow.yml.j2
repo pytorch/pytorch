@@ -177,6 +177,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
@@ -199,6 +200,7 @@ jobs:
           if-no-files-found: error
           path:
             artifacts.zip
+      {%- endif %}
       - name: Clean up docker images
         if: always()
         run: |
@@ -235,7 +237,6 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    if: !{{ not build_only }}
     needs:
       - calculate-docker-image
       - build
@@ -373,6 +374,7 @@ jobs:
           docker system prune -af
 {% endblock %}
 {%- endif -%}
+{%- if not is_libtorch %}
 {% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -428,6 +430,7 @@ jobs:
         run: |
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endblock %}
+{%- endif -%}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
