@@ -57,6 +57,7 @@ class IrParser {
   };
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     if (init_registry_) {
       registerJitOperator();
@@ -67,6 +68,7 @@ class IrParser {
   // Fuses pointwise ops with loop unrolling (factor = 4).
   std::unique_ptr<Fusion> parse() {
     auto fusion = std::make_unique<Fusion>();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     FusionGuard fg(fusion.get());
     auto block = graph_->block();
 
@@ -544,6 +546,7 @@ class IrParser {
     if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<float>(val)) {
         cg_val = new Float(ival.value());
       } else {
@@ -555,6 +558,7 @@ class IrParser {
                    static_cast<c10::TypePtr>(IntType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<int>(val)) {
         cg_val = new Int(ival.value());
       } else {
@@ -566,6 +570,7 @@ class IrParser {
                    static_cast<c10::TypePtr>(BoolType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (auto ival = constant_as<bool>(val)) {
         cg_val = new Bool(ival.value());
       } else {
@@ -608,7 +613,9 @@ class IrParser {
       Symbol,
       std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> jit_reduction_op_registry_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool init_registry_;
 };
 
@@ -617,7 +624,9 @@ std::unordered_map<
     std::vector<
         std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool IrParser::init_registry_ = true;
 
 } // namespace

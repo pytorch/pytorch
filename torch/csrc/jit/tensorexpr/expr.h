@@ -187,12 +187,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     base_handle_->set_name_hint(name_hint);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(const std::string& name_hint,
       const std::vector<const Expr*>& dims,
       Dtype dtype,
       const Expr* initializer = nullptr)
       : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Buf(Var* var,
       std::vector<const Expr*> dims,
       Dtype dtype,
@@ -247,9 +249,17 @@ class TORCH_API BufHandle : public ExprHandle {
       Dtype dtype)
       : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
 
+  BufHandle(const std::vector<ExprHandle>& dims, Dtype dtype)
+      : ExprHandle(Buf::make("_", dims, dtype)) {}
+
+  explicit BufHandle(Dtype dtype) : ExprHandle(Buf::make("_", {}, dtype)) {}
+
   explicit BufHandle(const Buf* node) : ExprHandle(node) {}
   const Buf* node() const {
     return static_cast<const Buf*>(ExprHandle::node());
+  }
+  Buf* node() {
+    return static_cast<Buf*>(ExprHandle::node());
   }
 
   template <typename... Ts>

@@ -218,13 +218,12 @@ TEST(BoundsInference, _5) {
   LoopNest l({b});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithTail(loops[0], 16, &outer, &inner, &tail);
+  LoopNest::splitWithTail(loops[0], 16, &inner, &tail);
+  For* outer = loops[0];
 
   {
     // Verify inferred bounds for the outer loop
@@ -534,7 +533,7 @@ TEST(BoundsInference, CacheReads) {
   auto bounds_info_before = inferBounds(l.root_stmt());
 
   Stmt* j_loop = l.getLoopStmtsFor(B)[1];
-  l.cacheAccesses(A->buf(), "A_local", j_loop);
+  LoopNest::cacheAccesses(A->buf(), "A_local", j_loop);
 
   auto bounds_info_after = inferBounds(l.root_stmt());
 
@@ -729,11 +728,13 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *outer, *inner, *tail;
+  For *inner, *tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
-  l.splitWithTail(l.getLoopStmtsFor(A)[0], 5, &outer, &inner, &tail);
+  For* outer = l.getLoopStmtsFor(A)[0];
+  // `outer` loop get transformed to the outer loop after splitting.
+  LoopNest::splitWithTail(outer, 5, &inner, &tail);
 
   using namespace analysis;
 

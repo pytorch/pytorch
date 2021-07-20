@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -65,10 +66,9 @@ void FuseWithListUnpack(Node* n) {
 
   TORCH_INTERNAL_ASSERT(n->outputs().size() == 1);
   // 1. Add internal input "_outputs" to node, so that later symbolic function
-  // conversion
-  //    is aware of the number of outputs.
+  //    conversion is aware of the number of outputs.
   // 2. Add the exact number of outputs to n, copy metadata and replace uses of
-  // listUnpack outputs.
+  //    listUnpack outputs.
   n->i_(
       Symbol::fromQualString("attr::_outputs"),
       static_cast<int64_t>(listUnpack_node->outputs().size()));
@@ -168,31 +168,29 @@ static void ReplaceAddWithConcat(Block* b) {
 // before the pass
 // graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
 //   %1 : None = prim::Constant()
-//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %2 : int[] = aten::size(%x.1)
 //   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
 //   %5 : int[] = prim::ListConstruct(%a.1, %b.1)
-//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
-//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1)
 //
 // after the pass:
 // graph(%x.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
 //   %1 : None = prim::Constant()
-//   %2 : int[] = aten::size(%x.1) # <string>:7:9
+//   %2 : int[] = aten::size(%x.1)
 //   %7 : Tensor = onnx::Constant[value={0}]()
 //   %8 : Tensor = onnx::Gather(%2, %7)
 //   %9 : Tensor = onnx::Constant[value={1}]()
 //   %10 : Tensor = onnx::Gather(%2, %9)
 //   %a.1 : int, %b.1 : int = prim::ListUnpack(%2)
 //   %5 : int[] = prim::ListConstruct(%8, %10)
-//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1) #
-//   test/onnx/test_pytorch_onnx_onnxruntime.py:1757:23 return (%6)
+//   %6 : Tensor = aten::new_zeros(%x.1, %5, %1, %1, %1, %1)
 static void fuseListAndListUnpack(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       fuseListAndListUnpack(child_block);
     }
     if (it->kind() == prim::ListUnpack) {
-      for (size_t i = 0; i < it->outputs().size(); i++) {
+      for (const auto i : c10::irange(it->outputs().size())) {
         auto output = it->outputs().at(i);
         if (it->inputs().size() == 1 &&
             it->input()->node()->kind() != prim::ListConstruct &&
@@ -221,8 +219,11 @@ static void fuseListAndListUnpack(Block* b) {
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
   FuseWithListUnpack(graph->block());
+  GRAPH_DUMP("After FuseWithListUnpack: ", graph);
   ReplaceAddWithConcat(graph->block());
+  GRAPH_DUMP("After ReplaceAddWithConcat: ", graph);
   fuseListAndListUnpack(graph->block());
+  GRAPH_DUMP("After fuseListAndListUnpack: ", graph);
 }
 
 } // namespace jit

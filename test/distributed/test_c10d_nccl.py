@@ -158,7 +158,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
             raise unittest.SkipTest("No GPUs available, skipping test")
         self._test_default_store_timeout("nccl")
 
-
 class ProcessGroupNCCLNoGPUTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -422,6 +421,30 @@ class ProcessGroupNCCLTest(TestCase):
             allgather_base(output_t, tensor)
 
     @requires_nccl()
+    def test_reduce_scatter_base_basics(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same size as output size times world size"):
+            input_t = torch.tensor([self.rank]).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=input_t.dtype).cuda(device_id)
+            # fails the check because output_t is not correctly sized
+            reduce_scatter_base(output_t, input_t)
+
+        # anticpate an error
+        with self.assertRaisesRegex(RuntimeError, "input tensor must be the same type as the outut tensor."):
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
+            output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(device_id)
+            # fails the check because the dtype is different
+            reduce_scatter_base(output_t, tensor)
+
+    @requires_nccl()
     def test_reduce_scatter_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
@@ -497,6 +520,26 @@ class ProcessGroupNCCLTest(TestCase):
             expected = torch.tensor([float(math.factorial(virtual_world_size))])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
+
+    @requires_nccl()
+    def test_reduce_scatter_base_ops(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce_scatter_base(output_t, input_t):
+            work = pg._reduce_scatter_base(output_t, input_t)
+            work.wait()
+
+        device_id = self.rank % self.num_gpus
+        # reduce_scatter_base is GPU number agnostic.
+        # Each rank contribute one tensor regardless of GPU counts
+        output_t = torch.empty([1]).cuda(device_id)
+        tensor = torch.arange(self.world_size, dtype=output_t.dtype).cuda(device_id)
+
+        reduce_scatter_base(output_t, tensor)
+
+        # Verification
+        self.assertEqual(output_t[0], self.rank * self.world_size)
 
     @requires_nccl()
     def test_barrier(self):
@@ -1114,7 +1157,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
                 )
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                    self.assertEqualIgnoreType(i.grad, j.grad)
+                    self.assertEqualIgnoreType(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
             # Shuffle the input so that DDP input is different
             torch.manual_seed(1337 + iteration)
@@ -1757,7 +1800,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
             for i, j in zip(model.parameters(), ddp_model.parameters()):
                 self.assertTrue(i.grad is not None)
                 self.assertTrue(j.grad is not None)
-                self.assertEqual(i.grad, j.grad)
+                self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()
@@ -1956,6 +1999,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @unittest.skip("Frequently times out see https://github.com/pytorch/pytorch/issues/58920")
     def test_nccl_errors_blocking_abort(self):
         self._test_nccl_errors_blocking(lambda: os.abort())
 

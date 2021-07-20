@@ -166,7 +166,7 @@ def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
 
 class TestGatherRanges(serial.SerializedTestCase):
     @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_gather_ranges(self, boarders_and_data, gc, dc):
         boarders, data = boarders_and_data
 
@@ -187,7 +187,7 @@ class TestGatherRanges(serial.SerializedTestCase):
         )
 
     @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
         data, ranges, lengths, _ = tensor_splits
 

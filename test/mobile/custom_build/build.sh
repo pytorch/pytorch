@@ -66,10 +66,11 @@ run_custom_build_with_static_dispatch() {
   # by the JIT runtime. The intermediate ops will be automatically kepted
   # by the linker as they are statically referenced by the static dispatch
   # code, for which we can bypass the registration.
+  # We don't set '-DSTATIC_DISPATCH_BACKEND=CPU' explicitly to test automatic
+  # fallback to static dispatch when '-DOP_DEPENDENCY' is omitted.
   BUILD_ROOT="${LIBTORCH_BUILD_ROOT}" \
     "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-DSTRIP_ERROR_MESSAGES" \
-    -DSTATIC_DISPATCH_BACKEND=CPU \
     -DSELECTED_OP_LIST="${ROOT_OPS}"
 }
 

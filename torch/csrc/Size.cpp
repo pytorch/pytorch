@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/Size.h>
 
 #include <string>
@@ -22,7 +23,7 @@ PyObject * THPSize_New(const torch::autograd::Variable& var)
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
   if (!self) throw python_error();
 
-  for (int64_t i = 0; i < var.dim(); ++i) {
+  for (const auto i : c10::irange(var.dim())) {
     PyObject *py_size_tensor = THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
     if (!py_size_tensor) throw python_error();
     PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
@@ -191,7 +192,6 @@ PyTypeObject THPSizeType = {
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -43,6 +44,18 @@ template<typename scalar_vals_t, int n> struct TensorListScalarListMetadata
   scalar_vals_t scalar_vals[depth_to_max_tensors_scalarlist[n-1]];
   unsigned char block_to_tensor[depth_to_max_blocks[n-1]];
   int block_to_chunk[depth_to_max_blocks[n-1]];
+};
+
+// note(mkozuki): `n` of 96 and `scalar_vals_t` of `c10::complex<double>`
+// violates the cuda kernel argument size limitation of 4kb.
+// 80 is a number that does not violate this limitation.
+template<> struct TensorListScalarListMetadata<c10::complex<double>, 1>
+{
+  void* addresses[1][80];
+  int numel_for_tensor[80];
+  c10::complex<double> scalar_vals[80];
+  unsigned char block_to_tensor[depth_to_max_blocks[1-1]];
+  int block_to_chunk[depth_to_max_blocks[1-1]];
 };
 
 template<typename T, typename U, typename... ArgTypes>

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 
+#include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -163,10 +164,8 @@ void Method::run(Stack& stack) const {
   /* if the metadata dict doesn't contain "model_name", copy the metadata and
   set the value of "model_name" as name() */
   std::unordered_map<std::string, std::string> copied_metadata =
-      owner_->metadata();
-  if (owner_->metadata().find("model_name") == owner_->metadata().end()) {
-    copied_metadata["model_name"] = owner_->name();
-  }
+      owner_->getMetadata();
+
   if (observer) {
     observer->onEnterRunMethod(
         copied_metadata, instance_key, function_->name());
@@ -184,6 +183,18 @@ void Method::run(Stack& stack) const {
     if (observer) {
       observer->onExitRunMethod(instance_key);
     }
+    // This exception must be caught first as it derived from c10::Error
+  } catch (c10::BackendRuntimeException& e) {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    e.pushDebugHandle(function_->getExceptionDebugHandle());
+    // symbolicate all handles
+    e.add_context(owner_->getDebugTable().getSourceDebugString(
+        e.getDebugHandles(), getTopModuleTypeName(*owner_)));
+#endif
+    if (observer) {
+      observer->onFailRunMethod(instance_key, e.what());
+    }
+    TORCH_RETHROW(e);
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     auto debug_string = owner_->getDebugTable().getSourceDebugString(

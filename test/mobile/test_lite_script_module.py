@@ -7,6 +7,12 @@ import inspect
 
 from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_quantization import (
+    AnnotatedSingleLayerLinearModel,
+    TwoLayerLinearModel,
+    AnnotatedNestedModel
+)
+from torch.testing._internal.common_quantization import QuantizationLiteTestCase
 
 class TestLiteScriptModule(TestCase):
 
@@ -430,6 +436,56 @@ class TestLiteScriptModule(TestCase):
             error_message = f"{e}"
         self.assertTrue('test_lite_script_module.py\", line {}'.format(lineno + 8) in error_message)
         self.assertTrue('top(FooTest5)' in error_message)
+
+
+class TestLiteScriptQuantizedModule(QuantizationLiteTestCase):
+
+    def test_single_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedSingleLayerLinearModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_two_layer(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=TwoLayerLinearModel)
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_annotated_nested(self):
+        input = torch.rand(2, 5, dtype=torch.float)
+        quantized_model = self._create_quantized_model(model_class=AnnotatedNestedModel, qengine="qnnpack")
+        self._compare_script_and_mobile(model=quantized_model, input=input)
+
+    def test_quantization_example(self):
+
+        # From the example in Static Quantization section of https://pytorch.org/docs/stable/quantization.html
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.quant = torch.quantization.QuantStub()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.relu = torch.nn.ReLU()
+                self.dequant = torch.quantization.DeQuantStub()
+
+            def forward(self, x):
+                x = self.quant(x)
+                x = self.conv(x)
+                x = self.relu(x)
+                x = self.dequant(x)
+                return x
+
+        model_fp32 = M()
+
+        model_fp32.eval()
+        model_fp32.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+        model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+        model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+        input_fp32 = torch.randn(4, 1, 4, 4)
+        model_fp32_prepared(input_fp32)
+        model_int8 = torch.quantization.convert(model_fp32_prepared)
+
+        input = torch.randn(4, 1, 4, 4)
+        self._compare_script_and_mobile(model=model_int8, input=input)
+
 
 if __name__ == '__main__':
     run_tests()

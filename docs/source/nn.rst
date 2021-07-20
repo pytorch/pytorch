@@ -22,6 +22,7 @@ These are the basic building blocks for graphs:
 
     ~parameter.Parameter
     ~parameter.UninitializedParameter
+    ~parameter.UninitializedBuffer
 
 Containers
 ----------------------------------
@@ -48,6 +49,7 @@ Global Hooks For Module
     register_module_forward_pre_hook
     register_module_forward_hook
     register_module_backward_hook
+    register_module_full_backward_hook
 
 .. currentmodule:: torch
 
@@ -112,6 +114,7 @@ Padding Layers
 
     nn.ReflectionPad1d
     nn.ReflectionPad2d
+    nn.ReflectionPad3d
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
@@ -145,12 +148,14 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.GELU
     nn.Sigmoid
     nn.SiLU
+    nn.Mish
     nn.Softplus
     nn.Softshrink
     nn.Softsign
     nn.Tanh
     nn.Tanhshrink
     nn.Threshold
+    nn.GLU
 
 Non-linear Activations (other)
 ------------------------------
@@ -243,6 +248,7 @@ Dropout Layers
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout
+    nn.FeatureAlphaDropout
 
 Sparse Layers
 -------------
@@ -371,6 +377,7 @@ From the ``torch.nn.utils`` module
     remove_weight_norm
     spectral_norm
     remove_spectral_norm
+    skip_init
 
 Parametrizations implemented using the new parametrization functionality
 in :func:`torch.nn.utils.parameterize.register_parametrization`.

@@ -10,6 +10,8 @@
 #include <ATen/record_function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 
+#include <torch/csrc/jit/backends/backend_exception.h>
+
 namespace torch {
 namespace jit {
 char const* toString(OpCode op);
@@ -230,6 +232,10 @@ bool InterpreterState::run(Stack& stack) {
         default:
           AT_ERROR(toString(inst.op), " is invalid.");
       }
+      // This exception must be caught first as it derived from c10::Error
+    } catch (c10::BackendRuntimeException& e) {
+      exception_pc_ = pc;
+      TORCH_RETHROW(e);
     } catch (c10::Error& error) {
       // Reason for catching and rethrowing the error is so that we can
       // set the exception pc that is queried later

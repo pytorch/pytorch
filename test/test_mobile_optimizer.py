@@ -254,12 +254,12 @@ class TestOptimizer(TestCase):
         FileCheck().check_count("prim::CallMethod[name=\"forward\"]", 2, exactly=True) \
                    .run(bn_no_forward_scripted_module.foo.graph)
 
-        bn_fold_no_foward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, preserved_methods=['foo'])
-        self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_foward_scripted_module)), 1)
+        bn_fold_no_forward_scripted_module = optimize_for_mobile(bn_no_forward_scripted_module, preserved_methods=['foo'])
+        self.assertEqual(len(torch.jit.export_opnames(bn_fold_no_forward_scripted_module)), 1)
         bn_input = torch.rand(1, 1, 6, 6)
         torch.testing.assert_allclose(
             bn_no_forward_scripted_module.foo(bn_input),
-            bn_fold_no_foward_scripted_module.foo(bn_input),
+            bn_fold_no_forward_scripted_module.foo(bn_input),
             rtol=1e-2,
             atol=1e-3)
 
@@ -384,13 +384,8 @@ class TestOptimizer(TestCase):
         # Expected to be False since no bundled inputs methods were added
         self.assertFalse(
             hasattr(module_optim_bi_not_preserved, 'get_all_bundled_inputs') or
-            hasattr(module_optim_bi_not_preserved, 'get_num_bundled_inputs') or
-            hasattr(module_optim_bi_not_preserved, 'run_on_bundled_input')
+            hasattr(module_optim_bi_not_preserved, 'get_num_bundled_inputs')
         )
-
-        # We expect an exception here
-        with self.assertRaises(AttributeError):
-            module_optim_bi_not_preserved.run_on_bundled_input(0)
 
         # Add bundled inputs methods to the module
         torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
@@ -401,12 +396,8 @@ class TestOptimizer(TestCase):
         # All of the bundled inputs methods were preserved
         self.assertTrue(
             hasattr(module_optim_bi_preserved, 'get_all_bundled_inputs') and
-            hasattr(module_optim_bi_preserved, 'get_num_bundled_inputs') and
-            hasattr(module_optim_bi_preserved, 'run_on_bundled_input')
+            hasattr(module_optim_bi_preserved, 'get_num_bundled_inputs')
         )
-
-        # We do not expect an exception here
-        module_optim_bi_preserved.run_on_bundled_input(0)
 
         bundled_input = module_optim_bi_preserved.get_all_bundled_inputs()[0]
         module_optim_bi_preserved(*bundled_input)

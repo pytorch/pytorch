@@ -18,8 +18,8 @@
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
-  - [Previewing changes](#previewing-changes)
-    - [Submitting changes for review](#submitting-changes-for-review)
+  - [Previewing changes locally](#previewing-changes-locally)
+  - [Previewing documentation on PRs](#previewing-documentation-on-prs)
   - [Adding documentation tests](#adding-documentation-tests)
 - [Profiling with `py-spy`](#profiling-with-py-spy)
 - [Managing multiple build trees](#managing-multiple-build-trees)
@@ -77,11 +77,17 @@ https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
-1. Uninstall all existing PyTorch installs:
+1. Uninstall all existing PyTorch installs. You may need to run `pip
+uninstall torch` multiple times. You'll know `torch` is fully
+uninstalled when you see `WARNING: Skipping torch as it is not
+installed`. (You should only have to `pip uninstall` a few times, but
+you can always `uninstall` with `timeout` or in a loop if you're feeling
+lazy.)
+
+
 ```bash
-conda uninstall pytorch
-pip uninstall torch
-pip uninstall torch # run this command twice
+conda -y uninstall pytorch
+yes | pip uninstall torch
 ```
 
 2. Clone a copy of PyTorch from source:
@@ -96,7 +102,7 @@ cd pytorch
 ```bash
 git pull --rebase
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 ```
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
@@ -134,8 +140,10 @@ For example:
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
 if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
-In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
-and `python setup.py clean`. Then you can install in `develop` mode again.
+In case you want to reinstall, make sure that you uninstall PyTorch
+first by running `pip uninstall torch` until you see `WARNING: Skipping
+torch as it is not installed`; next run `python setup.py clean`. After
+that, you can install in `develop` mode again.
 
 ### Tips and Debugging
 * A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
@@ -157,15 +165,15 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   git submodule deinit -f .
   git clean -xdf
   python setup.py clean
-  git submodule update --init --recursive # very important to sync the submodules
-  python setup.py develop                 # then try running the command again
+  git submodule update --init --recursive --jobs 0 # very important to sync the submodules
+  python setup.py develop                          # then try running the command again
   ```
   4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
   experiment with some environment variables, you can pass them into the command:
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+* If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
   - If you encountered error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
@@ -340,7 +348,7 @@ in `test/test_jit.py`. Your command would be:
 python test/test_jit.py TestJit.test_Sequential
 ```
 
-The `hypothesis` library must be installed to run the tests. `mypy` is
+The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
 an optional dependency, and `pytest` may help run tests more selectively.
 All these packages can be installed with `conda` or `pip`.
 
@@ -431,12 +439,12 @@ is part of the test suite `ContainerAliasingTest` in the file
 ### Run Specific CI Jobs
 
 You can generate a commit that limits the CI to only run a specific job by using
-`tools/explicit_ci_jobs.py` like so:
+`tools/testing/explicit_ci_jobs.py` like so:
 
 ```bash
 # --job: specify one or more times to filter to a specific job + its dependencies
 # --make-commit: commit CI changes to git with a message explaining the change
-python tools/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
+python tools/testing/explicit_ci_jobs.py --job binary_linux_manywheel_3_6m_cpu_devtoolset7_nightly_test --make-commit
 
 # Make your changes
 
@@ -520,7 +528,7 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
 
-### Previewing changes
+### Previewing changes locally
 
 To view HTML files locally, you can open the files in your web browser. For example,
 navigate to `file:///your_pytorch_folder/docs/build/html/index.html` in a web
@@ -555,42 +563,11 @@ rsync -az me@my_machine:/path/to/pytorch/docs/build/html build
 rsync -az me@my_machine:/path/to/pytorch/docs/cpp/build/html cpp/build
 ```
 
-#### Submitting changes for review
+### Previewing documentation on PRs
 
-It is helpful when submitting a PR that changes the docs to provide a rendered
-version of the result. If your change is small, you can add a screenshot of the
-changed docs to your PR.
-
-If your change to the docs is large and affects multiple pages, you can host
-the docs yourself with the following steps, then add a link to the output in your
-PR. These instructions use GitHub pages to host the docs
-you have built. To do so, follow [these steps](https://guides.github.com/features/pages/)
-to make a repo to host your changed documentation.
-
-GitHub pages expects to be hosting a Jekyll generated website which does not work
-well with the static resource paths used in the PyTorch documentation. To get around
-this, you must add an empty file called `.nojekyll` to your repo.
-
-```bash
-cd your_github_pages_repo
-touch .nojekyll
-git add .
-git commit
-git push
-```
-
-Then, copy built documentation and push the changes:
-
-```bash
-cd your_github_pages_repo
-cp -r ~/my_pytorch_path/docs/build/html/* .
-git add .
-git commit
-git push
-```
-
-Then you should be able to see the changes at your_github_username.github.com/your_github_pages_repo.
-
+PyTorch will host documentation previews at `https://docs-preview.pytorch.org/<pr number>/` once the
+`pytorch_python_doc_build` GitHub Actions job has completed on your PR. You can visit that page directly
+or find its link in the automated Dr. CI comment on your PR.
 
 ### Adding documentation tests
 
@@ -875,13 +852,13 @@ object. Example of usage:
 
 ```
 $ gdb python
-GNU gdb (Ubuntu 9.2-0ubuntu1~20.04) 9.2
+GNU gdb (GDB) 9.2
 [...]
 (gdb) # insert a breakpoint when we call .neg()
-(gdb) break at::native:neg
-No source file named at::native.
+(gdb) break at::Tensor::neg
+Function "at::Tensor::neg" not defined.
 Make breakpoint pending on future shared library load? (y or [n]) y
-Breakpoint 1 (at::native:neg) pending.
+Breakpoint 1 (at::Tensor::neg) pending.
 
 (gdb) run
 [...]
@@ -891,18 +868,20 @@ Breakpoint 1 (at::native:neg) pending.
 tensor([1., 2., 3., 4.], dtype=torch.float64)
 >>> t.neg()
 
-Breakpoint 1, at::native::neg (self=...) at [...]/pytorch/aten/src/ATen/native/UnaryOps.cpp:520
-520     Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
-(gdb) # the default repr of 'self' is not very useful
-(gdb) p self
-$1 = (const at::Tensor &) @0x7ffff72ed780: {impl_ = {target_ = 0x5555559df6e0}}
-(gdb) torch-tensor-repr self
-Python-level repr of self:
+Thread 1 "python" hit Breakpoint 1, at::Tensor::neg (this=0x7ffb118a9c88) at aten/src/ATen/core/TensorBody.h:3295
+3295    inline at::Tensor Tensor::neg() const {
+(gdb) # the default repr of 'this' is not very useful
+(gdb) p this
+$1 = (const at::Tensor * const) 0x7ffb118a9c88
+(gdb) p *this
+$2 = {impl_ = {target_ = 0x55629b5cd330}}
+(gdb) torch-tensor-repr *this
+Python-level repr of *this:
 tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. Howevever, auto-loadings is disabled by default, because of security reasons:
+[.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
 
 ```
 $ gdb
@@ -1120,7 +1099,8 @@ have more checks than older versions. In our CI, we run clang-tidy-6.0.
    uncommitted changes). Changes are picked up based on a `git diff` with the
    given revision:
   ```bash
-  python tools/clang_tidy.py -d build -p torch/csrc --diff 'HEAD~1'
+  git diff HEAD~1 > pr.diff
+  python tools/linter/clang_tidy --paths torch/csrc --diff-file "pr.diff"
   ```
 
 Above, it is assumed you are in the PyTorch root folder. `path/to/build` should

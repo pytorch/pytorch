@@ -90,7 +90,7 @@ Tensor arithmetic_scalar(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_output.extents()),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -146,7 +146,7 @@ Tensor& arithmetic_scalar_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_self.extents()),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
@@ -216,7 +216,7 @@ Tensor arithmetic_tensor(
           },
           shader_descriptor,
           v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_output.extents()),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
@@ -283,7 +283,7 @@ Tensor& arithmetic_tensor_(
           },
           shader_descriptor,
           v_self.extents(),
-          context->gpu().adapter->local_work_group_size(),
+          adaptive_work_group_size(v_self.extents()),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(

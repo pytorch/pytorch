@@ -5,9 +5,11 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
-#include <memory>
 
+#include <array>
+#include <atomic>
 #include <functional>
+#include <memory>
 
 namespace c10 {
 class TORCH_API OperatorHandle;
@@ -400,12 +402,6 @@ class TORCH_API RecordFunctionCallback {
     return *this;
   }
 
-  RecordFunctionCallback& setShouldRun(
-      bool(*should_run)(const RecordFunctionCallback&)) {
-    should_run_ = should_run;
-    return *this;
-  }
-
   bool needsInputs() const {
     return needs_inputs_;
   }
@@ -438,7 +434,6 @@ class TORCH_API RecordFunctionCallback {
   friend class CallbackManager;
   StartCallback start_;
   EndCallback end_;
-  bool(*should_run_)(const RecordFunctionCallback&) = nullptr;
   double sampling_prob_ = 1.0;
   std::array<bool, static_cast<size_t>(RecordScope::NUM_SCOPES)> scopes_ = {};
   bool needs_inputs_ = false;
@@ -502,9 +497,97 @@ class TORCH_API RecordFunctionCallback {
 
 typedef uint64_t CallbackHandle;
 
+
+struct GlobalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+ private:
+  std::atomic<bool> enabled;
+ public:
+  CallbackHandle handle;
+
+  GlobalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), enabled(true), handle(h) {}
+
+  // Copying is fine despite std::atomic<bool> not being supposed to
+  // have a copy/move constructor: adding & removing callbacks is
+  // already not thread-safe.
+  GlobalRecordFunctionCallbacksEntry(
+      const GlobalRecordFunctionCallbacksEntry& rhs)
+      : callback(rhs.callback), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(const GlobalRecordFunctionCallbacksEntry& rhs) {
+    callback = rhs.callback;
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  GlobalRecordFunctionCallbacksEntry(
+      GlobalRecordFunctionCallbacksEntry&& rhs) noexcept
+      : callback(std::move(rhs.callback)), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(GlobalRecordFunctionCallbacksEntry&& rhs) noexcept {
+    callback = std::move(rhs.callback);
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool disable() {
+    bool expected = true;
+    // NOTE: we use sequentially consistent access here and in
+    // enable() because updating further atomic flags depends on this
+    // operation.
+    return enabled.compare_exchange_strong(expected, false);
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool enable() {
+    bool expected = false;
+    return enabled.compare_exchange_strong(expected, true);
+  }
+
+  // Read the flag. Note that it is neither necessary nor correct to
+  // check this before calling enable() or disable().
+  bool isEnabled() const {
+    return enabled.load(std::memory_order_relaxed);
+  }
+};
+
+// It is unnecessary to use atomic operations for enabling
+// thread-local function callbacks. Moreover, it prevents saving to
+// ThreadLocalState because std::atomic is non-copyable.
+struct ThreadLocalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+  bool enabled = true;
+  CallbackHandle handle;
+
+  ThreadLocalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), handle(h) {}
+
+  bool disable() {
+    auto old = enabled;
+    enabled = false;
+    return old != enabled;
+  }
+
+  bool enable() {
+    auto old = enabled;
+    enabled = true;
+    return old != enabled;
+  }
+
+  bool isEnabled() const {
+    return enabled;
+  }
+};
+
 // Holds pairs (callbacks, unique_id)
-typedef std::vector<std::pair<RecordFunctionCallback, CallbackHandle>>
-    RecordFunctionCallbacks;
+using GlobalRecordFunctionCallbacks =
+  std::vector<GlobalRecordFunctionCallbacksEntry>;
+using ThreadLocalRecordFunctionCallbacks =
+  std::vector<ThreadLocalRecordFunctionCallbacksEntry>;
 
 /**
  * addThreadLocalCallback adds a thread local callback to run with RecordFunction,
@@ -541,6 +624,18 @@ TORCH_API CallbackHandle addGlobalCallback(
  * no other code can run simultaneously
  */
 TORCH_API void removeCallback(CallbackHandle handle);
+
+/**
+ * Prevent the given callback from executing. If handle is invalid,
+ * does nothing.
+ */
+TORCH_API void disableCallback(CallbackHandle handle);
+
+/**
+ * Allow the given callback, previously disabled with disableCallback, to
+ * execute again. If handle is invalid, does nothing.
+ */
+TORCH_API void reenableCallback(CallbackHandle handle);
 
 /**
  * hasGlobalCallbacks returns whether there're global callbacks
@@ -593,7 +688,7 @@ class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
 struct TORCH_API RecordFunctionTLS {
   // Thread local vector of callbacks, holds pairs (callbacks, unique_id);
   // must be sorted in increasing handles order
-  RecordFunctionCallbacks sorted_tls_callbacks_;
+  ThreadLocalRecordFunctionCallbacks sorted_tls_callbacks_;
 
   bool tls_record_function_enabled_ = true;
 

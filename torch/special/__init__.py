@@ -2,7 +2,7 @@ import sys
 
 import torch
 from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
-from torch._torch_docs import common_args
+from torch._torch_docs import common_args, multi_dim_common
 
 Tensor = torch.Tensor
 
@@ -35,6 +35,41 @@ Example::
     tensor([  -inf, 0.0000, 0.3466])
 """)
 
+psi = _add_docstr(_special.special_psi,
+                  r"""
+psi(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.special.digamma`.
+""")
+
+digamma = _add_docstr(_special.special_digamma,
+                      r"""
+digamma(input, *, out=None) -> Tensor
+
+Computes the logarithmic derivative of the gamma function on `input`.
+
+.. math::
+    \digamma(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
+""" + r"""
+Args:
+    input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
+
+.. note::  This function is similar to SciPy's `scipy.special.digamma`.
+
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
+           Previously it returned `NaN` for `0`.
+
+Example::
+
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.digamma(a)
+    tensor([-0.5772, -1.9635])
+
+""".format(**common_args))
+
 gammaln = _add_docstr(_special.special_gammaln,
                       r"""
 gammaln(input, *, out=None) -> Tensor
@@ -56,6 +91,38 @@ Example::
     >>> torch.special.gammaln(a)
     tensor([ 0.5724,  0.0000, -0.1208])
 
+""".format(**common_args))
+
+polygamma = _add_docstr(_special.special_polygamma,
+                        r"""
+polygamma(n, input, *, out=None) -> Tensor
+
+Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
+:math:`n \geq 0` is called the order of the polygamma function.
+
+.. math::
+    \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
+
+.. note::
+    This function is implemented only for nonnegative integers :math:`n \geq 0`.
+""" + """
+Args:
+    n (int): the order of the polygamma function
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 0.5])
+    >>> torch.special.polygamma(1, a)
+    tensor([1.64493, 4.9348])
+    >>> torch.special.polygamma(2, a)
+    tensor([ -2.4041, -16.8288])
+    >>> torch.special.polygamma(3, a)
+    tensor([ 6.4939, 97.4091])
+    >>> torch.special.polygamma(4, a)
+    tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
 erf = _add_docstr(_special.special_erf,
@@ -99,6 +166,30 @@ Example::
 
     >>> torch.special.erfc(torch.tensor([0, -1., 10.]))
     tensor([ 1.0000, 1.8427,  0.0000])
+""".format(**common_args))
+
+erfcx = _add_docstr(_special.special_erfcx,
+                    r"""
+erfcx(input, *, out=None) -> Tensor
+
+Computes the scaled complementary error function for each element of :attr:`input`.
+The scaled complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfcx}(x) = e^{x^2} \mathrm{erfc}(x)
+""" + r"""
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.special.erfcx(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 5.0090, 0.0561])
 """.format(**common_args))
 
 erfinv = _add_docstr(_special.special_erfinv,
@@ -158,6 +249,13 @@ Example::
     >>> torch.special.logit(a, eps=1e-6)
     tensor([-0.9466,  2.6352,  0.6131, -1.7169,  0.6261])
 """.format(**common_args))
+
+logsumexp = _add_docstr(_special.special_logsumexp,
+                        r"""
+logsumexp(input, dim, keepdim=False, *, out=None)
+
+Alias for :func:`torch.logsumexp`.
+""".format(**multi_dim_common))
 
 expit = _add_docstr(_special.special_expit,
                     r"""
@@ -272,6 +370,71 @@ Example::
     tensor([2.7726, 2.1972, 1.3863])
 """.format(**common_args))
 
+xlogy = _add_docstr(_special.special_xlogy,
+                    r"""
+xlogy(input, other, *, out=None) -> Tensor
+
+Computes ``input * log(other)`` with the following cases.
+
+.. math::
+    \text{out}_{i} = \begin{cases}
+        \text{NaN} & \text{if } \text{other}_{i} = \text{NaN} \\
+        0 & \text{if } \text{input}_{i} = 0.0 \\
+        \text{input}_{i} * \log{(\text{other}_{i})} & \text{otherwise}
+    \end{cases}
+
+Similar to SciPy's `scipy.special.xlogy`.
+
+""" + r"""
+
+Args:
+    input (Number or Tensor) : Multiplier
+    other (Number or Tensor) : Argument
+
+.. note:: At least one of :attr:`input` or :attr:`other` must be a tensor.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.zeros(5,)
+    >>> y = torch.tensor([-1, 0, 1, float('inf'), float('nan')])
+    >>> torch.special.xlogy(x, y)
+    tensor([0., 0., 0., 0., nan])
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([3, 2, 1])
+    >>> torch.special.xlogy(x, y)
+    tensor([1.0986, 1.3863, 0.0000])
+    >>> torch.special.xlogy(x, 4)
+    tensor([1.3863, 2.7726, 4.1589])
+    >>> torch.special.xlogy(2, y)
+    tensor([2.1972, 1.3863, 0.0000])
+""".format(**common_args))
+
+i0 = _add_docstr(_special.special_i0,
+                 r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
+""".format(**common_args))
+
 i0e = _add_docstr(_special.special_i0e,
                   r"""
 i0e(input, *, out=None) -> Tensor
@@ -284,9 +447,198 @@ for each element of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
 Keyword args:
     {out}
+
 Example::
     >>> torch.special.i0e(torch.arange(5, dtype=torch.float32))
     tensor([1.0000, 0.4658, 0.3085, 0.2430, 0.2070])
+""".format(**common_args))
+
+i1 = _add_docstr(_special.special_i1,
+                 r"""
+i1(input, *, out=None) -> Tensor
+Computes the first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.i1(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.5652, 1.5906, 3.9534, 9.7595])
+""".format(**common_args))
+
+i1e = _add_docstr(_special.special_i1e,
+                  r"""
+i1e(input, *, out=None) -> Tensor
+Computes the exponentially scaled first order modified Bessel function of the first kind (as defined below)
+for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \exp(-|x|) * i1(x) =
+        \exp(-|x|) * \frac{(\text{input}_{i})}{2} * \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!) * (k+1)!}
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.i1e(torch.arange(5, dtype=torch.float32))
+    tensor([0.0000, 0.2079, 0.2153, 0.1968, 0.1788])
+""".format(**common_args))
+
+ndtr = _add_docstr(_special.special_ndtr,
+                   r"""
+ndtr(input, *, out=None) -> Tensor
+Computes the area under the standard Gaussian probability density function,
+integrated from minus infinity to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtr}(x) = \frac{1}{\sqrt{2 \pi}}\int_{-\infty}^{x} e^{-\frac{1}{2}t^2} dt
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtr(torch.tensor([-3., -2, -1, 0, 1, 2, 3]))
+    tensor([0.0013, 0.0228, 0.1587, 0.5000, 0.8413, 0.9772, 0.9987])
+""".format(**common_args))
+
+ndtri = _add_docstr(_special.special_ndtri,
+                    r"""
+ndtri(input, *, out=None) -> Tensor
+Computes the argument, x, for which the area under the Gaussian probability density function
+(integrated from minus infinity to x) is equal to :attr:`input`, elementwise.
+
+.. math::
+    \text{ndtri}(p) = \sqrt{2}\text{erf}^{-1}(2p - 1)
+
+.. note::
+    Also known as quantile function for Normal Distribution.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> torch.special.ndtri(torch.tensor([0, 0.25, 0.5, 0.75, 1]))
+    tensor([   -inf, -0.6745,  0.0000,  0.6745,     inf])
+""".format(**common_args))
+
+log1p = _add_docstr(_special.special_log1p,
+                    r"""
+log1p(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.log1p`.
+""")
+
+sinc = _add_docstr(_special.special_sinc,
+                   r"""
+sinc(input, *, out=None) -> Tensor
+
+Computes the normalized sinc of :attr:`input.`
+
+.. math::
+    \text{out}_{i} =
+    \begin{cases}
+      1, & \text{if}\ \text{input}_{i}=0 \\
+      \sin(\pi \text{input}_{i}) / (\pi \text{input}_{i}), & \text{otherwise}
+    \end{cases}
+""" + r"""
+
+Args:
+    {input}
+
+Keyword args:
+    {out}
+
+Example::
+    >>> t = torch.randn(4)
+    >>> t
+    tensor([ 0.2252, -0.2948,  1.0267, -1.1566])
+    >>> torch.special.sinc(t)
+    tensor([ 0.9186,  0.8631, -0.0259, -0.1300])
+""".format(**common_args))
+
+round = _add_docstr(_special.special_round,
+                    r"""
+round(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.round`.
+""")
+
+log_softmax = _add_docstr(_special.special_log_softmax,
+                          r"""
+log_softmax(input, dim, *, dtype=None) -> Tensor
+Computes softmax followed by a logarithm.
+
+While mathematically equivalent to log(softmax(x)), doing these two
+operations separately is slower and numerically unstable. This function
+is computed as:
+
+.. math::
+    \text{log\_softmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
+""" + r"""
+
+Args:
+    input (Tensor): input
+    dim (int): A dimension along which log_softmax will be computed.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is cast to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+
+Example::
+    >>> t = torch.ones(2, 2)
+    >>> torch.special.log_softmax(t, 0)
+    tensor([[-0.6931, -0.6931],
+            [-0.6931, -0.6931]])
+""")
+
+zeta = _add_docstr(_special.special_zeta,
+                   r"""
+zeta(input, other, *, out=None) -> Tensor
+
+Computes the Hurwitz zeta function, elementwise.
+
+.. math::
+    \zeta(x, q) = \sum_{k=0}^{\infty} \frac{1}{(k + q)^x}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor corresponding to `x`.
+    other (Tensor): the input tensor corresponding to `q`.
+
+.. note::
+    The Riemann zeta function corresponds to the case when `q = 1`
+
+Keyword args:
+    {out}
+
+Example::
+    >>> x = torch.tensor([2., 4.])
+    >>> torch.special.zeta(x, 1)
+    tensor([1.6449, 1.0823])
+    >>> torch.special.zeta(x, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.0823])
+    >>> torch.special.zeta(2, torch.tensor([1., 2.]))
+    tensor([1.6449, 0.6449])
 """.format(**common_args))

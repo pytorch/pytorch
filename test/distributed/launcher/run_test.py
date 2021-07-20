@@ -126,7 +126,6 @@ class ElasticLaunchTest(unittest.TestCase):
             "--master_addr=localhost",
             f"--master_port={master_port}",
             "--node_rank=0",
-            "--use_env",
             path("bin/test_script.py"),
             f"--touch_file_dir={self.test_dir}",
         ]
@@ -147,6 +146,35 @@ class ElasticLaunchTest(unittest.TestCase):
         args = [
             f"--nnodes={nnodes}",
             f"--nproc_per_node={nproc_per_node}",
+            "--rdzv_backend=etcd",
+            f"--rdzv_endpoint={self._etcd_endpoint}",
+            f"--rdzv_id={run_id}",
+            "--monitor_interval=1",
+            "--start_method=fork",
+            "--no_python",
+        ]
+
+        script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
+
+        with self.assertRaises(ValueError):
+            # --no_python cannot be used with --module
+            launch.main(args + ["--module"] + script_args)
+
+        launch.main(args + script_args)
+
+        # make sure all the workers ran
+        # each worker touches a file with its global rank as the name
+        self.assertSetEqual(
+            {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
+        )
+
+    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test incompatible with tsan")
+    def test_launch_user_script_default_nproc(self):
+        run_id = str(uuid.uuid4().int)
+        nnodes = 1
+        world_size = 1
+        args = [
+            f"--nnodes={nnodes}",
             "--rdzv_backend=etcd",
             f"--rdzv_endpoint={self._etcd_endpoint}",
             f"--rdzv_id={run_id}",
@@ -344,6 +372,28 @@ class ElasticLaunchTest(unittest.TestCase):
             f"--nnodes={nnodes}",
             f"--nproc_per_node={nproc_per_node}",
             "--standalone",
+            "--monitor_interval=1",
+            "--start_method=fork",
+            path("bin/test_script.py"),
+            f"--touch_file_dir={self.test_dir}",
+        ]
+        launch.main(args)
+
+        # make sure all the workers ran
+        # each worker touches a file with its global rank as the name
+        self.assertSetEqual(
+            {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
+        )
+
+    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test incompatible with tsan")
+    def test_launch_run_path(self):
+        nnodes = 1
+        nproc_per_node = 4
+        world_size = nnodes * nproc_per_node
+        args = [
+            "--run_path",
+            f"--nnodes={nnodes}",
+            f"--nproc_per_node={nproc_per_node}",
             "--monitor_interval=1",
             "--start_method=fork",
             path("bin/test_script.py"),

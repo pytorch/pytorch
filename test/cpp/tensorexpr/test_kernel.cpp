@@ -577,6 +577,74 @@ TEST_F(Kernel, CatWoConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getCatWoConditionals() = false;
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(Kernel, OptimizeConditionals) {
+  bool old_cat_wo_conditionals = getCatWoConditionals();
+  bool old_opt_conditionals = getOptConditionals();
+  getCatWoConditionals() = false;
+  getOptConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, strides=[3, 1], device=cpu),
+            %b : Float(5, 7, strides=[7, 1], device=cpu),
+            %c : Float(5, 9, strides=[9, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(5, 19, strides=[19, 1]) = aten::cat(%inputs, %dim)
+        %t : Float(5, 19, strides=[19, 1]) = aten::relu(%r)
+        return (%t))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK-NOT: Allocate
+# CHECK-NOT: Free)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto b = at::rand({5, 7}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto c = at::rand({5, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::relu(at::cat({a, b, c}, 1));
+
+  std::vector<at::Tensor> inputs = {a, b, c};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+
+  // Check sizes
+  CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  CHECK_EQ(o.dtype(), ref.dtype());
+  size_t num_el = 1;
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    num_el *= ref.sizes()[idx];
+  }
+
+  // Check the contents
+  for (size_t i = 0; i < num_el; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+  getOptConditionals() = old_opt_conditionals;
+  getCatWoConditionals() = old_cat_wo_conditionals;
 }
 
 namespace {
@@ -607,17 +675,12 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_SumAllAxes) {
-  // [zero-dim tensors]
-  // NNC does not yet handle zero-dim tensors. aten::sum with no axis
-  // input returns a zero-dim tensors, so these tests must be disabled
-  // until we add support for zero-dim tensors.
-
+TEST_F(Kernel, SumAllAxes) {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : ${dtype}
-        %2 : Tensor = aten::sum(%0, %1)
+        %2 : ${out_dtype}(requires_grad=0, device=cpu) = aten::sum(%0, %1)
         return (%2))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -625,6 +688,11 @@ TEST_F(Kernel, DISABLED_SumAllAxes) {
     KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
+    if (scalar_type == ScalarType::Undefined) {
+      env.s("out_dtype", "Float");
+    } else {
+      env.s("out_dtype", "Double");
+    }
     const auto graph_string = format(graph_template, env);
 
     auto graph = std::make_shared<Graph>();
@@ -740,13 +808,13 @@ TEST_F(Kernel, SumOneAxis) {
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], requires_grad=0, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}], requires_grad=0, device=cpu) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -1036,17 +1104,16 @@ TEST_F(Kernel, Softmax4D) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
-  // see : [zero-dim tensors]
+TEST_F(Kernel, InlineProducerIntoReduction) {
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
-        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=7]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        %4 : Double(device=cpu) = aten::sum(%2, %3)
         return (%4))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -1077,9 +1144,7 @@ TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
-  // see : [zero-dim tensors]
-
+TEST_F(Kernel, InlineReductionIntoConsumer) {
   KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
@@ -1089,8 +1154,8 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=6]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
-        %5 : Float(5, 3, strides=[3, 1]) = aten::mul(%2, %4)
+        %4 : Float(device=cpu) = aten::sum(%2, %3)
+        %5 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%2, %4)
         return (%5))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -1281,6 +1346,47 @@ TEST_F(Kernel, CodegenInspection) {
   ASSERT_TRUE(
       !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
 #endif
+}
+
+Tensor* lowerNanToNum(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto e = Compute(
+      "custom_nan_to_num",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        auto load = input_buf.load(indices);
+        return IfThenElse::make(Cast::make(kBool, isnan(load)), 0.0f, load);
+      });
+  return e;
+}
+
+TEST_F(Kernel, CustomLowering) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+          %none : NoneType = prim::Constant()
+          %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+          return (%y)
+)IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
+      {aten::nan_to_num, lowerNanToNum}};
+  TensorExprKernel k(graph, lowerings);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check that our custom lowering is actually used
+  torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
+  torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
 } // namespace jit

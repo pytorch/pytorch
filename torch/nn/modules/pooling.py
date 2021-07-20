@@ -105,7 +105,7 @@ class MaxPool2d(_MaxPoolNd):
                                                    \text{stride[1]} \times w + n)
         \end{aligned}
 
-    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
@@ -179,7 +179,7 @@ class MaxPool3d(_MaxPoolNd):
                                                              \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
         \end{aligned}
 
-    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
     It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
@@ -573,8 +573,8 @@ class AvgPool2d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
@@ -654,8 +654,9 @@ class AvgPool3d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] -
@@ -1078,11 +1079,16 @@ class _AdaptiveAvgPoolNd(Module):
 class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     r"""Applies a 1D adaptive average pooling over an input signal composed of several input planes.
 
-    The output size is H, for any input size.
+    The output size is :math:`L_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size H
+        output_size: the target output size :math:`L_{out}`.
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
+          :math:`L_{out}=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5
@@ -1109,6 +1115,11 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
                      Can be a tuple (H, W) or a single H for a square image H x H.
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1})` or :math:`(C, S_{0}, S_{1})`, where
+          :math:`S=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7
@@ -1143,6 +1154,11 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
                      D, H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1}, S_{2})` or :math:`(C, S_{0}, S_{1}, S_{2})`,
+          where :math:`S=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7x9

@@ -44,7 +44,7 @@ class ProtoDBTransaction : public Transaction {
     // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
     }

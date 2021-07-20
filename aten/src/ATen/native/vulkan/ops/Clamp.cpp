@@ -297,6 +297,14 @@ Tensor& sigmoid_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(sigmoid_));
 }
 
+Tensor tanh(const Tensor& self) {
+  return ops::activation(self, VK_KERNEL(tanh));
+}
+
+Tensor& tanh_(Tensor& self) {
+  return ops::activation_(self, VK_KERNEL(tanh_));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
@@ -310,6 +318,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("hardtanh_"), hardtanh_);
   m.impl(TORCH_SELECTIVE_NAME("sigmoid"), sigmoid);
   m.impl(TORCH_SELECTIVE_NAME("sigmoid_"), sigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("tanh"), tanh);
+  m.impl(TORCH_SELECTIVE_NAME("tanh_"), tanh_);
   m.impl(TORCH_SELECTIVE_NAME("relu"), relu);
   m.impl(TORCH_SELECTIVE_NAME("relu_"), relu_);
 }
