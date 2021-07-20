@@ -540,7 +540,3 @@ torch::deploy::InterpreterImpl*
 new_interpreter_impl(void) {
   return new ConcreteInterpreterImpl();
 }
-
-// with -nostdlib passed to linker, we need to make it thing
-// this symbol will exist, otherwise it emits a relocation error.
-__attribute__((weak)) void* __dso_handle;
