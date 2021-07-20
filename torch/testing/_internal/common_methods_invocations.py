@@ -6292,6 +6292,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo('topk',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_topk,
            skips=(
