@@ -235,9 +235,11 @@ Interpreter::~Interpreter() {
   if (handle_) {
     // ensure python uninitialization runs before we dlclose the library
     pImpl_.reset();
+#ifndef FBCODE_CAFFE2
     auto deploy_flush_python_libs =
         (void (*)(void))dlsym(handle_, "deploy_flush_python_libs");
     deploy_flush_python_libs();
+#endif
     dlclose(handle_);
   }
 }
