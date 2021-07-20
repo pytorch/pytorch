@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
@@ -671,7 +672,7 @@ void Conv2dOpContext::conv2d_sliding_window(
         },
         shader,
         global_size,
-        context->gpu().adapter->local_work_group_size(),
+        adaptive_work_group_size(global_size),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.image(
@@ -753,7 +754,7 @@ void Conv2dOpContext::conv2d_winograd_2_3(
         },
         VK_KERNEL(transform_winograd_2_3_sh),
         v_input_winograd.extents(),
-        context->gpu().adapter->local_work_group_size(),
+        adaptive_work_group_size(v_input_winograd.extents()),
         v_input_winograd.image(
             command_buffer,
             vTensor::Stage::Compute,
@@ -778,6 +779,12 @@ void Conv2dOpContext::conv2d_winograd_2_3(
       },
     };
 
+    uvec3 global_size = {
+      safe_downcast<uint32_t>(out_w_units),
+      safe_downcast<uint32_t>(out_h_units),
+      v_output.extents().data[2u],
+    };
+
     context->dispatch(
         command_buffer,
         {
@@ -788,12 +795,8 @@ void Conv2dOpContext::conv2d_winograd_2_3(
           VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
         },
         VK_KERNEL(conv2d_winograd_2_3),
-        {
-          safe_downcast<uint32_t>(out_w_units),
-          safe_downcast<uint32_t>(out_h_units),
-          v_output.extents().data[2u],
-        },
-        context->gpu().adapter->local_work_group_size(),
+        global_size,
+        adaptive_work_group_size(global_size),
         v_output.image(
             command_buffer,
             vTensor::Stage::Compute,
