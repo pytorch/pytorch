@@ -69,10 +69,9 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
           x_max_data[i],
           qmin,
           qmax,
-          symmetric_quant,
-          /* preserve sparsity */ // Set preserve_sparsity to true for
-                                  // symmetric quantization.
-          false /* force power of two*/);
+          symmetric_quant, // preserve sparsity
+          false // force power of two
+      );
       scale[i] = x_qparams.scale;
       zero_point[i] = x_qparams.zero_point;
 #else
@@ -82,8 +81,9 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
           x_max_data[i],
           qmin,
           qmax,
-          symmetric_quant, /* preserve sparsity */
-          false /* force power of two*/);
+          symmetric_quant, // preserve sparsity
+          false // force power of two
+      );
       scale[i] = x_qparams.scale;
       zero_point[i] = x_qparams.zero_point;
 #endif
@@ -99,8 +99,9 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
         inp_running_max.item().toFloat(),
         qmin,
         qmax,
-        symmetric_quant, /* bool preserve_sparsity */
-        false /* force power of two*/);
+        symmetric_quant, // bool preserve_sparsity
+        false // force power of two
+    );
 
     scale[0] = x_qparams.scale;
     zero_point[0] = x_qparams.zero_point;
@@ -112,8 +113,9 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
         inp_running_max.item().toFloat(),
         qmin,
         qmax,
-        symmetric_quant, /* bool preserve_sparsity */
-        false /* force power of two*/);
+        symmetric_quant, // bool preserve_sparsity
+        false // force power of two
+    );
     scale[0] = x_qparams.scale;
     zero_point[0] = x_qparams.zero_point;
 #endif
