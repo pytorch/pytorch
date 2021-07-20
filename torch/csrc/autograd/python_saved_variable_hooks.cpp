@@ -45,7 +45,9 @@ namespace torch { namespace autograd {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   PyObject* PyDefaultSavedVariableHooks::pack_hook_ = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   PyObject* PyDefaultSavedVariableHooks::unpack_hook_ = nullptr;
 
   void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
@@ -59,6 +61,8 @@ namespace torch { namespace autograd {
       Py_XDECREF(pack_hook_);
       Py_XDECREF(unpack_hook_);
     }
+    pack_hook_ = nullptr;
+    unpack_hook_ = nullptr;
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
