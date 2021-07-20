@@ -42,7 +42,7 @@ Tensor zeros_like_except(const Tensor& y, int64_t dim) {
 Tensor do_cumulative_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {
     Tensor left = y.slice(dim, 0, -1);
     Tensor right = y.slice(dim, 1);
-    
+
     return ((left + right) * dx).cumsum(dim) / 2.;
 }
 

@@ -10919,113 +10919,87 @@ Alias for :func:`torch.trapezoid`.
 
 add_docstr(torch.cumulative_trapezoid,
            r"""
-cumulative_trapezoid(y, x, *, dim=-1) -> Tensor
+cumulative_trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 
-Cumulatively estimates the integral of a given function (i.e. :math:`\int f(x)\,dx`),
-by applying the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_
-along the dimension specified by `dim`, with spacing specified by :attr:`x` or :attr:`dx`.
+Cumulatively computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_
+along ::attr:`dim`. By default the spacing between elements is assumed to be 1, but
+:attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
+used to specify arbitrary spacing along :attr:`dim`.
 
 For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
 and this function is that, :func:`torch.trapezoid` returns a value for each integration,
 where as this function returns a cumulative value for every spacing within the integration.
 
 Arguments:
-    y (Tensor): The values of the function to integrate
-    x (Tensor): The points at which the function :attr:`y` is sampled.
-        If `x` is not in ascending order, intervals on which it is decreasing
-        contribute negatively to the cumulative integral (i.e., the convention
-        :math:`\int_a^b f = -\int_b^a f` is followed). If consecutive values within :attr:`x`
-        are the same, the interval contributes 0 to the cumulative integral. If :attr:`x`'s dimension
-        does not match that of :attr:`y`, it will attempt to broadcast `x` to match :attr:`y`.
-    dim (int): The dimension along which to integrate.
-        By default, use the last (inner-most) dimension.
+    y (Tensor): Values to use when computing the trapezoidal rule.
+    x (Tensor): If specified, defines spacing between values as specified above.
 
-Returns:
-    A Tensor with the same shape as the input, containing the result of
-    cumulative integration of `y` along `dim`. Each element of the returned tensor
-    represents the cumulative estimates of the integral
-    :math:`\int y\,dx` along `dim`.
+Keyword arguments:
+    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+        are specified then this defaults to 1. Effectively multiplies the result by its value.
+    dim (int): The dimension along which to compute the trapezoidal rule.
+        The last (inner-most) dimension by default.
 
 Examples::
+    >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
+    >>> y = torch.tensor([1, 5, 10])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([3., 10.5])
 
-    >>> # Cumulatively compute the integral of y with 1-D tensors of coordinates.
-    >>> y = torch.tensor([10, 10, 20])
-    >>> x = torch.tensor([0, 1, 2])
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> (1 + 5) / 2
+    3.0
+    >>> (1 + 10 + 10) / 2
+    10.5
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with constant spacing of 2
+    >>> # NOTE: the result is the same as before, but multiplied by 2
+    >>> torch.cumulative_trapezoid(y, dx=2)
+    tensor([6., 21.])
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with arbitrary spacing
+    >>> x = torch.tensor([1, 3, 6])
     >>> torch.cumulative_trapezoid(y, x)
-    tensor(10., 25.)
+    tensor([6., 28.5])
 
-    >>> # Cumulatively compute the integral of y with 2-D tensors of coordinates.
-    >>> y = torch.tensor([[10, 10, 20], [0, 10, 20]])
-    >>> x = torch.tensor([[0, 1, 2], [0, 10, 11]])
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> ((3 - 1) * (1 + 5)) / 2
+    6.0
+    >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
+    28.5
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 matrix
+    >>> y = torch.arange(9).reshape(3, 3)
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([[ 0.5,  2.],
+            [ 3.5,  8.],
+            [ 6.5, 14.]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each column of the matrix
+    >>> torch.cumulative_trapezoid(y, dim=0)
+    tensor([[ 1.5,  2.5,  3.5],
+            [ 6.0,  8.0, 10.0]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with the same arbitrary spacing
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([1, 3, 6])
     >>> torch.cumulative_trapezoid(y, x)
-    tensor([[10., 25.],
-            [50., 65.]])
+    tensor([[2., 5.],
+            [2., 5.],
+            [2., 5.]])
 
-    >>> # Cumulatively compute the integral of y with 2-D tensors of coordinates,
-    >>> # but use dim=0 to integrate over the outer dimension.
-    >>> y = torch.tensor([[0, 10, 20], [10, 20, 40], [10, 20, 40]])
-    >>> x = torch.tensor([[0, 0, 0], [1, 1, 1], [2, 2, 2]])
-    >>> torch.cumulative_trapezoid(y, x, dim=0)
-    tensor([[5., 15., 30.],
-            [15., 35., 70.]])
-
-    >>> # Cumulatively compute the integral of y with 3-D tensors of coordinates.
-    >>> y = torch.tensor(np.arange(18).reshape((2,3,3)))
-    >>> x = torch.tensor(np.arange(18).reshape((2,3,3)))
-    >>> x
-    tensor([[[ 0,  1,  2],
-             [ 3,  4,  5],
-             [ 6,  7,  8]],
-            [[ 9, 10, 11],
-             [12, 13, 14],
-             [15, 16, 17]]])
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with different arbitrary spacing per row
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
     >>> torch.cumulative_trapezoid(y, x)
-    tensor([[[  0.5,  2. ]
-             [  3.5,  8. ]
-             [  6.5, 14. ]],
-             [[ 9.5, 20. ]
-              [12.5, 26. ]
-              [15.5, 32. ]]])
-
-.. function:: cumulative_trapezoid(y, *, dx=1, dim=-1) -> Tensor
-
-Alternatively, you can pass in a scalar argument :attr:`dx`,
-which represents the uniform distance between the sample points.
-
-Arguments:
-    y (Tensor): The values of the function to integrate
-
-Keyword args:
-    dx (float): The distance between points at which `y` is sampled.
-        Currently, only float/double types are supported.
-    dim (int): The dimension along which to integrate.
-        By default, use the last (inner-most) dimension.
-
-Returns:
-    A Tensor with the same shape as the input, containing the result of
-    cumulative integration of `y` along `dim`. Each element of the returned tensor
-    represents the cumulative estimates of the integral
-    :math:`\int y\,dx` along `dim`.
-
-Examples::
-
-    >>> # By default, dx = 1.0.
-    >>> y = torch.tensor([0, 10, 20])
-    >>> torch.trapezoid(y)
-    tensor([5., 20.])
-    >>> torch.cumulative_trapezoid(y, dx=2.0)
-    tensor([10., 40.])
-
-    >>> # The same dx (spacing) is used for each integration.
-    >>> y = torch.tensor([[0, 10, 20], [0, 20, 40]])
-    >>> torch.cumulative_trapezoid(y, dx=2.0)
-    tensor([[10., 40.],
-            [20., 80.])
-
-    >>> # You can also specify dim while using dx.
-    >>> y = torch.tensor([[0, 10, 20], [0, 20, 40]])
-    >>> torch.cumulative_trapezoid(y, dx=2.0, dim=0)
-    tensor([[ 0., 30., 60.]])
+    tensor([[1., 2.],
+            [2., 4.],
+            [3., 6.]])
 """)
 
 add_docstr(torch.repeat_interleave,
