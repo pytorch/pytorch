@@ -14,6 +14,22 @@ from torch.testing._internal.common_methods_invocations import \
 # which should ensure we test the vectorized and non-vectorized
 # kernel code paths.
 N_values = [20, 23] if not TEST_WITH_SLOW else [23, 30, 300]
+Scalars = (
+    random.randint(1, 10),
+    1.0 - random.random(),
+    True,
+    complex(1.0 - random.random(), 1.0 - random.random()),
+)
+
+def getScalarLists(N):
+    return (
+        ("int", [random.randint(0, 9) + 1 for _ in range(N)]),
+        ("float", [1.0 - random.random() for _ in range(N)]),
+        ("complex", [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)]),
+        ("bool", [True for _ in range(N)]),
+        ("mixed", [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)]),
+        ("mixed", [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]),
+    )
 
 _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 
@@ -157,13 +173,7 @@ class TestForeach(TestCase):
     @skipMeta
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_fastpath(self, device, dtype, op):
-        scalars = (
-            random.randint(1, 10),
-            1.0 - random.random(),
-            True,
-            complex(1.0 - random.random(), 1.0 - random.random()),
-        )
-        for N, scalar in itertools.product(N_values, scalars):
+        for N, scalar in itertools.product(N_values, Scalars):
             disable_fastpath = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
             if isinstance(scalar, int):
                 disable_fastpath |= dtype == torch.bool
@@ -179,13 +189,7 @@ class TestForeach(TestCase):
 
     @ops(foreach_binary_op_db)
     def test_binary_op_scalar_slowpath(self, device, dtype, op):
-        scalars = (
-            random.randint(1, 10),
-            1.0 - random.random(),
-            True,
-            complex(1.0 - random.random(), 1.0 - random.random()),
-        )
-        for N, scalar in itertools.product(N_values, scalars):
+        for N, scalar in itertools.product(N_values, Scalars):
             self._test_binary_op_scalar(device, dtype, op, N, scalar, False, False)
 
     def _test_binary_op_scalarlist(self, device, dtype, opinfo, N, scalarlist, is_fastpath, disable_fastpath):
@@ -209,14 +213,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_fastpath(self, device, dtype, op):
         for N in N_values:
-            for type_str, scalarlist in (
-                ("int", [random.randint(0, 9) + 1 for _ in range(N)]),
-                ("float", [1.0 - random.random() for _ in range(N)]),
-                ("complex", [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)]),
-                ("bool", [True for _ in range(N)]),
-                ("mixed", [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)]),
-                ("mixed", [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]),
-            ):
+            for type_str, scalarlist in getScalarLists(N):
                 bool_int_div = op.ref == torch.div and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
                 disable_fastpath = bool_int_div
                 if type_str == "int":
@@ -232,14 +229,7 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     def test_binary_op_scalarlist_slowpath(self, device, dtype, op):
         for N in N_values:
-            for scalarlist in [
-                [random.randint(0, 9) + 1 for _ in range(N)],
-                [1.0 - random.random() for _ in range(N)],
-                [complex(1.0 - random.random(), 1.0 - random.random()) for _ in range(N)],
-                [True for _ in range(N)],
-                [1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 3)],
-                [True, 1, 2.0, 3.0 + 4.5j] + [3.0 for _ in range(N - 4)]
-            ]:
+            for _, scalarlist in getScalarLists(N):
                 self._test_binary_op_scalarlist(device, dtype, op, N, scalarlist, False, False)
 
     def _pointwise_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, values=None):
@@ -262,7 +252,7 @@ class TestForeach(TestCase):
                 expected = ref(ref_inputs, values=values)
                 self.assertEqual(expected, actual)
 
-    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath):
+    def _test_pointwise_op(self, device, dtype, opinfo, N, is_fastpath, disable_fastpath, *, values=None):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [
@@ -270,19 +260,31 @@ class TestForeach(TestCase):
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
         ]
-        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, values=None)
-        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, values=None)
+        self._pointwise_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False, values=values)
+        self._pointwise_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, values=values)
 
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
         disable_fastpath = dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
+        # for N, scalar in itertools.product(N_values, Scalars):
         for N in N_values:
             self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath)
+            for scalar in Scalars:
+                self._test_pointwise_op(device, dtype, op, N, True, disable_fastpath, values=scalar)
+            for _, scalarlist in getScalarLists(N):
+                self._test_pointwise_op(
+                    device, dtype, op, N, True, disable_fastpath, values=scalarlist)
 
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_slowpath(self, device, dtype, op):
+        # for N, scalar in itertools.product(N_values, Scalars):
         for N in N_values:
             self._test_pointwise_op(device, dtype, op, N, False, False)
+            for scalar in Scalars:
+                self._test_pointwise_op(device, dtype, op, N, False, False, values=scalar)
+            for _, scalarlist in getScalarLists(N):
+                self._test_pointwise_op(
+                    device, dtype, op, N, False, False, values=scalarlist)
 
     # note(mkozuki): fastpath test uses dtypes which fastpath implementation supports.
     # To confirm the dtypes of `OpInfo` cover the dtypes that the function support,
