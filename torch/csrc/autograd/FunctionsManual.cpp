@@ -176,13 +176,13 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const T
 }
 
 Tensor _to_copy_backward(const Tensor& grad, const c10::TensorOptions& input_options) {
-  return grad.to(
+  return _to_copy(
+      grad,
       input_options.dtype().toScalarType(),
       input_options.layout(),
       input_options.device(),
       input_options.pinned_memory(),
       /*non_blocking=*/false,
-      /*copy=*/false,
       input_options.memory_format_opt());
 }
 
