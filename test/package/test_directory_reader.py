@@ -50,7 +50,7 @@ class DirectoryReaderTest(PackageTestCase):
         resnet = resnet18()
 
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
+        with PackageExporter(filename) as e:
             e.intern("**")
             e.save_pickle("model", "model.pkl", resnet)
 
@@ -70,7 +70,7 @@ class DirectoryReaderTest(PackageTestCase):
         import package_a
 
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
+        with PackageExporter(filename) as e:
             e.save_module("package_a")
 
         zip_file = zipfile.ZipFile(filename, "r")
@@ -88,7 +88,7 @@ class DirectoryReaderTest(PackageTestCase):
         import package_a  # noqa: F401
 
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
+        with PackageExporter(filename) as e:
             e.save_module("package_a")
 
         zip_file = zipfile.ZipFile(filename, "r")
@@ -103,7 +103,7 @@ class DirectoryReaderTest(PackageTestCase):
     def test_resource_reader(self):
         """Tests DirectoryReader as the base for get_resource_reader."""
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as pe:
+        with PackageExporter(filename) as pe:
             # Layout looks like:
             #    package
             #    ├── one/
@@ -185,7 +185,7 @@ class DirectoryReaderTest(PackageTestCase):
             """
         )
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as pe:
+        with PackageExporter(filename) as pe:
             pe.save_source_string("foo.bar", mod_src)
             pe.save_text("my_cool_resources", "sekrit.txt", "my sekrit plays")
 
@@ -202,7 +202,7 @@ class DirectoryReaderTest(PackageTestCase):
     @skipIf(version_info < (3, 7), "ResourceReader API introduced in Python 3.7")
     def test_importer_access(self):
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as he:
+        with PackageExporter(filename) as he:
             he.save_text("main", "main", "my string")
             he.save_binary("main", "main_binary", "my string".encode("utf-8"))
             src = dedent(
@@ -231,7 +231,7 @@ class DirectoryReaderTest(PackageTestCase):
         Tests that packaged code can used importlib.resources.path.
         """
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
+        with PackageExporter(filename) as e:
             e.save_binary("string_module", "my_string", "my string".encode("utf-8"))
             src = dedent(
                 """\
@@ -263,7 +263,7 @@ class DirectoryReaderTest(PackageTestCase):
         scripted_mod = torch.jit.script(ModWithTensor(torch.rand(1, 2, 3)))
 
         filename = self.temp()
-        with PackageExporter(filename, verbose=False) as e:
+        with PackageExporter(filename) as e:
             e.save_pickle("res", "mod.pkl", scripted_mod)
 
         zip_file = zipfile.ZipFile(filename, "r")

@@ -521,6 +521,7 @@ Other Operations
     view_as_real
     view_as_complex
     resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -570,6 +571,7 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
     triangular_solve
     vdot
 
