@@ -7,6 +7,8 @@ from torch.fx.node import Target, Node
 from torch.nn.modules.batchnorm import BatchNorm2d
 from torch.nn.modules.conv import Conv2d
 from torch.fx.experimental.refinement_types import Equality
+import itertools
+
 
 try:
     from unification import Var  # type: ignore[import]
@@ -538,22 +540,26 @@ class GraphTypeChecker:
 @register_refinement_rule(Conv2d)
 @register_refinement_rule(torch.nn.Linear)
 def first_one(n: Node):
+    res = []
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        return [Equality(arg_type.__args__[0], n.type.__args__[0])]
+        res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
+    return res
 
 # todo needs review for addition. Is this constraint correct?
 @register_refinement_rule(BatchNorm2d)
 @register_refinement_rule(torch.nn.ReLU)
 @register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
 def all_eq(n: Node):
+    res = []
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         args1 = arg_type.__args__
         args2 = n.type.__args__
-        return [Equality(args1[i], args2[i]) for i in range(len(args1))]
+        res = [Equality(args1[i], args2[i]) for i in range(len(args1))]
+    return res
 
 @register_refinement_rule(torch.add)
 @register_refinement_rule(operator.add)
@@ -575,12 +581,14 @@ def add_eq(n: Node):
 
 @register_refinement_rule(torch.nn.MaxPool2d)
 def first_two(n: Node):
+    res = []
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
         args1 = arg_type.__args__
         args2 = n.type.__args__
-        return [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
+        res = [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
+    return res
 
 @register_refinement_rule(torch.flatten)
 def flatten_refinement_rule(n: Node):
@@ -610,7 +618,7 @@ def flatten_refinement_rule(n: Node):
         for t1, t2 in zip(n.type.__args__[start_dim:end_dim], n.args[0].type.__args__[start_dim:end_dim]):
             eq_const.append(Equality(t1, t2))
 
-        return eq_const
+    return eq_const
 
 class Refine:
     """
@@ -621,15 +629,15 @@ class Refine:
     def __init__(self, traced):
         self.constraints = []
         self.traced = traced
-        self.curr_symbol = self.symbol_gen()
+        self.symbol_iter = itertools.count(start=0, step=1)
 
-    def symbol_gen(self):
-        val = [0]
-
-        def inc():
-            val[0] += 1
-            return val[0]
-        return inc
+    # def symbol_gen(self):
+    #     val = [0]
+    #
+    #     def inc():
+    #         val[0] += 1
+    #         return val[0]
+    #     return inc
 
     def refine(self):
         """
@@ -647,13 +655,13 @@ class Refine:
         Replace all unknown types with fresh type variables.
         """
         if typ == Dyn:
-            new_symbol = Var(self.curr_symbol())
+            new_symbol = Var(next(self.symbol_iter))
             return new_symbol
         elif isinstance(typ, TensorType):
             new_args = []
             for a in typ.__args__:
                 if a == Dyn:
-                    new_symbol = Var(self.curr_symbol())
+                    new_symbol = Var(next(self.symbol_iter))
                     new_args.append(new_symbol)
                 else:
                     new_args.append(a)
