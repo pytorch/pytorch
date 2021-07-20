@@ -15,7 +15,6 @@
 #endif
 #include <cuda_runtime_api.h>
 
-
 namespace c10 {
 namespace cuda {
 
