@@ -412,22 +412,22 @@ Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("add.Scalar"), TORCH_FN(add_scalar));
-  m.impl(TORCH_SELECTIVE_NAME("add_.Scalar"), TORCH_FN(add_scalar_));
-  m.impl(TORCH_SELECTIVE_NAME("add.Tensor"), TORCH_FN(add_tensor));
-  m.impl(TORCH_SELECTIVE_NAME("add_.Tensor"), TORCH_FN(add_tensor_));
-  m.impl(TORCH_SELECTIVE_NAME("sub.Scalar"), TORCH_FN(sub_scalar));
-  m.impl(TORCH_SELECTIVE_NAME("sub_.Scalar"), TORCH_FN(sub_scalar_));
-  m.impl(TORCH_SELECTIVE_NAME("sub.Tensor"), TORCH_FN(sub_tensor));
-  m.impl(TORCH_SELECTIVE_NAME("sub_.Tensor"), TORCH_FN(sub_tensor_));
-  m.impl(TORCH_SELECTIVE_NAME("mul.Scalar"), TORCH_FN(mul_scalar));
-  m.impl(TORCH_SELECTIVE_NAME("mul_.Scalar"), TORCH_FN(mul_scalar_));
-  m.impl(TORCH_SELECTIVE_NAME("mul.Tensor"), TORCH_FN(mul_tensor));
-  m.impl(TORCH_SELECTIVE_NAME("mul_.Tensor"), TORCH_FN(mul_tensor_));
-  m.impl(TORCH_SELECTIVE_NAME("div.Scalar"), TORCH_FN(div_scalar));
-  m.impl(TORCH_SELECTIVE_NAME("div_.Scalar"), TORCH_FN(div_scalar_));
-  m.impl(TORCH_SELECTIVE_NAME("div.Tensor"), TORCH_FN(div_tensor));
-  m.impl(TORCH_SELECTIVE_NAME("div_.Tensor"), TORCH_FN(div_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Scalar"), TORCH_FN(add_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Scalar"), TORCH_FN(add_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add.Tensor"), TORCH_FN(add_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::add_.Tensor"), TORCH_FN(add_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Scalar"), TORCH_FN(sub_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Scalar"), TORCH_FN(sub_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub.Tensor"), TORCH_FN(sub_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::sub_.Tensor"), TORCH_FN(sub_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Scalar"), TORCH_FN(mul_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Scalar"), TORCH_FN(mul_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul.Tensor"), TORCH_FN(mul_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mul_.Tensor"), TORCH_FN(mul_tensor_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Scalar"), TORCH_FN(div_scalar));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Scalar"), TORCH_FN(div_scalar_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div.Tensor"), TORCH_FN(div_tensor));
+  m.impl(TORCH_SELECTIVE_NAME("aten::div_.Tensor"), TORCH_FN(div_tensor_));
 }
 
 #endif /* USE_VULKAN_API */
