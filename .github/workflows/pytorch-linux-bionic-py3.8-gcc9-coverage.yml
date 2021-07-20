@@ -28,14 +28,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
   ciflow_should_run:
     runs-on: ubuntu-1804
-    if: (github.event_name != 'pull_request') || (github.event_name == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default'))
+    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default'))
     steps:
       - name: noop
         run: echo running ciflow_should_run
-
   calculate-docker-image:
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]

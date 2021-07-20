@@ -8,23 +8,24 @@ import jinja2
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
+Arch = Literal["windows", "linux"]
 
 DOCKER_REGISTRY = "308535385114.dkr.ecr.us-east-1.amazonaws.com"
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
-WINDOWS_RUNNERS = [
+WINDOWS_RUNNERS = set([
     WINDOWS_CPU_TEST_RUNNER,
     WINDOWS_CUDA_TEST_RUNNER,
-]
+])
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
-LINUX_RUNNERS = [
+LINUX_RUNNERS = set([
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
-]
+])
 
 
 # TODO: ------------- Remove the comment once fully rollout -------------------
@@ -37,7 +38,7 @@ LINUX_RUNNERS = [
 #       2. Probot Phase 1 (manual on 1 workflow)
 #          step 1. Probot automatically add labels based on the context
 #          step 2. Manually let probot trigger [unassigned] event
-#       4. Probot Phase 3 (auto on 1 workflows)
+#       3. Probot Phase 2 (auto on 1 workflows)
 #          step 1. Modify the workflows so that they only listen on [unassigned] events
 #          step 2. Probot automatically adds labels automatically based on the context
 #          step 3. Probot automatically triggers [unassigned] event
@@ -51,25 +52,19 @@ class CIFlowConfig:
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
     root_job_name: str = 'ciflow_should_run'
-    root_job: str = ''
+    root_job_condition: str = ''
 
-    def gen_root_job(self) -> None:
-        conditions = [
-            f"github.event_name == '{self.trigger_action}'",
-            # Once we're ready, we can enable the trigger_actor check for probot
-            # f"env.GITHUB_ACTOR == '{self.trigger_actor}'",
-        ] + [
-            f"contains(github.event.pull_request.labels.*.name, '{label}')"
-            for label in self.labels
-        ]
-        self.root_job = f'''
-  {self.root_job_name}:
-    runs-on: ubuntu-1804
-    if: (github.event_name != 'pull_request') || ({" && ".join(conditions)})
-    steps:
-      - name: noop
-        run: echo running {self.root_job_name}
-'''
+    def gen_root_job_condition(self) -> None:
+        # TODO: Make conditions strict
+        # At the beginning of the rollout of ciflow, we keep everything the same as what we have
+        # Once fully rollout, we can have strict constraints
+        # e.g. ADD      env.GITHUB_ACTOR == '{self.trigger_actor}
+        #      REMOVE   github.event.action !='{self.trigger_action}'
+        label_conditions = [f"github.event.action == '{self.trigger_action}'"] + \
+            [f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in self.labels]
+        self.root_job_condition = f"(github.event_name != 'pull_request') || " \
+            f"(github.event.action !='{self.trigger_action}') || " \
+            f"({' && '.join(label_conditions)})"
 
     def reset_root_job(self) -> None:
         self.root_job_name = ''
@@ -79,13 +74,13 @@ class CIFlowConfig:
         if not self.enabled:
             self.reset_root_job()
             return
-        self.gen_root_job()
+        self.gen_root_job_condition()
 
 
 @dataclass
 class CIWorkflow:
     # Required fields
-    arch: str
+    arch: Arch
     build_environment: str
     test_runner_type: str
 
@@ -119,7 +114,6 @@ class CIWorkflow:
         self.assert_valid()
 
     def assert_valid(self) -> None:
-        assert self.arch in ['linux', 'windows'], f"invalid arch: {self.arch}, must be one of ['linux','windows']"
         err_message = f"invalid test_runner_type for {self.arch}: {self.test_runner_type}"
         if self.arch == 'linux':
             assert self.test_runner_type in LINUX_RUNNERS, err_message
