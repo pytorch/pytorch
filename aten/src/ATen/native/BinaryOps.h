@@ -39,7 +39,7 @@ inline void sub_check(const Tensor& self, const Scalar& scalar) {
 using structured_binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using structured_binary_fn = void(*)(TensorIteratorBase&);
 
-using binary_fn_alpha = void(*)(TensorIterator&, const Scalar& alpha);
+using binary_fn_alpha = void(*)(TensorIteratorBase&, const Scalar& alpha);
 using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =

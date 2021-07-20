@@ -700,7 +700,7 @@ void sigmoid_backward_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void logit_backward_kernel(TensorIterator& iter, const Scalar& eps_scalar) {
+void logit_backward_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, iter.dtype(), "logit_backward_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
