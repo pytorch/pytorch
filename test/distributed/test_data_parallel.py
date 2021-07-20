@@ -380,7 +380,7 @@ class TestDataParallel(TestCase):
                 self.assertEqual(out.get_device(), dev_id[0])
                 self.assertEqual(out, expected_out)
                 for expected, param in zip(expected_grads, l.parameters()):
-                    self.assertEqual(param.grad, expected, exact_is_coalesced=False)
+                    self.assertEqual(param.grad.coalesce(), expected.coalesce())
 
         # Check for None device_ids
         l = l.cuda()
