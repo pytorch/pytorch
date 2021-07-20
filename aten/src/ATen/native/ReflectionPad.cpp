@@ -65,11 +65,8 @@ TORCH_META_FUNC(reflection_pad1d_backward)(const Tensor& grad_output,
     IntArrayRef padding) {
   int64_t dim_plane = 0;
   int64_t dim_w = 1;
-  int64_t nbatch = 1;
 
   if (input.ndimension() == 3) {
-    nbatch = input.size(0);
-    (void)nbatch;
     dim_w++;
     dim_plane++;
   }
