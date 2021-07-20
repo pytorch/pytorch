@@ -2116,6 +2116,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AvgPool2d',
+        constructor_args=((2, 2),),
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
+        input_size=(3, 6, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='AvgPool2d',
         constructor_args=((2, 2), (2, 2)),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2}).stride({2, 2})',
         input_size=(2, 3, 6, 6),
@@ -2311,6 +2319,14 @@ new_module_tests = [
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2.),
         cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='ConstantPad2d',
+        constructor_args=((1, 2, 3, 4), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
         input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2320,6 +2336,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
         input_size=(2, 3, 4, 4, 5),
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
+        input_size=(3, 4, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
     ),
     dict(
         module_name='ConstantPad3d',
@@ -2493,6 +2517,13 @@ new_module_tests = [
         constructor_args=((2, 2, 2),),
         cpp_constructor_args='torch::nn::AvgPool3dOptions({2, 2, 2})',
         input_size=(2, 3, 4, 4, 4),
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=((2, 2, 2),),
+        cpp_constructor_args='torch::nn::AvgPool3dOptions({2, 2, 2})',
+        input_size=(3, 4, 4, 4),
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AvgPool3d',
@@ -3222,6 +3253,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
         constructor_args=(1,),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(1)',
         input_fn=lambda: torch.rand(1, 3, 5, 6),
@@ -3247,6 +3286,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions(3)',
         input_fn=lambda: torch.rand(2, 3, 5, 2, 7),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5, 2, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveAvgPool3d',
