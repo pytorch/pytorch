@@ -159,7 +159,8 @@ TEST(BFloat16Math, NextAfter) {
   const c10::BFloat16 lowest = std::numeric_limits<c10::BFloat16>::lowest();
   const c10::BFloat16 inf = std::numeric_limits<c10::BFloat16>::infinity();
   const c10::BFloat16 nan = std::numeric_limits<c10::BFloat16>::quiet_NaN();
-  const c10::BFloat16 denorm_min = std::numeric_limits<c10::BFloat16>::denorm_min();
+  const c10::BFloat16 denorm_min =
+      std::numeric_limits<c10::BFloat16>::denorm_min();
 
   auto check_nextafter =
       [](c10::BFloat16 from, c10::BFloat16 to, c10::BFloat16 expected) {
