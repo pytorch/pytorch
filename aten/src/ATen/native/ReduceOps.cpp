@@ -118,6 +118,9 @@ TORCH_META_FUNC(argmin)
 
 TORCH_META_FUNC(cumsum)
 (const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+  // Checking whether 'dim' is valid.
+  maybe_wrap_dim(dim, self.dim());
+
   const auto& result = maybe_get_output();
   ScalarType out_dtype;
 
@@ -135,7 +138,6 @@ TORCH_META_FUNC(cumsum)
   }
 
   set_output(self.sizes(), self.options().dtype(out_dtype));
-  namedinference::propagate_names(result, self);
 }
 
 } // namespace meta
