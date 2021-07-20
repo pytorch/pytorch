@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   ciflow_should_run:
-    runs-on: ubuntu-1804
+    runs-on: ubuntu-18.04
     if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default'))
     steps:
       - name: noop

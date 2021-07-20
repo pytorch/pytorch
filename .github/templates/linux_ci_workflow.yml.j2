@@ -41,7 +41,7 @@ concurrency:
 jobs:
 {%- if ciflow_config.enabled %}
   !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-1804
+    runs-on: ubuntu-18.04
     if: !{{ ciflow_config.root_job_condition }}
     steps:
       - name: noop
