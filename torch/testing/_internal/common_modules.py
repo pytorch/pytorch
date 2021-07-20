@@ -49,6 +49,7 @@ class modules(_TestParametrizer):
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for module_info in self.module_info_list:
+            # TODO: Factor a lot of this out since it's similar to OpInfo.
             for dtype in floating_types():
                 # Construct the test name.
                 test_name = '{}_{}_{}{}'.format(test.__name__,
@@ -118,20 +119,20 @@ class ModuleInfo(object):
                  module_cls,  # Class for the module under test
                  *,
                  module_inputs_func,  # Function to generate module inputs
-                 has_constructor_kwargs=False,  # Indicates if the module's constructor accepts **kwargs
                  needs_factory_kwargs=False,  # Indicates if factory_kwargs should be passed explicitly to avoid
                                               # conflicts with e.g. a dtype arg (usually for quantized modules)
                  has_inplace_variant=False,  # Indicates if the module can be applied in-place with inplace=True
                  is_pickleable=True,  # Indicates if the module can be pickled
+                 has_sparse_gradients = False,  # Indicates whether the module has sparse gradients (e.g. Embedding)
                  skips=[],  # Indicates which tests to skip
-                 decorators=None,
+                 decorators=None,  # Additional decorators to apply to generated tests
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
-        self.has_constructor_kwargs = has_constructor_kwargs
         self.needs_factory_kwargs = needs_factory_kwargs
         self.has_inplace_variant = has_inplace_variant
         self.is_pickleable = is_pickleable
+        self.has_sparse_gradients = has_sparse_gradients
         self.skips = skips
         self.decorators = decorators
 

@@ -3,21 +3,18 @@ from copy import deepcopy
 from itertools import chain
 from tempfile import TemporaryFile
 from torch.testing import floating_types
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, _TestParametrizer
-from torch.testing._internal.common_modules import module_db, MODULE_CLASSES, MODULE_CLASS_NAMES, formatted_module_name, mock_wrapper, modules
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, dtypes, _TestParametrizer, onlyCUDA)
+from torch.testing._internal.common_modules import (
+    module_db, MODULE_CLASSES, MODULE_CLASS_NAMES, formatted_module_name, mock_wrapper, modules)
 from torch.testing._internal.common_utils import TestCase, run_tests, freeze_rng_state
 from unittest import mock
 from unittest.mock import patch
 
 
 class TestModule(TestCase):
-    # @module_classes(MODULE_CLASSES)
-    # def test_has_module_info(self, device, module_cls):
-    #     self.assertTrue(True)
-
-    # @modules(module_db)
-    # def test_factory_kwargs(self, device, dtype, module):
-    #     self.assertTrue(True)
+    _do_cuda_memory_leak_check = True
+    _do_cuda_non_default_stream = True
 
     @modules(module_db)
     def test_basics(self, device, dtype, module_info):
@@ -59,7 +56,32 @@ class TestModule(TestCase):
                         self.assertTrue(torch.allclose(outputs, ref_outputs))
 
                 # Check gradients.
+                if module_info.has_sparse_gradients:
+                    # TODO: Handle this!
+                    # gradcheck doesn't support operators that take in dense inputs but
+                    # return sparse parameters. This only happens in the case of nn.Embedding
+                    # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
+                    # is a slightly different version of gradcheck that can handle this.
+                    #assert len(args) == 1 and len(kwargs) == 0
+                    #test_input_jacobian = torch.is_floating_point(args[0])
+                    #self.check_jacobian(module, args[0], test_input_jacobian)
+                    raise NotImplementedError
+                else:
+                    raise NotImplementedError
+                    # TODO: Handle this!
+                    # params = tuple(x for x in module.parameters())
+                    # num_inputs = len(input_tuple)
 
+                    # def fn_to_gradcheck(*inputs_and_params, **kwargs):
+                    #     assert not kwargs
+                    #     return test_case._forward(module, inputs_and_params[:num_inputs])
+
+                    # self.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
+                    #                           check_batched_grad=self.check_batched_grad))
+
+                    # if self.check_gradgrad:
+                    #     test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
+                    #                                        check_batched_grad=self.check_batched_grad))
 
     @modules([m for m in module_db if m.has_inplace_variant])
     def test_inplace_variant(self, device, dtype, module_info):
@@ -191,6 +213,32 @@ class TestModule(TestCase):
                             self.assertEqual(
                                 buffer.dtype, dtype,
                                 f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
+
+    @onlyCUDA
+    @modules(module_db)
+    def test_cpu_gpu_parity(self, device, dtype, module_info):
+        module_cls = module_info.module_cls
+        cpu_inputs = module_info.module_inputs_func(module_info, device='cpu', dtype=dtype, requires_grad=True)
+        gpu_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype, requires_grad=True)
+        for cpu_input, gpu_input in zip(cpu_inputs, gpu_inputs):
+            if cpu_input.forward_input is None or gpu_input.forward_input is None:
+                continue
+
+            with freeze_rng_state():
+                # === Instantiate the module on CPU and GPU. ===
+                cpu_args, cpu_kwargs = cpu_input.constructor_input.args, cpu_input.constructor_input.kwargs
+                m_cpu = module_cls(*cpu_args, **cpu_kwargs)
+                gpu_args, gpu_kwargs = gpu_input.constructor_input.args, gpu_input.constructor_input.kwargs
+                m_gpu = module_cls(*gpu_args, **gpu_kwargs)
+
+                # === Run forward and backward. ===
+                cpu_args, cpu_kwargs = cpu_input.forward_input.args, gpu_input.forward_input.kwargs
+                cpu_outputs = m_cpu(*cpu_args, **cpu_kwargs)
+                gpu_args, gpu_kwargs = gpu_input.forward_input.args, gpu_input.forward_input.kwargs
+                gpu_outputs = m_gpu(*gpu_args, **gpu_kwargs)
+                self.assertEqual(cpu_outputs, gpu_outputs)
+
+                # TODO: Check backwards as well.
 
 
 instantiate_device_type_tests(TestModule, globals())
