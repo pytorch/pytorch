@@ -77,7 +77,7 @@ Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
         return zeros_like_except(y, dim);
     }
     TORCH_CHECK(y.scalar_type() != kBool, "trapezoid: received a bool input for `y`, but bool is not supported")
-    TORCH_CHECK(!(dx.isComplex() or dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
+    TORCH_CHECK(!(dx.isComplex() ||  dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
     return do_trapezoid(y, dx.toDouble(), dim);
 }
 
