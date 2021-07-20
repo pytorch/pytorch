@@ -2,11 +2,11 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDARTWrappers.h>
 #endif
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <ATen/MapAllocator.h>
-#include <ATen/cuda/CUDARTWrappers.h>
 #include <atomic>
 #include <string>
 

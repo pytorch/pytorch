@@ -9,7 +9,6 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDARTWrappers.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
