@@ -61,7 +61,7 @@ void dispatch(
 
 Tensor& _convert_coo_to_csr_out_cpu(
     const Tensor& self,
-    const Scalar& size,
+    const int64_t size,
     bool out_int32,
     Tensor& result) {
   TORCH_CHECK(
@@ -75,25 +75,25 @@ Tensor& _convert_coo_to_csr_out_cpu(
       result.dim(),
       " dimensions");
   TORCH_CHECK(
-      result.numel() == size.to<int64_t>() + 1,
+      result.numel() == size + 1,
       "Output needs ",
-      size.to<int64_t>() + 1,
+      size + 1,
       " elements, but got ",
       result.numel(),
       " elements");
 
-  dispatch(result, self, size.to<int64_t>(), out_int32);
+  dispatch(result, self, size, out_int32);
   return result;
 }
 
 Tensor _convert_coo_to_csr_cpu(
     const Tensor& self,
-    const Scalar& size,
+    const int64_t size,
     bool out_int32) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options =
       TensorOptions().device(self.options().device()).dtype(scalar_type);
-  Tensor result = at::empty({size.to<int64_t>() + 1}, options);
+  Tensor result = at::empty({size + 1}, options);
   at::native::_convert_coo_to_csr_out_cpu(self, size, out_int32, result);
   return result;
 }
