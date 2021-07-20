@@ -1493,6 +1493,16 @@ class TestOldViewOps(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+    @onlyCPU
+    def test_conj_neg_view_numpy_error(self, device):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Can't call numpy() on Tensor that has conjugate bit set. Use tensor.resolve_conj().numpy() instead."):
+            torch.tensor([1+2j]).conj().numpy()
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Can't call numpy() on Tensor that has negative bit set. Use tensor.resolve_conj().numpy() instead."):
+            torch.tensor([1+2j]).conj().imag.numpy()
+
 
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestOldViewOps, globals())

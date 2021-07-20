@@ -124,6 +124,16 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "Can't call numpy() on Tensor that requires grad. "
         "Use tensor.detach().numpy() instead.");
   }
+  if (tensor.is_conj()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Tensor that has conjugate bit set. "
+        "Use tensor.resolve_conj().numpy() instead.");
+  }
+  if (tensor.is_neg()) {
+    throw std::runtime_error(
+        "Can't call numpy() on Tensor that has negative bit set. "
+        "Use tensor.resolve_neg().numpy() instead.");
+  }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
