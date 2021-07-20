@@ -10,33 +10,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-# ---[ If running on Ubuntu, check system version and compiler version.
-if(EXISTS "/etc/os-release")
-  execute_process(COMMAND
-    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  execute_process(COMMAND
-    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  if(OS_RELEASE_ID STREQUAL "ubuntu")
-    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0")
-          message(FATAL_ERROR
-            "Please use GCC 6 or higher on Ubuntu 17.04 and higher. "
-            "For more information, see: "
-            "https://github.com/caffe2/caffe2/issues/1633"
-            )
-        endif()
-      endif()
-    endif()
-  endif()
-endif()
-
 if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
