@@ -7,7 +7,8 @@ ARG UBUNTU_VERSION
 ENV DEBIAN_FRONTEND noninteractive
 
 # Set AMD gpu targets to build for
-ENV PYTORCH_ROCM_ARCH "gfx900;gfx906"
+ARG PYTORCH_ROCM_ARCH "gfx900;gfx906"
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
@@ -55,10 +56,6 @@ ADD ./common/install_vision.sh install_vision.sh
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
-
-# Set AMD gpu targets to build for
-ARG PYTORCH_ROCM_ARCH "gfx900;gfx906"
-ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 
 # Install rocm
 ARG ROCM_VERSION
