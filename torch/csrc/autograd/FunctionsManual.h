@@ -223,6 +223,11 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     const Tensor & weight_);
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntArrayRef sizes, IntArrayRef strides, optional<int64_t> storage_offset_);
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask);
+
+std::tuple<Tensor, Tensor> attn_backward(const Tensor& grad_output, const Tensor& grad_attn,
+                                         const Tensor& q, const Tensor& k, const Tensor& v,
+                                         const Tensor& attn);
+
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_layer_norm_backward(
     const Tensor& dY,

@@ -1972,6 +1972,37 @@ std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self
             output_mask[1] ? grad * -self * recip : Tensor() };
 }
 
+std::tuple<Tensor, Tensor> attn_backward(const Tensor& grad_output, const Tensor& grad_attn,
+                                         const Tensor& q, const Tensor& k, const Tensor& v,
+                                         const Tensor& attn) {
+  bool grad_output_defined = grad_output.defined();
+  bool grad_attn_defined = grad_attn.defined();
+
+  bool in_place;
+  Tensor grad_u3;
+  if (grad_output_defined) {
+    grad_u3 = grad_output.matmul(v.t());
+    in_place = true;
+    if (grad_attn_defined) {
+      grad_u3.add_(grad_attn);
+    }
+  } else if (grad_attn_defined) {
+    grad_u3 = grad_attn;
+    in_place = false;
+  } else {
+    return std::make_tuple(Tensor(), Tensor());
+  }
+
+  TORCH_INTERNAL_ASSERT(grad_u3.defined());
+
+  Tensor multiplicand = attn.pow(2).neg_().add_(1);
+  grad_u3 = in_place ? grad_u3.mul_(multiplicand) : grad_u3.mul(multiplicand);
+
+  Tensor grad_q = grad_u3.matmul(k);
+  Tensor grad_k = grad_u3.t().matmul(q);
+  return std::make_tuple(grad_q, grad_k);
+}
+
 // TODO: Seriously consider writing the derivative formulas for
 // each output separately; there is not all that much sharing
 // of computation going on here.
