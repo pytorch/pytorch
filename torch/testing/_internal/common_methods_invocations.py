@@ -4854,7 +4854,7 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('acosh',
                    aliases=('arccosh', ),
                    ref=np.arccosh,
-                   domain=(1, 9),
+                   domain=(1, None),
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    # "rsqrt_cuda" not implemented for 'BFloat16'
@@ -5981,7 +5981,7 @@ op_db: List[OpInfo] = [
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
-                   domain=(0, 9),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -5995,7 +5995,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('log10',
                    ref=np.log10,
-                   domain=(0, 9),
+                   domain=(0, None),
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    assert_autodiffed=True,
@@ -6013,7 +6013,7 @@ op_db: List[OpInfo] = [
                    # TODO: @krshrimali: Link an issue here;
                    # log1p gives inf output for huge bfloat16 (and float32) values, should ideally return a value
                    # a similar error is raised for float32 (test_working_log1p_cpu_float32)
-                   domain=(-1, 9),
+                   domain=(-1, None),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
@@ -6022,7 +6022,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True),
     UnaryUfuncInfo('log2',
                    ref=np.log2,
-                   domain=(0, 9),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
@@ -6394,14 +6394,14 @@ op_db: List[OpInfo] = [
                  # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
                  # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
                  # is hence set to 9 to avoid huge input values.
-                 domain=(1, 9),
+                 domain=(1, None),
                  skips=skips_mvlgamma(),
                  sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
                  # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
                  # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
                  # is hence set to 9 to avoid huge input values.
-                 domain=(2, 9),
+                 domain=(2, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
@@ -6410,7 +6410,7 @@ op_db: List[OpInfo] = [
                  # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
                  # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
                  # is hence set to 9 to avoid huge input values.
-                 domain=(3, 9),
+                 domain=(3, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
@@ -6893,7 +6893,7 @@ op_db: List[OpInfo] = [
                    )),
     UnaryUfuncInfo('rsqrt',
                    ref=lambda x: np.reciprocal(np.sqrt(x)),
-                   domain=(0, 9),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
@@ -6904,7 +6904,7 @@ op_db: List[OpInfo] = [
                    ref=np.sqrt,
                    supports_sparse=True,
                    # TODO @krshrimali: Link an issue here; gradcheck failures, max per-element difference is nan (slow-mode)
-                   domain=(0, 9),
+                   domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
