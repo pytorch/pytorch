@@ -5901,19 +5901,25 @@ for shape in [(1,), ()]:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     def test_graph_save_on_cpu(self):
-        a = torch.randn(5, requires_grad=True)
-        with torch.autograd.graph.save_on_cpu():
+        try:
+            torch.autograd.graph.set_save_on_cpu(True)
+            a = torch.randn(5, requires_grad=True)
             y = a * a
-        self.assertEqual(a, y.grad_fn._saved_self)
-        self.assertEqual(a, y.grad_fn._saved_other)
-        y.sum().backward()
-        self.assertEqual(2 * a, a.grad)
+            self.assertEqual(a, y.grad_fn._saved_self)
+            self.assertEqual(a, y.grad_fn._saved_other)
+            y.sum().backward()
+            self.assertEqual(2 * a, a.grad)
+        finally:
+            torch.autograd.graph.set_save_on_cpu(False)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_graph_save_on_cpu_cuda(self):
         a = torch.randn(5, requires_grad=True, device="cuda")
-        with torch.autograd.graph.save_on_cpu():
+        try:
+            torch.autograd.graph.set_save_on_cpu(True)
             y = a * a
+        finally:
+            torch.autograd.graph.set_save_on_cpu(False)
         self.assertTrue(y.is_cuda)
         before = CudaMemoryLeakCheck.get_cuda_memory_usage()
         self.assertTrue(y.grad_fn._saved_self.is_cuda)
