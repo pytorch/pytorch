@@ -115,11 +115,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal);
 
+#ifdef USE_KINETO
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
-      .def("name", [](const KinetoEvent& e) {
-        return e.name();
-      })
+      .def("name", &KinetoEvent::name)
       // PyTorch thread id of the start callback
       .def("start_thread_id", [](const KinetoEvent& e) {
         return e.startThreadId();
@@ -139,13 +138,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.sequenceNr();
       })
       // absolute start time (since unix epoch) in us
-      .def("start_us", [](const KinetoEvent& e) {
-        return e.startUs();
-      })
+      .def("start_us", &KinetoEvent::startUs)
       // duration in us
-      .def("duration_us", [](const KinetoEvent& e) {
-        return e.durationUs();
-      })
+      .def("duration_us", &KinetoEvent::durationUs)
       // used for correlation between high-level PyTorch events
       // and low-level device events
       .def("correlation_id", [](const KinetoEvent& e) {
@@ -180,21 +175,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.scope();
       })
       // device number, for CPU - process id
-      .def("device_index", [](const KinetoEvent& e) {
-        return e.deviceIndex();
-      })
+      .def("device_index", &KinetoEvent::deviceIndex)
       // for CUDA - stream id, for CPU - start thread id
-      .def("device_resource_id", [](const KinetoEvent& e) {
-        return e.deviceResourceId();
-      })
+      .def("device_resource_id", &KinetoEvent::deviceResourceId)
       // device type
       .def("device_type", [](const KinetoEvent& e) {
         return e.deviceType();
       })
       // correlation id of a linked event
-      .def("linked_correlation_id", [](const KinetoEvent& e) {
-        return e.linkedCorrelationId();
-      })
+      .def("linked_correlation_id", &KinetoEvent::linkedCorrelationId)
       // compute flops
       .def("flops", [](const KinetoEvent& e) {
         return e.flops();
@@ -203,22 +192,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
       })
-      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
-      .def("nbytes", [](const KinetoEvent& e) {
-        return e.nBytes();
-      });
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
-    .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
-#ifdef USE_KINETO
-    .def("save", &ProfilerResult::save)
-#endif // USE_KINETO
-    ;
+    .def("legacy_events", &ProfilerResult::legacy_events)
+    .def("save", &ProfilerResult::save);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
+#endif
 
   m.def("_add_metadata_json", [](const std::string& key, const std::string& value) {
 #ifdef USE_KINETO
@@ -226,7 +210,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #else
       LOG(WARNING) << "Adding profiling metadata requires using "
                    << "torch.profiler with Kineto support (USE_KINETO=1)";
-#endif // USE_KINETO
+#endif
   });
 
   m.def("kineto_available", []() {
@@ -237,12 +221,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif
   });
 
-  m.def("_supported_activities", []() {
-    std::set<ActivityType> activities {ActivityType::CPU};
-#if defined(USE_KINETO) && !defined(LIBKINETO_NOCUPTI)
+  m.def("_supported_kineto_activities", []() {
+    std::set<ActivityType> activities;
+#ifdef USE_KINETO
+    activities.insert(ActivityType::CPU);
+#ifndef LIBKINETO_NOCUPTI
     if (at::getNumGPUs() > 0 && !at::hasHIP()) {
       activities.insert(ActivityType::CUDA);
     }
+#endif
 #endif
     return activities;
   });
