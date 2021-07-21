@@ -16,11 +16,15 @@ namespace {
 
 #if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
+static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
+  o = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(a), 16));
+}
+
 static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i lo = _mm256_extractf128_si256(a, 0);
   __m128i hi = _mm256_extractf128_si256(a, 1);
-  o1 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(lo), 16));
-  o2 = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_cvtepu16_epi32(hi), 16));
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
 }
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
@@ -736,6 +740,37 @@ inline Vectorized<BFloat16> convert_float_bfloat16(const Vectorized<float>& a, c
   return Vectorized<BFloat16>::loadu(arr2);
 }
 
+#endif
+
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data));
+  __m256 out_values;
+  cvtbf16_fp32(values, out_values);
+  out = out_values;
+}
+
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  auto vec = Vectorized<c10::BFloat16>::loadu(data);
+  __m256 out1_values, out2_values;
+  cvtbf16_fp32(vec, out1_values, out2_values);
+  out1 = out1_values;
+  out2 = out2_values;
+}
+#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out) {
+  __at_align32__ float values[Vectorized<float>::size()];
+  for (int k = 0; k < Vectorized<float>::size(); ++k) {
+    values[k] = data[k];
+  }
+  out = Vectorized<float>::loadu(values);
+}
+
+void load_fp32_from_bf16(const c10::BFloat16 *data, Vectorized<float>& out1, Vectorized<float>& out2) {
+  load_fp32_from_bf16(data, out1);
+  data += Vectorized<float>::size();
+  load_fp32_from_bf16(data, out2);
+}
 #endif
 
 }}}

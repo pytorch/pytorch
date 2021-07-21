@@ -22,7 +22,7 @@ call %INSTALLER_DIR%\install_miniconda3.bat
 
 
 :: Install ninja and other deps
-if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions )
+if "%REBUILD%"=="" ( pip install -q "ninja==1.10.0.post1" dataclasses typing_extensions "expecttest==0.1.3" )
 
 :: Override VS env here
 pushd .

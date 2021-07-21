@@ -101,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     moveaxis
     narrow
     nonzero
+    permute
     reshape
     row_stack
     scatter
@@ -480,6 +481,8 @@ Other Operations
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
@@ -518,6 +521,7 @@ Other Operations
     view_as_real
     view_as_complex
     resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -567,6 +571,7 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
     triangular_solve
     vdot
 
