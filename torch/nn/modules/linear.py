@@ -72,8 +72,8 @@ class Bias(Module):
         return F.bias(input, self.bias)
 
     def extra_repr(self) -> str:
-        return 'num_features={}, bias={}'.format(
-            self.num_features, self.bias is not None
+        return 'num_features={}'.format(
+            self.num_features
         )
 
 class Linear(Module):
