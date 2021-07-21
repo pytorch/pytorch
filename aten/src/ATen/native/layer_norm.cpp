@@ -56,16 +56,13 @@ std::tuple<
     int64_t,
     int64_t,
     c10::MaybeOwned<Tensor>,
-    c10::MaybeOwned<Tensor>,
-    Tensor,
-    Tensor>
+    c10::MaybeOwned<Tensor>>
 layer_init(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
     const c10::optional<Tensor>& bias_opt /* optional */
     ) {
-
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
@@ -73,36 +70,36 @@ layer_init(
       at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  auto X = input.expect_contiguous();
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
   auto N = M_N.second;
+  auto X = input.expect_contiguous();
   auto gamma = weight.expect_contiguous();
   auto beta = bias.expect_contiguous();
 
-  Tensor mean = at::empty({M}, X->options());
-  Tensor rstd = at::empty({M}, X->options());
-  return std::make_tuple(X, M, N, gamma, beta, mean, rstd);
+  return std::make_tuple(X, M, N, gamma, beta);
 }
 
-Tensor& layer_norm_new_out(
+Tensor& layer_norm_out(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
     const c10::optional<Tensor>& bias_opt /* optional */,
     double eps,
+    bool /* cudnn_enable, deprecated */,
     Tensor& out) {
   c10::MaybeOwned<Tensor> X, gamma, beta;
   int64_t M, N;
-  Tensor mean, rstd;
-  std::tie(X, M, N, gamma, beta, mean, rstd) =
+  std::tie(X, M, N, gamma, beta) =
       layer_init(input, normalized_shape, weight_opt, bias_opt);
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
   layer_norm_impl_out(
       out, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return out;
 }
 
-std::tuple<Tensor, Tensor, Tensor> _layer_norm(
+std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt /* optional */,
@@ -110,9 +107,10 @@ std::tuple<Tensor, Tensor, Tensor> _layer_norm(
     double eps) {
   c10::MaybeOwned<Tensor> X, gamma, beta;
   int64_t M, N;
-  Tensor mean, rstd;
-  std::tie(X, M, N, gamma, beta, mean, rstd) =
+  std::tie(X, M, N, gamma, beta) =
       layer_init(input, normalized_shape, weight_opt, bias_opt);
+  Tensor mean = at::empty({M}, X->options());
+  Tensor rstd = at::empty({M}, X->options());
   Tensor Y = at::native::empty_like(
       *X,
       c10::nullopt /* dtype */,
@@ -126,25 +124,6 @@ std::tuple<Tensor, Tensor, Tensor> _layer_norm(
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
-Tensor layer_norm_new(
-    const Tensor& input,
-    IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
-    double eps) {
-  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight_opt, bias_opt, eps));
-}
-
-Tensor layer_norm(
-    const Tensor& input,
-    IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
-    double eps,
-    bool /* cudnn_enable, deprecated */) {
-  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight_opt, bias_opt, eps));
-}
-
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward(
     const Tensor& dY,
     const Tensor& input,
@@ -155,19 +134,10 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward(
     const c10::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned =
-      at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned =
-      at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
-  auto X = input.expect_contiguous();
-  auto gamma = weight.expect_contiguous();
-  auto beta = bias.expect_contiguous();
+  c10::MaybeOwned<Tensor> X, gamma, beta;
+  int64_t M, N;
+  std::tie(X, M, N, gamma, beta) =
+      layer_init(input, normalized_shape, weight_opt, bias_opt);
 
   Tensor dX;
   Tensor dgamma;
@@ -228,6 +198,16 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward(
         &dbeta);
   }
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+}
+
+Tensor layer_norm(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
+    double eps,
+    bool /* cudnn_enable, deprecated */) {
+  return std::get<0>(at::native_layer_norm(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
