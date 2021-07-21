@@ -53,11 +53,12 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 //   // Now continue on other work in the current stream.
 class TORCH_API ProcessGroupUCC final : public ProcessGroup {
 public:
-  class WorkUCC : public ProcessGroup::Work {
-    ucs_status_ptr_t pt
+  class WorkUCP : public ProcessGroup::Work {
+    bool *finished;
   public:
-    bool isCompleted() override { return true; };
-    bool isSuccess() const override { return true; };
+    WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
+    bool isCompleted() override { return *finished; };
+    bool isSuccess() const override { return *finished; };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted());
       return true;

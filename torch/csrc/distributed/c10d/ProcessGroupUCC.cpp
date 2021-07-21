@@ -141,11 +141,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   params.cb.send = [](void* request, ucs_status_t status, void* user_data) {
     *static_cast<bool *>(request) = true;
   };
-  ucs_status_ptr_t st = ucp_tag_send_nbx(
+  ucs_status_ptr_t request = ucp_tag_send_nbx(
     ucp_endpoints[dstRank], tensor.data_ptr(), 1, tag, &params);
-  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(st), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(st)));
+  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
 
-  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>();
+  if (request == nullptr) {
+    // If the operation is finished immediately, then the callback will
+    // not be invoked.
+    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
+  }
+
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
   return work;
 }
 
