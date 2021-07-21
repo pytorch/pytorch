@@ -42,7 +42,7 @@ from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
-from torch.testing import floating_types_and, integral_types, complex_types
+from torch.testing import floating_types_and, integral_types, complex_types, get_all_dtypes
 import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
@@ -1998,8 +1998,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
         else:
             result = torch.rand(size, device=device, dtype=dtype) * span + low
-    else:
-        assert dtype in complex_types()
+    elif dtype in complex_types():
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
@@ -2007,6 +2006,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         real = torch.rand(size, device=device, dtype=float_dtype) * span + low
         imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
         result = torch.complex(real, imag)
+    else:
+        raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
