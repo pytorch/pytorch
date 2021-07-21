@@ -1828,6 +1828,19 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
+def bias(input: Tensor, bias: Tensor) -> Tensor:
+    r"""
+    Applies a bias to the incoming data: :math:`y = x + b`.
+
+    Shape:
+
+        - Input: :math:`(N, *, num\_features)` N is the batch size, `*` means any number of
+          additional dimensions
+        - Bias: :math:`(num\_features)`
+        - Output: :math:`(N, *, num\_features)`
+    """
+    return torch._C._nn.bias(input, bias)
+
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.

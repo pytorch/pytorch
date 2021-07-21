@@ -35,6 +35,50 @@ class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
 /// module storage semantics.
 TORCH_MODULE(Identity);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies a linear bias.
+/// See https://pytorch.org/docs/master/generated/torch.nn.Bias.html to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::BiasOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// Bias bias(5)
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
+ public:
+  BiasImpl(int64_t num_features)
+    : BiasImpl(BiasOptions(num_features)) {}
+  explicit BiasImpl(const BiasOptions& options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  /// Pretty prints the `Bias` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Transforms the `input` tensor by adding the `bias`.
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  BiasOptions options;
+
+  /// The learned bias.
+  Tensor bias;
+};
+
+/// A `ModuleHolder` subclass for `BiasImpl`.
+/// See the documentation for `BiasImpl` class to learn what methods it
+/// provides, and examples of how to use `Bias` with `torch::nn::BiasOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(Bias);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.
