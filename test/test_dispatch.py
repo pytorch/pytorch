@@ -789,7 +789,7 @@ CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd"])
+        dispatcher.register(["CPU", "XLA", "CompositeImplicitAutograd"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -799,18 +799,16 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
-Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
 '''
         )
 
     def test_math_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeImplicitAutograd", "AutogradCPU"])
+        dispatcher.register(["CPU", "XLA", "CompositeImplicitAutograd", "AutogradCPU"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -820,12 +818,10 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
-Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeImplicitAutograd [math kernel]
 AutogradOther   fn_CompositeImplicitAutograd [math kernel]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
 '''
         )
         self.assertExpectedInline(
@@ -837,7 +833,6 @@ key             kernel
 ---------------------------
 CPU             fn_CPU
 XLA             fn_XLA
-Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 '''
@@ -845,7 +840,7 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
 
     def test_defaultbackend_autogradcpu(self):
         dispatcher = PythonDispatcher()
-        dispatcher.register(["CPU", "XLA", "Lazy", "CompositeExplicitAutograd", "AutogradCPU"])
+        dispatcher.register(["CPU", "XLA", "CompositeExplicitAutograd", "AutogradCPU"])
         self.assertExpectedInline(
             dispatcher.dispatchTable(),
             '''\
@@ -855,12 +850,10 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_XLA [kernel]
-Lazy            fn_Lazy [kernel]
 QuantizedCPU    fn_CompositeExplicitAutograd [default backend kernel]
 AutogradOther   fallthrough [backend fallback]
 AutogradCPU     fn_AutogradCPU [kernel]
 AutogradXLA     fallthrough [backend fallback]
-AutogradLazy    fallthrough [backend fallback]
 '''
         )
 
@@ -873,7 +866,6 @@ key             kernel
 ---------------------------
 CPU             fn_CPU
 XLA             fn_XLA
-Lazy            fn_Lazy
 AutogradCPU     fn_AutogradCPU
 CompositeExplicitAutograd[alias] fn_CompositeExplicitAutograd
 '''
@@ -891,12 +883,10 @@ key             kernel
 ---------------------------
 CPU             fn_CPU [kernel]
 XLA             fn_CompositeImplicitAutograd [math kernel]
-Lazy            fn_CompositeImplicitAutograd [math kernel]
 QuantizedCPU    fn_QuantizedCPU [kernel]
 AutogradOther   ambiguous_autogradother [ambiguous autogradother]
 AutogradCPU     fallthrough [backend fallback]
 AutogradXLA     fn_CompositeImplicitAutograd [math kernel]
-AutogradLazy    fn_CompositeImplicitAutograd [math kernel]
 '''
         )
 

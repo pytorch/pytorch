@@ -55,7 +55,6 @@ class PythonDispatcher:
         "CPU", "AutogradCPU",
         "QuantizedCPU", "AutogradOther",
         "XLA", "AutogradXLA",
-        "Lazy", "AutogradLazy",
     ]
     alias_keys = [
         "CompositeExplicitAutograd",

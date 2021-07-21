@@ -51,7 +51,6 @@ enum class Backend {
   MkldnnCPU,
   MLC,
   HPU,
-  Lazy,
   NumOptions
 };
 
@@ -70,8 +69,6 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::MSNPU;
   } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;
-  } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
-    return Backend::Lazy;
   } else if (t == DispatchKey::MLC || t == DispatchKey::AutogradMLC) {
     return Backend::MLC;
   } else if (t == DispatchKey::Vulkan) {
@@ -127,8 +124,6 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MSNPU;
     case Backend::XLA:
       return DispatchKey::XLA;
-    case Backend::Lazy:
-      return DispatchKey::Lazy;
     case Backend::XPU:
       return DispatchKey::XPU;
     case Backend::SparseXPU:
@@ -182,8 +177,6 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::MSNPU;
     case Backend::XLA:
       return DeviceType::XLA;
-    case Backend::Lazy:
-      return DeviceType::Lazy;
     case Backend::SparseCPU:
       return DeviceType::CPU;
     case Backend::SparseCUDA:
@@ -239,8 +232,6 @@ static inline const char* toString(Backend b) {
       return "MSNPU";
     case Backend::XLA:
       return "XLA";
-    case Backend::Lazy:
-      return "Lazy";
     case Backend::MLC:
       return "MLC";
     case Backend::SparseCPU:
