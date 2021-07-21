@@ -726,14 +726,6 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
-  TORCH_CHECK(
-      self.device() == result.device(),
-      "mvlgamma: Expected all tensors to be on the same device, but found at least two devices, ",
-      self.device(),
-      " and ",
-      result.device(),
-      "!");
-
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
       at::can_cast(out.scalar_type(), result.scalar_type()),
