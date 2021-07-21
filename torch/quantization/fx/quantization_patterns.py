@@ -262,7 +262,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         prepare step.
         """
         if self.num_tensor_args == 1:
-            # return activation_dtype(qconfig) == torch.float16
             return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
             return True
@@ -297,6 +296,7 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 args = load_arg(quantized=torch.float)(self.binary_op_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
                 op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
+
                 def modified_load_arg(n: Node):
                     if n.name == self.binary_op_node.name:
                         return op_out

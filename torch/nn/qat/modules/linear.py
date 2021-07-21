@@ -53,8 +53,8 @@ class Linear(nn.Linear):
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features)
-        linear.weight = torch.nn.Parameter(self.weight)
-        linear.bias = None
+        linear.weight = torch.nn.Parameter(self.weight.detach())
         if self.bias is not None:
-            linear.bias = torch.nn.Parameter(self.bias)
+            linear.bias = torch.nn.Parameter(self.bias.detach())
+        linear.train(self.training)
         return linear
