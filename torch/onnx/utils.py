@@ -406,8 +406,7 @@ def _get_param_count_list(method_graph, args_params):
     return param_count_list
 
 
-def _resolve_graph_inputs_shape_type(model, method_graph, args_params):
-    param_count_list = _get_param_count_list(method_graph, args_params)
+def _resolve_and_flatten_graph_inputs(model, args_params):
     sig = inspect.signature(model.forward)
     ordered_list_keys = list(sig.parameters.keys())
     resolved_args = []
@@ -421,8 +420,7 @@ def _resolve_graph_inputs_shape_type(model, method_graph, args_params):
     else:
         resolved_args = args_params
     resolved_args, _ = torch.jit._flatten(resolved_args)
-    return resolved_args, _propagate_and_assign_input_shapes(
-        method_graph, resolved_args, param_count_list, False, False)
+    return resolved_args
 
 
 def _create_jit_graph(model, args):
@@ -436,7 +434,10 @@ def _create_jit_graph(model, args):
             module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
             method_graph = module._get_method("forward").graph
             args_params = tuple(args) + tuple(params)
-            _, graph = _resolve_graph_inputs_shape_type(model, method_graph, args_params)
+            param_count_list = _get_param_count_list(method_graph, args_params)
+            graph_inputs = _resolve_and_flatten_graph_inputs(model, args_params)
+            graph = _propagate_and_assign_input_shapes(
+                method_graph, graph_inputs, param_count_list, False, False)
         except AttributeError as e:
             raise RuntimeError("'forward' method must be a script method") from e
         return graph, params, torch_out, module

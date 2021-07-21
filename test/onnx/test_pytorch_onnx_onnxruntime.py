@@ -1003,7 +1003,6 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(MixedModel(), (x, {"y": y, "z": None}))
         self.run_test(MixedModel(), (x, {"y": None, "z": z}))
-        self.run_test(MixedModel(), (x, {"z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
 
     @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
@@ -1785,7 +1784,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
-        self.run_test(FloatingPoint(), x, remained_onnx_input_idx=None)
+        self.run_test(FloatingPoint(), x, remained_onnx_input_idx=[])
 
         class FloatingPoint(torch.jit.ScriptModule):
             @torch.jit.script_method
