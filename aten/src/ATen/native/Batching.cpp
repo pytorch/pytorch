@@ -1,5 +1,4 @@
 #include <ATen/BatchedTensorImpl.h>
-#include <ATen/Functions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/VmapTransforms.h>
 
@@ -71,6 +70,17 @@ static std::pair<Tensor,int64_t> remove_existing_batch_dim(
   return std::make_pair(std::move(result_tensor), newly_exposed_logical_dim);
 }
 
+// at::movedim but may return the original tensor if dst is the same as src.
+static Tensor maybe_movedim(const Tensor& self, int64_t src, int64_t dst) {
+  auto logical_dim = self.dim();
+  src = maybe_wrap_dim(src, logical_dim);
+  dst = maybe_wrap_dim(dst, logical_dim);
+  if (src == dst) {
+    return self;
+  }
+  return self.movedim(src, dst);
+}
+
 // Removes the batch dim with level `level` from `self`. If this causes the
 // last batch dim to be removed from a BatchedTensor, then this returns a
 // regular Tensor.
@@ -103,7 +113,7 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t newly_exposed_logical_dim;
   std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
-  return at::movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
+  return maybe_movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
 }
 
 } // namespace native
