@@ -315,7 +315,7 @@ struct TORCH_API Engine {
   }
 
   virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
-    return torch::autograd::DefaultSavedVariableHooks::get_hooks();
+    return nullptr;
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows
