@@ -138,6 +138,7 @@ TORCH_META_FUNC(cumsum)
   }
 
   set_output(self.sizes(), self.options().dtype(out_dtype));
+  namedinference::propagate_names(result, self);
 }
 
 } // namespace meta
