@@ -10,6 +10,23 @@ namespace at { namespace native {
 
 namespace {
 
+ScalarType first_type() {
+  return ScalarType::Undefined;
+}
+
+template <typename... Args>
+ScalarType first_type(const Tensor& arg, const Args&... parameters) {
+  return arg.defined() ? arg.scalar_type() : first_type(parameters...);
+}
+
+// A transform is mixed type if the parameters are higher precision than the input
+template <typename... Args>
+bool is_mixed_type(const Tensor& input, const Args&... parameters) {
+  const auto parameter_type = first_type(parameters...);
+  return ((parameter_type != ScalarType::Undefined) &&
+          (parameter_type != input.scalar_type()));
+}
+
 inline bool batch_norm_use_channels_last_kernels(const at::Tensor& self) {
   return (self.is_contiguous(at::MemoryFormat::ChannelsLast) ||
           (self.is_contiguous() && self.strides()[1] == 1));
@@ -56,8 +73,8 @@ void batch_norm_elementwise(
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
                                     "batch_norm_elementwise_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if ((weight->defined() && weight->scalar_type() != self.scalar_type()) ||
-          (bias->defined() && bias->scalar_type() != self.scalar_type())) {
+      const bool mixed_type = is_mixed_type(self, *weight, *bias);
+      if (mixed_type) {
         batch_norm_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
             out, self, *weight, *bias, mean_, invstd_);
       } else {
@@ -131,7 +148,8 @@ Tensor batch_norm_elementwise_backward_train(
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_elemt", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
+      const bool mixed_type = is_mixed_type(input, weight);
+      if (mixed_type) {
         return batch_norm_backward_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
             grad_out, input, mean, invstd, weight, sum_dy, sum_dy_xmu);
       } else {
@@ -444,7 +462,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
     return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
                                            "batch_norm_backward_cuda", [&] {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      if (weight->defined() && weight->scalar_type() != input.scalar_type()) {
+      const bool mixed_type = is_mixed_type(input, *weight, *running_mean, *running_var);
+      if (mixed_type) {
           return batch_norm_backward_cuda_template<scalar_t, accscalar_t, int32_t>(
               grad_out, input, *weight, *running_mean, *running_var,
               *save_mean, *save_invstd, train, epsilon, grad_input_mask);
@@ -596,17 +615,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> batch_norm_backward_reduce_cuda(const
     auto mean_st = mean.dtype();
     auto invstd_st = invstd.dtype();
     TORCH_CHECK(mean_st == invstd_st, "mean and invstd need to have the same data types");
-    const bool is_mixed_type = weight.defined() && weight.scalar_type() != input.scalar_type();
+    const bool mixed_type = is_mixed_type(input, weight);
     using accscalar_t = at::acc_type<scalar_t, true>;
 
     if (cuda::detail::canUse32BitIndexMath(grad_output)) {
-      if (is_mixed_type) {
+      if (mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int32_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       }
     } else {
-      if (is_mixed_type) {
+      if (mixed_type) {
         return batch_norm_backward_reduce_cuda_template<scalar_t, accscalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
       } else {
         return batch_norm_backward_reduce_cuda_template<scalar_t, scalar_t, int64_t>(grad_output, input, mean, invstd, weight, input_g, weight_g, bias_g);
