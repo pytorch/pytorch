@@ -1,12 +1,12 @@
 import io
 import os
+import site
 import sys
 import copy
 import unittest
 
 import torch
 from typing import Optional
-from pathlib import Path
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -27,11 +27,11 @@ class TestTorchbind(JitTestCase):
         if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
         if TEST_WITH_ROCM:
-            torch_root = Path(torch.__file__).resolve().parent
-            p = torch_root / 'lib' / 'libtorchbind_test.so'
+            site_dir = site.getsitepackages()[0]
+            p = os.path.join(site_dir, 'torch', 'lib', 'libtorchbind_test.so')
         else:
-            torch_root = Path(__file__).resolve().parent.parent.parent
-            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+            site_dir = site.getsitepackages()[0]
+            p = os.path.join(site_dir, 'torch', 'lib', 'libtorchbind_test.so')
         torch.ops.load_library(str(p))
 
     def test_torchbind(self):

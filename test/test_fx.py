@@ -8,13 +8,13 @@ import numbers
 import operator
 import os
 import pickle
+import site
 import sys
 import torch
 import traceback
 import warnings
 import unittest
 from math import sqrt
-from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -109,8 +109,8 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
+        site_dir = site.getsitepackages()[0]
+        p = os.path.join(site_dir, 'torch', 'lib', 'libtorchbind_test.so')
         torch.ops.load_library(str(p))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
