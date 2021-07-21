@@ -1197,53 +1197,58 @@ def sample_inputs_linalg_vector_norm(op_info, device, dtype, requires_grad, **kw
 
     return inputs
 
-# In order to use the kwarg alpha, partials should be used in an OpInfo's sample_inputs_func
-# eg. sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2)
-# Then one sample input would also be generated corresponding to the value of alpha provided.
-# In the future, kwargs 'alpha_floating', 'alpha_integral' & 'alpha_complex' can be used to
-# specify scalars of floating, integral & complex types as values for "alpha".
-# Keyword argument `rhs_exclude_zero` is used to exclude zero values from rhs tensor argument
-# This is necessary for operations like `true_divide`, where divide by zero throws an exception.
-def sample_inputs_binary_pwise(op_info, device, dtype, requires_grad, extra_kwargs=None, **kwargs):
-    if extra_kwargs is None:
-        extra_kwargs = {}
 
-    scalar = 3.14 + 3.14j if dtype.is_complex else (3.14 if dtype.is_floating_point else 3)
-    scalar = 1 if dtype is torch.bool else scalar
-    tests_list = [
-        ((S, S, S), (S, S, S), False),
-        ((S, S, S), (S, S), False),
-        ((), (), False),
-        ((S, S, S), (), False),
-        ((S, S, S), scalar, False),
-        ((), scalar, False)
-    ]
-    tests_with_lhs_broadcasting = [
-        ((S, S), (S, S, S), True),
-        ((), (S, S, S), True),
-        ((S, 1, S), (M, S), True),
-    ]
-    test_cases = tests_list + tests_with_lhs_broadcasting  # type: ignore[operator]
-    samples = []
-    for first_shape, shape_or_scalar, broadcasts_input in test_cases:
-        arg = shape_or_scalar
+# Metadata class for binary "universal functions (ufuncs)" that accept two
+# tensor and have common properties
+class BinaryUfuncInfo(OpInfo):
+    """Operator information for 'universal binary functions (binary ufuncs).'
+    These are functions of two tensors with common properties like:
+      - they are elementwise functions
+      - the output shape is determined by the input shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+    pass
 
-        if isinstance(shape_or_scalar, tuple):
-            exclude_zero = kwargs.get('rhs_exclude_zero', False)
-            arg = make_tensor(shape_or_scalar, device=device, dtype=dtype,
-                              requires_grad=requires_grad, exclude_zero=exclude_zero)
-        samples.append(SampleInput(make_tensor(first_shape, device=device, dtype=dtype,
-                                               requires_grad=requires_grad),
-                                   args=(arg,), kwargs=extra_kwargs,
-                                   broadcasts_input=broadcasts_input))
-    # Adds an extra sample using "alpha" if it's passed in kwargs
-    if 'alpha' in kwargs:
-        a = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        b = make_tensor((S, S, S), device=device, dtype=dtype, requires_grad=requires_grad)
-        extra_kwargs['alpha'] = kwargs['alpha']
-        sample = SampleInput(a, args=(b,), kwargs=extra_kwargs)
-        samples.append(sample)
-    return tuple(samples)
+
+def sample_inputs_binary_pwise(
+        op_info, device, dtype, requires_grad, op_kwargs=None, lhs_make_tensor_kwargs=None, **rhs_make_tensor_kwargs
+):
+    if op_kwargs is None:
+        op_kwargs = {}
+    if lhs_make_tensor_kwargs is None:
+        lhs_make_tensor_kwargs = {}
+
+    shapes = [
+        ((1,), ()),
+        ((S,), ()),
+        ((1,), (S,)),
+        ((S,), (S,)),
+        ((S, 1), (S,)),
+        ((1, S), (S,)),
+        ((M, S), (S,)),
+        ((M, S), (M, S)),
+        ((1, M, S), (S,)),
+        ((1, M, S), (M, S)),
+        ((M, 1, S), (M, S)),
+        ((1, M, S), (1, M, S)),
+        ((S, M, S), ()),
+        ((S, M, S), (S, M, S)),
+        ((M, 1, S), (1, M, S)),
+    ]
+
+    return [
+        SampleInput(
+            make_tensor(shape_a, device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs),
+            args=(make_tensor(shape_b, device=device, dtype=dtype, **rhs_make_tensor_kwargs),),
+            kwargs=op_kwargs,
+        )
+        for shape_a, shape_b in shapes
+    ]
 
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
@@ -3676,19 +3681,6 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
-    lhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    rhs = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
-    # Avoid integer divide by 0
-    if not (dtype.is_floating_point or dtype.is_complex):
-        rhs[rhs == 0] = 1
-
-    return [
-        SampleInput(lhs, args=(rhs,)),
-        SampleInput(lhs, args=(rhs[0],)),
-        SampleInput(lhs, args=(3.14,)),
-    ]
-
 def sample_inputs_isin(op_info, device, dtype, requires_grad):
     element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
     indices = torch.randint(0, L, size=[S])
@@ -4885,28 +4877,28 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
                                 dtypes=[torch.cdouble]),
                    )),
-    OpInfo('add',
-           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-           ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
-           assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
-           supports_inplace_autograd=False,
-           supports_forward_ad=True),
-    OpInfo('mul',
-           aliases=('multiply',),
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_binary_pwise),
-    OpInfo('sub',
-           # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
-           ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
-           aliases=('subtract',),
-           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
-           assert_autodiffed=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, alpha=2),
-           supports_inplace_autograd=False),
+    BinaryUfuncInfo('add',
+                    # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+                    ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
+                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+                    assert_autodiffed=True,
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, op_kwargs=dict(alpha=2)),
+                    supports_inplace_autograd=False,
+                    supports_forward_ad=True),
+    BinaryUfuncInfo('mul',
+                    aliases=('multiply',),
+                    dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+                    assert_autodiffed=True,
+                    supports_forward_ad=True,
+                    sample_inputs_func=sample_inputs_binary_pwise),
+    BinaryUfuncInfo('sub',
+                    # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
+                    ref=lambda input, other, *, alpha=1: np.subtract(input, np.multiply(alpha, other)),
+                    aliases=('subtract',),
+                    dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
+                    assert_autodiffed=True,
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, op_kwargs=dict(alpha=2)),
+                    supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
            # alpha=beta=1 is tested in the following opinfo, because that special case will
@@ -5440,41 +5432,43 @@ op_db: List[OpInfo] = [
            op=torch.diff,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_diff),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='no_rounding_mode',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           assert_autodiffed=True),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='trunc_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
-                                      "rounding_mode": 'trunc'}, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
-           assert_autodiffed=True),
-    OpInfo('div',
-           aliases=('divide',),
-           variant_test_name='floor_rounding',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_binary_pwise, extra_kwargs={
-                                      "rounding_mode": 'floor'}, rhs_exclude_zero=True),
-           supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/59174
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
-           assert_autodiffed=True),
-    OpInfo('true_divide',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           supports_forward_ad=True,
-           sample_inputs_func=partial(sample_inputs_binary_pwise, rhs_exclude_zero=True)),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='no_rounding_mode',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True),
+                    supports_forward_ad=True,
+                    assert_autodiffed=True),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='trunc_rounding',
+                    dtypes=all_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(
+                        sample_inputs_binary_pwise, op_kwargs=dict(rounding_mode="trunc"), exclude_zero=True
+                    ),
+                    supports_forward_ad=True,
+                    skips=(
+                        # Reference: https://github.com/pytorch/pytorch/issues/59174
+                        SkipInfo('TestJit', 'test_variant_consistency_jit'),
+                    ),
+                    assert_autodiffed=True),
+    BinaryUfuncInfo('div',
+                    aliases=('divide',),
+                    variant_test_name='floor_rounding',
+                    dtypes=all_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(
+                        sample_inputs_binary_pwise, op_kwargs=dict(rounding_mode="floor"), exclude_zero=True
+                    ),
+                    supports_forward_ad=True,
+                    skips=(
+                        # Reference: https://github.com/pytorch/pytorch/issues/59174
+                        SkipInfo('TestJit', 'test_variant_consistency_jit'),
+                    ),
+                   assert_autodiffed=True),
+    BinaryUfuncInfo('true_divide',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_forward_ad=True,
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True)),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -5718,11 +5712,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                    safe_casts_outputs=True),
-    OpInfo('floor_divide',
-           dtypes=all_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_floor_divide,
-           supports_autograd=False,
-           ),
+    BinaryUfuncInfo('floor_divide',
+                    dtypes=all_types_and(torch.half, torch.bfloat16),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True),
+                    supports_autograd=False,
+                    ),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
                    ref=np.frexp,
@@ -7854,6 +7848,7 @@ op_db: List[OpInfo] = [
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
+binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]

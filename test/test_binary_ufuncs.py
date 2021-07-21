@@ -17,8 +17,9 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
-    skipCUDAIfRocm, skipIf)
+    skipCUDAIfRocm, skipIf, ops)
 from torch.testing import all_types_and_complex_and, integral_types_and
+from torch.testing._internal.common_methods_invocations import binary_ufuncs
 
 if TEST_SCIPY:
     import scipy.special
@@ -88,6 +89,64 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
+    @ops(binary_ufuncs)
+    def test_broadcasting(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype):
+            a = sample.input
+            b, *other_args = sample.args
+            if isinstance(b, torch.Tensor):
+                expected = torch.broadcast_shapes(a.shape, b.shape)
+            else:
+                expected = a.shape
+
+            actual = op(a, b, *other_args, **sample.kwargs).shape
+
+            msg = (
+                f"For {device} / {dtype}, torch.{op.name} broadcasts inputs of shapes {a.shape} and {b.shape} "
+                f"incorrectly: {actual} != {expected}"
+            )
+            torch.testing.assert_close(actual, expected, msg=msg)
+
+    @ops(binary_ufuncs)
+    def test_broadcast_python_scalar(self, device, dtype, op):
+        for shape in ((), (1,), (2,), (1, 2, 3)):
+            a = torch.ones(shape, device=device, dtype=dtype)
+            b_tensor = torch.ones((), device=device, dtype=dtype)
+            b_python = b_tensor.item()
+
+            actual = op(a, b_python)
+            expected = op(a, b_tensor)
+
+            torch.testing.assert_close(
+                actual,
+                expected,
+                check_device=False,
+                check_dtype=False,
+                msg=f"For {device} / {dtype}, torch.{op.name} broadcasts Python scalars different than 0d tensors.",
+            )
+
+    @ops(binary_ufuncs)
+    def test_not_broadcastable(self, device, dtype, op):
+        shapes = [
+            ((2,), (3,)),
+            ((3, 1), (2, 1)),
+            ((1, 3, 2), (3,)),
+            ((3, 1, 2), (2, 1, 2)),
+        ]
+        for shape_a, shape_b in shapes:
+            a = torch.ones(shape_a, device=device, dtype=dtype)
+            b = torch.ones(shape_b, device=device, dtype=dtype)
+
+            try:
+                broadcasted_shape = op(a, b).shape
+            except RuntimeError:
+                continue
+
+            msg = (
+                f"For {device} / {dtype}, torch.{op.name} broadcasts inputs shapes {a.shape} and {b.shape} into "
+                f"{broadcasted_shape}, although they are not broadcastable."
+            )
+            raise AssertionError(msg)
 
     def test_add_broadcast_empty(self, device):
         # empty + empty
@@ -1183,11 +1242,10 @@ class TestBinaryUfuncs(TestCase):
     # Also tests that reverse operations are equivalent to forward ops
     # NOTE: division ops are tested separately above
     def test_binary_ops_with_scalars(self, device):
-        for ops in ((operator.add, torch.add),
-                    (operator.sub, torch.sub),
-                    (operator.mul, torch.mul),
-                    (operator.truediv, torch.div)):
-            python_op, torch_op = ops
+        for python_op, torch_op in ((operator.add, torch.add),
+                                    (operator.sub, torch.sub),
+                                    (operator.mul, torch.mul),
+                                    (operator.truediv, torch.div)):
 
             for a, b in product(range(-10, 10), range(-10, 10)):
                 for op in (lambda x: x * .5, lambda x: math.floor(x)):
