@@ -304,11 +304,20 @@ class ConvBnReLU1d(ConvBn1d):
         return super(ConvBnReLU1d, cls).from_float(mod)
 
     def to_float(self):
-        conv = torch.nn.Conv1d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv = torch.nn.Conv1d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         bn = torch.nn.BatchNorm1d(self.bn.num_features, self.bn.eps, self.bn.momentum, self.bn.affine, self.bn.track_running_stats)
         bn.weight = Parameter(self.bn.weight)
@@ -316,7 +325,9 @@ class ConvBnReLU1d(ConvBn1d):
         if self.bn.bias is not None:
             bn.bias = Parameter(self.bn.bias)
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.ConvBnReLU1d(conv, bn, relu)
+        result = torch.nn.intrinsic.ConvBnReLU1d(conv, bn, relu)
+        result.train(self.training)
+        return result
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
@@ -361,10 +372,10 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 
     def to_float(self):
         conv = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         bn = torch.nn.BatchNorm2d(
             self.bn.num_features, self.bn.eps, self.bn.momentum,
@@ -373,7 +384,9 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         bn.bias = None
         if self.bn.bias is not None:
             bn.bias = Parameter(self.bn.bias)
-        return torch.nn.intrinsic.ConvBn2d(conv, bn)
+        result = torch.nn.intrinsic.ConvBn2d(conv, bn)
+        result.train(self.training)
+        return result
 
 class ConvBnReLU2d(ConvBn2d):
     r"""
@@ -423,10 +436,10 @@ class ConvBnReLU2d(ConvBn2d):
 
     def to_float(self):
         conv = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         bn = torch.nn.BatchNorm2d(
             self.bn.num_features,
@@ -440,7 +453,9 @@ class ConvBnReLU2d(ConvBn2d):
             bn.bias = Parameter(self.bn.bias)
 
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.ConvBnReLU2d(conv, bn, relu)
+        result = torch.nn.intrinsic.ConvBnReLU2d(conv, bn, relu)
+        result.train(self.training)
+        return result
 
 class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
     r"""A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
@@ -478,12 +493,14 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
 
     def to_float(self):
         conv = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.ConvReLU2d(conv, relu)
+        result = torch.nn.intrinsic.ConvReLU2d(conv, relu)
+        result.train(self.training)
+        return result
 
 class ConvBn3d(_ConvBnNd, nn.Conv3d):
     r"""
@@ -551,11 +568,20 @@ class ConvBn3d(_ConvBnNd, nn.Conv3d):
         )
 
     def to_float(self):
-        conv = torch.nn.Conv3d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv = torch.nn.Conv3d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         bn = torch.nn.BatchNorm3d(
             self.bn.num_features,
@@ -567,7 +593,9 @@ class ConvBn3d(_ConvBnNd, nn.Conv3d):
         bn.bias = None
         if self.bn.bias is not None:
             bn.bias = Parameter(self.bn.bias)
-        return torch.nn.intrinsic.ConvBn3d(conv, bn)
+        result = torch.nn.intrinsic.ConvBn3d(conv, bn)
+        result.train(self.training)
+        return result
 
 class ConvBnReLU3d(ConvBn3d):
     r"""
@@ -634,11 +662,20 @@ class ConvBnReLU3d(ConvBn3d):
         return super(ConvBnReLU3d, cls).from_float(mod)
 
     def to_float(self):
-        conv = torch.nn.Conv3d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv = torch.nn.Conv3d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         bn = torch.nn.BatchNorm3d(
             self.bn.num_features,
@@ -652,7 +689,9 @@ class ConvBnReLU3d(ConvBn3d):
             bn.bias = Parameter(self.bn.bias)
 
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.ConvBnReLU3d(conv, bn, relu)
+        result = torch.nn.intrinsic.ConvBnReLU3d(conv, bn, relu)
+        result.train(self.training)
+        return result
 
 
 class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
@@ -708,15 +747,25 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         return super(ConvReLU3d, cls).from_float(mod)
 
     def to_float(self):
-        conv = torch.nn.Conv3d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
-        conv.weight = torch.nn.Parameter(self.weight)
+        conv = torch.nn.Conv3d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
+        conv.weight = torch.nn.Parameter(self.weight.detach())
         conv.bias = None
         if self.bias is not None:
-            conv.bias = torch.nn.Parameter(self.bias)
+            conv.bias = torch.nn.Parameter(self.bias.detach())
 
         relu = torch.nn.ReLU()
-        return torch.nn.intrinsic.ConvReLU3d(conv, relu)
-
+        result = torch.nn.intrinsic.ConvReLU3d(conv, relu)
+        result.train(self.training)
+        return result
 
 def update_bn_stats(mod):
     if type(mod) in set(
