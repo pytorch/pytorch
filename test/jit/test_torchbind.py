@@ -1,6 +1,5 @@
 import io
 import os
-import site
 import sys
 import copy
 import unittest
