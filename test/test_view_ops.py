@@ -1355,6 +1355,22 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_reshape_view_semantics(self, device, dtype):
+        tensor = make_tensor((15, 4), device, dtype)
+        target = (20, 3)
+
+        # Cases where the tensor can be returned as a view.
+        view_tensor = tensor.reshape(target)
+        self.assertEqual((view_tensor.size()), target)
+        self.assertEqual(tensor.storage().data_ptr(), view_tensor.storage().data_ptr())
+
+        # Cases where the tensor must be copied (transpose makes it non-contiguous forcing
+        # the copy).
+        copy_tensor = tensor.transpose(0, 1).reshape(target)
+        self.assertEqual(copy_tensor.size(), target)
+        self.assertNotEqual(tensor.storage().data_ptr(), copy_tensor.storage().data_ptr())
+
     def test_contiguous(self, device):
         x = torch.randn(1, 16, 5, 5, device=device)
         self.assertTrue(x.is_contiguous())
