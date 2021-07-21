@@ -631,14 +631,6 @@ class Refine:
         self.traced = traced
         self.symbol_iter = itertools.count(start=0, step=1)
 
-    # def symbol_gen(self):
-    #     val = [0]
-    #
-    #     def inc():
-    #         val[0] += 1
-    #         return val[0]
-    #     return inc
-
     def refine(self):
         """
         Generates constraints for
@@ -658,13 +650,7 @@ class Refine:
             new_symbol = Var(next(self.symbol_iter))
             return new_symbol
         elif isinstance(typ, TensorType):
-            new_args = []
-            for a in typ.__args__:
-                if a == Dyn:
-                    new_symbol = Var(next(self.symbol_iter))
-                    new_args.append(new_symbol)
-                else:
-                    new_args.append(a)
+            new_args = [self.replace_dyn_with_fresh_var(a) for a in typ.__args__]
             return TensorType(tuple(new_args))
         else:
             return typ
