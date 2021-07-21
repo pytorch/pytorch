@@ -1111,29 +1111,29 @@ class DistributedDataParallel(Module, _Joinable):
 
         Example::
 
-          >>>  import torch
-          >>>  import torch.distributed as dist
-          >>>  import os
-          >>>  import torch.multiprocessing as mp
-          >>>  import torch.nn as nn
-          >>>  # On each spawned worker
-          >>>  def worker(rank):
-          >>>      dist.init_process_group("nccl", rank=rank, world_size=2)
-          >>>      torch.cuda.set_device(rank)
-          >>>      model = nn.Linear(1, 1, bias=False).to(rank)
-          >>>      model = torch.nn.parallel.DistributedDataParallel(
-          >>>          model, device_ids=[rank], output_device=rank
-          >>>      )
-          >>>      # Rank 1 gets one more input than rank 0.
-          >>>      inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
-          >>>      with model.join():
-          >>>          for _ in range(5):
-          >>>              for inp in inputs:
-          >>>                  loss = model(inp).sum()
-          >>>                  loss.backward()
-          >>>  # Without the join() API, the below synchronization will hang
-          >>>  # blocking for rank 1's allreduce to complete.
-          >>>  torch.cuda.synchronize(device=rank)
+            >>> import torch
+            >>> import torch.distributed as dist
+            >>> import os
+            >>> import torch.multiprocessing as mp
+            >>> import torch.nn as nn
+            >>> # On each spawned worker
+            >>> def worker(rank):
+            >>>     dist.init_process_group("nccl", rank=rank, world_size=2)
+            >>>     torch.cuda.set_device(rank)
+            >>>     model = nn.Linear(1, 1, bias=False).to(rank)
+            >>>     model = torch.nn.parallel.DistributedDataParallel(
+            >>>         model, device_ids=[rank], output_device=rank
+            >>>     )
+            >>>     # Rank 1 gets one more input than rank 0.
+            >>>     inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
+            >>>     with model.join():
+            >>>         for _ in range(5):
+            >>>             for inp in inputs:
+            >>>                 loss = model(inp).sum()
+            >>>                 loss.backward()
+            >>>     # Without the join() API, the below synchronization will hang
+            >>>     # blocking for rank 1's allreduce to complete.
+            >>>     torch.cuda.synchronize(device=rank)
         """
         return _Join(
             [self],
@@ -1156,6 +1156,18 @@ class DistributedDataParallel(Module, _Joinable):
                 to modify the behavior of the join hook at run time; all
                 :class:`_Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
+
+        The hook supports the following keyword arguments:
+            divide_by_initial_world_size (bool, optional):
+                If ``True``, then gradients are divided by the initial world
+                size that DDP was launched with.
+                If ``False``, then gradients are divided by the effective world
+                size (i.e. the number of non-joined processes), meaning that
+                the uneven inputs contribute more toward the global gradient.
+                Typically, this should be set to ``True`` if the degree of
+                unevenness is small but can be set to ``False`` in extreme
+                cases for possibly better results.
+                Default is ``True``.
         """
         divide_by_initial_world_size = kwargs.get("divide_by_initial_world_size", True)
         return _DDPJoinHook(
