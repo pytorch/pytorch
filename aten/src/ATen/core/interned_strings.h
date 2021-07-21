@@ -265,6 +265,8 @@ namespace c10 {
   _(aten, linalg_householder_product)\
   _(aten, transpose)                 \
   _(aten, transpose_)                \
+  _(aten, trapz)                     \
+  _(aten, trapezoid)                 \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
