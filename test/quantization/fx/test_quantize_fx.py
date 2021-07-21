@@ -88,7 +88,7 @@ import copy
 import itertools
 import operator
 import unittest
-import io
+
 from typing import Callable
 
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
@@ -1157,10 +1157,6 @@ class TestQuantizeFx(QuantizationTestCase):
 
             m = M().to(device).eval()
 
-            def update(qconfig, model):
-                device = torch.quantization.fx.utils.assert_and_get_unique_device(model)
-                return torch.quantization.fx.qconfig_utils.add_device_to_obs_ctr_in_qconfig(qconfig, torch.device(device))
-
             global_qconfig = default_qconfig
             object_type_qconfig = default_dynamic_qconfig
             module_name_regex_qconfig = float16_dynamic_qconfig
@@ -1170,12 +1166,16 @@ class TestQuantizeFx(QuantizationTestCase):
                 "object_type": [(nn.Conv2d, object_type_qconfig)],
                 "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
                 "module_name": [("module_conv2", module_name_qconfig)]}
-            m = prepare_fx(m, qconfig_dict)
+            m_prep = prepare_fx(m, qconfig_dict)
 
-            self.assertEqual(str(m.linear.qconfig), str(update(global_qconfig, m)))
-            self.assertEqual(str(m.conv.qconfig), str(update(object_type_qconfig, m)))
-            self.assertEqual(str(m.module_conv1.qconfig), str(update(module_name_regex_qconfig, m)))
-            self.assertEqual(str(m.module_conv2.qconfig), str(update(module_name_qconfig, m)))
+            self.assertEqual(m_prep.linear.qconfig.activation.p.func, global_qconfig.activation.p.func)
+            self.assertEqual(m_prep.linear.qconfig.weight.p.func, global_qconfig.weight.p.func)
+            self.assertEqual(m_prep.conv.qconfig.activation.p.func, object_type_qconfig.activation.p.func)
+            self.assertEqual(m_prep.conv.qconfig.weight.p.func, object_type_qconfig.weight.p.func)
+            self.assertEqual(m_prep.module_conv1.qconfig.activation.p.func, module_name_regex_qconfig.activation.p.func)
+            self.assertEqual(m_prep.module_conv1.qconfig.weight.p.func, module_name_regex_qconfig.weight.p.func)
+            self.assertEqual(m_prep.module_conv2.qconfig.activation.p.func, module_name_qconfig.activation.p.func)
+            self.assertEqual(m_prep.module_conv2.qconfig.weight.p.func, module_name_qconfig.weight.p.func)
 
     def test_qconfig_module_name_object_type_order(self):
         class M1(torch.nn.Module):
@@ -4545,6 +4545,36 @@ class TestQuantizeFxModels(QuantizationTestCase):
             model_quantized = convert_fx(model_prepared, is_reference=True)
             out = model_quantized(input.to(device_after))
             self.assertEqual(out.device.type, device_after)
+
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
+    def test_prepare_serialize_switch_device_convert(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                y = self.linear1(x.view(-1))
+                return y
+
+        for device in ['cuda', 'cpu']:
+            for device_after in ['cuda', 'cpu']:
+                input = torch.randn((5, 1, 6, 6)).to(device)
+                model = Net().to(device).eval()
+                qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+                model_prepared_first = prepare_fx(model, qconfig_dict)
+                model_prepared_second = prepare_fx(model, qconfig_dict)
+                model_prepared_first(input)
+                state_dict = model_prepared_first.state_dict()
+                del model_prepared_first
+                model_prepared_second.load_state_dict(state_dict)
+                model_prepared_second.to(device_after)
+                model_quantized = convert_fx(model_prepared_second, is_reference=True)
+                out = model_quantized(input.to(device_after))
+                self.assertEqual(out.device.type, device_after)
 
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,

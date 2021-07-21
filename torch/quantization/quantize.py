@@ -19,7 +19,7 @@ from .quantization_mappings import (
 
 from .stubs import DeQuantStub, QuantWrapper
 from .qconfig import (
-    create_qconfig_with_module,
+    add_module_to_qconfig_obs_ctr,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig)
@@ -56,14 +56,13 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
 
     torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
-    # TODO refactor so these are imported
-    module_qconfig = create_qconfig_with_module(module_qconfig, module)
-    module.qconfig = module_qconfig
+    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    module.qconfig = qconfig_with_device_check
 
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
-                                  module_qconfig, module_prefix)
+                                  qconfig_with_device_check, module_prefix)
 
 # TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):

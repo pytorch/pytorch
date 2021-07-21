@@ -16,7 +16,7 @@ class _PartialWrapper(object):
         self.callable_args = {}
 
     def __call__(self, *args, **keywords):
-        # call each arg in callable_args and add them to keyword 
+        # call each arg in callable_args and add them to keyword
         # unless already there (so constructor can be overwritten)
         for arg_name in self.callable_args:
             if arg_name not in keywords:
@@ -39,7 +39,8 @@ def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
     This can be useful when there is a need to create classes with the same
-    constructor arguments, but different instances.
+    constructor arguments, but different instances. Can be used in conjuction with
+    _callable_args
 
     Example::
 
@@ -59,12 +60,13 @@ def _with_callable_args(cls_or_self, **kwargs):
 
     This can be useful when there is a need to create classes with the same
     constructor arguments, but different instances and those arguments should only
-    be calculated at construction time.
+    be calculated at construction time. Can be used in conjunction with _with_args
 
     Example::
 
+        >>> Foo.with_callable_args = classmethod(_with_callable_args)
         >>> Foo.with_args = classmethod(_with_args)
-        >>> foo_builder = Foo.with_callable_args(cur_time=get_time).with_args(name="dan")
+        >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
         >>> foo_instance1 = foo_builder()
         >>> wait 50
         >>> foo_instance2 = foo_builder()
