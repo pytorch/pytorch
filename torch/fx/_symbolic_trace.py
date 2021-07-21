@@ -207,6 +207,10 @@ class Tracer(TracerBase):
 
                 Turning this on is likely to slow down tracing by 1.5-3x.
 
+            param_shapes_constant (bool): see https://github.com/pytorch/pytorch/issues/61733. When
+            this flag is set,  calls to shape, size and a few other shape like attributes of a module's parameter
+            will be evaluted directly, rather than returning a new Proxy value for an attribute access.
+
         """
 
         super().__init__()

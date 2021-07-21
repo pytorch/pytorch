@@ -1,8 +1,6 @@
 import unittest
-
 import torch
 import torch.fx
-import difflib
 
 
 class MyModule(torch.nn.Module):
@@ -36,9 +34,12 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         tracer2 = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph2 = tracer2.trace(mymod2)
 
-        # the second graph has an exta relu function call node
-        assert(len(traced_graph2.nodes) > len(traced_graph.nodes))
+        graph1_node_names = [n.name for n in traced_graph.nodes]
+        graph2_node_names = [n.name for n in traced_graph2.nodes]
 
+        # the second graph has an exta relu function call node
+        assert 'mm' in graph1_node_names and 'mm' in graph2_node_names
+        assert 'relu' not in graph1_node_names and 'relu' in graph2_node_names
 
 if __name__ == '__main__':
     unittest.main()

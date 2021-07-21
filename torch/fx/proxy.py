@@ -38,9 +38,6 @@ class TracerBase:
         represents the parameter of a function. If we need to encode
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
-
-        obj_proxied is the actual runtime Python value for which this proxy is created, only used
-        for param_shapes_constant support for now.
         '''
 
         args_ = self.create_arg(args)
@@ -275,8 +272,9 @@ class Attribute(Proxy):
 
 class ParameterProxy(Proxy):
     """
-    a special proxy which lets "shape" attribute accesses pass through to the underlying
-    module parameter object, so that conditional tests on parameter shapes can be traced
+    a special proxy which lets "shape", "size", "dim", and a few other
+    attribute accesses pass through to the underlying  module parameter object,
+    so that conditional tests on these attributes will not throw exception during tracing
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
@@ -290,6 +288,26 @@ class ParameterProxy(Proxy):
     @property
     def shape(self):
         return self.param.shape
+
+    @property
+    def size(self):
+        return self.param.size
+
+    @property
+    def dim(self):
+        return self.param.dim
+
+    @property
+    def ndim(self):
+        return self.param.ndim
+
+    @property
+    def numel(self):
+        return self.param.numel
+
+    @property
+    def nelement(self):
+        return self.param.nelement
 
 
 for method in magic_methods:
