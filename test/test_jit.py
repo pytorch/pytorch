@@ -14496,7 +14496,7 @@ dedent """
                     return 0
 
         @torch.jit._overload
-        def null_overload(x: int) -> int: ...
+        def null_overload(x: int) -> int: ...  # noqa: E704
 
         @torch.jit._overload
         def null_overload(x: str) -> str:  # noqa: F811
@@ -14517,7 +14517,7 @@ dedent """
                 pass
 
             @torch.jit._overload_method
-            def forward(self, x: Tensor):
+            def forward(self, x: Tensor):  # noqa: F811
                 pass
 
         with self.assertRaisesRegex(RuntimeError, 'Implementation for the method ".+" is missing.'):

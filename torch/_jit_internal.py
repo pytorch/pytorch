@@ -716,8 +716,7 @@ def copy_torchscript_modifier(orig, new) -> None:
 _overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
 
-def _get_overload_example():
-    return '''
+_OVERLOAD_EXAMPLE = '''
 Example usage of overload function:
 @torch.jit._overload
 def my_function(x: type0) -> type0: # decl 1
@@ -736,10 +735,11 @@ def my_function(x):                 # implementation
 
 def get_overload_no_implementation_error_message(kind, obj):
     sourcelines, file_lineno, filename = get_source_lines_and_file(obj)
-    return (f'Implementation for the {kind} "{_qualified_name(obj)}" is missing. Please make' +
-           "sure a definition is provided and defined after all overload declarations.\n" +
-           f'File "{filename}", line {file_lineno}:' + "\n" + ''.join(sourcelines) +
-           _get_overload_example())
+    return (
+        f'Implementation for the {kind} "{_qualified_name(obj)}" is missing. Please make'
+        f'sure a definition is provided and defined after all overload declarations.\n'
+        f'File "{filename}", line {file_lineno}:\n' + ''.join(sourcelines) + _OVERLOAD_EXAMPLE
+    )
 
 def _check_overload_body(func):
     parsed_def = parse_def(func)
@@ -754,7 +754,7 @@ def _check_overload_body(func):
     if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
         msg = "Only `pass` statement or `...` can be the body of overload declaration:\n"
         msg += '\n'.join(parsed_def.source.split("\n")[:3])
-        msg += " <- Expecting `pass` or `...` here!\n" + _get_overload_example()
+        msg += " <- Expecting `pass` or `...` here!\n" + _OVERLOAD_EXAMPLE
         raise RuntimeError(msg)
 
 def _overload(func):
