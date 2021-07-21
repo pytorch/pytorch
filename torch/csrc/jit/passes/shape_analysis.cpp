@@ -2176,7 +2176,7 @@ using TypeCache = std::unordered_map<TypePtr, TypePtr>;
 TypePtr getOrCreateUnshapedType(TypePtr type, TypeCache& unshaped_type_cache);
 
 TypePtr unshapedTypeImpl(TypePtr type, TypeCache& unshaped_type_cache) {
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->cast<TensorType>()) {
     return TensorType::get();
   }
   std::vector<TypePtr> unshaped_contained_types;
