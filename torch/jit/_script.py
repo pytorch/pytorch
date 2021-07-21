@@ -982,6 +982,7 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
+
 def _script_pdt(obj, optimize=None, _frames_up=0, _rcb=None,
                 example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None):
     # This is a private API, intended for internal use only. Usage of this API is only for experimental
@@ -1048,6 +1049,20 @@ def create_script_dict(obj):
     return torch._C.ScriptDict(obj)  # type: ignore[attr-defined]
 
 
+def create_script_list(obj, type_hint=None):
+    """
+    Create a ``torch._C.ScriptList`` instance with the data from ``obj``.
+    Args:
+        obj (dict): The Python list that is used to initialize the ``ScriptList``
+                    returned by this function.
+    Returns:
+        An instance of ``torch._C.ScriptList`` that has the same data as ``obj``
+        and can be passed between Python and TorchScript with reference semantics and
+        zero copy overhead.
+    """
+    return torch._C.ScriptList(obj)  # type: ignore[attr-defined]
+
+
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -1057,15 +1072,15 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
     tensors and do control-dependent operations. For a complete guide, see the
     :ref:`language-reference`.
 
-    Scripting a dictionary copies the data inside it into a TorchScript instance than can be
+    Scripting a dictionary or list copies the data inside it into a TorchScript instance than can be
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
 
-    ``torch.jit.script`` can be used as a function for modules, functions, and dictionaries
+    ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
      and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
     Args:
-        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type, or
-                                                  dictionary to compile.
+        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type,
+                                                  dictionary, or list to compile.
 
     Returns:
         If ``obj`` is ``nn.Module``, ``script`` returns
@@ -1073,7 +1088,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         have the same set of sub-modules and parameters as the
         original ``nn.Module``. If ``obj`` is a standalone function,
         a :class:`ScriptFunction` will be returned. If ``obj`` is a ``dict``, then
-        ``script`` returns an instance of `torch._C.ScriptDict`.
+        ``script`` returns an instance of `torch._C.ScriptDict`. If ``obj`` is a ``list``,
+        then ``script`` returns an instance of `torch._C.ScriptList`.
 
     **Scripting a function**
         The ``@torch.jit.script`` decorator will construct a :class:`ScriptFunction`
@@ -1217,6 +1233,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
+    if isinstance(obj, list):
+        return create_script_list(obj)
 
     if inspect.isclass(obj):
         qualified_name = _qualified_name(obj)

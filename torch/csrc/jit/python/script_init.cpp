@@ -1,3 +1,4 @@
+#include <pybind11/detail/common.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -24,6 +25,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
+#include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
@@ -1019,7 +1021,10 @@ void initJitScriptBindings(PyObject* module) {
           "write_files",
           &ScriptModuleSerializer::writeFiles,
           py::arg("code_dir") = ".data/ts_code/code/")
-      .def("storage_context", &ScriptModuleSerializer::storage_context);
+      .def(
+          "storage_context",
+          &ScriptModuleSerializer::storage_context,
+          pybind11::return_value_policy::reference_internal);
 
   // Used by torch.package to coordinate sharing of storages between eager
   // and ScriptModules.
@@ -1027,7 +1032,6 @@ void initJitScriptBindings(PyObject* module) {
       SerializationStorageContext,
       std::shared_ptr<SerializationStorageContext>>(
       m, "SerializationStorageContext")
-      .def(py::init<SerializationStorageContext&>())
       .def("has_storage", &SerializationStorageContext::hasStorage)
       .def("get_or_add_storage", &SerializationStorageContext::getOrAddStorage);
 
@@ -2135,6 +2139,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   initScriptDictBindings(module);
+  initScriptListBindings(module);
 }
 } // namespace jit
 } // namespace torch
