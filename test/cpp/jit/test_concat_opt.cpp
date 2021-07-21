@@ -49,8 +49,8 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
               %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
               %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
           %5 : int = prim::Constant[value=0]()
-          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %5)
-          %concat.3 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %2, %5)
+          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %5)
+          %concat.3 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %2, %5)
           %res : Tensor[] = prim::ListConstruct(%concat.2, %concat.3)
           return (%res)
       )IR";
@@ -71,14 +71,14 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationPrefix) {
   //        %1 : ...,
   //        %2 : ...):
   //    %3 : int = prim::Constant[value=0]()
-  //    %4 : Tensor = prim::Concat(%0, %1, %3)
-  //    %7 : Tensor = prim::Concat(%4, %2, %3) // UPDATED
+  //    %4 : Tensor = prim::VarConcat(%0, %1, %3)
+  //    %7 : Tensor = prim::VarConcat(%4, %2, %3) // UPDATED
   //    %8 : Tensor[] = prim::ListConstruct(%4, %7)
   //    return (%8)
 
   testing::FileCheck()
-      .check_count("= prim::Concat(%0, %1, %3)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%4, %2, %3)", 1, /*exactly*/ true)
+      .check_count("= prim::VarConcat(%0, %1, %3)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%4, %2, %3)", 1, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(%4, %7)", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
@@ -94,8 +94,8 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationSuffix) {
               %1: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
               %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
           %5 : int = prim::Constant[value=0]()
-          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%1, %2, %5)
-          %concat.3 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %2, %5)
+          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%1, %2, %5)
+          %concat.3 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %2, %5)
           %res : Tensor[] = prim::ListConstruct(%concat.2, %concat.3)
           return (%res)
       )IR";
@@ -116,14 +116,14 @@ TEST(ConcatOptTest, SimpleCommonInputsEliminationSuffix) {
   //        %1 : ...,
   //        %2 : ...):
   //    %3 : int = prim::Constant[value=0]()
-  //    %4 : Tensor = prim::Concat(%1, %2, %3)
-  //    %7 : Tensor = prim::Concat(%0, %4, %3) // UPDATED
+  //    %4 : Tensor = prim::VarConcat(%1, %2, %3)
+  //    %7 : Tensor = prim::VarConcat(%0, %4, %3) // UPDATED
   //    %8 : Tensor[] = prim::ListConstruct(%4, %7)
   //    return (%8)
 
   testing::FileCheck()
-      .check_count("= prim::Concat(%1, %2, %3)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%0, %4, %3)", 1, /*exactly*/ true)
+      .check_count("= prim::VarConcat(%1, %2, %3)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%0, %4, %3)", 1, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(%4, %7)", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
@@ -140,11 +140,11 @@ TEST(ConcatOptTest, CommonInputsEliminationWithDifferentOrderInputs) {
               %2: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
           %5 : int = prim::Constant[value=0]()
 
-          #CHECK: prim::Concat
-          %concat.1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %5)
+          #CHECK: prim::VarConcat
+          %concat.1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %5)
 
-          #CHECK: prim::Concat
-          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%1, %0, %2, %5)
+          #CHECK: prim::VarConcat
+          %concat.2 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%1, %0, %2, %5)
 
           #CHECK: prim::ListConstruct
           %res : Tensor[] = prim::ListConstruct(%concat.1, %concat.2)
@@ -179,10 +179,10 @@ TEST(ConcatOptTest, MoreCommonInputsElimination) {
               %3: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu),
               %4: Float(32, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu)):
           %5 : int = prim::Constant[value=0]()
-          %concat.1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %5)
-          %concat.2 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %2, %5)
-          %concat.3 : Float(160, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %2, %3, %5)
-          %concat.4 : Float(192, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::Concat(%0, %1, %2, %3, %4, %5)
+          %concat.1 : Float(96, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %5)
+          %concat.2 : Float(128, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %2, %5)
+          %concat.3 : Float(160, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %2, %3, %5)
+          %concat.4 : Float(192, 56, 56, strides=[3136, 56, 1], requires_grad=0, device=cpu) = prim::VarConcat(%0, %1, %2, %3, %4, %5)
           %res : Tensor[] = prim::ListConstruct(%concat.1, %concat.2, %concat.3, %concat.4)
           return (%res)
       )IR";
@@ -201,10 +201,10 @@ TEST(ConcatOptTest, MoreCommonInputsElimination) {
   checkOutputs(orig_outputs, opt_outputs);
 
   testing::FileCheck()
-      .check_count("= prim::Concat(%0, %1, %5)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%6, %2, %5)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%11, %3, %5)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%12, %4, %5)", 1, /*exactly*/ true)
+      .check_count("= prim::VarConcat(%0, %1, %5)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%6, %2, %5)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%11, %3, %5)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%12, %4, %5)", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->run(*graph);
 }
@@ -363,16 +363,16 @@ TEST(ConcatOptTest, UseVariadicCat) {
 
   checkOutputs(orig_outputs, opt_outputs);
 
-  // After replacing `aten::cat` with `prim::Concat` we should have the
+  // After replacing `aten::cat` with `prim::VarConcat` we should have the
   // following graph:
   //
   //  graph(%0 : ...,
   //        %1 : ...):
   //    %zero : int = prim:Constant[value=0]()
-  //    %varcat : Tensor = prim::Concat(%0, %1, %2, %3, %4, %5, %zero)
+  //    %varcat : Tensor = prim::VarConcat(%0, %1, %2, %3, %4, %5, %zero)
   //    return (%varcat)
   testing::FileCheck()
-      .check_count("= prim::Concat(", 1, /*exactly*/ true)
+      .check_count("= prim::VarConcat(", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
       ->run(*graph);
@@ -415,11 +415,11 @@ TEST(OptimizeConcatTest, UseVariadicCatReplaceMultiple) {
   //        %2 : ...,
   //        %3 : ....):
   //    %zero : int = prim:Constant[value=0]()
-  //    %varcat1 : Tensor = prim::Concat(%0, %1, %zero)
-  //    %varcat2 : Tensor = prim::Concat(%2, %3, %zero)
+  //    %varcat1 : Tensor = prim::VarConcat(%0, %1, %zero)
+  //    %varcat2 : Tensor = prim::VarConcat(%2, %3, %zero)
   //    return (%varcat1, %varcat2)
   testing::FileCheck()
-      .check_count("= prim::Concat(", 2, /*exactly*/ true)
+      .check_count("= prim::VarConcat(", 2, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
       ->run(*graph);
@@ -448,18 +448,18 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListUses) {
 
   checkOutputs(orig_outputs, opt_outputs);
 
-  // After replacing `aten::cat` with `prim::Concat` we should have the
+  // After replacing `aten::cat` with `prim::VarConcat` we should have the
   // following graph:
   //
   //  graph(%0 : ...,
   //        %1 : ...):
   //    %zero : int = prim:Constant[value=0]()
   //    %input : Tensor[] = prim::ListConstruct(%0, %1)
-  //    %varcat : Tensor = prim::Concat(%0, %1, %zero)
+  //    %varcat : Tensor = prim::VarConcat(%0, %1, %zero)
   //    return (%varcat, %input)
   testing::FileCheck()
       .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->run(*graph);
 }
@@ -491,7 +491,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationAfterCat) {
   checkOutputs(orig_outputs, opt_outputs);
 
   // The input list to `aten::cat` is mutated only after `aten::cat` op. So,
-  // it should have been replaced with `prim::Concat`. The transformed graph
+  // it should have been replaced with `prim::VarConcat`. The transformed graph
   // should look like the following:
   //
   //  graph(%0 : ...,
@@ -499,12 +499,12 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationAfterCat) {
   //        %2 : ...):
   //    %3 : int = prim:Constant[value=0]()
   //    %4 : Tensor[] = prim::ListConstruct(%0, %1)
-  //    %7 : Tensor = prim::Concat(%0, %1, %3)
+  //    %7 : Tensor = prim::VarConcat(%0, %1, %3)
   //    %6 : Tensor = aten::append(%4, %2)
   //    return (%7, %4)
   testing::FileCheck()
       .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->run(*graph);
 }
@@ -541,7 +541,7 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
     testing::FileCheck()
         .check_count("= prim::ListConstruct(", 1, /*exactly*/ true)
         ->check_count("= aten::cat(", 1, /*exactly*/ true)
-        ->check_count("= prim::Concat(", 0, /*exactly*/ true)
+        ->check_count("= prim::VarConcat(", 0, /*exactly*/ true)
         ->run(*graph);
   }
 
@@ -552,17 +552,17 @@ TEST(ConcatOptTest, UseVariadicCatWithListMutationBeforeCat) {
     checkOutputs(orig_outputs, opt_outputs);
 
     // The mutation of the list must be removed and the `aten::cat` op must
-    // be replaced with the `prim::Concat` op in the graph. The transformed
+    // be replaced with the `prim::VarConcat` op in the graph. The transformed
     // graph should look like the following:
     //
     //  graph(%0 : ...,
     //        %1 : ...,
     //        %2 : ...):
     //    %3 : int = prim:Constant[value=0]()
-    //    %7 : Tensor = prim::Concat(%0, %1, %2, %3)
+    //    %7 : Tensor = prim::VarConcat(%0, %1, %2, %3)
     //    return (%7)
     testing::FileCheck()
-        .check_count("= prim::Concat(", 1, /*exactly*/ true)
+        .check_count("= prim::VarConcat(", 1, /*exactly*/ true)
         ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
         ->check_count("= aten::cat(", 0, /*exactly*/ true)
         ->run(*graph);
@@ -605,7 +605,7 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListMutations) {
   checkOutputs(orig_outputs, opt_outputs);
 
   // All the mutations of the list must be removed and the `aten::cat` ops must
-  // be replaced with `prim::Concat` ops in the graph. The transformed graph
+  // be replaced with `prim::VarConcat` ops in the graph. The transformed graph
   // should look like the following:
   //
   //  graph(%0 : ...,
@@ -614,13 +614,13 @@ TEST(ConcatOptTest, UseVariadicCatWithMultipleListMutations) {
   //        %3 : ...,
   //        %4 : ...):
   //    %10 : int = prim:Constant[value=0]()
-  //    %5 : Tensor = prim::Concat(%0, %1, %10)
-  //    %6 : Tensor = prim::Concat(%0, %1, %2, %10)
-  //    %7 : Tensor = prim::Concat(%0, %1, %2, %3, %10)
-  //    %8 : Tensor = prim::Concat(%0, %1, %2, %3, %4, %10)
+  //    %5 : Tensor = prim::VarConcat(%0, %1, %10)
+  //    %6 : Tensor = prim::VarConcat(%0, %1, %2, %10)
+  //    %7 : Tensor = prim::VarConcat(%0, %1, %2, %3, %10)
+  //    %8 : Tensor = prim::VarConcat(%0, %1, %2, %3, %4, %10)
   //    return (%5, %6, %7, %8)
   testing::FileCheck()
-      .check_count("= prim::Concat(", 4, /*exactly*/ true)
+      .check_count("= prim::VarConcat(", 4, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->run(*graph);
@@ -671,13 +671,13 @@ TEST(
   //        %1 : ...,
   //        %2 : ...):
   //    %3 : int = prim::Constant[value=0]()
-  //    %10 : Tensor = prim::Concat(%0, %1, %2, %3)
-  //    %12 : Tensor = prim::Concat(%10, %0, %3) // UPDATED
+  //    %10 : Tensor = prim::VarConcat(%0, %1, %2, %3)
+  //    %12 : Tensor = prim::VarConcat(%10, %0, %3) // UPDATED
   //    %8 : Tensor[] = prim::ListConstruct(%10, %12)
   //    return (%8)
   testing::FileCheck()
-      .check_count("= prim::Concat(%0, %1, %2, %3)", 1, /*exactly*/ true)
-      ->check_count("= prim::Concat(%10, %0, %3)", 1, /*exactly*/ true)
+      .check_count("= prim::VarConcat(%0, %1, %2, %3)", 1, /*exactly*/ true)
+      ->check_count("= prim::VarConcat(%10, %0, %3)", 1, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(%10, %12)", 1, /*exactly*/ true)
       ->check_count("= aten::cat(", 0, /*exactly*/ true)
       ->check_count("= prim::ListConstruct(", 0, /*exactly*/ true)
