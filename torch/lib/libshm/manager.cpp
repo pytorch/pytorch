@@ -1,14 +1,13 @@
-#include <sys/mman.h>
-#include <poll.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <errno.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <vector>
-#include <set>
 #include <algorithm>
+#include <cerrno>
+#include <fcntl.h>
 #include <memory>
+#include <poll.h>
+#include <set>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <unordered_map>
+#include <vector>
 
 #include <c10/util/tempfile.h>
 
