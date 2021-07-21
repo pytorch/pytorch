@@ -240,7 +240,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void bitwise_and_kernel(TensorIterator& iter) {
+void bitwise_and_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
         iter,
@@ -261,7 +261,7 @@ void bitwise_and_kernel(TensorIterator& iter) {
   }
 }
 
-void bitwise_or_kernel(TensorIterator& iter) {
+void bitwise_or_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     cpu_kernel(
         iter,
@@ -282,7 +282,7 @@ void bitwise_or_kernel(TensorIterator& iter) {
   }
 }
 
-void bitwise_xor_kernel(TensorIterator& iter) {
+void bitwise_xor_kernel(TensorIteratorBase& iter) {
   if (iter.dtype() == ScalarType::Bool) {
     // Boolean type does not work with ^ (bitwise XOR) in C++. bitwise_xor wraps this operation for both Boolean and
     // integral types.
