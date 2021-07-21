@@ -567,14 +567,14 @@ def add_eq(n: Node):
     res = []
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         arg_type1 = n.args[0].type
-        arg_type2 = n.args[0].type
+        arg_type2 = n.args[1].type
         if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
             args1 = arg_type1.__args__
             args2 = arg_type2.__args__
             args3 = n.type.__args__
             r = []
             for x, y, z in zip(args1, args2, args3):
-                if args1 == args2:
+                if x == y:
                     r.append(Equality(x, z))
             res = r
     return res

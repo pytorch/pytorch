@@ -828,7 +828,8 @@ class TypeCheckerTest(unittest.TestCase):
         # apply shape inference to graph and check
         # that the batch size is equal across all layers
         infer_symbolic_types(gm_static)
-        # infer_symbolic_types(gm_static)
+        infer_symbolic_types(gm_static)
+
 
         batch_sizes = []
         for n in gm_static.graph.nodes:
@@ -861,6 +862,8 @@ class TypeCheckerTest(unittest.TestCase):
         tc.type_check()
 
         infer_symbolic_types(traced)
+        infer_symbolic_types(traced)
+
 
         my_types = iter([TensorType[(2, 2, Var(7), 4)],
                          TensorType[(2, 2, Var(7), 4)],
