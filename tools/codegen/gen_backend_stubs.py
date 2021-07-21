@@ -3,6 +3,7 @@ import argparse
 import os
 import yaml
 from collections import namedtuple
+from copy import copy
 from typing import List, Dict, Union, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
@@ -140,6 +141,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
+    backend_indices = copy(backend_indices)
     grouped_native_functions = get_grouped_native_functions(native_functions)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
     backend_key = parsed_backend_yaml.backend_key
