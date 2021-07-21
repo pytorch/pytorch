@@ -513,7 +513,9 @@ static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indic
               min_indices.device(), " for indices output");
   dim = maybe_wrap_dim(dim, self.dim());
   if (self.numel() == 0) {
-    zero_numel_tensor_resize(min, min_indices, self, dim, keepdim, "min()");
+    auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, "min()");
+    resize_output(min, sizes);
+    resize_output(min_indices, sizes);
     return std::tie(min, min_indices);
   }
   else if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
