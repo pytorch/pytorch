@@ -238,9 +238,7 @@ std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
 
   // Copy type of block output to node output.
-  for (size_t i = 0; i < node->outputs().size(); ++i) {
-    node->output(i)->setType(node->blocks().at(0)->outputs().at(i + 1)->type());
-  }
+  FixupONNXControlflowNodeOutputs(node);
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;
 }
@@ -460,6 +458,37 @@ std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
     }
     default:
       return n->outputs().vec();
+  }
+}
+
+void FixupONNXControlflowNodeOutputs(Node* n) {
+  switch (n->kind()) {
+    case ::c10::onnx::Loop: {
+      for (size_t i = 0; i < n->outputs().size(); ++i) {
+        auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
+        if (i < loop_carried_output_size) {
+          n->output(i)->setType(n->blocks().at(0)->outputs().at(i + 1)->type());
+        } else {
+          auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
+          if (auto t_type = type->cast<TensorType>()) {
+            auto sizes = t_type->symbolic_sizes().sizes();
+            if (sizes.has_value()) {
+              sizes.value().emplace(
+                  sizes.value().begin(), c10::ShapeSymbol::newSymbol());
+              type = t_type->withSymbolicShapes(sizes.value());
+            }
+          }
+          n->output(i)->setType(type);
+        }
+      }
+      break;
+    }
+    case ::c10::onnx::If: {
+      ONNXMergeIfBlockOutputShapes(n);
+      break;
+    }
+    default:
+      break;
   }
 }
 
