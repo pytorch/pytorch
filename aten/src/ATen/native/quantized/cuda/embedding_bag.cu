@@ -41,35 +41,38 @@ fma4sb(const float4 fa, const float fscale, const float fbias) {
   return res;
 }
 
+template <uint8_t bits_per_dim>
 __forceinline__ __device__ float4
-dequantize_int8(uint32_t packedVals, float2 scale_bias) {
+dequantize_intx(uint32_t packedVals, float2 scale_bias, uint8_t offset_bits) {
   float4 res;
 
-  res.x = bfe(packedVals, 0, 8);
-  res.y = bfe(packedVals, 8, 8);
-  res.z = bfe(packedVals, 16, 8);
-  res.w = bfe(packedVals, 24, 8);
+  res.x = bfe(packedVals, offset_bits + (0 * bits_per_dim), bits_per_dim);
+  res.y = bfe(packedVals, offset_bits + (1 * bits_per_dim), bits_per_dim);
+  res.z = bfe(packedVals, offset_bits + (2 * bits_per_dim), bits_per_dim);
+  res.w = bfe(packedVals, offset_bits + (3 * bits_per_dim), bits_per_dim);
 
   return fma4sb(res, scale_bias.x, scale_bias.y);
 }
 
-__forceinline__ __device__ float4
-accumulate_packed_int8(float4 acc, uint32_t packedVals, float2 scale_bias) {
-  float4 res = dequantize_int8(packedVals, scale_bias);
-
-  // Accumulate in float32.
-  acc.x += res.x;
-  acc.y += res.y;
-  acc.z += res.z;
-  acc.w += res.w;
-  return acc;
+template <uint8_t bits_per_dim>
+__forceinline__ __device__ void
+accumulate_packed_intx(float4* acc, uint32_t packedVals, float2 scale_bias) {
+  constexpr uint8_t dims_per_byte = 8 / bits_per_dim;
+  for (uint8_t i = 0; i < dims_per_byte; i++) {
+    float4 res = dequantize_intx<bits_per_dim>(packedVals, scale_bias, 4 * bits_per_dim * i /* offset_bits */);
+    // Accumulate in float32.
+    acc[i].x += res.x;
+    acc[i].y += res.y;
+    acc[i].z += res.z;
+    acc[i].w += res.w;
+  }
 }
 
 // END QUANTIZE HELPER FUNCTIONS
 
 // UN-OPTIMIZED kernel, doesn't even avoid warp divergence!
-template <typename index_t>
-__global__ void embedding_bag_byte_rowwise_offsets_kernel(
+template <typename index_t, uint8_t bits_per_dim>
+__global__ void embedding_bag_nbits_rowwise_offsets_kernel(
     const PackedTensorAccessor64<uint8_t, 2, RestrictPtrTraits> weight,
     const PackedTensorAccessor32<index_t, 1, RestrictPtrTraits> indices,
     const PackedTensorAccessor32<index_t, 1, RestrictPtrTraits> offsets,
@@ -78,16 +81,20 @@ __global__ void embedding_bag_byte_rowwise_offsets_kernel(
     const c10::optional<Tensor>& compressed_indices_mapping,
     const bool include_last_offset,
     PackedTensorAccessor32<float, 2, RestrictPtrTraits> output) {
+  static_assert(bits_per_dim == 4 || bits_per_dim == 8, "the current embedding_bag_nbits_rowwise_offsets_kernel only has been tested for 4 and 8 bits per dim");
+  constexpr uint8_t dims_per_byte = 8 / bits_per_dim;
+  constexpr bool fp32_scale_bias = bits_per_dim == 8;
+
   int32_t B = output.size(0);
-  int32_t T = output.size(1);
+  int32_t D = output.size(1);
   int32_t b_t = blockIdx.x * blockDim.y + threadIdx.y;
-  if (b_t >= B * T) {
+  if (b_t >= B * D) {
     return;
   }
   int32_t t = b_t / B;
   int32_t b = b_t % B;
 
-  const int32_t D_bytes = T + 8;
+  const int32_t D_bytes = weight.size(1);
 
   int64_t indices_start = offsets[t * B + b];
   int64_t indices_end;
@@ -102,28 +109,42 @@ __global__ void embedding_bag_byte_rowwise_offsets_kernel(
   const uint8_t* __restrict__ weights = &weight[0][0];
 
   if (L == 0) {
-    for (int32_t d = 0; d < T; d += 4) {
+    for (int32_t d = 0; d < D; d += 4) {
       *(float4*)(&output[b][d]) = make_float4(0, 0, 0, 0);
     }
     return;
   }
 
-  float4 accumulator;
-  for (int32_t d = 0; d < T; d += 4) {
-    accumulator = make_float4(0, 0, 0, 0);
+
+  float4 accumulator[dims_per_byte];
+  int32_t byte_offset = 0;
+  for (int32_t d = 0; d < D; d += dims_per_byte * 4, byte_offset += 4) {
+    for (int32_t i = 0; i < dims_per_byte; ++i) {
+        accumulator[i] = make_float4(0, 0, 0, 0);
+    }
     for (int32_t l = indices_start; l < indices_end; ++l) {
       int64_t idx = indices[l];
       const uint8_t* __restrict__ row = &weights[idx * D_bytes];
-      float2 scale_bias = make_float2(
-          reinterpret_cast<const float*>(&row[D_bytes - 8])[0],
-          reinterpret_cast<const float*>(&row[D_bytes - 4])[0]);
+      float2 scale_bias;
+      if (fp32_scale_bias) {
+        scale_bias = make_float2(
+            reinterpret_cast<const float*>(&row[D_bytes - 8])[0],
+            reinterpret_cast<const float*>(&row[D_bytes - 4])[0]);
+      } else {
+        scale_bias = make_float2(
+            __half2float(reinterpret_cast<const __half*>(&row[D_bytes - 4])[0]),
+            __half2float(reinterpret_cast<const __half*>(&row[D_bytes - 2])[0]));
+      }
 
-      uint32_t v0 = reinterpret_cast<const uint32_t*>(&row[d])[0];
+      uint32_t v0 = reinterpret_cast<const uint32_t*>(&row[byte_offset])[0];
 
-      accumulator = accumulate_packed_int8(accumulator, v0, scale_bias);
+      accumulate_packed_intx<bits_per_dim>(accumulator, v0, scale_bias);
     }
 
-    *(float4*)(&output[b][d]) = accumulator;
+
+    for (int32_t i = 0; i < dims_per_byte; ++i) {
+      *(float4*)(&output[b][d + (i * 4)]) = accumulator[i];
+    }
   }
 }
 
@@ -198,7 +219,7 @@ at::Tensor& embedding_bag_byte_impl(
   at::native::resize_(output, shape, c10::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
-        embedding_bag_byte_rowwise_offsets_kernel<<<
+        embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
             output_size,
             dim3(1, 1, 1),
             0,
@@ -333,57 +354,62 @@ at::Tensor& embedding_bag_4bit_impl(
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  TORCH_CHECK(weight.dim() == 2);
-  TORCH_CHECK(offsets.dim() == 1);
-
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
-  auto offsets_data = offsets.data_ptr<OffsetType>();
-
-  // Get compressed indices for pruned_weights op.
-  int32_t* compressed_indices_mapping_data = nullptr;
-  int compressed_index_size = 0;
-  bool fallback_to_no_sparse = false;
-  if (pruned_weights) {
-    compressed_index_size = compressed_indices_mapping.value().numel();
-    compressed_indices_mapping_data =
-        compressed_indices_mapping.value().data_ptr<int32_t>();
-
-    // if compressed_indices_mapping is [0], it is a indicator that
-    // we should fallback to non sparse embedding look up kernel.
-    if ((compressed_index_size == 1 &&
-         compressed_indices_mapping_data[0] == 0)) {
-      fallback_to_no_sparse = true;
-    }
+  TORCH_CHECK(weight.is_cuda());
+  TORCH_CHECK(indices.is_cuda());
+  TORCH_CHECK(offsets.is_cuda());
+  TORCH_CHECK(indices.device() == weight.device())
+  TORCH_CHECK(offsets.device() == weight.device());
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(per_sample_weights_.value().device() == weight.device());
   }
+  if (compressed_indices_mapping.has_value()) {
+    TORCH_CHECK(compressed_indices_mapping.value().device() == weight.device());
+  }
+
+  TORCH_CHECK(weight.dtype() == at::kByte);
+  TORCH_CHECK(weight.dim() == 2);
+
+  at::cuda::OptionalCUDAGuard device_guard;
+  device_guard.set_index(weight.get_device());
 
   const auto weight_sizes = weight.sizes();
   const int64_t N = weight_sizes[0];
-  const int64_t weight_size = weight_sizes[1];
-  const int64_t D =
-      (weight_size - 4) * 2; // NB: 2-byte fp16 scale and 2-byte zero_offset
+  const int D = 2*(weight_sizes[1] - 4); // NB: -4 to account for scale and bias @fp16
   const int64_t M = offsets.sizes()[0];
+  TORCH_CHECK(D % 8 == 0);
+  TORCH_CHECK(
+      !per_sample_weights_.has_value(),
+      "Per sample weights not yet implemented for embedding_bag_byte_rowwise_offsets_cuda");
+  TORCH_CHECK(
+      !compressed_indices_mapping.has_value(),
+      "Compressed indices mapping not yet implemented for embedding_bag_byte_rowwise_offsets_cuda");
 
-  int64_t output_size = M - 1;
-  std::vector<OffsetType> offsets_include_last_val;
-  if (!include_last_offset) {
-    output_size = M;
-    offsets_include_last_val.resize(M + 1);
-    // Avoid `null pointer passed as argument 2` ASAN violation when offsets
-    // tensor is empty.
-    if (M > 0) {
-      std::memcpy(
-          offsets_include_last_val.data(),
-          offsets_data,
-          sizeof(OffsetType) * M);
-    }
-    offsets_include_last_val[M] = indices.numel();
-    offsets_data = offsets_include_last_val.data();
-  }
+  const auto maxThreads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+
+  int64_t output_size = include_last_offset ? M - 1 : M;
 
   const std::vector<int64_t> shape = {output_size, D};
   at::native::resize_(output, shape, c10::nullopt);
+  AT_DISPATCH_INDEX_TYPES(
+      indices.scalar_type(), "embedding_bag_4bit_rowwise_offsets_kernel", ([&] {
+        embedding_bag_nbits_rowwise_offsets_kernel<index_t, 4><<<
+            output_size,
+            dim3(1, 1, 1),
+            0,
+            at::cuda::getCurrentCUDAStream()>>>(
+            weight.packed_accessor64<uint8_t, 2, RestrictPtrTraits>(),
+            indices.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
+            offsets.packed_accessor32<index_t, 1, RestrictPtrTraits>(),
+            false /* pruned_weights */,
+            per_sample_weights_,
+            compressed_indices_mapping,
+            include_last_offset,
+            output.packed_accessor32<float, 2, RestrictPtrTraits>());
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }));
+
   TORCH_CHECK(output.is_cuda());
+
   return output;
 }
 
