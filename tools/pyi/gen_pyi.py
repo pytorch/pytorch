@@ -286,8 +286,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                     'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
                     'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
-        'frombuffer': ['def frombuffer(buffer: Any, *, dtype: Optional[_dtype], '
-                       'count: int=-1, offset: int=0, device: Union[_device, str, None]=None, '
+        'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
+                       'offset: int=0, device: Union[_device, str, None]=None, '
                        'requires_grad: _bool=False) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
