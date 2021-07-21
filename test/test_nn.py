@@ -14463,6 +14463,21 @@ class TestNNDeviceType(NNTestCase):
             Y_cpu = layer_norm(X.cpu())
             self.assertEqual(Y_cpu, Y, rtol=0, atol=1e-5)
 
+    @onlyCPU
+    def test_glu_bfloat16(self, device):
+        input = torch.randn(5, 2, 8, 8, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
+        glu = torch.nn.GLU(dim=-1).to(device)
+        input2 = input.detach().clone().float().requires_grad_(True)
+        out = glu(input)
+        out.sum().backward()
+        out2 = glu(input2)
+        out2.sum().backward()
+
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(input.grad.dtype, torch.bfloat16)
+        self.assertEqual(out, out2.bfloat16())
+        self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0.01, rtol=0)
+
     @onlyNativeDeviceTypes
     def test_GroupNorm_general(self, device):
         self._test_GroupNorm_general(device)
