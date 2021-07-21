@@ -147,9 +147,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       continue;
     }
     Node* last = nullptr;
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (auto it = set.second->begin(); it != set.second->end(); it++) {
-      Value* v = *it;
+    for (const auto& v : *set.second) {
       auto k = v->node()->kind();
       if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
           k == prim::Param) {
