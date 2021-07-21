@@ -608,6 +608,8 @@ def get_unmatchable_types_map() -> Dict[str, Set[NSNodeTargetType]]:
     ])
 
     MODS_UNMATCHABLE: Set[NSNodeTargetType] = set([
+        torch.quantization.ObserverBase,
+        torch.quantization.FakeQuantizeBase,
         nn.Identity,
     ])
 

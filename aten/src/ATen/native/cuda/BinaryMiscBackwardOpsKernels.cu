@@ -14,7 +14,7 @@
 namespace at {
 namespace native {
 
-void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
+void sigmoid_backward_kernel_cuda(TensorIterator& iter) {
   if(isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sigmoid_backward_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
@@ -30,7 +30,7 @@ void sigmoid_backward_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scalar) {
+void logit_backward_kernel_cuda(TensorIterator& iter, const Scalar& eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
       at::ScalarType::BFloat16,
@@ -63,7 +63,7 @@ void logit_backward_kernel_cuda(TensorIteratorBase& iter, const Scalar& eps_scal
       });
 }
 
-void tanh_backward_kernel_cuda(TensorIteratorBase& iter) {
+void tanh_backward_kernel_cuda(TensorIterator& iter) {
   if(isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "tanh_backward_complex_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {

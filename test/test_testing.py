@@ -18,6 +18,7 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -444,15 +445,6 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
-    def test_isclose_equality_shortcut(self):
-        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
-        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
-        # they were not compared as integers.
-        a = torch.tensor(2 ** 53, dtype=torch.int64)
-        b = a + 1
-
-        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
-
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
         def check(size, low, high, requires_grad, noncontiguous):
@@ -733,35 +725,20 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAssertClose(TestCase):
-    def test_mismatching_types_subclasses(self):
-        actual = torch.rand(())
-        expected = torch.nn.Parameter(actual)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            fn()
-
-    def test_mismatching_types_type_equality(self):
-        actual = torch.empty(())
-        expected = torch.nn.Parameter(actual)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
-                fn(allow_subclasses=False)
-
-    def test_mismatching_types(self):
+    def test_type_inequality(self):
         actual = torch.empty(2)
-        expected = actual.numpy()
+        expected = actual.tolist()
 
-        for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
+        for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, str(type(expected))):
-                fn(allow_subclasses=allow_subclasses)
+                fn()
 
     def test_unknown_type(self):
         actual = "0"
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, str(type(actual))):
+            with self.assertRaisesRegex(UsageError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -778,7 +755,7 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(UsageError):
                 fn()
 
     def test_mismatching_layout(self):
@@ -825,7 +802,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(UsageError):
                 fn(rtol=0.0)
 
     def test_only_atol(self):
@@ -833,7 +810,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaises(UsageError):
                 fn(atol=0.0)
 
     def test_mismatching_values(self):

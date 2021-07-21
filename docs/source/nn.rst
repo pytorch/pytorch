@@ -190,9 +190,6 @@ Normalization Layers
     nn.InstanceNorm1d
     nn.InstanceNorm2d
     nn.InstanceNorm3d
-    nn.LazyInstanceNorm1d
-    nn.LazyInstanceNorm2d
-    nn.LazyInstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
 

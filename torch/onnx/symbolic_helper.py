@@ -661,12 +661,6 @@ def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     step = g.op("Cast", step, to_i=scalar_type_to_onnx[type]) if step else None
     return type, end, start, step
 
-def _arange_helper(g, *args):
-    if _export_onnx_opset_version <= 10:
-        from torch.onnx.symbolic_opset9 import arange
-    else:
-        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
-    return arange(g, *args)
 
 def _size_helper(g, self, dim):
     full_shape = g.op("Shape", self)
@@ -746,8 +740,7 @@ def _optional_input_placeholder_tensor(g):
 
 def _handle_reduce_dim_none(g, self, op_name):
     dim_size = _get_tensor_dim_size(self, 0)
-    rank = _get_tensor_rank(self)
-    if rank is not None and any([_get_tensor_dim_size(self, i) == 0 for i in range(rank)]):
+    if dim_size is None or dim_size == 0:
         # If input tensor is empty, according to ONNX ReduceSum definition,
         # set keepdims=1 so that the resulted tensor has the same rank as the input.
         return g.op(op_name, self, keepdims_i=1)

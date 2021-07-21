@@ -283,12 +283,16 @@ namespace torch { namespace gdb {
 // so we need to wrap the Tensor into a Python object first.
 char *tensor_repr(at::Tensor tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
-  PyObject *pytensor = nullptr;
-  PyObject *repr = nullptr;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  PyObject *pytensor = NULL;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  PyObject *repr = NULL;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t bufsize;
-  const char *buf = nullptr;
-  char *result = nullptr;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  const char *buf = NULL;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  char *result = NULL;
 
   pytensor = THPVariable_Wrap(at::Tensor(tensor));
   if (!pytensor)
@@ -325,7 +329,8 @@ error:
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(result);
   PyGILState_Release(gil);
-  return nullptr;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  return NULL;
 }
 
 }} // namespace torch::gdb

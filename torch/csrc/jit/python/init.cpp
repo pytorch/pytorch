@@ -203,7 +203,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
              std::map<std::string, IValue>& paramsDict) {
-            EvalPeepholeONNX(graph, paramsDict);
+            EvalPeepholeONNX(graph->block(), paramsDict);
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -216,7 +216,7 @@ void initJITBindings(PyObject* module) {
              std::map<std::string, IValue>& paramsDict,
              int opset_version) {
             ConstantFoldONNX(
-                graph,
+                graph->block(),
                 paramsDict,
                 opset_version); // overload resolution
             return paramsDict;
@@ -407,6 +407,9 @@ void initJITBindings(PyObject* module) {
           py::arg("g"),
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
+      .def(
+          "_jit_pass_remove_inplace_ops",
+          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
       .def("_jit_pass_constant_pooling", ConstantPooling)
       .def(
           "_jit_pass_create_functional_graphs",
@@ -556,6 +559,9 @@ void initJITBindings(PyObject* module) {
                 python::unflatten(vars, desc));
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
+      .def(
+          "_jit_pass_onnx_encapsulate_pattern_into_subblock",
+          EncapsulatePatternIntoSubblock)
       .def(
           "_jit_onnx_convert_pattern_from_subblock", ConvertPatternFromSubblock)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
