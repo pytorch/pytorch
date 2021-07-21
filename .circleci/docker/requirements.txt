@@ -209,6 +209,8 @@ toml==0.10.2
     # via pytest
 typed-ast==1.4.3
     # via mypy
+types-dataclasses==0.1.5
+    # via -r requirements.txt
 typing-extensions==3.10.0.0
     # via
     #   -r requirements.txt
