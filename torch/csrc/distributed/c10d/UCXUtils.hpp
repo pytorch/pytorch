@@ -30,6 +30,12 @@ public:
   ~UCPContext();
 };
 
+struct UCPEndpoint {
+  ucp_ep_h endpoint;
+  UCPEndpoint(ucp_address_t *address);
+  ~UCPEndpoint();
+};
+
 inline ucs_memory_type getUCSMemoryType(c10::DeviceType type) {
   switch(type) {
   case c10::kCPU:

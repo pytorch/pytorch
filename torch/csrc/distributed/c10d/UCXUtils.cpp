@@ -52,6 +52,18 @@ UCPContext *UCPContext::get() {
 
 std::unique_ptr<UCPContext> UCPContext::instance;
 
+UCPEndpoint::UCPEndpoint(ucp_address_t* address) {
+  ucp_ep_params_t ep_params;
+  ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
+  ep_params.address = address;
+  ucs_status_t st = ucp_ep_create(UCPContext::get()->worker, &ep_params, &endpoint);
+  TORCH_UCX_CHECK(st, "Failed to create endpoint.");
+}
+
+UCPEndpoint::~UCPEndpoint() {
+  ucp_ep_destroy(endpoint);
+}
+
 } // namespace c10d
 
 #endif

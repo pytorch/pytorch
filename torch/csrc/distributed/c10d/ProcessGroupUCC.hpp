@@ -79,8 +79,6 @@ public:
       int rank,
       int size);
 
-  ~ProcessGroupUCC() override;
-
   const std::string getBackendName() const override {
       return std::string(UCC_BACKEND_NAME);
   }
@@ -159,7 +157,7 @@ public:
 private:
   c10::intrusive_ptr<Store> store;
   void lazyInitUCP();
-  std::vector<ucp_ep_h> ucp_endpoints = {};
+  std::vector<std::shared_ptr<UCPEndpoint>> ucp_endpoints = {};
 };
 
 } // namespace c10d

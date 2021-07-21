@@ -22,12 +22,6 @@ ProcessGroupUCC::ProcessGroupUCC(
     int size) : ProcessGroup(rank, size), store(store) {
 }
 
-ProcessGroupUCC::~ProcessGroupUCC() {
-  for (int i = 0; i < ucp_endpoints.size(); i++) {
-    ucp_ep_destroy(ucp_endpoints[i]);
-  }
-}
-
 void ProcessGroupUCC::lazyInitUCP() {
   if (ucp_endpoints.size() > 0) {
     return;  // already initialized
@@ -46,14 +40,10 @@ void ProcessGroupUCC::lazyInitUCP() {
   store->set("ucp_address:" + std::to_string(rank_), val);
   ucp_worker_release_address(ucp_context->worker, local_addr);
 
-  ucp_endpoints.resize(size_);
   for (int i = 0; i < size_; i++) {
     std::vector<uint8_t> peer_addr = store->get("ucp_address:" + std::to_string(i));
-    ucp_ep_params_t ep_params;
-    ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
-    ep_params.address = reinterpret_cast<ucp_address_t*>(peer_addr.data());
-    st = ucp_ep_create(ucp_context->worker, &ep_params, &(ucp_endpoints[i]));
-    TORCH_UCX_CHECK(st, "Failed to create endpoint.");
+    ucp_address_t *address = reinterpret_cast<ucp_address_t*>(peer_addr.data());
+    ucp_endpoints.emplace_back(std::make_shared<UCPEndpoint>(address));
   }
 }
 
@@ -142,7 +132,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     *static_cast<bool *>(request) = true;
   };
   ucs_status_ptr_t request = ucp_tag_send_nbx(
-    ucp_endpoints[dstRank], tensor.data_ptr(), 1, tag, &params);
+    ucp_endpoints[dstRank]->endpoint, tensor.data_ptr(), 1, tag, &params);
   TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
 
   if (request == nullptr) {
