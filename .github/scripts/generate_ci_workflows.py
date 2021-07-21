@@ -14,17 +14,17 @@ GITHUB_DIR = Path(__file__).resolve().parent.parent
 
 WINDOWS_CPU_TEST_RUNNER = "windows.4xlarge"
 WINDOWS_CUDA_TEST_RUNNER = "windows.8xlarge.nvidia.gpu"
-WINDOWS_RUNNERS = set([
+WINDOWS_RUNNERS = {
     WINDOWS_CPU_TEST_RUNNER,
     WINDOWS_CUDA_TEST_RUNNER,
-])
+}
 
 LINUX_CPU_TEST_RUNNER = "linux.2xlarge"
 LINUX_CUDA_TEST_RUNNER = "linux.8xlarge.nvidia.gpu"
-LINUX_RUNNERS = set([
+LINUX_RUNNERS = {
     LINUX_CPU_TEST_RUNNER,
     LINUX_CUDA_TEST_RUNNER,
-])
+}
 
 
 @dataclass
