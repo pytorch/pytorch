@@ -221,19 +221,20 @@ Tensor from_blob_quantized_per_tensor_affine(
     float scale,
     int64_t zeroPoint,
     const TensorOptions& options) {
-
   auto dtype = typeMetaToScalarType(options.dtype());
-  TORCH_CHECK(isQIntType(dtype), "from_blob_quantized_per_tensor_affine expects QInt dtypes");
+  TORCH_CHECK(
+      isQIntType(dtype),
+      "from_blob_quantized_per_tensor_affine expects QInt dtypes");
 
   std::size_t itemsize = options.dtype().itemsize();
   std::size_t size = 1;
-   for (std::int64_t s : sizes) {
-     size *= static_cast<std::size_t>(s);
-   }
+  for (std::int64_t s : sizes) {
+    size *= static_cast<std::size_t>(s);
+  }
   const auto datasize = size * itemsize;
 
-  DataPtr dataPtr =
-    InefficientStdFunctionContext::makeDataPtr(data, deleter, options.device());
+  DataPtr dataPtr = InefficientStdFunctionContext::makeDataPtr(
+      data, deleter, options.device());
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
@@ -242,10 +243,14 @@ Tensor from_blob_quantized_per_tensor_affine(
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
-  QuantizerPtr quantizer = make_per_tensor_affine_quantizer(scale, zeroPoint, dtype);
+  QuantizerPtr quantizer =
+      make_per_tensor_affine_quantizer(scale, zeroPoint, dtype);
 
   Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
-      storage, at::DispatchKeySet(options.computeDispatchKey()), options.dtype(), quantizer);
+      storage,
+      at::DispatchKeySet(options.computeDispatchKey()),
+      options.dtype(),
+      quantizer);
   get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
 
   return qtensor;
