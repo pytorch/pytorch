@@ -57,6 +57,16 @@ TEST(TorchpyTest, LoadLibrary) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(TorchpyTest, InitTwice) {
+  {
+    torch::deploy::InterpreterManager m(2);
+  }
+  {
+    torch::deploy::InterpreterManager m(1);
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
