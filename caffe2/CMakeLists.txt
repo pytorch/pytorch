@@ -518,6 +518,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_codegen.cpp PROPERTIES COMPILE_FLAGS -Wno-init-list-lifetime)
   endif()
 
+  # Pass path to PocketFFT
+  if(AT_POCKETFFT_ENABLED)
+    set_source_files_properties(${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/mkl/SpectralOps.cpp PROPERTIES INCLUDE_DIRECTORIES "${POCKETFFT_INCLUDE_DIR}")
+  endif()
+
   if(NOT INTERN_DISABLE_MOBILE_INTERP)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
@@ -527,8 +532,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/context.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/nnc/registry.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
@@ -661,6 +664,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/enum.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/imethod.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
@@ -992,15 +996,24 @@ endif()
 
 
 if(LINUX)
-  find_library(BREAKPAD_LIB breakpad_client)
-  find_path(BREAKPAD_INCLUDE_DIR breakpad)
+  find_library(BREAKPAD_LIB breakpad_client
+    PATHS /usr/local/lib/)
+  find_path(BREAKPAD_INCLUDE_DIR breakpad
+    PATHS /usr/local/include/)
+
   if(BREAKPAD_LIB AND BREAKPAD_INCLUDE_DIR)
     message(STATUS "found breakpad library")
-    target_link_libraries(torch_cpu PUBLIC ${BREAKPAD_LIB})
+    target_link_libraries(torch_cpu PRIVATE ${BREAKPAD_LIB})
     target_compile_definitions(torch_cpu PRIVATE ADD_BREAKPAD_SIGNAL_HANDLER)
-    target_include_directories(torch_cpu PUBLIC ${BREAKPAD_INCLUDE_DIR}/breakpad)
+    target_include_directories(torch_cpu PRIVATE ${BREAKPAD_INCLUDE_DIR}/breakpad)
   else()
-    message(STATUS "breakpad library not found")
+    if(BREAKPAD_INCLUDE_DIR)
+      message(STATUS "breakpad_client library not found")
+    elseif(BREAKPAD_LIB)
+      message(STATUS "breakpad include path not found")
+    else()
+      message(STATUS "breakpad_client library and include path not found")
+    endif()
   endif()
 endif()
 
@@ -1021,7 +1034,7 @@ endif()
   install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
     FILES_MATCHING PATTERN "*.h")
-  install(DIRECTORY "${TORCH_SRC_DIR}/lib/c10d"
+  install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
     FILES_MATCHING PATTERN "*.hpp")
   install(FILES
@@ -1039,25 +1052,28 @@ endif()
         ${TORCH_ROOT}/test/cpp/lite_interpreter_runtime
         ${CMAKE_BINARY_DIR}/test_lite_interpreter_runtime
       )
+    else()
+      add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
+      add_subdirectory(
+        ${TORCH_ROOT}/test/cpp/tensorexpr
+        ${CMAKE_BINARY_DIR}/test_tensorexpr
+      )
+      if(USE_DISTRIBUTED)
+        add_subdirectory(${TORCH_ROOT}/test/cpp/c10d ${CMAKE_BINARY_DIR}/test_cpp_c10d)
+        if(NOT WIN32)
+          add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
+          add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
+        endif()
+      endif()
+      if(NOT NO_API)
+        add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
+      endif()
+
       add_subdirectory(
         ${TORCH_ROOT}/test/mobile/nnc
         ${CMAKE_BINARY_DIR}/test_mobile_nnc
       )
-    else()
-      add_subdirectory(${TORCH_ROOT}/test/cpp/jit ${CMAKE_BINARY_DIR}/test_jit)
-        add_subdirectory(
-          ${TORCH_ROOT}/test/cpp/tensorexpr
-          ${CMAKE_BINARY_DIR}/test_tensorexpr
-        )
-        if(USE_DISTRIBUTED AND NOT WIN32)
-          add_subdirectory(${TORCH_ROOT}/test/cpp/rpc ${CMAKE_BINARY_DIR}/test_cpp_rpc)
-        endif()
     endif()
-  endif()
-
-  if(BUILD_TEST AND NOT NO_API AND NOT BUILD_LITE_INTERPRETER)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/api ${CMAKE_BINARY_DIR}/test_api)
-    add_subdirectory(${TORCH_ROOT}/test/cpp/dist_autograd ${CMAKE_BINARY_DIR}/dist_autograd)
   endif()
 
   # XXX This ABI check cannot be run with arm-linux-androideabi-g++
@@ -1100,10 +1116,6 @@ endif()
     ${PROJECT_BINARY_DIR}/TorchConfigVersion.cmake
     ${PROJECT_BINARY_DIR}/TorchConfig.cmake
     DESTINATION share/cmake/Torch)
-
-  if(USE_DISTRIBUTED)
-    add_subdirectory(${TORCH_SRC_DIR}/lib/c10d lib_c10d)
-  endif()
 
 
   # ---[ Torch python bindings build
@@ -1184,11 +1196,29 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
+
+# For torch/csrc/distributed/c10d
+function(include_torch_lib_dir target)
+  target_include_directories(${target} PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
+endfunction()
+
+include_torch_lib_dir(torch_cpu)
+if(USE_ROCM)
+  include_torch_lib_dir(torch_hip)
+elseif(USE_CUDA)
+  if(BUILD_SPLIT_CUDA)
+    include_torch_lib_dir(torch_cuda_cpp)
+  else()
+    include_torch_lib_dir(torch_cuda)
+  endif()
+endif()
+if(BUILD_PYTHON)
+    include_torch_lib_dir(torch_python)
+endif()
+
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
 if(USE_DISTRIBUTED)
-  # Needed to support the inclusion of c10d/Foo.hpp headers.
-  target_include_directories(torch_cpu PUBLIC ${TORCH_SRC_DIR}/lib)
   target_compile_definitions(torch_cpu PUBLIC USE_DISTRIBUTED)
   if(USE_GLOO AND USE_C10D_GLOO)
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_GLOO)
@@ -1207,7 +1237,7 @@ if(USE_DISTRIBUTED)
   if(USE_MPI AND USE_C10D_MPI)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       set_source_files_properties(
-        "${TORCH_SRC_DIR}/lib/c10d/ProcessGroupMPI.cpp"
+        "${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupMPI.cpp"
         PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)

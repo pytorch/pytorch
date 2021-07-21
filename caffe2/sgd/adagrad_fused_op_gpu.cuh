@@ -8,6 +8,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 #ifdef __HIP_PLATFORM_HCC__
 #define SEGREDUCE_MINBLOCKS 8
@@ -103,7 +104,7 @@ randFactor<at::Half, float, NEAREST>::convertTypeFromTargetToParam(
 }
 
 static inline __device__ void gpuAtomicAdd(float* address, float val) {
-  atomicAdd(address, val);
+  gpu_atomic_add(address, val);
 }
 
 static inline __device__ void gpuAtomicAdd(c10::Half* address, c10::Half val) {

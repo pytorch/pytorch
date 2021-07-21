@@ -1,8 +1,8 @@
 #import <ATen/native/metal/MetalCommandBuffer.h>
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/MetalUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -31,12 +31,12 @@ Tensor view(const Tensor& input, IntArrayRef size) {
     return makeTensor({inferred_size, stride_value}, input.options());
   }
   MPSImage* X = imageFromTensor(input);
-  MetalCommandBuffer* commandBuffer = getCommandBufferFromTensor(input);
+  MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
   MetalTensorImplStorage mt{inferred_size, stride_value};
   mt.texture()->allocateTemporaryStorage(inferred_size, commandBuffer);
   MPSImage* Y = mt.texture()->image();
   id<MTLComputePipelineState> state =
-      [[MPSCNNContext sharedInstance] specializedPipelineState:"reshape"
+      [[MetalContext sharedInstance] specializedPipelineState:"reshape"
                                                      Constants:@[
                                                        @(Y.height),
                                                        @(Y.width),
@@ -57,8 +57,6 @@ Tensor view(const Tensor& input, IntArrayRef size) {
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X markRead];
-  [Y markRead];
   auto output = makeTensor(std::move(mt), input.options());
   return output;
 }

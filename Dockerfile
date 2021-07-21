@@ -38,7 +38,7 @@ RUN curl -fsSL -v -o ~/miniconda.sh -O  https://repo.anaconda.com/miniconda/Mini
 FROM dev-base as submodule-update
 WORKDIR /opt/pytorch
 COPY . .
-RUN git submodule update --init --recursive
+RUN git submodule update --init --recursive --jobs 0
 
 FROM conda as build
 WORKDIR /opt/pytorch

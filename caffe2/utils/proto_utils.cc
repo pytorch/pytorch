@@ -7,6 +7,12 @@
 #include <fstream>
 #include <unordered_set>
 
+#if defined(_MSC_VER)
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <google/protobuf/io/coded_stream.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
@@ -16,7 +22,7 @@
 #include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #endif // !CAFFE2_USE_LITE_PROTO
 
-#include "caffe2/core/logging.h"
+#include <c10/util/Logging.h>
 
 using ::google::protobuf::MessageLite;
 
@@ -409,12 +415,12 @@ INSTANTIATE_GET_SINGLE_ARGUMENT(NetDef, n, false)
 #define INSTANTIATE_GET_REPEATED_ARGUMENT(                             \
     T, fieldname, enforce_lossless_conversion)                         \
   template <>                                                          \
-  C10_EXPORT vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
+  C10_EXPORT std::vector<T> ArgumentHelper::GetRepeatedArgument<T>(         \
       const string& name, const std::vector<T>& default_value) const { \
     if (arg_map_.count(name) == 0) {                                   \
       return default_value;                                            \
     }                                                                  \
-    vector<T> values;                                                  \
+    std::vector<T> values;                                                  \
     for (const auto& v : arg_map_.at(name).fieldname()) {              \
       if (enforce_lossless_conversion) {                               \
         auto supportsConversion =                                      \
@@ -489,7 +495,7 @@ C10_EXPORT Argument MakeArgument(const string& name, const MessageLite& value) {
 #define CAFFE2_MAKE_REPEATED_ARGUMENT(T, fieldname) \
   template <>                                       \
   C10_EXPORT Argument MakeArgument(                 \
-      const string& name, const vector<T>& value) { \
+      const string& name, const std::vector<T>& value) { \
     Argument arg;                                   \
     arg.set_name(name);                             \
     for (const auto& v : value) {                   \

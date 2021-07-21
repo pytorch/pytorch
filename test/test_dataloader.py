@@ -18,7 +18,7 @@ from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_PYTORCH_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_TSAN, IS_SANDCASTLE)
 
 try:
@@ -28,7 +28,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_PYTORCH_CI:
+    if IS_IN_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -927,7 +927,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)
@@ -2072,7 +2072,7 @@ class RandomDataset(IterableDataset):
 try:
     keep_fds_alive = []
     resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
-    for random_t in DataLoader(RandomDataset(200, (2,2)),
+    for random_t in DataLoader(RandomDataset(200, (2,2)), multiprocessing_context="fork",
                                num_workers=1, persistent_workers=True):
       random_t.max(dim=0)
       keep_fds_alive.append(random_t)

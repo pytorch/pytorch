@@ -436,8 +436,7 @@ class Conv2d : public BaseOp {
 
 class OpsList {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  OpsList() {}
+  OpsList() = default;
   OpsList(std::vector<std::unique_ptr<BaseOp>>& _ops) : ops(std::move(_ops)) {}
 
   auto runDual(at::Tensor& in, at::Tensor& vin) {

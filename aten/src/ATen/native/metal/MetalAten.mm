@@ -1,7 +1,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalContext.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #include <ATen/metal/Context.h>
 #include <torch/script.h>
 
@@ -114,7 +114,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
 struct MetalImpl : public at::metal::MetalInterface {
   bool is_metal_available() const override {
 #if defined(USE_PYTORCH_METAL)
-    return [[MPSCNNContext sharedInstance] available];
+    return [[MetalContext sharedInstance] available];
 #else
     return false;
 #endif
