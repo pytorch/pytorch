@@ -53,6 +53,16 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 //   // Now continue on other work in the current stream.
 class TORCH_API ProcessGroupUCC final : public ProcessGroup {
 public:
+  class WorkUCC : public ProcessGroup::Work {
+  public:
+    bool isCompleted() override { return true; };
+    bool isSuccess() const override { return true; };
+    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
+      while(!isCompleted());
+      return true;
+    };
+  };
+
   explicit ProcessGroupUCC(
       const c10::intrusive_ptr<Store>& store,
       int rank,

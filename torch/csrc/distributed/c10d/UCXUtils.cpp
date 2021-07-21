@@ -3,6 +3,8 @@
 #include <c10d/UCXUtils.hpp>
 #include <string>
 
+namespace c10d {
+
 UCPContext::UCPContext() {
   ucp_params_t params = {};
   ucp_config_t* config = {};
@@ -11,9 +13,7 @@ UCPContext::UCPContext() {
 
   // get config
   st = ucp_config_read("TORCH", nullptr, &config);
-  if (st != UCS_OK) {
-    throw UCXError(std::string("Failed to read UCP config: ") + ucs_status_string(st));
-  }
+  TORCH_UCX_CHECK(st, "Failed to read UCP config.");
 
   // initialize context
   params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE |
@@ -26,9 +26,7 @@ UCPContext::UCPContext() {
   params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);
   ucp_config_release(config);
-  if (st != UCS_OK) {
-    throw UCXError(std::string("Failed to init UCP context: ") + ucs_status_string(st));
-  }
+  TORCH_UCX_CHECK(st, "Failed to init UCP context.");
 
   // initialize worker
   worker_params.field_mask = UCP_WORKER_PARAM_FIELD_THREAD_MODE;
@@ -36,7 +34,7 @@ UCPContext::UCPContext() {
   st = ucp_worker_create(context, &worker_params, &worker);
   if (st != UCS_OK) {
     ucp_cleanup(context);
-    throw UCXError(std::string("Failed to create UCP worker: ") + ucs_status_string(st));
+    TORCH_UCX_CHECK(st, "Failed to create UCP worker.");
   }
 }
 
@@ -53,5 +51,7 @@ UCPContext *UCPContext::get() {
 }
 
 std::unique_ptr<UCPContext> UCPContext::instance;
+
+} // namespace c10d
 
 #endif

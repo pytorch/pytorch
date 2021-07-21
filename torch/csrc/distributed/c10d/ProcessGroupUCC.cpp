@@ -2,12 +2,17 @@
 
 #ifdef USE_C10D_UCC
 
+namespace {
+
 static void check_tensor(const std::vector<at::Tensor>& tensors) {
   TORCH_CHECK(tensors.size() == 1, "ProcessGroupUCC takes 1 tensor");
   TORCH_CHECK(tensors[0].is_contiguous(), "ProcessGroupUCC input tensor has to be contiguous");
   TORCH_CHECK(!tensors[0].is_sparse(), "ProcessGroupUCC input tensor has to be dense");
-  // TODO: check cuda case
+  // TODO: check cuda
+  // TODO: check non-overlapping and dense instead of contiguous
 }
+
+} // namespace
 
 namespace c10d {
 
@@ -23,7 +28,7 @@ ProcessGroupUCC::~ProcessGroupUCC() {
   }
 }
 
-void ProcessGroupUCC::lazyInitUCX() {
+void ProcessGroupUCC::lazyInitUCP() {
   if (ucp_endpoints.size() > 0) {
     return;  // already initialized
   }
@@ -34,9 +39,7 @@ void ProcessGroupUCC::lazyInitUCX() {
   size_t local_addr_len;
 
   st = ucp_worker_get_address(ucp_context->worker, &local_addr, &local_addr_len);
-  if (st != UCS_OK) {
-    throw UCXError(std::string("Failed to get worker address: ") + ucs_status_string(st));
-  }
+  TORCH_UCX_CHECK(st, "Failed to get worker address.");
   std::vector<uint8_t> val = std::vector<uint8_t>(
       reinterpret_cast<uint8_t*>(local_addr),
       reinterpret_cast<uint8_t*>(local_addr) + local_addr_len);
@@ -50,9 +53,7 @@ void ProcessGroupUCC::lazyInitUCX() {
     ep_params.field_mask = UCP_EP_PARAM_FIELD_REMOTE_ADDRESS;
     ep_params.address = reinterpret_cast<ucp_address_t*>(peer_addr.data());
     st = ucp_ep_create(ucp_context->worker, &ep_params, &(ucp_endpoints[i]));
-    if (st != UCS_OK) {
-      throw UCXError(std::string("Failed to create endpoint: ") + ucs_status_string(st));
-    }
+    TORCH_UCX_CHECK(st, "Failed to create endpoint.");
   }
 }
 
@@ -128,18 +129,24 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  TORCH_CHECK(false, "ProcessGroupUCC does not support send");
   check_tensor(tensors);
   auto& tensor = tensors[0];
   lazyInitUCP();
 
-  // ucc_coll_req_h request = comm->send_nb(
-  //     eps[dstRank],
-  //     tensor.data_ptr(),
-  //     ucs_mtype_map.at(tensor.device().type()),
-  //     tensor.numel() * tensor.element_size(),
-  //     tag);
-  // return comm->enqueue_p2p(OpType::SEND, request);
+  ucp_request_param_t params;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
+  params.memory_type = getUCSMemoryType(tensor.device().type());
+  params.cb.send = [](void* request, ucs_status_t status, void* user_data) {
+    *static_cast<bool *>(request) = true;
+  };
+  ucs_status_ptr_t st = ucp_tag_send_nbx(
+    ucp_endpoints[dstRank], tensor.data_ptr(), 1, tag, &params);
+  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(st), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(st)));
+
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>();
+  return work;
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
