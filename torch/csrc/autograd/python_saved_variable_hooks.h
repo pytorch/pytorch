@@ -23,7 +23,7 @@ private:
   PyObject* data_ = nullptr;
 };
 
-struct PyDefaultSavedVariableHooks : public DefaultSavedVariableHooks {
+struct PyDefaultSavedVariableHooks {
   static void set_hooks(py::function &pack_hook, py::function &unpack_hook);
   static void reset_hooks();
   static std::unique_ptr<SavedVariableHooks> get_hooks();
