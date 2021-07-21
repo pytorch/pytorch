@@ -3,12 +3,12 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
-#include <torch/csrc/jit/runtime/memory_planner.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/memory_planner.h>
 
 namespace torch {
 namespace jit {

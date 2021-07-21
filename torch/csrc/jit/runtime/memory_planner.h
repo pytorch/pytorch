@@ -100,7 +100,7 @@ class MemoryPlanner {
       const Graph& graph,
       std::vector<IValue*> outputs,
       const std::unordered_map<const Value*, std::vector<const Value*>>&
-      value_to_same_storage_values,
+          value_to_same_storage_values,
       const std::unordered_set<const Value*>& external_values,
       bool enable_out_variant);
 
