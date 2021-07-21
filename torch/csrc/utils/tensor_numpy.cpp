@@ -109,12 +109,14 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   TORCH_CHECK(is_numpy_available(), "Numpy is not available");
 
   TORCH_CHECK(tensor.device().type() == DeviceType::CPU,
-      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-      "copy the tensor to host memory first.", tensor.device().str().c_str());
+      "can't convert ", tensor.device().str().c_str(),
+      " device type tensor to numpy. Use Tensor.cpu() to ",
+      "copy the tensor to host memory first.");
 
-  TORCH_CHECK(tensor.layout() == Layout::Strided,
-      "can't convert %s layout tensor to numpy."
-      "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
+  TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
+      "can't convert ", c10::str(tensor.layout()).c_str(),
+      " layout tensor to numpy.",
+      "convert the tensor to a strided layout first.");
 
   TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
       "Can't call numpy() on Tensor that requires grad. "
