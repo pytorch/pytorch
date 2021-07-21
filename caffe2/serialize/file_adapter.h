@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <memory>
+#include <vector>
 
 #include "c10/macros/Macros.h"
 #include "caffe2/serialize/istream_adapter.h"
@@ -20,8 +21,8 @@ class TORCH_API FileAdapter final : public ReadAdapterInterface {
   ~FileAdapter();
 
  private:
-  std::ifstream file_stream_;
-  std::unique_ptr<IStreamAdapter> istream_adapter_;
+  FILE* fp_;
+  size_t size_;
 };
 
 } // namespace serialize
