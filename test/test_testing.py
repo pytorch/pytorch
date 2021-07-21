@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast)
+     deviceCountAtLeast, onlyCPU)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
@@ -634,7 +634,8 @@ if __name__ == '__main__':
             with self.logger:
                 raise ValueError('Hello')
 
-    def test_logger_reporting(self):
+    @onlyCPU
+    def test_logger_reporting(self, device):
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python3
 
