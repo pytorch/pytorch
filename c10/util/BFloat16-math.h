@@ -112,7 +112,7 @@ C10_HOST_DEVICE inline c10::BFloat16 nextafter(
 #else
   if (std::isnan(from) || std::isnan(to)) {
 #endif
-    return from;
+    return from + to;
   }
 
   // if they are exactly the same.
