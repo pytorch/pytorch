@@ -7347,7 +7347,6 @@ class DistributedTest:
                         if torch.is_tensor(opt[i]):
                             self.assertEqual(opt[i].grad_fn, None)
                         else:
-                            tensor = opt[i]["tensor"]
                             self.assertEqual(opt[i]["tensor"].grad_fn, None)
                     out.mean().backward()
 
