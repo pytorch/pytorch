@@ -443,47 +443,27 @@ static TypePtr inferShapeAndTypeForInput(
     TypePtr input_type,
     Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
-    bool complete);
-
-static TupleTypePtr getTupleTensorType(
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    const TypePtr& tupleType,
     bool complete) {
-  TORCH_INTERNAL_ASSERT(tupleType->kind() == TupleType::Kind);
-  std::vector<TypePtr> types;
-  for (const auto& subType : tupleType->containedTypes()) {
-    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
-    types.emplace_back(
-        inferShapeAndTypeForInput(subType, s_iter, s_iter_end, complete));
-  }
-  return TupleType::create(types);
-}
-
-static TypePtr inferShapeAndTypeForInput(
-    TypePtr input_type,
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    bool complete) {
-  if (input_type->kind() == TupleType::Kind) {
-    return getTupleTensorType(s_iter, s_iter_end, input_type, complete);
-  } else if (input_type->kind() == TensorType::Kind) {
+  if (auto tuple_type = input_type->cast<TupleType>()) {
+	  std::vector<TypePtr> types;
+	  for (const auto& sub_type : tuple_type->containedTypes()) {
+	    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
+	    types.emplace_back(
+	        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete));
+	  }
+    return TupleType::create(types);
+  } else if (auto list_type = input_type->cast<ListType>()) {
+	  const TypePtr& sub_type = list_type->getElementType();
+    auto elem_type = inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    return ListType::create(elem_type);
+  } else if (auto tensor_type = input_type->cast<TensorType>()) {
     auto type = getTensorType(s_iter->toTensor(), complete);
     s_iter++;
     return type;
   } else if (auto optional_type = input_type->cast<OptionalType>()) {
-    const TypePtr& optional_elem_type = optional_type->getElementType();
-    if (optional_elem_type->cast<TensorType>()) {
-      TORCH_INTERNAL_ASSERT(s_iter->isTensor());
-      auto tensor_type = getTensorType(s_iter->toTensor(), complete);
-      s_iter++;
-      return OptionalType::create(tensor_type);
-    } else {
-      // TODO: check for other optional types or empty e.g. if
-      // (optional_elem_type->cast<ListType>())
-      s_iter++;
-      return input_type;
-    }
+    const TypePtr& sub_type = optional_type->getElementType();
+    auto elem_type = inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    return OptionalType::create(elem_type);
   } else {
     // Primitive type, keep as is.
     s_iter++;
