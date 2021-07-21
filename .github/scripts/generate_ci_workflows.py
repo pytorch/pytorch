@@ -54,10 +54,9 @@ class CIFlowConfig:
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
 
-    # TODO: Remove this option after ciflow fully rollout.
-    # trigger_action_only controls if we liston only on the trigger_action of a pull_request.
+    # trigger_action_only controls if we listen only on the trigger_action of a pull_request.
     # If it's False, we listen on all default pull_request actions, this is useful when
-    # probot is not automated yet.
+    # ciflow (via probot) is not automated yet.
     trigger_action_only: bool = False
 
     def gen_root_job_condition(self) -> None:
