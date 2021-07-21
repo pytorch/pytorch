@@ -274,5 +274,23 @@ void LoadBalancer::free(int where) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+void PythonMethodWrapper::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  auto session = model_.acquire_session();
+  auto iArgumentNames =
+      session
+          .global("GetArgumentNamesModule", "getArgumentNames")(
+              {session.from_movable(model_)})
+          .toIValue();
+  TORCH_INTERNAL_ASSERT(iArgumentNames.isList());
+  auto argumentNames = iArgumentNames.toListRef();
+
+  argumentNamesOut.reserve(argumentNames.size());
+  for (auto& argumentName : argumentNames) {
+    TORCH_INTERNAL_ASSERT(argumentName.isString());
+    argumentNamesOut.push_back(argumentName.toStringRef());
+  }
+}
+
 } // namespace deploy
 } // namespace torch
