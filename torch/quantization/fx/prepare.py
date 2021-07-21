@@ -722,7 +722,7 @@ def propagate_dtypes_for_known_nodes(
             maybe_propagate_dtype_for_node(
                 cur_node, torch.bool, node_name_to_target_dtype, matches)
 
-def make_input_output_share_observers(
+def maybe_make_input_output_share_observers(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
@@ -750,7 +750,6 @@ def make_input_output_share_observers(
 
     # if there is no non-Tensor arg, return directly
     if first_arg is None:
-        print("first arg none")
         return False
 
     if isinstance(first_arg, (list, tuple)):
@@ -758,7 +757,6 @@ def make_input_output_share_observers(
     elif isinstance(first_arg, Node):
         first_arg_arg = first_arg
     else:
-        print("first arg not Noe")
         return False
 
     # if we have a graph such as
@@ -776,7 +774,6 @@ def make_input_output_share_observers(
             if isinstance(trace_back_node, Node):
                 break
         if trace_back_node is None:
-            print("trace back is None")
             return False
         first_arg_arg = trace_back_node
 
@@ -994,7 +991,7 @@ def insert_observers_for_model(
                             # to make all inputs and outputs use the first input's
                             # observer
                             if isinstance(qhandler, CatQuantizeHandler) or is_like_copy_node:
-                                if not make_input_output_share_observers(node, model, modules):
+                                if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
                             if isinstance(qhandler, CustomModuleQuantizeHandler):
