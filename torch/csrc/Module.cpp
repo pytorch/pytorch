@@ -108,7 +108,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
-    names.push_back(name + "." + type->tp_name);
+    names.emplace_back(name + "." + type->tp_name);
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
@@ -927,6 +927,13 @@ PyObject* initModule() {
   PyObject *has_cudnn = Py_False;
 #endif
  ASSERT_TRUE(set_module_attr("has_cudnn", has_cudnn));
+
+#if AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED()
+  PyObject *has_spectral = Py_True;
+#else
+  PyObject *has_spectral = Py_False;
+#endif
+ ASSERT_TRUE(set_module_attr("has_spectral", has_spectral));
 
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions

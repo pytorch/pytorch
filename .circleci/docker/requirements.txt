@@ -215,6 +215,8 @@ typing-extensions==3.10.0.0
     #   importlib-metadata
     #   mypy
     #   rich
+unidiff==0.6.0
+    # via -r tools/linter/clang_tidy/requirements.txt
 unittest-xml-reporting==3.0.4
     # via -r requirements-dev.in
 urllib3==1.26.6

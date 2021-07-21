@@ -942,6 +942,13 @@ resolve_conj() -> Tensor
 See :func:`torch.resolve_conj`
 """)
 
+add_docstr_all('resolve_neg',
+               r"""
+resolve_neg() -> Tensor
+
+See :func:`torch.resolve_neg`
+""")
+
 add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
@@ -1008,6 +1015,12 @@ add_docstr_all('cov', r"""
 cov(*, correction=1, fweights=None, aweights=None) -> Tensor
 
 See :func:`torch.cov`
+""")
+
+add_docstr_all('corrcoef', r"""
+corrcoef() -> Tensor
+
+See :func:`torch.corrcoef`
 """)
 
 add_docstr_all('cross',
@@ -2043,6 +2056,13 @@ add_docstr_all('is_conj',
 is_conj() -> bool
 
 Returns True if the conjugate bit of :attr:`self` is set to true.
+""")
+
+add_docstr_all('is_neg',
+               r"""
+is_neg() -> bool
+
+Returns True if the negative bit of :attr:`self` is set to true.
 """)
 
 add_docstr_all('is_signed',

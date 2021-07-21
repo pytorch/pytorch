@@ -30,7 +30,7 @@ from .gen_trace_type import (
 from .gen_inplace_or_view_type import (
     get_view_info, is_tensor_type, is_tensor_list_type, unpack_args, get_base_name,
     use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE, gen_formals,
+    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name
 )
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
@@ -100,9 +100,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_view_as_real_physical', '_conj_physical',
-    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward',
-    'conj_physical_'
+    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'conj_physical_', '_neg_view'
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -117,11 +116,17 @@ RESET_GRAD_ACCUMULATOR = {
     'set', 'resize'
 }
 
-# NOTE [ Invariant: TensorImpl and Storage Pointer Equality ]
+# NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
 #
-# When a function modifies its input tensors (via inplace or out-variants),
-# it should never change the the input tensors' underlying c10::TensorImpl pointers
-# or c10::Storage pointers.
+# We check the following properties:
+#   1) A function should never change the input tensors' underlying c10::TensorImpl
+#      pointers or c10::Storage pointers, even if it modifies its input tensors (via
+#      inplace or out-variants)
+# If the function does not modify its arguments, we also check the following properties
+# pertaining to its output:
+#   2) Its TensorImpl has use_count of 1
+#   3) If the function is a view function, it has the same StorageImpl as that of
+#      the input it is aliased with. Otherwise, its StorageImpl has use_count of 1
 #
 # The following code templates implement the checks for this invariant:
 SAVE_TENSOR_STORAGE = CodeTemplate("""\
@@ -129,9 +134,10 @@ c10::optional<Storage> ${tensor_name}_storage_saved =
   ${tensor_name}.has_storage() ? c10::optional<Storage>(${tensor_name}.storage()) : c10::nullopt;
 """)
 
+# If tensor_name == out_tensor_name, used to enforce (1), otherwise used for (2)
 ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate("""\
 if (${tensor_name}_storage_saved.has_value())
-  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${tensor_name}.storage()));
+  AT_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """)
 
 SAVE_TENSORLIST_STORAGE = CodeTemplate("""\
@@ -172,6 +178,14 @@ ENFORCE_SAME_TENSOR_IMPL = CodeTemplate("""\
 if (${tensor_name}_impl_saved) AT_ASSERT(${tensor_name}_impl_saved == ${tensor_name}.getIntrusivePtr());
 """)
 
+ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate("""\
+AT_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+""")
+
+ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE = CodeTemplate("""\
+if (${tensor_name}.has_storage()) AT_ASSERT(${tensor_name}.storage().use_count() == 1, "function: ${fn_name}");
+""")
+
 SAVE_TENSORLIST_IMPL = CodeTemplate("""\
 std::vector<c10::intrusive_ptr<TensorImpl>> ${tensorlist_name}_impl_saved(${tensorlist_name}.size());
 for (size_t i=0; i<${tensorlist_name}.size(); i++)
@@ -205,11 +219,28 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     'set_', '_cudnn_rnn_flatten_weight',
 }
-# END CHECKS FOR [ Invariant: TensorImpl and Storage Pointer Equality ]
+DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
+    # These non-inplace, non-out functions return tensors with use_count > 1
+    # Therefore, they MAY (but not necessarily) return one of its inputs as-is
+    # See https://github.com/pytorch/pytorch/issues/60426 for more information
+    '_embedding_bag', '_embedding_bag_forward_only',
+    'q_per_channel_scales', 'q_per_channel_zero_points',
+    'lu_unpack', '_cudnn_rnn_backward',
 
-METHOD_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) ;
-""")
+    # The below failed StorageImpl use_count check but we skip tensor_impl check
+    # just in case
+    '_cudnn_rnn', 'dequantize_self',
+}
+
+DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
+    # These non-view functions return tensors with storage use_count != 1
+    'thnn_conv2d_forward', 'slow_conv3d_forward', 'channel_shuffle',
+
+    # If an input is returned as-is in output, we cannot guarantee its storage_impl
+    # use count to be 1 either.
+    *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
+}
+# END CHECKS FOR [ TensorImpl and Storage Pointer Sanity Checks ]
 
 DECLARE_GRAD_FN = CodeTemplate("""\
 std::shared_ptr<${op}> grad_fn;
@@ -658,33 +689,69 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                                rhs_value=rhs_value)
         return call
 
-    def enforce_same_tensorimpl_and_storage(call: str, unpacked_bindings: List[Binding]) -> str:
-        save_ptrs_stmts: List[str] = []
-        enforce_same_ptrs_stmts: List[str] = []
-        if cpp.name(f.func) not in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
-            for unpacked_binding in unpacked_bindings:
-                arg = unpacked_binding.name
-                noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
-                if noref_cpp_type == BaseCType(tensorListT):
-                    save_ptrs_stmts += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                        SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                                ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+    def check_tensorimpl_and_storage(call: str, unpacked_bindings: List[Binding]) -> str:
+        # See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
+        stmts_before_call: List[str] = []
+        stmts_after_call: List[str] = []
+
+        if cpp.name(f.func) in DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE:
+            return call
+
+        # Check properties of inputs (enforce (1))
+        for unpacked_binding in unpacked_bindings:
+            arg = unpacked_binding.name
+            noref_cpp_type = unpacked_binding.nctype.type.remove_const_ref()
+            if noref_cpp_type == BaseCType(tensorListT):
+                stmts_before_call += [SAVE_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                      SAVE_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                stmts_after_call += [ENFORCE_SAME_TENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                     ENFORCE_SAME_TENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+            elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
+                stmts_before_call += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                      SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+                stmts_after_call += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
+                                     ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
+            elif noref_cpp_type == BaseCType(tensorT):
+                stmts_before_call += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
+                                      SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
+                stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg, out_tensor_name=arg),
+                                     ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
+
+        assert (stmts_before_call and stmts_after_call) or (not stmts_before_call and not stmts_after_call)
+
+        # Check properties of outputs (enforce (2), (3))
+        if not f.func.kind() in (SchemaKind.inplace, SchemaKind.out):
+            base_name = f.func.name.name.base  # TODO: should be str(f.func.name.name)?
+            aliased_arg_name = ALL_VIEW_FUNCTIONS.get(base_name, None)
+            if aliased_arg_name is not None:
+                aliased_arg_name = unpacked_name(aliased_arg_name)
+            for i, (ret, ret_name) in enumerate(zip(f.func.returns, cpp.return_names(f))):
+                noref_cpp_type = cpp.return_type(ret).remove_const_ref()
+                if noref_cpp_type == BaseCType(tensorT):
+                    if aliased_arg_name is not None:
+                        assert i == 0, "Expect non-CompositeImplicitAutograd view function {base} to return single output"
+                        stmts_after_call += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=aliased_arg_name,
+                                                                                    out_tensor_name=ret_name)]
+                    else:
+                        if type_wrapper_name(f) not in DONT_ENFORCE_STORAGE_IMPL_USE_COUNT:
+                            stmts_after_call += [ENFORCE_TENSOR_STORAGE_USE_COUNT_EQUALS_ONE.substitute(
+                                tensor_name=ret_name, fn_name=type_wrapper_name(f))]
+
+                    if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
+                        stmts_after_call += [ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE.substitute(
+                            tensor_name=ret_name, fn_name=type_wrapper_name(f))]
+
+                # Currently we don't have any functions that return the following types, but
+                # we should update the checks once we do
                 elif noref_cpp_type == ListCType(OptionalCType(BaseCType(tensorT))):
-                    save_ptrs_stmts += [SAVE_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                        SAVE_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                    enforce_same_ptrs_stmts += [ENFORCE_SAME_OPTIONALTENSORLIST_STORAGE.substitute(tensorlist_name=arg),
-                                                ENFORCE_SAME_OPTIONALTENSORLIST_IMPL.substitute(tensorlist_name=arg)]
-                elif noref_cpp_type == BaseCType(tensorT):
-                    save_ptrs_stmts += [SAVE_TENSOR_STORAGE.substitute(tensor_name=arg),
-                                        SAVE_TENSOR_IMPL.substitute(tensor_name=arg)]
-                    enforce_same_ptrs_stmts += [ENFORCE_SAME_TENSOR_STORAGE.substitute(tensor_name=arg),
-                                                ENFORCE_SAME_TENSOR_IMPL.substitute(tensor_name=arg)]
-        assert (save_ptrs_stmts and enforce_same_ptrs_stmts) or (not save_ptrs_stmts and not enforce_same_ptrs_stmts)
-        if save_ptrs_stmts and enforce_same_ptrs_stmts:
-            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=save_ptrs_stmts) + \
+                    raise AssertionError(f"Please add use_count checks for {noref_cpp_type}")
+                elif noref_cpp_type == BaseCType(tensorListT):
+                    raise AssertionError(f"Please add use_count checks for {noref_cpp_type}")
+
+        if stmts_before_call and stmts_after_call:
+            call = RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_before_call) + \
                 call + \
-                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=enforce_same_ptrs_stmts)
+                RUN_ONLY_IN_DEBUG_MODE.substitute(statements=stmts_after_call)
         return call
 
     def emit_call(f: NativeFunction, unpacked_bindings: List[Binding]) -> str:
@@ -709,7 +776,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         else:
             call = DISPATCH_TO_NON_VAR_TYPE_WITHOUT_RETURN_VALUES.substitute(
                 base_type_call=base_type_call, guard=guard)
-        call = enforce_same_tensorimpl_and_storage(call, unpacked_bindings)
+        call = check_tensorimpl_and_storage(call, unpacked_bindings)
         return call
 
     def emit_history() -> str:

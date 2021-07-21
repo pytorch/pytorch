@@ -202,6 +202,7 @@ void THPUtils_invalidArguments(PyObject *given_args, PyObject *given_kwargs,
   std::vector<std::string> option_strings;
   va_list option_list;
   va_start(option_list, num_options);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for(const auto i : c10::irange(num_options))
     option_strings.emplace_back(va_arg(option_list, const char*));
   va_end(option_list);
@@ -282,16 +283,12 @@ namespace torch { namespace gdb {
 // so we need to wrap the Tensor into a Python object first.
 char *tensor_repr(at::Tensor tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  PyObject *pytensor = NULL;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  PyObject *repr = NULL;
+  PyObject *pytensor = nullptr;
+  PyObject *repr = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t bufsize;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  const char *buf = NULL;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  char *result = NULL;
+  const char *buf = nullptr;
+  char *result = nullptr;
 
   pytensor = THPVariable_Wrap(at::Tensor(tensor));
   if (!pytensor)
@@ -328,8 +325,7 @@ error:
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(result);
   PyGILState_Release(gil);
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  return NULL;
+  return nullptr;
 }
 
 }} // namespace torch::gdb

@@ -1,5 +1,6 @@
 -r requirements.txt
 -r requirements-flake8.txt
+-r tools/linter/clang_tidy/requirements.txt
 boto3==1.16.34
 cffi
 click
