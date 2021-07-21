@@ -74,6 +74,7 @@ name: Bazel Linux CI (!{{ build_environment }})
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
+          AWS_DEFAULT_REGION: us-east-1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -81,11 +82,10 @@ name: Bazel Linux CI (!{{ build_environment }})
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Test PyTorch
         run: |
           export SHARD_NUMBER=0
@@ -150,7 +150,7 @@ name: Bazel Linux CI (!{{ build_environment }})
     if: always()
     needs:
       - build-and-test
-    runs-on: ubuntu-18.04
+    runs-on: linux.2xlarge
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -166,17 +166,14 @@ name: Bazel Linux CI (!{{ build_environment }})
         run: |
           # Should preserve paths so reports should still be in test/test-reports
           unzip -o 'test-reports-*.zip'
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
       - name: Install dependencies
         # boto3 version copied from .circleci/docker/common/install_conda.sh
         run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+          pip3 install -r requirements.txt
+          pip3 install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python3 tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -184,9 +181,7 @@ name: Bazel Linux CI (!{{ build_environment }})
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -194,6 +189,5 @@ name: Bazel Linux CI (!{{ build_environment }})
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endblock %}
