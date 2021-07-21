@@ -660,7 +660,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.special.gammaincc` and :func:`torch.special.gammanln` for related functions.
+See :func:`torch.special.gammaincc` and :func:`torch.special.gammaln` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
@@ -706,7 +706,7 @@ If both are zero or either is negative then :math:`\text{out}_i=\text{nan}`.
 .. math::
     \Gamma(\text{input}_i) = \int_0^\infty t^{(\text{input}_i-1)} e^{-t} dt.
 
-See :func:`torch.special.gammainc` and :func:`torch.special.gammanln` for related functions.
+See :func:`torch.special.gammainc` and :func:`torch.special.gammaln` for related functions.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
 and float inputs.
