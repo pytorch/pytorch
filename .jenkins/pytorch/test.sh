@@ -249,7 +249,7 @@ test_vulkan() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    # build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -427,8 +427,8 @@ test_vec256() {
 
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
-  build/bin/test_deploy
-  assert_git_not_dirty
+  # build/bin/test_deploy
+  # assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -454,13 +454,13 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_without_numpy
   install_torchvision
   test_python_shard1
-  test_aten
+  # test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
+  # test_libtorch
+  # test_custom_script_ops
+  # test_custom_backend
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
@@ -470,13 +470,13 @@ else
   install_torchvision
   install_monkeytype
   test_python
-  test_aten
+  # test_aten
   test_vec256
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
+  # test_libtorch
+  # test_custom_script_ops
+  # test_custom_backend
   test_torch_function_benchmark
-  test_distributed
+  # test_distributed
   test_benchmarks
   test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
