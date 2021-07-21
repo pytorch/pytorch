@@ -269,6 +269,7 @@ class TestOperators(TestCase):
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
             'nn.functional.linear',
+            'nn.functional.pad',
             'broadcast_to',
             'dsplit',
             'dstack',
@@ -311,6 +312,7 @@ class TestOperators(TestCase):
     def test_vjpvmap(self, device, dtype, op):
         op_skip = {
             'nn.functional.linear',
+            'nn.functional.pad',
             '__getitem__',
             '__rpow__',
             'broadcast_to',

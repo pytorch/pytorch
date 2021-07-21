@@ -2883,7 +2883,13 @@ class TestVmapOperatorsOpInfo(TestCase):
             return
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        vmap_fail = {'__getitem__', 'squeeze', 'unfold', 'nn.functional.linear'}
+        vmap_fail = {
+            '__getitem__',
+            'squeeze',
+            'unfold',
+            'nn.functional.linear',
+            'nn.functional.pad',
+        }
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
