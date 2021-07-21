@@ -189,17 +189,8 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
 // a value from outside the block. Inserting an Identity node inside
 // the block, linking with the value outside as workaround.
 void FixupONNXSubblockOutputs(Node* n) {
-  for (Block* block : n->blocks()) {
-    for (Value* output : block->outputs()) {
-      if (output->node()->owningBlock() != block) {
-        Node* id_node = block->owningGraph()->create(onnx::Identity);
-        id_node->insertBefore(block->return_node());
-        id_node->addInput(output);
-        id_node->output()->copyMetadata(output);
-        id_node->copyMetadata(n);
-        block->return_node()->replaceInputWith(output, id_node->output());
-      }
-    }
+  for (auto* child_block : n->blocks()) {
+    insertIdentityForInputUsedAsOutput(child_block);
   }
 }
 
@@ -240,6 +231,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
+  FixupONNXSubblockOutputs(node);
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
