@@ -45,8 +45,8 @@ Tensor empty_strided(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("empty.memory_format", at::native::vulkan::ops::empty_memory_format);
-  m.impl("empty_strided", TORCH_FN(at::native::vulkan::ops::empty_strided));
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty.memory_format"), at::native::vulkan::ops::empty_memory_format);
+  m.impl(TORCH_SELECTIVE_NAME("aten::empty_strided"), TORCH_FN(at::native::vulkan::ops::empty_strided));
 }
 
 #endif /* USE_VULKAN_API */
