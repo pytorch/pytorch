@@ -1,1 +1,1 @@
-from . import sparse
+from torch.ao.nn import sparse
