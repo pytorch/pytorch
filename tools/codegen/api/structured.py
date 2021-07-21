@@ -5,7 +5,8 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
-                                     tensorT, scalarT, intArrayRefT, dimnameListT)
+                                     tensorT, scalarT, intArrayRefT, dimnameListT,
+                                     optionalTensorRefT)
 from tools.codegen.api import cpp
 
 from typing import Union, List
@@ -32,10 +33,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
             raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if t.elem == BaseType(BaseTy.Tensor):
-            raise AssertionError(
-                "optional tensor not supported by structured yet; to implement this "
-                "add OptionalTensor c.f. https://github.com/pytorch/pytorch/issues/51456"
-            )
+            return NamedCType(binds, BaseCType(optionalTensorRefT))
         elif t.elem == BaseType(BaseTy.Scalar):
             raise AssertionError(
                 "optional scalar not supported by structured yet"
