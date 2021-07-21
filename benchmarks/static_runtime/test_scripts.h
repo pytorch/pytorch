@@ -438,6 +438,11 @@ const auto full_like_script = R"JIT(
       return (b.clone())
 )JIT";
 
+const auto linear_script = R"JIT(
+  def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
+      return torch.linear(inp, weights, bias).clone()
+)JIT";
+
 // dict of tuple of list
 const auto nested_output_script_0 = R"JIT(
   def forward(self, a, b):
@@ -492,4 +497,18 @@ const auto bmm_script = R"JIT(
 const auto addmm_script = R"JIT(
   def forward(self, inp: Tensor, mat1: Tensor, mat2: Tensor, beta: float, alpha: float):
    return torch.addmm(inp, mat1, mat2, alpha=alpha, beta=beta).clone()
+)JIT";
+
+const auto if_script = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, x: bool):
+    c = (a + b).relu().half().float()
+    d = b * c
+    if x:
+      e = a.flatten().half() * b.flatten().half()
+    else:
+      e = a.flatten().half() + b.flatten().half()
+    f = e.float().relu()
+    g = {"d": d, "b": b}
+    h = {"e": e, "f": f}
+    return [g, h]
 )JIT";
