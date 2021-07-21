@@ -137,6 +137,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("linalg_eigh", linalg_eigh_batch_rule);
   VMAP_SUPPORT("slogdet", slogdet_batch_rule);
   OP_DECOMPOSE(einsum);
+  OP_DECOMPOSE(outer);
   m.impl("linear", linear_decomp);
 }
 }}
