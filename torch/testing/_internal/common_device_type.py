@@ -375,7 +375,6 @@ class DeviceTypeTestBase(TestCase):
                     with self.logger:
                         result = test(self, **param_kwargs)
                 except RuntimeError as rte:
-                    self.logger.print_report_after_failure()
                     # check if rte should stop entire test suite.
                     self._stop_test_suite = self._should_stop_test_suite()
                     # raise the runtime error as is for the test suite to record.
