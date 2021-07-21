@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
 from functorch_lagging_op_db import functorch_lagging_op_db
+from functorch_additional_op_db import additional_op_db
 from common_utils import (
     parameterized,
     instantiate_parameterized_methods,
@@ -152,7 +153,7 @@ vjp_fail = {
 
 
 class TestOperators(TestCase):
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
@@ -193,7 +194,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result, expected)
 
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vjp(self, device, dtype, op):
         if op.name in vjp_fail:
             self.skipTest("Skipped; Expected failures")
@@ -224,7 +225,7 @@ class TestOperators(TestCase):
 
             self.assertEqual(result_vjps, expected_vjps)
 
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvjp(self, device, dtype, op):
         op_skip = set({
         })
@@ -264,9 +265,10 @@ class TestOperators(TestCase):
 
             self.assertEqual(result_vjps, expected_vjps)
 
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
+            'nn.functional.linear',
             'broadcast_to',
             'dsplit',
             'dstack',
@@ -305,9 +307,10 @@ class TestOperators(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvmap(self, device, dtype, op):
         op_skip = {
+            'nn.functional.linear',
             '__getitem__',
             '__rpow__',
             'broadcast_to',
