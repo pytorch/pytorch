@@ -142,6 +142,7 @@ void meta_func_cum_ops(
   }
 
   meta.set_output(self.sizes(), self.options().dtype(out_dtype));
+  namedinference::propagate_names(result, self);
 }
 
 TORCH_META_FUNC(cumsum)
