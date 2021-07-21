@@ -8,7 +8,6 @@ from ._distributed_c10d import ProcessGroup, Store
 
 # This module is defined in torch/csrc/distributed/rpc/init.cpp
 
-_DEFAULT_NUM_SEND_RECV_THREADS: int
 _DEFAULT_INIT_METHOD: str
 _DEFAULT_NUM_WORKER_THREADS: int
 _UNSET_RPC_TIMEOUT: float

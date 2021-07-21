@@ -23,14 +23,19 @@ def _backend_type_repr(self):
 _backend_type_doc = """
     An enum class of available backends.
 
-    PyTorch ships with two builtin backends: ``BackendType.TENSORPIPE`` and
-    ``BackendType.PROCESS_GROUP``. Additional ones can be registered using the
+    PyTorch ships with a builtin ``BackendType.TENSORPIPE`` backend.
+    Additional ones can be registered using the
     :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
 """
 
+# Create a placeholder which includes PROCESS_GROUP BackendType
+# which is deprecated. The backend type will still be available, but
+# will throw an error when the user tries to use it in init_rpc
+placeholder_backend_types = dict(PROCESS_GROUP=None)
+
 # Create an enum type, `BackendType`, with empty members.
 # Can't handle Function Enum API (mypy bug #9079)
-BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
+BackendType = enum.Enum(value="BackendType", names=placeholder_backend_types)  # type: ignore[misc]
 # Unable to assign a function a method (mypy bug #2427)
 BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 BackendType.__doc__ = _backend_type_doc
@@ -99,21 +104,6 @@ def construct_rpc_backend_options(
 def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
 
-
-def _process_group_construct_rpc_backend_options_handler(
-    rpc_timeout,
-    init_method,
-    num_send_recv_threads=rpc_constants.DEFAULT_NUM_SEND_RECV_THREADS,
-    **kwargs
-):
-    from . import ProcessGroupRpcBackendOptions
-
-    return ProcessGroupRpcBackendOptions(
-        rpc_timeout=rpc_timeout,
-        init_method=init_method,
-        num_send_recv_threads=num_send_recv_threads
-    )
-
 def _init_process_group(store, rank, world_size):
     # Initialize ProcessGroup.
     process_group_timeout = rpc_constants.DEFAULT_PROCESS_GROUP_TIMEOUT
@@ -135,42 +125,6 @@ def _init_process_group(store, rank, world_size):
             )
         )
     return group
-
-def _process_group_init_backend_handler(
-    store, name, rank, world_size, rpc_backend_options
-):
-    from . import ProcessGroupRpcBackendOptions
-    from . import ProcessGroupAgent
-
-    if not isinstance(store, dist.Store):
-        raise TypeError("`store` must be a c10d::Store. {}".format(store))
-
-    if not isinstance(
-        rpc_backend_options, ProcessGroupRpcBackendOptions
-    ):
-        raise TypeError(
-            "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`. {}".format(
-                rpc_backend_options
-            )
-        )
-
-    group = _init_process_group(store, rank, world_size)
-
-    # TODO: add try-except and destroy _agent in all processes if any fails.
-    return ProcessGroupAgent(
-        store,
-        name,
-        group,
-        rpc_backend_options.num_send_recv_threads,
-        timedelta(seconds=rpc_backend_options.rpc_timeout),
-    )
-
-
-register_backend(
-    "PROCESS_GROUP",
-    _process_group_construct_rpc_backend_options_handler,
-    _process_group_init_backend_handler,
-)
 
 def _tensorpipe_construct_rpc_backend_options_handler(
     rpc_timeout,

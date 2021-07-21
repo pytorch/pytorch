@@ -52,12 +52,10 @@ if is_available():
         ProcessGroupRpcBackendOptions,
         RpcAgent,
         PyRRef,
-        ProcessGroupAgent,
         TensorPipeAgent,
         RemoteProfilerManager,
         WorkerInfo,
         _DEFAULT_INIT_METHOD,
-        _DEFAULT_NUM_SEND_RECV_THREADS,
         _DEFAULT_NUM_WORKER_THREADS,
         _UNSET_RPC_TIMEOUT,
         _DEFAULT_RPC_TIMEOUT_SEC,
@@ -95,10 +93,9 @@ if is_available():
                 Name can only contain number, alphabet, underscore, colon,
                 and/or dash, and must be shorter than 128 characters.
             backend (BackendType, optional): The type of RPC backend
-                implementation. Supported values include
-                ``BackendType.TENSORPIPE`` (the default) and
-                ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
-                information.
+                implementation. Supported values is
+                ``BackendType.TENSORPIPE`` (the default).
+                See :ref:`rpc-backends` for more information.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions, optional): The options
@@ -159,13 +156,12 @@ if is_available():
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
         if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            warnings.warn(
-                "RPC was initialized with the PROCESS_GROUP backend which is "
-                "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend. "
-                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
-                "RPC backend. If you have concerns or suggestions please comment in "
-                "https://github.com/pytorch/pytorch/issues/55615"
+            raise RuntimeError(
+                "RPC was initialized with the PROCESS_GROUP backend which has "
+                "been removed and is superseded by the TENSORPIPE backend. "
+                "Please migrate to the TENSORPIPE backend. "
+                "PyTorch v1.9 was the last release that carries PROCESS_GROUP "
+                "RPC backend."
             )
 
         if rpc_backend_options is None:
