@@ -1,6 +1,7 @@
 #include "caffe2/serialize/file_adapter.h"
 #include <c10/util/Exception.h>
 #include <cstdio>
+
 #include "caffe2/core/common.h"
 
 namespace caffe2 {
@@ -31,8 +32,9 @@ size_t FileAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
   return fread(buf, 1, n, fp_);
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-FileAdapter::~FileAdapter() {}
+FileAdapter::~FileAdapter() {
+  fclose(fp_);
+}
 
 } // namespace serialize
 } // namespace caffe2
