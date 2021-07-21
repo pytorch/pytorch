@@ -10724,54 +10724,123 @@ Example::
             [2, 2],
             [2, 3],
             [3, 3]])
+
+""")
+
+add_docstr(torch.trapezoid,
+           r"""
+trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
+
+Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>_ along
+:attr:`dim`. By default the spacing between elements is assumed to be 1, but
+:attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
+used to specify arbitrary spacing along :attr:`dim`.
+
+
+Assuming :attr:`y` is a one-dimensional tensor with elements :math:`{y_0, y_1, ..., y_n}`,
+the default computation is
+
+.. math::
+    \begin{aligned}
+        \sum_{i = 1}^{n-1} \frac{1}{2} (y_i + y_{i-1})
+    \end{aligned}
+
+When :attr:`dx` is specified the computation becomes
+
+.. math::
+    \begin{aligned}
+        \sum_{i = 1}^{n-1} \frac{\Delta x}{2} (y_i + y_{i-1})
+    \end{aligned}
+
+effectively multiplying the result by :attr:`dx`. When :attr:`x` is specified,
+assuming :attr:`x` is also a one-dimensional tensor with
+elements :math:`{x_0, x_1, ..., x_n}`, the computation becomes
+
+.. math::
+    \begin{aligned}
+        \sum_{i = 1}^{n-1} \frac{(x_i - x_{i-1})}{2} (y_i + y_{i-1})
+    \end{aligned}
+
+When :attr:`y` is two or more dimensions, this computation is performed independently
+along dimension :attr:`dim`. If :attr:`x` is also specified and is one-dimensional,
+then that dimension defines the spacing for each computation.
+If :attr:`x` is also specified and is not one-dimensional, then it is broadcast to
+the shape of :attr:`y` and the corresponding sizes are used for each computation.
+See the examples below for details.
+
+.. note::
+    The trapezoidal rule is a technique for approximating the definite integral of a function
+    by averaging its left and right Riemann sums. The approximation becomes more accurate as
+    the resolution of the partition increases.
+
+Arguments:
+    y (Tensor): Values to use when computing the trapezoidal rule.
+    x (Tensor): If specified, defines spacing between values as specified above.
+
+Keyword arguments:
+    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+        are specified then this defaults to 1. Effectively multiplies the result by its value.
+    dim (int): The dimension along which to compute the trapezoidal rule.
+        The last (inner-most) dimension by default.
+
+Examples::
+
+    >>> # Computes the trapezoidal rule in 1D, spacing is implicitly 1
+    >>> y = torch.tensor([1, 5, 10])
+    >>> torch.trapezoid(y)
+    tensor(10.5)
+
+    >>> # Computes the same trapezoidal rule directly to verify
+    >>> (1 + 10 + 10) / 2
+    10.5
+
+    >>> # Computes the trapezoidal rule in 1D with constant spacing of 2
+    >>> # NOTE: the result is the same as before, but multiplied by 2
+    >>> torch.trapezoid(y, dx=2)
+    21.0
+
+    >>> # Computes the trapezoidal rule in 1D with arbitrary spacing
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.trapezoid(y, x)
+    28.5
+
+    >>> # Computes the same trapezoidal rule directly to verify
+    >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
+    28.5
+
+    >>> # Computes the trapezoidal rule for each row of a 3x3 matrix
+    >>> y = torch.arange(9).reshape(3, 3)
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> torch.trapezoid(y)
+    tensor([ 2., 8., 14.])
+
+    >>> # Computes the trapezoidal rule for each column of the matrix
+    >>> torch.trapezoid(y, dim=0)
+    tensor([ 6., 8., 10.])
+
+    >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with the same arbitrary spacing
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.trapezoid(y, x)
+    array([5., 5., 5.])
+
+    >>> # Computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with different arbitrary spacing per row
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
+    >>> torch.trapezoid(y, x)
+    array([2., 4., 6.])
 """)
 
 add_docstr(torch.trapz,
            r"""
 trapz(y, x, *, dim=-1) -> Tensor
 
-Estimate :math:`\int y\,dx` along `dim`, using the trapezoid rule.
+Alias for :func:`torch.trapezoid`.
 
-Arguments:
-    y (Tensor): The values of the function to integrate
-    x (Tensor): The points at which the function `y` is sampled.
-        If `x` is not in ascending order, intervals on which it is decreasing
-        contribute negatively to the estimated integral (i.e., the convention
-        :math:`\int_a^b f = -\int_b^a f` is followed).
-    dim (int): The dimension along which to integrate.
-        By default, use the last dimension.
-
-Returns:
-    A Tensor with the same shape as the input, except with `dim` removed.
-    Each element of the returned tensor represents the estimated integral
-    :math:`\int y\,dx` along `dim`.
-
-Example::
-
-    >>> y = torch.randn((2, 3))
-    >>> y
-    tensor([[-2.1156,  0.6857, -0.2700],
-            [-1.2145,  0.5540,  2.0431]])
-    >>> x = torch.tensor([[1, 3, 4], [1, 2, 3]])
-    >>> torch.trapz(y, x)
-    tensor([-1.2220,  0.9683])
-
-.. function:: trapz(y, *, dx=1, dim=-1) -> Tensor
-
-As above, but the sample points are spaced uniformly at a distance of `dx`.
-
-Arguments:
-    y (Tensor): The values of the function to integrate
-
-Keyword args:
-    dx (float): The distance between points at which `y` is sampled.
-    dim (int): The dimension along which to integrate.
-        By default, use the last dimension.
-
-Returns:
-    A Tensor with the same shape as the input, except with `dim` removed.
-    Each element of the returned tensor represents the estimated integral
-    :math:`\int y\,dx` along `dim`.
 """)
 
 add_docstr(torch.repeat_interleave,
