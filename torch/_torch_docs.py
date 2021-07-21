@@ -8037,16 +8037,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     See :func:`torch.fmod` for how division by zero is handled.
 
 .. note::
-    This is different from `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_
-    (from Python 3.7) and C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_
-    functions both of which compute IEEE 754-style remainder while `torch.remainder` computes the Python's
-    modulus operation.
-
-    PyTorch (conforming to Python's `%` operator and NumPy's `np.remainder
-    <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_) uses floor rounding mode and
-    guarantees same sign of the remainder as the divisor :attr:`other` while IEEE 754-style remainder
-    uses closest integer rounding mode and doesn't guarantee same sign except when divided by zero where
-    the output has same sign as the dividend :attr:`input`.
+    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
+    is equivalent to Python's modulus operation, and different from Python's
+    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
+    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implements
+    the IEEE remainder.
 
 Args:
     input (Tensor or Scalar): the dividend
