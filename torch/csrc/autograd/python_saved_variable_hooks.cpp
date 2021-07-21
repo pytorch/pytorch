@@ -58,7 +58,7 @@ namespace torch { namespace autograd {
     PyObject* pack_hook_ptr = pack_hook.release().ptr();
     PyObject* unpack_hook_ptr = unpack_hook.release().ptr();
     if (!pack_hook_.compare_exchange_strong(expected, pack_hook_ptr) ||
-        !pack_hook_.compare_exchange_strong(expected, unpack_hook_ptr)) {
+        !unpack_hook_.compare_exchange_strong(expected, unpack_hook_ptr)) {
       reset_hooks();
       TORCH_INTERNAL_ASSERT(false); // race condition
     }
