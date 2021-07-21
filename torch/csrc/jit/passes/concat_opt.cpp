@@ -544,29 +544,38 @@ class VariadicCatUpdater {
       return false;
     }
     auto list = cat->input(0)->node();
-    // We do not transform cat ops whose list input has > 1 use. This is
-    // because these uses could be modifying the list using ops like
-    // `aten::append`. So, we conservatively assume that any use other than
-    // the one in cat mutates the list.
-    if (list->output()->uses().size() > 1) {
+    // We do not transform cat ops whose list input can not be moved to the
+    // position before cat. This in turn implies that there is some mutation
+    // of the input list before cat.
+    if (!getOrCreateAliasDb()->couldMoveBeforeTopologically(list, cat)) {
       return false;
     }
     std::vector<Value*> inputs = list->inputs().vec();
     inputs.push_back(cat->input(1));
     auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
     GRAPH_UPDATE("Adding\n", *var_cat);
-    var_cat->insertBefore(list);
+    var_cat->insertBefore(cat);
     GRAPH_UPDATE("Replacing\n", *cat, "with\n", *var_cat);
     cat->output()->replaceAllUsesWith(var_cat->output());
     GRAPH_UPDATE("Deleting\n", *cat);
     cat->destroy();
-    TORCH_INTERNAL_ASSERT(!list->hasUses());
-    GRAPH_UPDATE("Deleting\n", *list);
-    list->destroy();
+    if (!list->hasUses()) {
+      GRAPH_UPDATE("Deleting\n", *list);
+      list->destroy();
+    }
     return true;
   }
 
+  AliasDb* getOrCreateAliasDb() {
+    if (!aliasDb_) {
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
+    }
+    return aliasDb_.get();
+  }
+
   std::shared_ptr<Graph> graph_;
+  std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+
   std::vector<Node*> cat_nodes_;
 };
 
