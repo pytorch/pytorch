@@ -253,49 +253,11 @@ class BatchNormNet(nn.Module):
         x = self.fc2(x)
         return F.softmax(x, dim=1)
 
-
-class UnusedParamTwoLinLayerNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.a = nn.Linear(10, 10, bias=False)
-        self.b = nn.Linear(10, 10, bias=False)
-        self.c = nn.Linear(5, 5, bias=False)
-
-    def forward(self, x):
-        a = self.a(x)
-        b = self.b(x)
-        return (a, b)
-
-class UnusedNet(UnusedParamTwoLinLayerNet):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x, local):
-        if local:
-            return self.a(x)
-        else:
-            return self.b(x)
-
-
-class DictOutputModule(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.module = UnusedParamTwoLinLayerNet()
-
-    def forward(self, x):
-        predictions = self.module(x)
-        loss = (predictions[0] + predictions[1]).sum()
-        return {
-            "predictions": predictions,
-            "loss": loss,
-        }
-
-
 class TwoLinLayerNet(nn.Module):
     def __init__(self):
         super().__init__()
         self.a = nn.Linear(10, 10, bias=False)
-        self.b = nn.Linear(10, 1, bias=False)
+        self.b = nn.Linear(10, 10, bias=False)
 
     def forward(self, x):
         a = self.a(x)
@@ -499,9 +461,7 @@ class TestDistBackend(MultiProcessTestCase):
         Barrier.init()
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
-        self.skip_return_code_checks = [
-            self.test_ddp_model_diff_across_ranks.__wrapped__,
-        ]
+        self.skip_return_code_checks = []
 
     def tearDown(self):
         cleanup_temp_dir()
@@ -2625,13 +2585,17 @@ class DistributedTest:
             )
 
         # SCATTER
-        def _test_scatter_helper(self, group, group_id, rank):
+        def _test_scatter_helper(self, group, group_id, rank, dtype=torch.float):
             for dest in group:
-                tensor = _build_tensor(dest + 1, -1)
-                expected_tensor = _build_tensor(dest + 1, rank)
+                tensor = _build_tensor(dest + 1, -1, dtype=dtype)
+                expected_tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = (
-                    [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
+                    [_build_tensor(dest + 1, i, dtype=dtype) for i in group] if rank == dest else []
                 )
+                if dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(t).shape for t in tensors]
+                else:
+                    tensor_shapes = [t.shape for t in tensors]
                 self.call_dist_op(
                     ":scatter",
                     False,
@@ -2640,7 +2604,7 @@ class DistributedTest:
                     src=dest,
                     scatter_list=tensors,
                     group=group_id,
-                    tensor_shapes=[t.shape for t in tensors],
+                    tensor_shapes=tensor_shapes,
                 )
                 self.assertEqual(tensor, expected_tensor)
 
@@ -2673,6 +2637,11 @@ class DistributedTest:
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
+
+        @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
+        def test_scatter_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
         @skip_if_small_worldsize
@@ -2968,16 +2937,21 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float
         ):
             if group_id is not None:
                 size = len(group)
-                in_tensor = torch.ones([size, size]) * rank
-                expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
-                out_tensor = torch.ones([size, size]) * -1
+                in_tensor = torch.ones([size, size], dtype=dtype) * rank
+                expected_tensor = torch.cat([torch.ones([1, size], dtype=dtype) * i for i in group])
+                out_tensor = torch.ones([size, size], dtype=dtype) * -1
                 if cuda:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
+                if dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(in_tensor).shape]
+                else:
+                    tensor_shapes = [in_tensor.shape]
                 self.call_dist_op(
                     ":all_to_all",
                     False,
@@ -2985,7 +2959,7 @@ class DistributedTest:
                     out_tensor,
                     in_tensor,
                     group=group_id,
-                    tensor_shapes=[in_tensor.shape],
+                    tensor_shapes=tensor_shapes,
                 )
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
@@ -2997,15 +2971,16 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float
         ):
             if group_id is not None:
                 size = len(group)
                 in_splits = [i + 1 for i in group]
                 out_splits = [rank + 1 for _ in group]
-                in_tensor = torch.ones([sum(in_splits), size]) * rank
-                out_tensor = torch.ones([(rank + 1) * size, size])
+                in_tensor = torch.ones([sum(in_splits), size], dtype=dtype) * rank
+                out_tensor = torch.ones([(rank + 1) * size, size], dtype=dtype)
                 expected_tensor = torch.cat(
-                    [torch.ones([rank + 1, size]) * i for i in group]
+                    [torch.ones([rank + 1, size], dtype=dtype) * i for i in group]
                 )
                 if cuda:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
@@ -3024,15 +2999,16 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float,
         ):
             if group_id is not None:
                 size = len(group)
                 in_splits = [i + 1 for i in group]
                 in_tensors = [
-                    torch.ones([in_splits[i], size]) * rank for i, _ in enumerate(group)
+                    torch.ones([in_splits[i], size], dtype=dtype) * rank for i, _ in enumerate(group)
                 ]
-                out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
-                expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+                out_tensors = [torch.ones([(rank + 1), size], dtype=dtype) for _ in group]
+                expected_tensors = [torch.ones([rank + 1, size], dtype=dtype) * i for i in group]
                 if cuda:
                     in_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in in_tensors]
                     expected_tensors = [
@@ -3063,6 +3039,27 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
+        def test_all_to_all_single_equal_split_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_single_equal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat
+            )
+
+        @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
+        @skip_if_no_gpu
+        def test_all_to_all_single_equal_split_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_equal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat
+            )
+
+        @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_unequal_split(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
@@ -3080,6 +3077,27 @@ class DistributedTest:
                 rank_to_GPU,
             )
 
+        @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
+        def test_all_to_all_single_unequal_split_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_single_unequal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat
+            )
+
+        @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
+        @skip_if_no_gpu
+        def test_all_to_all_single_unequal_split_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_unequal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat,
+            )
+
         @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
         def test_all_to_all(self):
             group, group_id, rank = self._init_global_test()
@@ -3091,6 +3109,20 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU)
+
+        @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
+        def test_all_to_all_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat)
+
+        @unittest.skipIf(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        @skip_if_rocm
+        def test_all_to_all_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_helper(
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat
+            )
 
         @unittest.skipIf(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         @skip_if_small_worldsize
@@ -5781,8 +5813,8 @@ class DistributedTest:
                     expected_grad = sum(i for i in range(world_size)) / world_size
                     self.assertEqual(net.module.weight.grad.item(), expected_grad)
 
-            join_config = net.ddp_uneven_inputs_config
-            self.assertFalse(join_config.ddp_join_enabled)
+            join_config = net._join_config
+            self.assertFalse(join_config.enable)
             self.validate_net_equivalence(net)
 
         @skip_if_lt_x_gpu(2)
@@ -5820,10 +5852,10 @@ class DistributedTest:
         )
         def test_broadcast_object_list(self):
             # Only set device for NCCL backend since it must use GPUs.
+            # Case where rank != GPU device.
+            next_rank = (self.rank + 1) % int(self.world_size)
             backend = os.environ["BACKEND"]
             if backend == "nccl":
-                # Case where rank != GPU device.
-                next_rank = (self.rank + 1) % int(self.world_size)
                 torch.cuda.set_device(next_rank)
 
             src_rank = 0
@@ -5837,7 +5869,33 @@ class DistributedTest:
                 else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
             )
 
-            # Single object test
+            # Single object test with device specified. Backend="gloo", device=cpu
+            if backend != "nccl":
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device('cpu'))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test with device specified. Backend="gloo", device=current_device+1
+            # The test is gated by the fact GPU count is the same as world size to avoid the case
+            # when backend is gloo but there is no multiple GPU devices.
+            if backend != "nccl" and torch.cuda.device_count() == int(self.world_size):
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test with device specified. Backend="nccl", device=current_device+1
+            if backend == "nccl" and torch.cuda.device_count() == int(self.world_size):
+                single_obj_list = [objects[0]]
+                if self.rank != src_rank:
+                    self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+                dist.broadcast_object_list(single_obj_list, src=0, group=None, device=torch.device(next_rank))
+                self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
+
+            # Single object test: backward compatibility with device unspecified
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
@@ -6442,6 +6500,17 @@ class DistributedTest:
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
         def test_ddp_model_diff_across_ranks(self):
+            group_gloo = dist.new_group(
+                timeout=timedelta(seconds=60),
+                backend=dist.Backend.GLOO
+            )
+            # Set NCCL_BLOCKING_WAIT and use a new NCCL group to improve test
+            # determinism.
+            os.environ["NCCL_BLOCKING_WAIT"] = "1"
+            group_to_use = dist.new_group(
+                backend=dist.get_backend(),
+                timeout=timedelta(seconds=5)
+            )
             torch.cuda.set_device(self.rank)
             # Creates network with different sized embedding table on different
             # ranks. This should throw an error during DDP init.
@@ -6454,8 +6523,11 @@ class DistributedTest:
                 dist._get_debug_mode() == dist._DistributedDebugLevel.DETAIL
             )
             rank_0_ctx = (
-                suppress()
-                if dist.get_backend() == dist.Backend.NCCL and not is_detail_dbg_mode
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Caught collective operation timeout"
+                )
+                if dist.get_backend(group_to_use) == dist.Backend.NCCL and not is_detail_dbg_mode
                 # Gloo can raise various exception messages, so just assert
                 # Runtime error here.
                 else self.assertRaises(RuntimeError)
@@ -6467,155 +6539,97 @@ class DistributedTest:
             )
             with ctx:
                 net = torch.nn.parallel.DistributedDataParallel(
-                    net.to(self.rank), device_ids=[self.rank]
+                    net.to(self.rank), device_ids=[self.rank], process_group=group_to_use,
                 )
-                dist.barrier()
+                # Should only be run by rank 0, and blocking_wait catches and
+                # reports exception.
+                dist.barrier(group_to_use)
 
-        def _test_output_unused_in_loss(self, module_cls, gradient_as_bucket_view):
-            model = module_cls()
-            local_net = copy.deepcopy(model)
+            # Perform gloo-based barrier to ensure one rank doesn't exit test
+            # early which causes failure with Barrier.sync.
+            dist.barrier(group_gloo)
+
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
+        @require_backend({"gloo", "nccl"})
+        @require_backends_available({"gloo", "nccl"})
+        @skip_if_lt_x_gpu(2)
+        def test_output_unused_in_loss(self):
+            model = TwoLinLayerNet()
+            # Need copy of model to pass into 2nd DDP ctor otherwise autograd hooks
+            # on first DDP reducer will execute!
+            model_copy = copy.deepcopy(model)
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(model).cuda(self.rank),
                 device_ids=[self.rank],
-                find_unused_parameters=True,
             )
-
-            # Tests that certain parameters not getting gradient since the
-            # output is unused in loss computation is supported. Specifically,
-            # checks that the grads remain unchanged and are the same as local
-            # training.
-            inp = torch.randn(10, 10)
-            a_local_grad = None
-            a_dist_grad = None
-
-            # Ensure that if a param is not used in loss computation, its
-            # gradient is untouched, i.e. if it is None before it is None after,
-            # not zero.
-            if module_cls == DictOutputModule:
-                a, b = local_net(inp)["predictions"]
-                a_dist, b_dist = net(inp)["predictions"]
-            else:
-                a, b = local_net(inp)
-                a_dist, b_dist = net(inp)
-
-            loss_dist = b_dist.sum()
-            loss_dist.backward()
-
-            # Ensure that gradient corresponding to parameter "a" was not
-            # touched, i.e. it is None and matches the local grad.
-            if module_cls == DictOutputModule:
-                self.assertTrue(net.module.module.a.weight.grad is None)
-                self.assertEqual(
-                    net.module.module.a.weight.grad, local_net.module.a.weight.grad
-                )
-            else:
-                self.assertTrue(net.module.a.weight.grad is None)
-                self.assertEqual(net.module.a.weight.grad, local_net.a.weight.grad)
-
-            net.zero_grad()
-            local_net.zero_grad()
-            for i in range(6):
-                if module_cls == DictOutputModule:
-                    a, b = local_net(inp)["predictions"]
-                    a_dist, b_dist = net(inp)["predictions"]
-                else:
-                    a, b = local_net(inp)
-                    a_dist, b_dist = net(inp)
-                if i < 2:
-                    # Use both params in loss computation. Later, "a" will go
-                    # unused and we check to ensure DDP supports this and
-                    # gradients remain the same as local training.
-                    t = a @ b
-                    t_dist = a_dist @ b_dist
-                    loss = t.sum()
-                    loss_dist = t_dist.sum()
-                else:
-                    # Model output "a" unused in loss.
-                    loss = b.sum()
-                    loss_dist = b_dist.sum()
-                loss.backward()
-                loss_dist.backward()
-                if i == 1:
-                    # Save grads to compare with them in next iterations.
-                    if module_cls == DictOutputModule:
-                        a_local_grad = local_net.module.a.weight.grad
-                        a_dist_grad = net.module.module.a.weight.grad
-                    else:
-                        a_local_grad = local_net.a.weight.grad
-                        a_dist_grad = net.module.a.weight.grad
-                    self.assertEqual(a_local_grad, a_dist_grad)
-                elif i >= 2:
-                    # parameter "a" of both models should be the same and not change
-                    if module_cls == DictOutputModule:
-                        self.assertEqual(net.module.module.a.weight.grad, a_dist_grad)
-                        self.assertEqual(local_net.module.a.weight.grad, a_local_grad)
-                    else:
-                        self.assertEqual(net.module.a.weight.grad, a_dist_grad)
-                        self.assertEqual(local_net.a.weight.grad, a_local_grad)
-
-                # Verify grads are the same
-                for (local_param, dist_param) in zip(
-                    local_net.parameters(), net.parameters()
-                ):
-                    local_grad = local_param.grad
-                    dist_grad = dist_param.grad
-                    self.assertEqual(local_grad, dist_grad)
-
-            dist.barrier()
-
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @skip_if_lt_x_gpu(2)
-        def test_output_unused_in_loss_tuple_module(self):
-            module_cls = UnusedParamTwoLinLayerNet
-            for grad_as_bucket_view in [True, False]:
-                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
-
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @skip_if_lt_x_gpu(2)
-        def test_output_unused_in_loss_dict_module(self):
-            module_cls = DictOutputModule
-            for grad_as_bucket_view in [True, False]:
-                self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
-
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @skip_if_lt_x_gpu(2)
-        def test_undefined_grad_parity_unused_parameters(self):
-            # TODO: enable this for general training use cases:
-            # https://github.com/pytorch/pytorch/issues/58511.
-            x = torch.ones(1, 2).to(self.rank)
-            net = Net().to(self.rank)
-            local_net = copy.deepcopy(net)
-            net = torch.nn.parallel.DistributedDataParallel(
-                net,
+            net_with_find_unused = torch.nn.parallel.DistributedDataParallel(
+                model_copy.cuda(self.rank),
                 device_ids=[self.rank],
                 find_unused_parameters=True,
             )
-            out = net(x).sum()
-            local_out = local_net(x).sum()
-            # Simulates undefined gradients.
-            torch._C._functions.UndefinedGrad()(out).backward()
-            torch._C._functions.UndefinedGrad()(local_out).backward()
-            for (dist_param_name, dist_param), (local_param_name, local_param) in zip(
-                net.named_parameters(), local_net.named_parameters()
-            ):
-                dist_grad = dist_param.grad
-                local_grad = local_param.grad
-                self.assertEqual(
-                    dist_grad,
-                    local_grad,
-                    f"""DDP param {dist_param_name} with grad {dist_grad}
-                    does not match local param {local_param_name} with grad
-                    {local_grad}""",
-                )
+
+            inp = torch.randn(10, 10)
+
+            for ddp in [net, net_with_find_unused]:
+                for i in range(2):
+                    if i == 0:
+                        a, b = ddp(inp)
+                        loss = b.sum()
+                        loss.backward()
+                    else:
+                        try:
+                            a, b = ddp(inp)
+                            loss = b.sum()
+                            loss.backward()
+                        except RuntimeError as e:
+                            msg = str(e)
+                            unused_index = 0
+                            unused_index_substr = (
+                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
+                            )
+                            if ddp == net:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_recommend_find_unused_params_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                    unused_index_substr,
+                                ]
+                                unexpected_strs = [
+                                    ddp_find_unused_params_enabled_str,
+                                ]
+                            elif ddp == net_with_find_unused:
+                                expected_strs = [
+                                    ddp_prev_reduction_unfinished_str,
+                                    ddp_outputs_not_used_in_loss_str,
+                                    ddp_find_unused_params_enabled_str,
+                                    unused_index_substr,
+                                ]
+                                unexpected_strs = [
+                                    ddp_recommend_find_unused_params_str,
+                                ]
+                            # In debug mode, should show parameters that weren't reduced.
+                            # Without debug mode, should show suggestion to use debug mode.
+                            if dist._get_debug_mode() == dist._DistributedDebugLevel.OFF:
+                                expected_strs.append(ddp_suggest_debug_mode_str)
+                            else:
+                                unreduced_params = ", ".join(['a.weight'])
+                                expected_strs.append(
+                                    f"did not receive grad for rank {self.rank}: {unreduced_params}"
+                                )
+                            for s in expected_strs:
+                                self.assertTrue(
+                                    s in msg,
+                                    f"Expected {s} to be in {msg}"
+                                )
+                            for s in unexpected_strs:
+                                self.assertFalse(
+                                    s in msg,
+                                    f"Expected {s} not to be in {msg}"
+                                )
+                        else:
+                            self.assertFalse(True, "DDP error not raised")
+
+            dist.barrier()
 
         def _test_different_graph_across_ranks(
             self, find_unused_parameters=False, static_graph=False
@@ -7097,9 +7111,9 @@ class DistributedTest:
             syncbn_model = nn.SyncBatchNorm(
                 2, momentum=0.99, track_running_stats=False
             ).cuda()
-            local_syncbn_model = copy.deepcopy(model)
+            local_syncbn_model = copy.deepcopy(syncbn_model)
             syncbn_model = torch.nn.parallel.DistributedDataParallel(
-                model,
+                syncbn_model,
                 device_ids=[rank]
             )
             inp = torch.randn(10, 2, device=rank)
@@ -7111,14 +7125,8 @@ class DistributedTest:
             for test in tests:
                 test_model, test_local_model, test_inp = test
                 if self.rank == 0:
-                    with torch.no_grad():
-                        for _ in range(6):
-                            self.assertEqual(
-                                test_model(test_inp),
-                                test_local_model(test_inp)
-                            )
-
-                    model.eval()
+                    test_model.eval()
+                    test_local_model.eval()
                     for _ in range(6):
                         self.assertEqual(
                             test_model(test_inp),
@@ -7167,8 +7175,8 @@ class DistributedTest:
                     for i in range(6):
                         inp = torch.randn(10, 2, 4, 4).cuda(rank)
                         out = model_inference(inp)
-                        # Do not need to run backward as we are testing only
-                        # inference mode here.
+                        loss = out.sum()
+                        loss.backward()
 
                 # Ensure sync does not occur in eval() mode.
                 if BACKEND == "nccl":
@@ -7276,9 +7284,6 @@ class DistributedTest:
                     loss = get_loss(out)
                     loss.backward()
                     self._model_step(model)
-                    # Test non 1:1 calls to fwd/backward to ensure
-                    # https://github.com/pytorch/pytorch/issues/58111 is fixed.
-                    model_static_graph(inp, output_type=output_type)
                     out_static = model_static_graph(inp, output_type=output_type)
                     self.assertTrue(isinstance(out_static, type_mapping[output_type]))
                     loss_static = get_loss(out_static)
@@ -7288,107 +7293,6 @@ class DistributedTest:
                         model.parameters(), model_static_graph.parameters()
                     ):
                         self.assertEqual(p, p_static)
-
-        def _verify_ddp_model(self, ddp_model, local_model=None):
-            # Verify weights are appropriately synchronized.
-            all_params = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(all_params, list(ddp_model.parameters()))
-            rank_0_params = all_params[0]
-            for param_list in all_params[1:]:
-                for i, p in enumerate(param_list):
-                    rank_0_param = rank_0_params[i]
-                    self.assertTrue(torch.equal(rank_0_param.data.cpu(), p.data.cpu()))
-            if self.rank == 0 and local_model is not None:
-                local_params = list(local_model.parameters())
-                for dist_param, local_param in zip(rank_0_params, local_params):
-                    self.assertTrue(torch.equal(dist_param.data.cpu(), local_param.data.cpu()))
-
-        def _test_ddp_bwd_with_retain_graph(self, static_graph, find_unused_parameters):
-            # Ensures that calling backward multiple times with retain_graph=True
-            # is supported in DDP and verifies parity with local training.
-            class ToyModel(nn.Module):
-                def __init__(self):
-                    super(ToyModel, self).__init__()
-                    self.net1 = nn.Linear(10, 10, bias=False)
-
-                def forward(self, x):
-                    return self.net1(x)
-
-            rank = self.rank
-            torch.cuda.set_device(rank)
-            model = ToyModel().cuda(torch.cuda.current_device())
-            local_model = copy.deepcopy(model)
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[torch.cuda.current_device()],
-                find_unused_parameters=find_unused_parameters,
-            )
-            if static_graph:
-                ddp_model._set_static_graph()
-
-            # Run multiple backwards for DDP and local model.
-            inp = torch.randn(20, 10, device=rank)
-            for _ in range(3):
-                loss = ddp_model(inp).sum()
-            loss.backward(retain_graph=True)
-            loss.backward(retain_graph=True)
-            loss.backward()
-
-            for _ in range(3):
-                local_loss = local_model(inp).sum()
-            local_loss.backward(retain_graph=True)
-            local_loss.backward(retain_graph=True)
-            local_loss.backward()
-
-            # Run additional forward/backward steps to ensure that things like
-            # rebuild_buckets work appropriately.
-            for _ in range(3):
-                loss = ddp_model(inp).sum()
-                local_loss = local_model(inp).sum()
-                loss.backward()
-                local_loss.backward()
-            # Compare models.
-            self._verify_ddp_model(ddp_model, local_model)
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_bwd_with_retain_graph(self):
-            self._test_ddp_bwd_with_retain_graph(
-                static_graph=False, find_unused_parameters=False
-            )
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_bwd_with_retain_graph_find_unused_params(self):
-            self._test_ddp_bwd_with_retain_graph(
-                static_graph=False, find_unused_parameters=True
-            )
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_bwd_with_retain_graph_static(self):
-            self._test_ddp_bwd_with_retain_graph(
-                static_graph=True, find_unused_parameters=False
-            )
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_bwd_with_retain_graph_static_find_unused_params(self):
-            self._test_ddp_bwd_with_retain_graph(
-                static_graph=True, find_unused_parameters=True
-            )
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
@@ -7447,68 +7351,3 @@ class DistributedTest:
                         else:
                             self.assertEqual(opt[i]["tensor"].grad_fn, None)
                     out.mean().backward()
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_local_model(self):
-            rank = self.rank
-            torch.cuda.set_device(rank)
-            local_model = UnusedNet().cuda()
-            ddp_model = torch.nn.parallel.DistributedDataParallel(
-                local_model,
-                device_ids=[rank],
-                find_unused_parameters=True,
-            )
-            inp = torch.randn(5, 10).cuda()
-            # DDP fwd + bwd
-            out = ddp_model(inp, False)
-            out.sum().backward()
-            # Local model runs fwd + bwd
-            out = local_model(inp, True)
-            out.sum().backward()
-            # If hooks were not disabled for local model, next DDP fwd pass
-            # would fail, as require_finalize would've been set but DDP would
-            # not have reduced gradients.
-            out = ddp_model(inp, False)
-            out.sum().backward()
-            # Validate gradients are synchronized across ranks.
-            self._verify_ddp_model(ddp_model)
-
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_bwd_with_retain_graph_static_single_fwd(self):
-            # Ensures that if we do 1 forward pass immediately followed by 2
-            # backward passes, there is no issue. In particular, verifies that
-            # delay allreduce is enqueued only once.
-            rank = self.rank
-            model = TwoLinLayerNet().cuda(rank)
-            model_ddp = torch.nn.parallel.DistributedDataParallel(
-                model,
-                device_ids=[rank]
-            )
-            model_ddp._set_static_graph()
-            model_local = copy.deepcopy(model)
-            inp = torch.randn(2, 10, device=rank)
-            # Run single forward pass followed by 2 calls to backward with
-            # retain_graph=True.
-            out_ddp = model_ddp(inp)
-            out_ddp = torch.add(out_ddp[0], out_ddp[1]).sum()
-            out_local = model_local(inp)
-            out_local = torch.add(out_local[0], out_local[1]).sum()
-            out_ddp.backward(retain_graph=True)
-            out_ddp.backward()
-            out_local.backward(retain_graph=True)
-            out_local.backward()
-            dist_grad_tensor = torch.cat(
-                [param.grad for param in model_ddp.module.parameters()]
-            )
-            local_grad_tensor = torch.cat(
-                [param.grad for param in model_local.parameters()]
-            )
-            self.assertEqual(dist_grad_tensor, local_grad_tensor)
