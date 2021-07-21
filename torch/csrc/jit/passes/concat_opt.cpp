@@ -33,18 +33,6 @@ bool equal(at::ArrayRef<Value*> list1, at::ArrayRef<Value*> list2) {
       std::equal(list1.begin(), list1.end(), list2.begin());
 }
 
-// TODO: Use the function `isDominatedBy` in Node class once
-// https://github.com/pytorch/pytorch/pull/56437 lands.
-bool isDominatedBy(Node* node, Node* dominator) {
-  while (node) {
-    if (node->owningBlock() == dominator->owningBlock()) {
-      return dominator->isBefore(node);
-    }
-    node = node->owningBlock()->owningNode();
-  }
-  return false;
-}
-
 class ConcatCommonInputsEliminator {
  public:
   explicit ConcatCommonInputsEliminator(std::shared_ptr<Graph> graph)
@@ -118,7 +106,7 @@ class ConcatCommonInputsEliminator {
       auto prev_dim = prev_all_inputs.back();
       if (equal(curr_tensor_inputs_prefix, prev_tensor_inputs) &&
           curr_dim == prev_dim) {
-        if (!isDominatedBy(node, prev)) {
+        if (!node->isDominatedBy(prev)) {
           // We can't use the previous concatenated output if it does not
           // dominate the current concat node.
           continue;
@@ -162,7 +150,7 @@ class ConcatCommonInputsEliminator {
       auto prev_dim = prev_all_inputs.back();
       if (equal(curr_tensor_inputs_suffix, prev_tensor_inputs) &&
           curr_dim == prev_dim) {
-        if (!isDominatedBy(node, prev)) {
+        if (!node->isDominatedBy(prev)) {
           // We can't use the previous concatenated list if it does not
           // dominate the current list.
           continue;
