@@ -4759,6 +4759,10 @@ class TestNN(NNTestCase):
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
+        # no batch dims
+        input = torch.randn(50, 20, 64, 64)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -12836,6 +12840,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
+        # no batch dims
+        input = torch.empty(20, 64, 64)
+        self._test_dropout(nn.Dropout2d, device, input)
+
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -12847,6 +12855,10 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
+
+        # no batch dims
+        input = torch.empty(50, 20, 64, 64)
+        self._test_dropout(nn.Dropout3d, device, input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
