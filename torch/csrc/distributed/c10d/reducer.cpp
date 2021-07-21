@@ -439,6 +439,11 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     // struct are empty, and there is no pre-existing accumulation tensor.
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
+    // If no DDP comm hook is registered,
+    // the allreduce only sums up the value, and a separate division is required.
+    if (comm_hook_ == nullptr) {
+      replica.contents.div_(div_factor_);
+    }
     // The grad is modified in place and needs to be written back.
     return true;
   });
@@ -1452,11 +1457,6 @@ void Reducer::finalize_backward() {
     for (const auto i : c10::irange(future_result.size())) {
       auto& replica = bucket.replicas[i];
       if (bucket.expect_sparse_gradient) {
-        // If no DDP comm hook is registered,
-        // the allreduce only sums up the value, and a separate division is required.
-        if (comm_hook_ == nullptr) {
-          future_result[i].div_(div_factor_);
-        }
         replica.contents.copy_(future_result[i]);
       } else {
         // Reinitialize only `bucket_views_out` with the future_result by
