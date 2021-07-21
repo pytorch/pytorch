@@ -2,7 +2,6 @@
 
 #include <fstream>
 #include <memory>
-#include <vector>
 
 #include "c10/macros/Macros.h"
 #include "caffe2/serialize/istream_adapter.h"
