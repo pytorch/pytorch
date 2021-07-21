@@ -4,7 +4,6 @@ import copy
 
 import torch
 from torch import nn
-from torch import Tensor
 from torch.nn.utils import parametrize
 
 from torch.nn.modules.container import ModuleDict, ModuleList
