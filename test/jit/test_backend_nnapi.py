@@ -8,11 +8,7 @@ from pathlib import Path
 from test_nnapi import TestNNAPI
 
 from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    TEST_WITH_ROCM,
+    TEST_WITH_ASAN
 )
 
 # Make the helper files in test/ importable
@@ -31,9 +27,13 @@ Unit Tests for Nnapi backend with delegate
 Inherits most tests from TestNNAPI, which loads Android NNAPI models
 without the delegate API.
 """
-# This is needed for IS_WINDOWS or IS_MACOS to skip the tests.
-@unittest.skipIf(TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE,
-                 "Non-portable load_library call used in test")
+# First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
+# Second skip is because ASAN is currently causing an error.
+# It is still unclear how to resolve this. T95764916
+@unittest.skipIf(not os.path.exists(Path(__file__).resolve().parent.parent.parent
+                 / 'build' / 'lib' / 'libnnapi_backend.so'),
+                 "Skipping the test as libnnapi_backend.so was not found")
+@unittest.skipIf(TEST_WITH_ASAN, "Unresolved bug with ASAN")
 class TestNnapiBackend(TestNNAPI):
     def setUp(self):
         super().setUp()

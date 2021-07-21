@@ -31,7 +31,7 @@ struct TORCH_API Method : public torch::IMethod {
 
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
-      const Kwargs& kwargs = Kwargs()) override;
+      const Kwargs& kwargs = Kwargs()) const override;
 
   // Run method async. Invocation on this function would invokes a JIT
   // interpreter that executes ops inline, one by one, on caller's thread. A
@@ -58,15 +58,13 @@ struct TORCH_API Method : public torch::IMethod {
     return function_->get_executor();
   }
 
-  std::vector<std::string> getArgumentNames() override {
-    throw std::runtime_error("getArgumentNames not yet implemented");
-  }
-
   Function& function() const {
     return *function_;
   }
 
  private:
+  void setArgumentNames(std::vector<std::string>&) const override;
+
   // Methods are uniqued onwed by a single module. This raw pointer allows
   // looking up the module.
   ObjectPtr owner_;
