@@ -9,6 +9,8 @@
 #include <test/cpp/jit/test_utils.h>
 
 #include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/module.h>
@@ -70,6 +72,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include "torch/csrc/jit/runtime/operator.h"
 
 using namespace torch::autograd::profiler;
 
@@ -2626,6 +2629,33 @@ graph(%x.1 : Tensor):
   FunctionalToInplaceActivation(graph);
   testing::FileCheck().check("aten::relu_")->run(*graph);
   testing::FileCheck().check_not("aten::relu(")->run(*graph);
+}
+
+TEST(TestRegisterShapeOp, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph():
+  %2 : int = prim::Constant[value=5]()
+  %3: int[] = prim::ListConstruct(%2, %2)
+  return (%3))IR",
+      &*graph,
+      vmap);
+
+
+  auto g2 = std::make_shared<Graph>();
+  parseIR(
+      R"IR(
+graph():
+  %2 : Tensor = prim::MakeTestTensor()
+  return (%2))IR",
+      &*g2,
+      vmap);
+
+  registerShapeFunction(std::make_shared<Operator>(g2->nodes().begin()->getOperator()), graph);
+  PropagateShapesOnGraph(g2);
+  testing::FileCheck().check("5, 5")->run(*g2);
 }
 
 } // namespace jit

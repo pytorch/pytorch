@@ -172,10 +172,10 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_shape_compute_graph_for_node",
           [](Node* n) -> c10::optional<std::shared_ptr<Graph>> {
-            if (!n->maybeSchema()) {
+            if (!n->maybeOperator()) {
               return c10::nullopt;
             }
-            return shapeComputeGraphForSchema(n->schema());
+            return shapeComputeGraphForOperator(n->getOperator());
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)

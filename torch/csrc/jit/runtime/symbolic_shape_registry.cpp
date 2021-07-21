@@ -336,6 +336,8 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
   return schema_to_function_graph;
 }
 
+OperatorMap<std::shared_ptr<Graph>> user_registered_operators;
+
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cached_schema_to_graph;
@@ -375,21 +377,29 @@ void loadFunctions() {
 }
 } // anonymous namespace
 
-c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
-    const FunctionSchema& schema) {
+c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForOperator(
+    const Operator& op) {
   std::lock_guard<std::mutex> guard(lock);
   if (cached_schema_to_graph.size() == 0) {
     loadFunctions();
   }
-
+  auto schema = op.schema();
   GRAPH_DEBUG("Trying to find schema: ", schema);
   auto cache_it = cached_schema_to_graph.find(&schema);
   if (cache_it != cached_schema_to_graph.end()) {
     return cache_it->second;
   }
+  if (auto user_registered_graph = user_registered_operators.find(op)) {
+    return *user_registered_graph;
+  }
   GRAPH_DEBUG("Could not find schema: ", schema);
 
   return c10::nullopt;
+}
+
+void registerShapeFunction(const std::shared_ptr<Operator>& op, std::shared_ptr<Graph> graph) {
+  std::lock_guard<std::mutex> guard(lock);
+  user_registered_operators.insert(op, graph);
 }
 
 } // namespace jit
