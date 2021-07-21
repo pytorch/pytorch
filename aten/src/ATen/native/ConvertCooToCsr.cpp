@@ -10,10 +10,7 @@ namespace {
 constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
 
 template <typename input_t, typename output_t>
-void convert_coo_to_csr_cpu(
-    Tensor& result,
-    const Tensor& input,
-    const int64_t size) {
+void convert_coo_to_csr_cpu(Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
@@ -39,60 +36,31 @@ void convert_coo_to_csr_cpu(
     data_out[i] = (output_t)numel;
 }
 
-void dispatch(
-    Tensor& result,
-    const Tensor& input,
-    const int64_t size,
-    bool out_int32) {
+void dispatch(Tensor& result, const Tensor& input, const int64_t size, bool const out_int32) {
   if (!out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(
-        input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
-          convert_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
-        });
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
+      convert_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
+    });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(
-        input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
-          convert_coo_to_csr_cpu<scalar_t, int>(result, input, size);
-        });
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
+      convert_coo_to_csr_cpu<scalar_t, int>(result, input, size);
+    });
   }
 }
 
 } // namespace
 
-Tensor& _convert_coo_to_csr_out_cpu(
-    const Tensor& self,
-    const int64_t size,
-    bool out_int32,
-    Tensor& result) {
-  TORCH_CHECK(
-      self.dim() == 1,
-      "Input needs to be 1-dimensional, but got ",
-      self.dim(),
-      " dimensions");
-  TORCH_CHECK(
-      result.dim() == 1,
-      "Output needs to be 1-dimensional, but got ",
-      result.dim(),
-      " dimensions");
-  TORCH_CHECK(
-      result.numel() == size + 1,
-      "Output needs ",
-      size + 1,
-      " elements, but got ",
-      result.numel(),
-      " elements");
-
+Tensor& _convert_coo_to_csr_out_cpu(const Tensor& self, const int64_t size, const bool out_int32, Tensor& result) {
+  TORCH_CHECK(self.dim() == 1, "Input needs to be 1-dimensional, but got ", self.dim(), " dimensions");
+  TORCH_CHECK(result.dim() == 1, "Output needs to be 1-dimensional, but got ", result.dim(), " dimensions");
+  TORCH_CHECK(result.numel() == size + 1, "Output needs ", size + 1, " elements, but got ", result.numel(), " elements");
   dispatch(result, self, size, out_int32);
   return result;
 }
 
-Tensor _convert_coo_to_csr_cpu(
-    const Tensor& self,
-    const int64_t size,
-    bool out_int32) {
+Tensor _convert_coo_to_csr_cpu(const Tensor& self, const int64_t size, const bool out_int32) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
-  c10::TensorOptions options =
-      TensorOptions().device(self.options().device()).dtype(scalar_type);
+  c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({size + 1}, options);
   at::native::_convert_coo_to_csr_out_cpu(self, size, out_int32, result);
   return result;
