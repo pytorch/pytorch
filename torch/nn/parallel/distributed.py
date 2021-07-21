@@ -5,12 +5,15 @@ import logging
 import os
 import warnings
 from contextlib import contextmanager
-from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
-from torch.distributed.algorithms.join import _Join, _JoinHook
+from torch.distributed.algorithms.join import (
+    _Join,
+    _Joinable,
+    _JoinHook,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 RPC_AVAILABLE = False
@@ -121,63 +124,24 @@ def _dump_DDP_relevant_env_vars():
     print(formatted_output)
 
 
-class _DDPUnevenInputsConfig(NamedTuple):
-    ddp_join_enabled: bool
-    ddp_join_divide_by_initial_world_size: bool
-    ddp_join_throw_on_early_termination: bool
-
 # Add a DDPSink to run various functions when backwards starts, such as
 # queueing call back of out-most backward/graph task,
 # this helps call back is fired after all gradients' calculation
 # is completed.
 class _DDPSink(Function):
     @staticmethod
-    def forward(ctx, reducer, state_dict, *inputs):
-        # set_materialize_grads(False) will ensure that None gradients stay as
-        # None and are not filled with zeros.
-        ctx.set_materialize_grads(False)
+    def forward(ctx, reducer, *inputs):
         ctx.reducer = reducer
-        ctx.state_dict = state_dict
-        ctx.inputs = inputs
         return inputs
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        state_dict = ctx.state_dict
-
-        grad_enabled = state_dict['grad_enabled']
-        require_backward_grad_sync = state_dict['require_backward_grad_sync']
-        static_graph_training = ctx.state_dict['static_graph']
-        if grad_enabled and require_backward_grad_sync:
-            if static_graph_training or not state_dict['find_unused']:
-                ctx.reducer.prepare_for_backward([])
-            else:
-                # First type of unused params: parameters that did not participate
-                # in computing model outputs. These are found by the below call to
-                # prepare_for_backward.
-                # Second type of unused params: params that won't get gradient
-                # because outputs they produced do not get used in computing loss
-                # for this call to backward. Due to this passthrough autograd
-                # function, autograd hooks for these parameters are now triggered
-                # with undefined gradient to maintain parity with local training.
-                # DDP takes care of undefined grads in this case to ensure the .grad
-                # field of the param is not touched.
-                ctx.reducer.prepare_for_backward(list(_find_tensors(ctx.inputs)))
-
-        # Note that we enqueue delay allreduce after prepare_for_backward in
-        # static graph training as prepare_for_backward sets the
-        # num_backwards_call counter in the reducer.
-        static_graph_first_bwd = (
-            static_graph_training and ctx.reducer._static_graph_first_bwd()
-        )
-        if static_graph_first_bwd:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
-
-        return (None, None, *grad_outputs)
+        Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+        return (None, *grad_outputs)
 
 
 class _DDPJoinHook(_JoinHook):
-    def __init__(self, ddp, divide_by_initial_world_size, enable, throw_on_early_termination):
+    def __init__(self, ddp, divide_by_initial_world_size):
         """
         Sets config variables for internal usage.
         """
@@ -185,13 +149,8 @@ class _DDPJoinHook(_JoinHook):
             "DDP join hook requires passing in a DistributedDataParallel " \
             "instance as the state"
         ddp.logger._set_uneven_input_join()
-        ddp.ddp_uneven_inputs_config = \
-            _DDPUnevenInputsConfig(
-                ddp_join_enabled=enable,
-                ddp_join_divide_by_initial_world_size=divide_by_initial_world_size,
-                ddp_join_throw_on_early_termination=throw_on_early_termination,
-            )
         self.ddp = ddp
+        self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
         super().__init__()
 
     def main_hook(self):
@@ -236,16 +195,8 @@ class _DDPJoinHook(_JoinHook):
         """
         self.ddp._sync_final_model(is_last_joiner)
 
-    @property
-    def device(self):
-        return self.ddp.device
 
-    @property
-    def process_group(self):
-        return self.ddp.process_group
-
-
-class DistributedDataParallel(Module):
+class DistributedDataParallel(Module, _Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
@@ -509,6 +460,7 @@ class DistributedDataParallel(Module):
     ):
 
         super(DistributedDataParallel, self).__init__()
+        _Joinable.__init__(self)
         self.logger = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -577,11 +529,6 @@ class DistributedDataParallel(Module):
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
-        self.ddp_uneven_inputs_config = _DDPUnevenInputsConfig(
-            ddp_join_enabled=False,
-            ddp_join_divide_by_initial_world_size=False,
-            ddp_join_throw_on_early_termination=False,
-        )
         self.gradient_as_bucket_view = gradient_as_bucket_view
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = module._ddp_params_and_buffers_to_ignore
@@ -605,7 +552,7 @@ class DistributedDataParallel(Module):
                     "Modules with uninitialized parameters can't be used with `DistributedDataParallel`. "
                     "Run a dummy forward pass to correctly initialize the modules"
                 )
-        # used for intra-node param sync and inter-node sync as wel
+        # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
 
         # reduction bucket size
@@ -654,6 +601,7 @@ class DistributedDataParallel(Module):
         (4) Logging constructin-time DDP logging data
         (5) passing a handle of DDP to SyncBatchNorm Layer
         """
+        self.num_iterations = 0
         # The bucket size limit is specified in the constructor.
         # Additionally, we allow for a single small bucket for parameters
         # that are defined first, such that their gradients don't spill into
@@ -886,33 +834,19 @@ class DistributedDataParallel(Module):
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
             self.reducer.save_thread_local_state()
-            grad_enabled = torch.is_grad_enabled()
-            will_run_grad_reduction = grad_enabled and self.require_backward_grad_sync
-            if will_run_grad_reduction:
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
-            self.reducer.prepare_for_forward(will_run_grad_reduction)
-            if self.ddp_uneven_inputs_config.ddp_join_enabled:
-                ones = torch.ones(1, device=self.device)
-                work = dist.all_reduce(ones, group=self.process_group, async_op=True)
-                if self.ddp_uneven_inputs_config.ddp_join_throw_on_early_termination:
-                    # Active ranks schedule an allreduce with zeros, inactive
-                    # ranks schedule them with 1. If the result != 0 it
-                    # indicates at least one rank has terminated and we should
-                    # throw.
-                    zeros = torch.zeros(1, device=self.device)
-                    dist.all_reduce(zeros, group=self.process_group)
-                    should_throw_stop_iteration = zeros.item()
-                    if should_throw_stop_iteration:
-                        # Don't need to log this error as it is an expected error that
-                        # we are passing back to user training with uneven inputs.
-                        raise RuntimeError(
-                            "Detected at least one rank that exhausted inputs. Throwing across all ranks."
-                        )
-                else:
-                    self.reducer._set_forward_pass_work_handle(
-                        work,
-                        self.ddp_uneven_inputs_config.ddp_join_divide_by_initial_world_size,
-                    )
+                self.num_iterations += 1
+                self.reducer.prepare_for_forward()
+
+            # Notify the join context that this process has not joined, if
+            # needed
+            work = _Join.notify_join_context(self)
+            if work:
+                self.reducer._set_forward_pass_work_handle(
+                    work,
+                    self._divide_by_initial_world_size
+                )
 
             # Calling _rebuild_buckets before forward compuation,
             # It may allocate new buckets before deallocating old buckets
@@ -920,13 +854,13 @@ class DistributedDataParallel(Module):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if grad_enabled and self.reducer._rebuild_buckets():
+            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
 
             if self.require_forward_param_sync:
                 self._sync_params()
 
-            if self.ddp_uneven_inputs_config.ddp_join_enabled:
+            if self._join_config.enable:
                 # Notify joined ranks whether they should sync in backwards pass or not.
                 self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
@@ -936,50 +870,38 @@ class DistributedDataParallel(Module):
             else:
                 output = self.module(*inputs, **kwargs)
 
-            self.require_forward_param_sync = (
-                grad_enabled and self.require_backward_grad_sync
-            )
+            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+                self.require_forward_param_sync = True
+                # We'll return the output object verbatim since it is a freeform
+                # object. We need to find any tensors in this object, though,
+                # because we need to figure out which parameters were used during
+                # this forward pass, to ensure we short circuit reduction for any
+                # unused parameters. Only if `find_unused_parameters` is set.
+                if self.find_unused_parameters and not self.static_graph:
+                    # Do not need to populate this for static graph.
+                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                else:
+                    self.reducer.prepare_for_backward([])
+            else:
+                self.require_forward_param_sync = False
 
-            if not grad_enabled:
-                # Don't need to run through DDPSink as there will be no backward
-                # pass.
-                return output
-
-            state_dict = {
-                'static_graph': self.static_graph,
-                'find_unused': self.find_unused_parameters,
-                'grad_enabled': grad_enabled,
-                'require_backward_grad_sync': self.require_backward_grad_sync,
-            }
-            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
-                output
-            )
-            # Note: DDPSink helps to ensure that prepare_for_backward is called
-            # immediately before the backwards pass, to support a variety of
-            # features such as: enqueue delay allreduce for static graph, support
-            # multiple calls to backwards with retain_graph=True, and support
-            # finding all parameters that will not receive gradient.
-            output_placeholders = [None for _ in range(len(output_tensor_list))]
-            # Do not touch tensors that have no grad_fn, which can cause issues
-            # such as https://github.com/pytorch/pytorch/issues/60733
-            for i, output in enumerate(output_tensor_list):
-                if torch.is_tensor(output) and output.grad_fn is None:
-                    output_placeholders[i] = output
-
+        # TODO. Right now we add this sink for static_graph training only. once
+        # this feature is stable, we will add this sink for all cases. E.g.
+        # This sink can help capture more accuracte backward start time as well.
+        if self.static_graph and self.num_iterations == 1:
+            # Need to grab list of tensors from user output in order to pass
+            # to custom autograd function.
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(output)
             passthrough_tensor_list = _DDPSink.apply(
                 self.reducer,
-                state_dict,
-                *output_tensor_list,
+                *output_tensor_list
             )
-            for i in range(len(output_placeholders)):
-                if output_placeholders[i] is None:
-                    output_placeholders[i] = passthrough_tensor_list[i]
 
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                output_placeholders, treespec, output_is_rref
+                passthrough_tensor_list, treespec, output_is_rref
             )
-            return output
+        return output
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
@@ -1213,32 +1135,41 @@ class DistributedDataParallel(Module):
           >>>  # blocking for rank 1's allreduce to complete.
           >>>  torch.cuda.synchronize(device=rank)
         """
-        join_hooks = [
-            self._join_hook(
-                divide_by_initial_world_size=divide_by_initial_world_size,
-                enable=enable,
-                throw_on_early_termination=throw_on_early_termination,
-            )
-        ]
-        return _Join(join_hooks, enable, throw_on_early_termination)
+        return _Join(
+            [self],
+            enable,
+            throw_on_early_termination,
+            divide_by_initial_world_size=divide_by_initial_world_size
+        )
 
     def _join_hook(
         self,
-        divide_by_initial_world_size: bool = True,
-        enable: bool = True,
-        throw_on_early_termination: bool = False,
+        **kwargs,
     ):
         r"""
         Returns the DDP join hook, which enables training on uneven inputs by
         shadowing the collective communications in the forward and backward
         passes.
+
+        Arguments:
+            kwargs (dict): a :class:`dict` containing any keyword arguments
+                to modify the behavior of the join hook at run time; all
+                :class:`_Joinable` instances sharing the same join context
+                manager are forwarded the same value for ``kwargs``.
         """
+        divide_by_initial_world_size = kwargs.get("divide_by_initial_world_size", True)
         return _DDPJoinHook(
             self,
-            divide_by_initial_world_size=divide_by_initial_world_size,
-            enable=enable,
-            throw_on_early_termination=throw_on_early_termination
+            divide_by_initial_world_size=divide_by_initial_world_size
         )
+
+    @property
+    def _join_device(self):
+        return self.device
+
+    @property
+    def _join_process_group(self):
+        return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):
         r"""
@@ -1258,21 +1189,23 @@ class DistributedDataParallel(Module):
 
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Averages gradient tensors across workers and defined as:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future``:
+            hook (callable): Callable with the following signature:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
                              a Future indicating completion of any async work (ex: allreduce).
-                             If the hook doesn't perform any communication, it can also
-                             just return a completed Future. The Future should hold the
+                             If the hook doesn't perform any communication, it still
+                             must return a completed Future. The Future should hold the
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
+                             Note that the future's return type must be a list with a
+                             tensor as its single element.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of ``c10d.ProcessGroup.work``.
-                             ``get_future`` is currently supported for MPI and also supported for most
+                             Future associated with the completion of ``c10d.ProcessGroup.Work``.
+                             ``get_future`` is currently supported for NCCL and also supported for most
                              operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
@@ -1284,8 +1217,8 @@ class DistributedDataParallel(Module):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a result that has the same
-            shape with the tensors inside grad bucket.
+            The Future object that hook returns should contain a list that contains a
+            single tensor that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             DDP communication hook does not support single-process multiple-device mode.
@@ -1401,7 +1334,7 @@ class DistributedDataParallel(Module):
                 # If we are running DDP with the join manager, we have to agree
                 # upon a rank to sync module buffers from, since rank 0 may
                 # already have been joined and have stale module buffers.
-                if self.ddp_uneven_inputs_config.ddp_join_enabled:
+                if self._join_config.enable:
                     authoritative_rank = self._find_common_rank(
                         self._distributed_rank, True
                     )
