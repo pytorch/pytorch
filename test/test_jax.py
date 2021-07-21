@@ -3,25 +3,6 @@ import jax.numpy as jnp
 import numpy as np
 
 dtype=jnp.bfloat16
-# 0+ -> 0-
-# 0- -> 0+
-# 0 -> 1
-# 0 -> -1
-# 1 -> 2
-# 1 -> 0
-# -1 -> -2
-# -1 -> 0
-# nan -> 0
-# 0 -> nan
-# nan -> nan
-# nan -> inf
-# inf -> nan
-# inf -> -inf
-# -inf -> inf
-# inf -> 0
-# 0 -> inf
-# -inf -> 0
-# 0 -> -inf
 nan = float('nan')
 inf = float('inf')
 cases = ((0, -0),
