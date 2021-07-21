@@ -43,7 +43,7 @@ for namespace in MODULE_NAMESPACES:
 
 
 class modules(_TestParametrizer):
-    """ Decorator for specifying a list of modules over which to run a test. """
+    """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
     def __init__(self, module_info_list):
         self.module_info_list = module_info_list
 
@@ -170,12 +170,14 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     cases = [
         ('', {}),
         ('ignore_index', {'ignore_index': 2}),
-        ('weights', {'weight': torch.randn(10, device=device, dtype=dtype)}),
-        ('weights_ignore_index', {'weight': torch.randn(10, device=device, dtype=dtype), 'ignore_index': 2}),
-        ('weights_ignore_index_neg', {'weight': torch.randn(10, device=device, dtype=dtype), 'ignore_index': -1})
+        ('weights', {'weight': make_input(10)}),
+        ('weights_ignore_index', {'weight': make_input(10), 'ignore_index': 2}),
+        ('weights_ignore_index_neg', {'weight': make_input(10), 'ignore_index': -1})
     ]
     module_inputs = []
     for desc, constructor_kwargs in cases:
@@ -185,7 +187,7 @@ def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **
 
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(torch.rand(15, 10, device=device, dtype=dtype).log_softmax(dim=1),
+                        forward_input=FunctionInput(make_input((15, 10)).log_softmax(dim=1),
                                                     torch.empty(15, device=device).uniform_().mul(10).floor().long()),
                         desc=desc,
                         reference_fn=reference_fn)

@@ -76,6 +76,7 @@ TESTS = [
     'test_mkldnn',
     'test_model_dump',
     'test_module_init',
+    'test_modules',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
