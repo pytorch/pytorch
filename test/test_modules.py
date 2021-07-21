@@ -1,4 +1,3 @@
-from copy import deepcopy
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import TestCase, run_tests, freeze_rng_state
@@ -12,7 +11,7 @@ class TestModule(TestCase):
     def test_forward(self, device, dtype, module_info):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
-                                                      requires_grad=False)
+                                                       requires_grad=False)
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue

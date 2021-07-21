@@ -7,11 +7,12 @@ from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference
 from torch.testing._internal.common_utils import make_tensor
-from typing import List
+from types import ModuleType
+from typing import List, Tuple, Type, Set, Dict
 
 
 # List of all namespaces containing modules to test.
-MODULE_NAMESPACES = [
+MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.modules,
     torch.nn.qat.modules,
     torch.nn.quantizable.modules,
@@ -19,7 +20,7 @@ MODULE_NAMESPACES = [
 ]
 
 # Modules that shouldn't be tested for one reason or another.
-MODULES_TO_SKIP = {
+MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
@@ -28,15 +29,16 @@ MODULES_TO_SKIP = {
 }
 
 # List of all module classes to test.
-MODULE_CLASSES = list(chain(*[[getattr(namespace, module_name) for module_name in namespace.__all__]
-                              for namespace in MODULE_NAMESPACES]))
+MODULE_CLASSES: List[Type] = list(chain(*[
+    [getattr(namespace, module_name) for module_name in namespace.__all__]  # type: ignore[attr-defined]
+    for namespace in MODULE_NAMESPACES]))
 MODULE_CLASSES = [cls for cls in MODULE_CLASSES if cls not in MODULES_TO_SKIP]
 
 # Dict of module class -> common name. Useful for making test names more intuitive.
 # Example: torch.nn.modules.linear.Linear -> "nn.Linear"
-MODULE_CLASS_NAMES = {}
+MODULE_CLASS_NAMES: Dict[Type, str] = {}
 for namespace in MODULE_NAMESPACES:
-    for module_name in namespace.__all__:
+    for module_name in namespace.__all__:  # type: ignore[attr-defined]
         module_cls = getattr(namespace, module_name)
         namespace_name = namespace.__name__.replace('torch.', '').replace('.modules', '')
         MODULE_CLASS_NAMES[module_cls] = f'{namespace_name}.{module_name}'
@@ -97,6 +99,8 @@ def formatted_module_name(module_cls):
 
 class FunctionInput(object):
     """ Contains args and kwargs to pass as input to a function. """
+    __slots__ = ['args', 'kwargs']
+
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
@@ -110,8 +114,7 @@ class ModuleInput(object):
         self.constructor_input = constructor_input  # Inputs to pass during construction
         self.forward_input = forward_input  # Inputs to pass to forward()
         self.desc = desc  # Description for this set of inputs
-        self.reference_fn = reference_fn  # Reference function for comparison; expected signature:
-                                          # reference_fn(module, parameters, *args, **kwargs)
+        self.reference_fn = reference_fn  # Reference with signature: reference_fn(module, parameters, *args, **kwargs)
 
         if reference_fn is not None:
 
@@ -133,7 +136,7 @@ class ModuleInfo(object):
                  module_cls,  # Class object for the module under test
                  *,
                  module_inputs_func,  # Function to generate module inputs
-                 skips=[],  # Indicates which tests to skip
+                 skips=(),  # Indicates which tests to skip
                  decorators=None,  # Additional decorators to apply to generated tests
                  ):
         self.module_cls = module_cls
@@ -172,7 +175,7 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases = [
+    cases: List[Tuple[str, dict]] = [
         ('', {}),
         ('ignore_index', {'ignore_index': 2}),
         ('weights', {'weight': make_input(10)}),
