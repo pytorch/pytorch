@@ -756,9 +756,9 @@ RegisterOperators reg(
      // This is an alternative to aten::cat op that takes variable number of
      // parameters as input.
      // Format:
-     //    prim::VarConcat(Tensors..., dim) -> Tensor
+     //    prim::Concat(Tensors..., dim) -> Tensor
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("prim::VarConcat(...) -> Tensor"),
+         TORCH_SELECTIVE_SCHEMA("prim::Concat(...) -> Tensor"),
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            auto dim = pop(stack).toInt();
