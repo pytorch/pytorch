@@ -58,7 +58,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       return;
     }
 
-#ifdef USE_KINETO_UPDATED
     libkineto::GenericTraceActivity op(
         cpu_trace->span,
         libkineto::ActivityType::CPU_OP,
@@ -66,14 +65,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     op.device = libkineto::processId();
     op.resource = libkineto::systemThreadId();
     op.id = ctx->correlationId;
-#else
-    libkineto::GenericTraceActivity op;
-    op.activityType = libkineto::ActivityType::CPU_OP;
-    op.activityName = std::string(fn.name().str());
-    op.device = libkineto::processId();
-    op.sysThreadId = libkineto::systemThreadId();
-    op.correlation = ctx->correlationId;
-#endif
     op.startTime = ctx->startUs;
     op.endTime = getTimeUs();
     // optimization - postpone shapesToStr till finalizeCPUTrace
@@ -132,7 +123,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       {
         std::lock_guard<std::mutex> guard(state_mutex_);
         libkineto::api().activityProfiler().recordThreadInfo();
-#ifdef USE_KINETO_UPDATED
+
         memory_events_.emplace_back(
             cpu_trace->span,
             libkineto::ActivityType::CPU_INSTANT_EVENT,
@@ -140,13 +131,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         auto& act = memory_events_.back();
         act.device = libkineto::processId();
         act.resource = libkineto::systemThreadId();
-#else
-        memory_events_.emplace_back();
-        auto& act = memory_events_.back();
-        act.activityType = libkineto::ActivityType::CPU_INSTANT_EVENT;
-        act.activityName = "[memory]";
-        act.sysThreadId = libkineto::systemThreadId();
-#endif
+
         act.startTime = getTimeUs();
         act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
         act.addMetadata("Device Id", std::to_string(device.index()));
@@ -161,9 +146,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       // These events are already processed
       if (ev_ptr->type() != libkineto::ActivityType::CPU_OP &&
           ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT
-#ifdef USE_KINETO_UPDATED
           && ev_ptr->type() != libkineto::ActivityType::USER_ANNOTATION
-#endif
       ) {
         kineto_events_.emplace_back();
         kineto_events_.back()
@@ -367,7 +350,17 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::ostringstream oss;
-  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  std::transform(
+      stacks.begin(),
+      stacks.end(),
+      std::ostream_iterator<std::string>(oss, ";"),
+      [](std::string s) -> std::string {
+#ifdef _WIN32
+        // replace the windows backslash with forward slash
+        std::replace(s.begin(), s.end(), '\\', '/');
+#endif
+        return s;
+      });
   auto rc = oss.str();
   rc.pop_back();
   return "\"" + rc + "\"";
@@ -386,9 +379,7 @@ void prepareProfiler(
   std::set<libkineto::ActivityType> cpuTypes = {
     libkineto::ActivityType::CPU_OP,
     libkineto::ActivityType::CPU_INSTANT_EVENT,
-#ifdef USE_KINETO_UPDATED
     libkineto::ActivityType::USER_ANNOTATION,
-#endif
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::CUDA_RUNTIME,
   };
@@ -521,14 +512,10 @@ c10::DeviceType KinetoEvent::deviceType() const {
     case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
     case (uint8_t)libkineto::ActivityType::GPU_MEMSET:
     case (uint8_t)libkineto::ActivityType::CONCURRENT_KERNEL:
-#ifdef USE_KINETO_UPDATED
     case (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION:
-#endif
       return c10::DeviceType::CUDA;
     case (uint8_t)libkineto::ActivityType::CPU_OP:
-#ifdef USE_KINETO_UPDATED
     case (uint8_t)libkineto::ActivityType::USER_ANNOTATION:
-#endif
     case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
     case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
     case (uint8_t)libkineto::ActivityType::CPU_INSTANT_EVENT:

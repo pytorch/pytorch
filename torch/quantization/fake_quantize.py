@@ -109,8 +109,8 @@ class FakeQuantize(FakeQuantizeBase):
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
-        self.register_buffer('scale', torch.tensor([1.0]))
-        self.register_buffer('zero_point', torch.tensor([0]))
+        self.register_buffer('scale', torch.tensor([1.0], dtype=torch.float))
+        self.register_buffer('zero_point', torch.tensor([0], dtype=torch.int))
         self.dtype = self.activation_post_process.dtype
         self.qscheme = self.activation_post_process.qscheme
         self.ch_axis = self.activation_post_process.ch_axis \
@@ -130,9 +130,10 @@ class FakeQuantize(FakeQuantizeBase):
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
             _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
-            self.scale.resize_(_scale.shape)
+            if self.scale.shape != _scale.shape:
+                self.scale.resize_(_scale.shape)
+                self.zero_point.resize_(_zero_point.shape)
             self.scale.copy_(_scale)
-            self.zero_point.resize_(_zero_point.shape)
             self.zero_point.copy_(_zero_point)
 
         if self.fake_quant_enabled[0] == 1:
@@ -142,7 +143,7 @@ class FakeQuantize(FakeQuantizeBase):
                     self.ch_axis, self.quant_min, self.quant_max)
             else:
                 X = torch.fake_quantize_per_tensor_affine(
-                    X, float(self.scale), int(self.zero_point),
+                    X, self.scale, self.zero_point,
                     self.quant_min, self.quant_max)
         return X
 
@@ -217,8 +218,8 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
         assert quant_min <= quant_max, 'quant_min should be less than or equal to quant_max'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.register_buffer('scale', torch.tensor([scale]))
-        self.register_buffer('zero_point', torch.tensor([zero_point]))
+        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
+        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.int))
         self.dtype = dtype
         self.qscheme = qscheme
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
@@ -226,8 +227,8 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
 
     def forward(self, X):
         if self.fake_quant_enabled[0] == 1:
-            X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
-                                                      int(self.zero_point), self.quant_min,
+            X = torch.fake_quantize_per_tensor_affine(X, self.scale,
+                                                      self.zero_point, self.quant_min,
                                                       self.quant_max)
         return X
 

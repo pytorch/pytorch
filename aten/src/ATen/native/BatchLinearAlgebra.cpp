@@ -12,14 +12,12 @@
 
 #include <c10/util/irange.h>
 
-#include <TH/TH.h>  // for USE_LAPACK
-
 #include <vector>
 
 // First the required LAPACK implementations are registered here.
 // A comment above the registered LAPACK routine suggest which batched
 // linear algebra function uses that routine
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 
 // gesv
 extern "C" void zgesv_(int *n, int *nrhs, std::complex<double> *a, int *lda, int *ipiv, std::complex<double> *b, int *ldb, int *info);
@@ -205,7 +203,7 @@ extern "C" void sgelss_(int *m, int *n, int *nrhs,
 namespace at {
 namespace native {
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define the per-batch functions to be used in the main implementation of the batched
 // linear algebra operations
 template<class scalar_t>
@@ -706,7 +704,7 @@ For more information see LAPACK's documentation for GESV routine.
 */
 template<typename scalar_t>
 static void apply_solve(Tensor& b, Tensor& A, Tensor& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("solve: LAPACK library not found in compilation");
 #else
   auto A_data = A.data_ptr<scalar_t>();
@@ -948,7 +946,7 @@ For more information see LAPACK's documentation for GETRI and GETRF routines.
 */
 template <typename scalar_t>
 static void apply_inverse(Tensor& self, Tensor& infos_lu, Tensor& infos_getri) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -1198,7 +1196,7 @@ std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors)
 
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
@@ -1274,7 +1272,8 @@ Tensor cholesky(const Tensor &self, bool upper) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()"
+    "U = torch.linalg.cholesky(A).transpose(-2, -1).conj().\n"
+    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -1312,7 +1311,8 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
     "and\n"
     "U = torch.cholesky(A, upper=True)\n",
     "should be replaced with\n",
-    "U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()"
+    "U = torch.linalg.cholesky(A).transpose(-2, -1).conj().\n"
+    "This transform will produce equivalent results for all valid (symmetric positive definite) inputs."
   );
   checkSameDevice("cholesky", result, self);
   checkLinalgCompatibleDtype("cholesky", result, self);
@@ -2248,11 +2248,11 @@ DEFINE_DISPATCH(linalg_eigh_stub);
   * 'uplo_str' - controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
     "u", "U" - upper triangular portion of the input matrix is used in computations; "l", "L" - lower.
 */
-std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
+void linalg_eigh_out_info(
     const Tensor& input,
-    Tensor& values,
-    Tensor& vectors,
-    Tensor& infos,
+    const Tensor& values,
+    const Tensor& vectors,
+    const Tensor& infos,
     bool compute_eigenvectors,
     const c10::string_view uplo_str) {
   // These internal asserts make explicit the assumptions in the implementation
@@ -2308,8 +2308,6 @@ std::tuple<Tensor&, Tensor&> linalg_eigh_out_info(
   bool upper = (uplo == 'U');
 
   linalg_eigh_stub(input.device().type(), values, vectors, infos, upper, compute_eigenvectors);
-
-  return std::tuple<Tensor&, Tensor&>(values, vectors);
 }
 
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view uplo) {
@@ -2320,7 +2318,7 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view upl
   Tensor vectors = at::empty({0}, input.options());
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
-  std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, true, uplo);
+  linalg_eigh_out_info(input, values, vectors, infos, true, uplo);
 
   if (input.dim() > 2) {
     batchCheckErrors(infos, "torch.linalg.eigh");
@@ -2334,8 +2332,6 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view upl
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& input, c10::string_view uplo, Tensor& eigvals, Tensor& eigvecs) {
-  checkSameDevice("torch.linalg.eigh", eigvecs, input, "eigenvectors");
-  checkSameDevice("torch.linalg.eigh", eigvals, input, "eigenvalues");
   checkLinalgCompatibleDtype("torch.linalg.eigh", eigvecs, input, "eigenvectors");
 
   // eigenvalues are always real-valued here
@@ -2362,35 +2358,44 @@ Tensor linalg_eigvalsh(const Tensor& input, c10::string_view uplo) {
     return values;
   }
 
-  squareCheckInputs(input);
-  checkUplo(uplo);
   ScalarType real_dtype = toValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
+  values = at::linalg_eigvalsh_outf(input, uplo, values);
+  return values;
+}
+
+Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
+  ScalarType real_dtype = toValueType(input.scalar_type());
+  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
+
+  squareCheckInputs(input);
+  checkUplo(uplo);
+
+  auto expected_result_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
+  bool result_equal_expected_shape = result.sizes().equals(expected_result_shape);
+  bool expected_result_type = (result.scalar_type() == real_dtype);
+  bool copy_needed = !expected_result_type;
+  copy_needed |= (result.numel() != 0 && !result_equal_expected_shape);
+  copy_needed |= (result.numel() != 0 && !result.is_contiguous());
+
   Tensor vectors = at::empty({0}, input.options());
   Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
 
-  std::tie(values, vectors) = linalg_eigh_out_info(input, values, vectors, infos, false, uplo);
+  if (copy_needed) { // we have to allocate a temporary tensor
+    Tensor result_tmp = at::empty({expected_result_shape}, input.options().dtype(real_dtype));
+    linalg_eigh_out_info(input, result_tmp, vectors, infos, /*compute_eigenvectors=*/false, uplo);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {
+    // else use the provided output storage directly
+    linalg_eigh_out_info(input, result, vectors, infos, /*compute_eigenvectors=*/false, uplo);
+  }
 
   if (input.dim() > 2) {
     batchCheckErrors(infos, "torch.linalg.eigvalsh");
   } else {
     singleCheckErrors(infos.item().toInt(), "torch.linalg.eigvalsh");
   }
-
-  return values;
-}
-
-// TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
-// TODO: implement _out variant avoiding copy and using already allocated storage directly
-Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& result) {
-  checkSameDevice("torch.linalg.eigvalsh", result, input);
-  ScalarType real_dtype = toValueType(input.scalar_type());
-  checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
-
-  Tensor result_tmp = at::linalg_eigvalsh(input, uplo);
-
-  at::native::resize_output(result, result_tmp.sizes());
-  result.copy_(result_tmp);
 
   return result;
 }
@@ -2399,7 +2404,7 @@ Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& 
 
 template <typename scalar_t>
 static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool upper, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2936,7 +2941,7 @@ std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
 template <typename scalar_t>
 static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
                       char jobz, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -3619,7 +3624,7 @@ Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU
 //          B is overwritten with the solution vectors
 template <typename scalar_t>
 static void apply_lstsq(const Tensor& B, const Tensor& A) {
-#ifndef USE_LAPACK
+#if !AT_BUILD_WITH_LAPACK()
   TORCH_INTERNAL_ASSERT(false, "lstsq: LAPACK library not found in compilation");
 #else
 

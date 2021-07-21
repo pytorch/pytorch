@@ -392,7 +392,9 @@ class Partitioner:
         partition_0 = self.create_partition()
         for node in self.graph_module.graph.nodes:
             if node.op == "output":
-                break
+                # Skip the output node, but there can
+                # be nodes after the output in certain cases.
+                continue
             partition_0.nodes.add(node)
         partition_0.used_mem_bytes = total_size_of_graph
         partition_0.logical_device_ids = [logical_device_id]
