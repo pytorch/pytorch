@@ -212,6 +212,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("threshold_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::threshold_backward), &at::threshold_backward, const Scalar&>));
 
+
+  OP_DECOMPOSE2(max, other);
+  OP_DECOMPOSE2(min, other);
+
   OP_DECOMPOSE2(where, self);
   OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE2(where, ScalarOther);
