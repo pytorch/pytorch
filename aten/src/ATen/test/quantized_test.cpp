@@ -5,11 +5,13 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <type_traits>
 // For quantize_val
 #include <ATen/native/quantized/affine_quantizer.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/quantized/Quantizer.h>
 
 using namespace at;
 
@@ -212,4 +214,31 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
       ASSERT_EQ((int)q_data[i], qval);
     }
   }
+}
+
+TEST(TestQTensor, FromBlobQuantizedPerTensor) {
+  auto scale = 0.1;
+  auto zero_point = 10;
+  std::vector<int64_t> shape = {10, 10};
+  auto numel = c10::multiply_integers(shape);
+
+  TensorOptions options(at::kQUInt8);
+
+  auto custom_vec = std::make_unique<std::vector<uint8_t>>();
+  custom_vec->reserve(numel);
+
+  auto custom_data = custom_vec->data();
+  for (auto i = 0; i < numel; ++i) {
+    custom_data[i] = i;
+  }
+  auto deleteWhenDone = custom_vec.release();
+  auto deleter = [deleteWhenDone](void*) { delete deleteWhenDone; };
+
+  Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
+
+  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+  for (auto i = 0; i < numel; ++i) {
+    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+  }
+
 }
