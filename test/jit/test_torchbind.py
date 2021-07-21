@@ -27,23 +27,13 @@ class TestTorchbind(JitTestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        if TEST_WITH_ROCM or IS_IN_CI:
+        if IS_IN_CI or TEST_WITH_ROCM:
             torch_root = Path(torch.__file__).resolve().parent
             p = torch_root / 'lib' / 'libtorchbind_test.so'
         else:
             torch_root = Path(__file__).resolve().parent.parent.parent
             p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
-
-
-    if IS_IN_CI:
-        site_dir = site.getsitepackages()[0]
-        torch_dir = os.path.join(site_dir, 'torch')
-    else:
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        torch_dir = str(torch_root / 'build')
-    p = os.path.join(torch_dir, 'lib', 'libjitbackend_test.so')
-    torch.ops.load_library(p)
 
     def test_torchbind(self):
         def test_equality(f, cmp_key):
