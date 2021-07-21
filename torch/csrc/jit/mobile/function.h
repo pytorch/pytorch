@@ -2,8 +2,8 @@
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/operator_name.h>
 #include <vector>
-#include "ATen/core/operator_name.h"
 
 namespace torch {
 namespace jit {
@@ -14,39 +14,24 @@ namespace mobile {
 struct Code;
 
 /**
- * There are 2 approaches we can use:
+ * The approach for caching operator lambdas uses the c10::OperatorName
+ * as 'key', and OperatorFunctionWithSchema as 'value'. In case an
+ * entry in the cach was found, we still need to determine if the
+ * cached function has the same number of arguments. If it's different,
+ * we can't use the cached value, and we need to re-compute it from
+ * scratch.
  *
- * 1. Approach-1: Hash on OperatorName and num_args: In this case, we use
- *    OperatorInfoWithSchema as the key for looking up the hash map. In
- *    the future, if we have more parameters, we just add them to this
- *    struct.
- *
- * 2. Approach-2: Hash on just OperatorName, but check if the fetched
- *    value is consistent (num args) with the current value, and use
- *    the cached function pointer only if this is consistent. Create a
- *    new instance, if it isn't consistent. The expectation is that most
- *    of the time, we won't find a mismatch when doing a lookup.
- *
- * This diff implements approach-2, but I also tried approach-1.
- * It's easy to switch between the 2, so I don't have a preference.
- * It just seemed cleaner to hash on a simpler key and make a check
- * later since we don't expect collision in practice. Plus, in the
- * future it's easier to extend to more complex checks related to
- * versioning which may not be trivial to hash.
+ * The expectation is that most of the time, we won't find a mismatch
+ * when doing a lookup.
  *
  */
-struct OperatorInfoWithSchema {
-  c10::OperatorName opname;
-  c10::optional<int> num_specified_args;
-
-  bool operator==(const OperatorInfoWithSchema rhs) const {
-    return rhs.opname == opname && rhs.num_specified_args == num_specified_args;
-  }
-};
-
 struct OperatorFunctionWithSchema {
   std::function<void(Stack&)> fn;
   c10::optional<int> num_specified_args;
+
+  bool has_same_arg_num(const c10::optional<int>& other_num_args) const {
+    return other_num_args == num_specified_args;
+  }
 };
 
 class Function {
@@ -92,17 +77,3 @@ class Function {
 } // namespace mobile
 } // namespace jit
 } // namespace torch
-
-namespace std {
-template <>
-struct hash<::torch::jit::mobile::OperatorInfoWithSchema> {
-  size_t operator()(
-      const ::torch::jit::mobile::OperatorInfoWithSchema& x) const {
-    size_t h = std::hash<::c10::OperatorName>()(x.opname);
-    if (x.num_specified_args.has_value()) {
-      h ^= x.num_specified_args.value();
-    }
-    return h;
-  }
-};
-} // namespace std
