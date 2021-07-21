@@ -8,13 +8,13 @@ import numbers
 import operator
 import os
 import pickle
-import site
 import sys
 import torch
 import traceback
 import warnings
 import unittest
 from math import sqrt
+from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -40,7 +40,7 @@ if sys.version_info >= (3, 7):
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_FBCODE, IS_MACOS, IS_IN_CI
 from torch.testing._internal.jit_utils import JitTestCase
 
 from fx.named_tup import MyNamedTup
@@ -109,8 +109,12 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        site_dir = site.getsitepackages()[0]
-        p = os.path.join(site_dir, 'torch', 'lib', 'libtorchbind_test.so')
+        if IS_IN_CI:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):

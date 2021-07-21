@@ -1,7 +1,6 @@
 from torch.testing._internal.jit_utils import JitTestCase
 import io
 import os
-import site
 import sys
 import unittest
 
@@ -9,9 +8,11 @@ import torch
 import torch._C
 from torch.testing import FileCheck
 from torch.jit.mobile import _load_for_lite_interpreter
+from pathlib import Path
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    IS_IN_CI,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -74,8 +75,12 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        site_dir = site.getsitepackages()[0]
-        p = os.path.join(site_dir, 'torch', 'lib', 'libjitbackend_test.so')
+        if IS_IN_CI:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
@@ -492,9 +497,12 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        site_dir = site.getsitepackages()[0]
-        p = os.path.join(site_dir, 'torch', 'lib', 'libbackend_with_compiler.so')
-        torch.ops.load_library(str(p))
+        if IS_IN_CI:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libtorchbind_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
