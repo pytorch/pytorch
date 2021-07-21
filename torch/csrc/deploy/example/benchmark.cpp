@@ -1,3 +1,14 @@
+#include <pthread.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <assert.h>
 #include <torch/deploy.h>
 
 #include <ATen/ATen.h>
@@ -5,16 +16,6 @@
 #include <c10/util/irange.h>
 
 #include <torch/script.h>
-
-#include <pthread.h>
-#include <algorithm>
-#include <atomic>
-#include <cassert>
-#include <chrono>
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <vector>
 
 typedef void (*function_type)(const char*);
 

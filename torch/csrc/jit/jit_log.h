@@ -2,7 +2,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 // `TorchScript` offers a simple logging facility that can enabled by setting an
 // environment variable `PYTORCH_JIT_LOG_LEVEL`.

@@ -89,8 +89,6 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
-                    if self.is_neg():
-                        new_tensor = new_tensor.neg()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -943,9 +941,14 @@ class Tensor(torch._C._TensorBase):
         if self.is_sparse:
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
+            ro = [0]
+            i = 0
+            for irow in range(self.shape[0]):
+                while i < row_indices.size()[0] and row_indices[i] == irow:
+                    i += 1
+                ro.append(i)
             device = coalesced_self.values().device
-            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
-            crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
+            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),

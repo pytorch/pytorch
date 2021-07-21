@@ -6,8 +6,7 @@
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <ATen/MapAllocator.h>
-#include <atomic>
-#include <string>
+#include <random>
 
 static PyObject * THPStorage_(sharedDecref)(PyObject *_self, PyObject *noargs)
 {
@@ -41,11 +40,24 @@ static PyObject * THPStorage_(sharedIncref)(PyObject *_self, PyObject *noargs)
 }
 
 #ifndef THC_GENERIC_FILE
+// TODO: move this somewhere - we only need one version
+static std::string THPStorage_(__newHandle)() {
+  static std::random_device rd;
+  std::string handle = "/torch_";
+#ifdef _MSC_VER
+  handle += std::to_string(GetCurrentProcessId());
+#else
+  handle += std::to_string(getpid());
+#endif
+  handle += "_";
+  handle += std::to_string(rd());
+  return handle;
+}
 
 static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
-  std::string handle = at::NewProcessWideShmHandle();
+  std::string handle = THPStorage_(__newHandle)();
   return THWStorage_(newWithDataAndAllocator)(
       THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size * sizeof(scalar_t)), size, /* allocator */ nullptr);
 }
@@ -130,7 +142,7 @@ static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
               at::ALLOCATOR_MAPPED_EXCLUSIVE |
               at::ALLOCATOR_MAPPED_KEEPFD |
               at::ALLOCATOR_MAPPED_UNLINK;
-  std::string handle = at::NewProcessWideShmHandle();
+  std::string handle = THPStorage_(__newHandle)();
   auto sptr = at::MapAllocator::makeDataPtr(handle.c_str(), flags, size * sizeof(scalar_t), nullptr);
   return THWStorage_(newWithDataAndAllocator)(std::move(sptr), size, /* allocator */ nullptr);
 }

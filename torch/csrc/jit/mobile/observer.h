@@ -3,7 +3,6 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace torch {
 
@@ -76,16 +75,12 @@ class MobileModuleObserver {
   virtual void onEnterLoadModel(const int32_t) {}
   virtual void onExitLoadModel(
       const int32_t,
-      const std::unordered_map<std::string, std::string>&) {
-  } // key: filename, value: file content
+      const std::unordered_map<std::string, std::string>&) {}
   virtual void onFailLoadModel(const int32_t, const char*) {}
   virtual void onFailLoadModel(
       const int32_t,
       const char*,
       const std::unordered_map<std::string, std::string>&) {}
-  virtual std::vector<std::string> getDefaultExtraFiles() = 0;
-  virtual std::unordered_map<std::string, std::string> processMetadataFromExtra(
-      const std::unordered_map<std::string, std::string>&) = 0;
 };
 
 class MobileObserverConfig {

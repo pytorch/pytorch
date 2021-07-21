@@ -379,10 +379,7 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
   int64_t size = self.numel();
-  // Return nan for empty tensors
-  if (size <= 0) {
-    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
-  }
+  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
 
   // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());

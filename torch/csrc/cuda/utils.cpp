@@ -1,5 +1,6 @@
 #include <torch/csrc/python_headers.h>
-#include <cstdarg>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdarg.h>
 #include <string>
 #include <torch/csrc/cuda/THCP.h>
 

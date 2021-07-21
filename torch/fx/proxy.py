@@ -84,10 +84,8 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
-        if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
-            return a.__fx_create_arg__(self)
         # aggregates
-        elif isinstance(a, tuple) and hasattr(a, '_fields'):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
             # NamedTuple constructors don't seem to like getting a generator
             # expression as an argument to their constructor, so build this
             # intermediate tuple and unpack it into the NamedTuple constructor

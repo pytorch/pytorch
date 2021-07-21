@@ -104,30 +104,25 @@ def get_signature_for_torch_op(op : Callable) -> Optional[List[inspect.Signature
     return signatures
 
 def create_type_hint(x):
-    try:
-        if isinstance(x, list) or isinstance(x, tuple):
-            # todo(chilli): Figure out the right way for mypy to handle this
-            if isinstance(x, list):
-                def ret_type(x):
-                    return List[x]  # type: ignore[valid-type]
+    if isinstance(x, list) or isinstance(x, tuple):
+        # todo(chilli): Figure out the right way for mypy to handle this
+        if isinstance(x, list):
+            def ret_type(x):
+                return List[x]  # type: ignore[valid-type]
+        else:
+            def ret_type(x):
+                return Tuple[x, ...]
+        if len(x) == 0:
+            return ret_type(Any)
+        base_type = x[0]
+        for t in x:
+            if issubclass(t, base_type):
+                continue
+            elif issubclass(base_type, t):
+                base_type = t
             else:
-                def ret_type(x):
-                    return Tuple[x, ...]
-            if len(x) == 0:
                 return ret_type(Any)
-            base_type = x[0]
-            for t in x:
-                if issubclass(t, base_type):
-                    continue
-                elif issubclass(base_type, t):
-                    base_type = t
-                else:
-                    return ret_type(Any)
-            return ret_type(base_type)
-    except Exception as e:
-        # We tried to create a type hint for list but failed.
-        torch.warnings.warn(f"We were not able to successfully create type hint from the type {x}")
-        pass
+        return ret_type(base_type)
     return x
 
 def type_matches(signature_type : Any, argument_type : Any):
@@ -322,7 +317,7 @@ def _args_kwargs_to_normalized_args_kwargs(sig : inspect.Signature, args : Tuple
 
         target (inspect.Signature): Signature object for the target
         args (Tuple): Arguments that appear at the callsite for `target`
-        kwargs (Dict): Keyword arguments that appear at the callsite for `target`
+        kwargs (Dict): Keyword arugments that appear at the callsite for `target`
         normalize_to_only_use_kwargs (bool): Whether to normalize to only use kwargs.
 
     Returns:

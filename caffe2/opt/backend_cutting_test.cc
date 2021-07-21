@@ -51,9 +51,7 @@ TEST(BackendCuttingTest, unit) {
   net.add_external_input("W0");
   net.add_external_input("b0");
   net.add_external_output("N1");
-  auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
-  auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   EXPECT_EQ(1, net_opt.op_size());
   EXPECT_EQ(1, net_opt.external_input_size());
   EXPECT_EQ(1, net_opt.external_output_size());
@@ -81,9 +79,8 @@ TEST(BackendCuttingTest, line) {
   op->set_type("CopyOut");
   op->add_input("N2");
   op->add_output("Y");
-  auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
-  auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   EXPECT_EQ(3, net_opt.op_size());
 }
 
@@ -118,9 +115,7 @@ TEST(BackendCuttingTest, convergedPaths) {
   op->add_input("N5");
   op->add_output("Y");
 
-  auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
-  auto net_opt = cutResult.net;
-  EXPECT_EQ(1, cutResult.numberOfSubnets);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   EXPECT_EQ(3, net_opt.op_size());
 };
 
@@ -157,8 +152,6 @@ TEST(BackendCuttingTest, skipPath) {
   op->add_input("N7");
   op->add_output("Y");
 
-  auto cutResult = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
-  auto net_opt = cutResult.net;
-  EXPECT_EQ(2, cutResult.numberOfSubnets);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
   EXPECT_EQ(4, net_opt.op_size());
 }

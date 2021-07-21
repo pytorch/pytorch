@@ -6,6 +6,8 @@ from torch import Tensor
 from ..common_types import _size_2_t, _size_4_t, _size_6_t
 from typing import Sequence, Tuple
 
+import torch
+
 
 # TODO: grad_output size asserts in THNN
 
@@ -37,8 +39,8 @@ class ConstantPad1d(_ConstantPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
-        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
+        - Input: :math:`(N, C, W_{in})`
+        - Output: :math:`(N, C, W_{out})` where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -87,8 +89,8 @@ class ConstantPad2d(_ConstantPadNd):
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
-        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           :math:`H_{out} = H_{in} + \text{padding\_top} + \text{padding\_bottom}`
 
@@ -139,9 +141,8 @@ class ConstantPad3d(_ConstantPadNd):
             :math:`\text{padding\_front}`, :math:`\text{padding\_back}`)
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
-          :math:`(C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           :math:`D_{out} = D_{in} + \text{padding\_front} + \text{padding\_back}`
 
@@ -188,8 +189,8 @@ class ReflectionPad1d(_ReflectionPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
-        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
+        - Input: :math:`(N, C, W_{in})`
+        - Output: :math:`(N, C, W_{out})` where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -318,6 +319,14 @@ class ReflectionPad3d(_ReflectionPadNd):
         super(ReflectionPad3d, self).__init__()
         self.padding = _ntuple(6)(padding)
 
+    # TODO: Remove this forward() implementation and fallback to base implementation
+    # once the FC window for the new op has passed. This hack is temporarily provided
+    # to avoid breaking JIT-serialized models that rely on _pad() but not reflection_pad3d.
+    def forward(self, input: Tensor) -> Tensor:
+        assert len(self.padding) % 2 == 0, "Padding length must be divisible by 2"
+        assert len(self.padding) // 2 <= input.dim(), "Padding length too large"
+        return torch._C._nn.reflection_pad3d(input, self.padding)
+
 
 class _ReplicationPadNd(Module):
     __constants__ = ['padding']
@@ -341,8 +350,8 @@ class ReplicationPad1d(_ReplicationPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
-        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
+        - Input: :math:`(N, C, W_{in})`
+        - Output: :math:`(N, C, W_{out})` where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 

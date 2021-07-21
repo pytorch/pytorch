@@ -2,8 +2,9 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdio.h>
 #include <chrono>
-#include <cstdio>
 
 namespace torch {
 namespace jit {

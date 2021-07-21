@@ -219,8 +219,7 @@ void Method::run(Stack& stack) {
   function_->run(stack);
 }
 
-IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs)
-    const {
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
   stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
@@ -235,15 +234,6 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
 
   function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
   return function_->runAsync(stack, std::move(taskLauncher));
-}
-
-void Method::setArgumentNames(
-    std::vector<std::string>& argumentNamesOut) const {
-  TORCH_INTERNAL_ASSERT(function_);
-  argumentNamesOut.reserve(function_->getSchema().arguments().size());
-  for (auto& argument : function_->getSchema().arguments()) {
-    argumentNamesOut.push_back(argument.name());
-  }
 }
 
 IValue Module::operator()(std::vector<IValue> inputs) {

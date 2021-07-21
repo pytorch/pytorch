@@ -154,7 +154,8 @@ class ExprEval {
     Stmt* store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         new Store(ret_buf.data(), indices, expr.node());
-    buffer_args_extended.emplace_back(ret_buf);
+    // NOLINTNEXTLINE(modernize-use-emplace)
+    buffer_args_extended.push_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
 
@@ -197,7 +198,8 @@ class ExprEval {
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
-        call_args_extended.emplace_back(ret_val_arg.data());
+        // NOLINTNEXTLINE(modernize-use-emplace)
+        call_args_extended.push_back(CallArg(ret_val_arg.data()));
         codegen_->call(call_args_extended);
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
