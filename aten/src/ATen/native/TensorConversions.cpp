@@ -145,7 +145,7 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   TORCH_CHECK(self.element_size() == static_cast<int64_t>(type_meta.itemsize()),
     "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   TORCH_CHECK(!self.is_conj(),
-    "torch.Tensor.view is not supported for conjugate view tensors when converting to non-complex dtype.");
+    "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");
   TORCH_CHECK(!self.is_neg(),
     "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
   Storage storage = self.storage();

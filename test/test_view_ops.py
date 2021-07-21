@@ -1495,10 +1495,12 @@ class TestOldViewOps(TestCase):
 
     @onlyCPU
     def test_conj_neg_view_numpy_error(self, device):
-        self.assertRaisesRegex(RuntimeError, "has conjugate bit set", lambda: torch.tensor([1+2j]).conj().numpy())
-        self.assertRaisesRegex(RuntimeError, "has negative bit set", lambda: torch.tensor([1+2j]).conj().imag.numpy())
-        self.assertRaisesRegex(RuntimeError, "not supported for conjugate view tensors", lambda: torch.tensor([1+2j]).conj().view(torch.float64))
-        self.assertRaisesRegex(RuntimeError, "not supported for tensors with negative bit set", lambda: torch.tensor([1+2j]).conj().imag.view(torch.int32))
+        self.assertRaisesRegex(RuntimeError, "has conjugate bit set", lambda: torch.tensor([1 + 2j]).conj().numpy())
+        self.assertRaisesRegex(RuntimeError, "has negative bit set", lambda: torch.tensor([1 + 2j]).conj().imag.numpy())
+        self.assertRaisesRegex(RuntimeError, "not supported for conjugate view tensors",
+                               lambda: torch.tensor([1 + 2j]).conj().view(torch.float64))
+        self.assertRaisesRegex(RuntimeError, "not supported for tensors with negative bit set",
+                               lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32))
 
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestOldViewOps, globals())
