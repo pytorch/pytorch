@@ -29,8 +29,8 @@ struct PyDefaultSavedVariableHooks {
   static std::unique_ptr<SavedVariableHooks> get_hooks();
 
 private:
-  static PyObject* pack_hook_;
-  static PyObject* unpack_hook_;
+  static std::atomic<PyObject*> pack_hook_;
+  static std::atomic<PyObject*> unpack_hook_;
 };
 
 }}
