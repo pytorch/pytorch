@@ -147,7 +147,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
       c10::nullopt /* layout */,
       c10::nullopt /* device */,
       c10::nullopt /* pin_memory */,
-      at::MemoryFormat::Contiguous);
+      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   softmax_cpu_out(input_, dim_, half_to_float, output);
   return output;
 }
