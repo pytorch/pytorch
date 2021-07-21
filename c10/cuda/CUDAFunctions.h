@@ -43,7 +43,7 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
-#if HIP_VERSION >= 301
+#if defined(HIP_VERSION) && (HIP_VERSION >= 301)
   C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
   C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
