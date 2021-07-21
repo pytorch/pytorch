@@ -10,10 +10,4 @@ struct TORCH_API SavedVariableHooks {
   virtual ~SavedVariableHooks() = default;
 };
 
-struct TORCH_API DefaultSavedVariableHooks {
-  static std::unique_ptr<SavedVariableHooks> get_hooks() {
-    return nullptr;
-  }
-};
-
 }}
