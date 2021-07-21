@@ -25,6 +25,7 @@ env:
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
 
+
 concurrency:
   group: pytorch-win-vs2019-cuda11-cudnn8-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
@@ -32,6 +33,9 @@ concurrency:
 jobs:
   build:
     runs-on: "windows.4xlarge"
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
@@ -39,10 +43,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -80,12 +81,15 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      - name: Cleanup build-results
+      - name: Cleanup build-results and workspaces
+        if: always()
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
+          rm -rf ./*
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -119,15 +123,15 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -181,6 +185,12 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Cleanup workspace
+        if: always()
+        shell: bash
+        # Should remove the entirety of pytorch-${{ github.run_id }}
+        run: |
+          rm -rf ./*
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
