@@ -116,6 +116,7 @@ jobs:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda11-cudnn8-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      TEST_CONFIG: ${{ matrix.config }}
     needs:
       - build
       - generate-test-matrix
