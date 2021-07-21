@@ -563,15 +563,11 @@ TORCH_IMPL_FUNC(clamp_out)
  const OptionalScalarRef max,
  const Tensor& result) {
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.toScalar(), max.toScalar());
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    Tensor temp(result);
-    at::clamp_max_outf(self, max.toScalar(), temp);
-    result.copy_(temp);
+    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
   } else if (min) {
-    Tensor temp(result);
-    at::clamp_min_outf(self, min.toScalar(), temp);
-    result.copy_(temp);
+    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
   }
 }
 

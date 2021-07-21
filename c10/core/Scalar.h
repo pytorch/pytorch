@@ -7,6 +7,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -187,28 +188,7 @@ class C10_API Scalar {
   } v;
 };
 
-struct OptionalScalarRef {
-  OptionalScalarRef() : scalar_(nullptr) {}
-  OptionalScalarRef(const Scalar* scalar) : scalar_(scalar) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(scalar_);
-  }
-
-  bool has_value() const {
-    return scalar_ != nullptr;
-  }
-
-  const Scalar& toScalar() const {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(scalar_);
-    return *scalar_;
-  }
-
-  operator bool() const {
-    return has_value();
-  }
-
- private:
-  const Scalar* scalar_;
-};
+using OptionalScalarRef = c10::OptionalRef<Scalar>;
 
 // define the scalar.to<int64_t>() specializations
 #define DEFINE_TO(T, name)         \
