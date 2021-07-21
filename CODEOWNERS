@@ -35,3 +35,11 @@
 /torch/csrc/jit/passes/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /torch/onnx/ @bowenbao @neginraoof @shubhambhokare1
 /test/onnx/ @bowenbao @neginraoof @shubhambhokare1
+
+# Docker
+/.circleci/docker/ @jeffdaily @jithunnair-amd
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati

@@ -29,6 +29,7 @@ namespace cuda {
 class TORCH_CUDA_CU_API InputsIdLookup {
  public:
   //! constructor where maximum cache size is fixed during init
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit InputsIdLookup(size_t max_cache_size = 10)
       : max_cache_size_(max_cache_size){};
 

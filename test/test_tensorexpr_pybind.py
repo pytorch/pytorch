@@ -334,6 +334,41 @@ graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_kernel_with_custom_lowering(self):
+        def f(a):
+            return a.nan_to_num()
+
+        device = 'cpu'
+        x = torch.ones((2, 2), device=device)
+        x[0, 0] = x[1, 1] = torch.nan
+        graph_str = """
+graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+    %none : NoneType = prim::Constant()
+    %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+    return (%y)
+        """
+        graph = torch._C.parse_ir(graph_str)
+
+        def my_custom_lowering(inputs, out_shape, out_type, device):
+            def get_dim_args(dims):
+                dim_args = []
+                for dim in dims:
+                    dim_args.append(te.DimArg(dim, 'i' + str(len(dim_args))))
+                return dim_args
+
+            def compute(idxs):
+                load = inputs[0].as_buf().load(idxs)
+                return te.ifThenElse(te.ExprHandle.isnan(load), te.ExprHandle.float(0.), load)
+            return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
+
+        kernel = torch._C._te.TensorExprKernel(graph, {'aten::nan_to_num' : my_custom_lowering})
+        res1 = kernel.run((x,))
+        res2 = kernel.fallback((x,))
+        correct = f(x)
+        np.testing.assert_allclose(res1.numpy(), correct.numpy(), atol=2e-3)
+        np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
+
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_expand(self):
         def f(a):
             return a.expand((2, 3, 4))
@@ -362,6 +397,25 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
     def test_forgot_kernel_arena(self):
         self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
 
+    @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
+    def test_alloc_in_loop(self):
+        with kernel_arena_scope():
+            a, tmp, b = [
+                te.Placeholder(name, te.Dtype.Float, [te.ExprHandle.int(1)])
+                for name in ["a", "tmp", "b"]]
+            t0, t100 = [te.ExprHandle.int(n) for n in [0, 100]]
+            body = te.Block([
+                tmp.store([t0], a.load([t0])),
+                b.store([t0], tmp.load([t0]))
+            ])
+            for _ in range(4):
+                i = te.VarHandle("i", te.Dtype.Int)
+                body = te.For.make(i, t0, t100, body)
+            nest = te.LoopNest(body, [b.data()])
+            nest.prepare_for_codegen()
+            f = te.construct_codegen("llvm", nest.simplify(), [a, b])
+            ta, tb = [torch.ones(1) for _ in range(2)]
+            f.call([ta.data_ptr(), tb.data_ptr()])
 
 if __name__ == '__main__':
     run_tests()
