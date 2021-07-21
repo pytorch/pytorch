@@ -366,6 +366,9 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
+  m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
+    return at::randn({1});
+  });
   m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
       "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
@@ -383,10 +386,24 @@ bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
   return HasInplaceOp(graph->block(), alias_db);
 }
 
-void ReplaceWithCopy(
-    std::shared_ptr<torch::jit::Graph>& graph,
-    bool outputs_are_immutable) {
+void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
+  auto* fake_input =
+      graph->insert(Symbol::fromQualString("static_runtime::pure_inputs"), {});
+  fake_input->node()->moveBefore(*graph->nodes().begin());
+
+  std::vector<std::pair<Value*, Use>> old_inputs;
+  for (auto* input : graph->inputs()) {
+    for (const auto& use : input->uses()) {
+      old_inputs.emplace_back(std::make_pair(input, use));
+    }
+    input->replaceAllUsesWith(fake_input);
+  }
+
   AliasDb db(graph);
+  for (const auto& p : old_inputs) {
+    p.second.user->replaceInput(p.second.offset, p.first);
+  }
+  fake_input->node()->destroy();
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
@@ -457,7 +474,7 @@ void ReplaceWithCopy(
     }
 
     auto* out = n->output();
-    if (!outputs_are_immutable && db.mayContainAlias({out}, graph->outputs())) {
+    if (db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }
     auto* new_node = graph->create(new_symbol, n->outputs().size());

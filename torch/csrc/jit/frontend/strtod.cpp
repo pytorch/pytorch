@@ -2,8 +2,10 @@
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
 
 #include <ATen/core/Macros.h>
-#include <clocale>
-#include <cstdlib>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <locale.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <stdlib.h>
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
 #include <xlocale.h>
@@ -21,10 +23,14 @@
 // respective
 //   C stdlib functions
 
-#include <cctype>
-#include <cerrno>
-#include <cmath>
-#include <cstring>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <ctype.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <errno.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <math.h>
+// NOLINTNEXTLINE(modernize-deprecated-headers)
+#include <string.h>
 #include <locale>
 
 #define D_PNAN ((double)+NAN)

@@ -22,7 +22,6 @@ def dummy_meta_meta() -> ReportMetaMeta:
         'build_branch': '',
         'build_job': '',
         'build_workflow_id': '',
-        'build_start_time_epoch': '',
     }
 
 

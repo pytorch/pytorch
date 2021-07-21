@@ -524,13 +524,12 @@ def async_cuda_nested_add(to, x, y, z):
 # A custom Python class that contains a tensor, needed to see if we correctly
 # use the Python pickler to extract tensors from non-IValue-convertible types.
 class TensorWrapper:
-    __slots__ = ("tensor", "lock", "event")
+    __slots__ = ("tensor", "lock")
 
     def __init__(self, t):
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
-        self.event = torch.cuda.Event(enable_timing=True)
 
     def increase(self, v):
         with self.lock:
@@ -538,8 +537,8 @@ class TensorWrapper:
 
     def sum(self):
         with self.lock:
-            self.event.record()
             return self.tensor.sum()
+
 
 # Copied from test/test_cuda.py.
 _cycles_per_ms = None
@@ -4179,8 +4178,8 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_verify_backend_options(self):
-        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_TENSORPIPE)
-        self.assertEqual(self.rpc_backend_options.num_worker_threads, 8)
+        self.assertEqual(self.rpc_backend, rpc.backend_registry.BackendType.FAULTY_PROCESS_GROUP)
+        self.assertEqual(self.rpc_backend_options.num_send_recv_threads, 8)
         self.assertEqual(self.rpc_backend_options.num_fail_sends, 3)
         self.assertEqual(len(self.rpc_backend_options.messages_to_fail), 4)
         self.assertEqual(len(self.rpc_backend_options.messages_to_delay), 2)

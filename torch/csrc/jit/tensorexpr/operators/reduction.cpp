@@ -117,7 +117,8 @@ Tensor* computeMean(
     // When dims argument is not specified, reduce over all dimensions
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
-      mean_dims_expr.emplace_back(idx);
+      // NOLINTNEXTLINE(modernize-use-emplace)
+      mean_dims_expr.push_back(idx);
     }
   }
   return new Tensor(

@@ -122,7 +122,6 @@ class TestBasePruner(TestCase):
 
     def test_prepare(self):
         model = Model()
-        x = torch.ones(128, 16)
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         for g in pruner.module_groups:
@@ -134,11 +133,9 @@ class TestBasePruner(TestCase):
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
             assert type(module.parametrizations.weight[0]) == PruningParametrization
-        assert model(x).shape == (128, 16)
 
     def test_prepare_bias(self):
         model = ModelB()
-        x = torch.ones(128, 16)
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         for g in pruner.module_groups:
@@ -150,11 +147,9 @@ class TestBasePruner(TestCase):
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
             assert type(module.parametrizations.weight[0]) == PruningParametrization
-        assert model(x).shape == (128, 16)
 
     def test_convert(self):
         model = Model()
-        x = torch.ones(128, 16)
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
@@ -162,11 +157,9 @@ class TestBasePruner(TestCase):
             module = g['module']
             assert not hasattr(module, "parametrizations")
             assert not hasattr(module, 'mask')
-        assert model(x).shape == (128, 16)
 
     def test_convert_bias(self):
         model = ModelB()
-        x = torch.ones(128, 16)
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
@@ -174,7 +167,6 @@ class TestBasePruner(TestCase):
             module = g['module']
             assert not hasattr(module, "parametrizations")
             assert not hasattr(module, 'mask')
-        assert model(x).shape == (128, 16)
 
     def test_step(self):
         model = Model()

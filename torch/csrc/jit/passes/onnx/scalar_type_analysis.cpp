@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -257,7 +257,7 @@ static void UpdateScalarTypeForInputs(
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
       if (input->node()->kind() == onnx::Constant) {
         // Fix up the scalar directly instead of inserting a cast operator.
-        // TODO: Keep only the else branch once constant_folding is enabled by
+        // NOTE: Keep only the else branch once constant_folding is enabled by
         // default.
         at::Tensor val = input->node()->t(attr::value);
         at::Tensor new_val = val.to(scalar_type);
@@ -381,7 +381,6 @@ void ScalarTypeAnalysisForONNX(
   if (lowprecision_cast) {
     LowPrecisionCastForStandardOpsONNX(graph->block(), opset_version);
   }
-  GRAPH_DUMP("After ScalarTypeAnalysisForONNX: ", graph);
 }
 
 void ScalarTypeAnalysisNodeForONNX(Node* n) {
