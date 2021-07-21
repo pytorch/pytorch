@@ -11,7 +11,7 @@ from collections import namedtuple
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
+    'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'attn', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
@@ -64,6 +64,8 @@ class TestNamedTupleAPI(TestCase):
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
+            op(operators=['attn'], input=(torch.rand(a.shape), torch.rand(a.shape[0], 1)),
+               names=('output', 'attn'), hasout=False),
             op(operators=['svd', '_svd_helper'], input=(), names=('U', 'S', 'V'), hasout=True),
             op(operators=['linalg_svd'], input=(), names=('U', 'S', 'Vh'), hasout=True),
             op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
