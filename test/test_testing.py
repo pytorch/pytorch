@@ -444,6 +444,15 @@ class TestTesting(TestCase):
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
 
+    def test_isclose_equality_shortcut(self):
+        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
+        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
+        # they were not compared as integers.
+        a = torch.tensor(2 ** 53, dtype=torch.int64)
+        b = a + 1
+
+        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
+
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
         def check(size, low, high, requires_grad, noncontiguous):

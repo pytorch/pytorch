@@ -58,10 +58,12 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     const Tensor& input,
     const Tensor& scale,
     const Tensor& zero_point,
+    const Tensor& fake_quant_enabled,
     int64_t quant_min,
     int64_t quant_max) {
   float* scale_ptr = scale.data_ptr<float>();
   int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  int64_t* fake_quant_on = fake_quant_enabled.data_ptr<int64_t>();
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(output)
@@ -72,6 +74,9 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     gpu_kernel_multiple_outputs(
       iter,
       [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        if (*fake_quant_on == 0) {
+          return {input_val, 1};
+        }
         float inv_scale = 1.0f / (*scale_ptr);
         const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + (*zp_ptr));
         return {
