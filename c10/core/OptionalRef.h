@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-template<typename T>
+template <typename T>
 class OptionalRef {
  public:
   OptionalRef() : data_(nullptr) {}
