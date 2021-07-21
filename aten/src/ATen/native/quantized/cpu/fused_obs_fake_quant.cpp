@@ -118,9 +118,10 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     scale[0] = x_qparams.scale;
     zero_point[0] = x_qparams.zero_point;
 #endif
+    auto fake_quant_enabled = at::ones(1, x.options().dtype(at::kLong));
     fake_quant_out =
         at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-            x, scale, zero_point, qmin, qmax);
+            x, scale, zero_point, fake_quant_enabled, qmin, qmax);
   }
   return fake_quant_out;
 }
