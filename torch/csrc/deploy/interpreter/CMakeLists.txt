@@ -105,3 +105,4 @@ target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
 
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
+target_link_libraries(torch_deployinterpreter PRIVATE -l:libssl.a -l:libcrypto.a)

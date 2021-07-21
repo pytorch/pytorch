@@ -64,11 +64,7 @@ int main(int argc, const char** argv) {
   }
   Elf64_Dyn* w = dynamic;
   for (const Elf64_Dyn& e : entries) {
-    if (e.d_tag == DT_VERNEEDNUM) {
-      auto tmp = e;
-      tmp.d_un.d_val = 0;
-      *w++ = tmp;
-    } else if (e.d_tag != DT_NEEDED) {
+    if (e.d_tag != DT_NEEDED) {
       *w++ = e;
     }
   }
