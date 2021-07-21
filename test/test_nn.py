@@ -4759,6 +4759,10 @@ class TestNN(NNTestCase):
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
+        # no batch dims
+        input = torch.randn(50, 20, 64, 64)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -9298,6 +9302,25 @@ class TestNN(NNTestCase):
                     torch.nn.L1Loss()(input, torch.zeros_like(input)),
                     input.abs().mean())
 
+    def test_smoothl1loss_intergral_target(self):
+        def _input_grad(input, target, reduction):
+            output = F.smooth_l1_loss(input, target, reduction=reduction, beta=0.5)
+            output.sum().backward()
+            return input.grad
+
+        for device, dtype, reduction in product(device_(),
+                                                torch.testing.integral_types(),
+                                                ('none', 'sum', 'mean')):
+            input = torch.randn(2, 2, device=device, requires_grad=True)
+            target = torch.randint(0, 9, (2, 2), device=device, dtype=dtype)
+
+            input_grad_with_float_target = _input_grad(input, target.float(), reduction)
+
+            input_grad = _input_grad(input.detach().clone().requires_grad_(True),
+                                     target,
+                                     reduction)
+            self.assertEqual(input_grad, input_grad_with_float_target)
+
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
@@ -12817,6 +12840,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
+        # no batch dims
+        input = torch.empty(20, 64, 64)
+        self._test_dropout(nn.Dropout2d, device, input)
+
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -12828,6 +12855,10 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
+
+        # no batch dims
+        input = torch.empty(50, 20, 64, 64)
+        self._test_dropout(nn.Dropout3d, device, input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -13030,11 +13061,6 @@ class TestNNDeviceType(NNTestCase):
                 (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
                 (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
-
-        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
-            mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 10, device=device, dtype=dtype)
-            mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
             mod = torch.nn.ReplicationPad1d(2)
@@ -16301,6 +16327,48 @@ class TestNNDeviceType(NNTestCase):
     def test_softmax_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
 
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_conv_thnn_nhwc(self, device, dtype):
+        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups):
+            input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
+                .to(memory_format=torch.channels_last)
+            input.requires_grad_()
+            conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
+                .to(device='cpu', dtype=dtype, memory_format=torch.channels_last)
+            for p in conv.parameters():
+                p.data = torch.randint_like(p, -3, 3)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_()
+            ref_conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)
+            # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
+            ref_conv.load_state_dict(conv.state_dict())
+            ref_conv = ref_conv.to(device='cpu', dtype=dtype, memory_format=torch.contiguous_format)
+
+            out = conv(input)
+            ref_out = ref_conv(ref_input)
+
+            grad = torch.randint_like(out, -3, 3)
+            ref_grad = grad.detach().clone().contiguous()
+
+            out.backward(grad)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out, exact_dtype=False)
+            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
+            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
+            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
+
+        # non-dilated conv goes to thnn_conv2d
+        # dilated conv goes to slow_conv_dilated2d
+        with torch.backends.mkldnn.flags(enabled=False):
+            helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
+            helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
+            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
+            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
@@ -17602,7 +17670,7 @@ class TestLazyModules(TestCase):
                                     lambda: nn.LazyConvTranspose3d(32, 2),
                                     (16, 32, 2, 2, 2), (32,))
 
-    def _check_lazy_batchnorm(self, cls, lazy_cls, input_shape):
+    def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
                 lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
@@ -17615,14 +17683,15 @@ class TestLazyModules(TestCase):
                     self.assertIsInstance(lazy_module.running_var, UninitializedBuffer)
 
                 input = torch.ones(*input_shape)
-                y = lazy_module(input)
+                lazy_output = lazy_module(input)
                 self.assertIsInstance(lazy_module, cls)
                 self.assertNotIsInstance(lazy_module, lazy_cls)
 
                 num_features = input_shape[1]
                 module = cls(num_features, affine=affine, track_running_stats=track_running_stats)
-                expected = module(input)
+                expected_output = module(input)
 
+                self.assertEqual(lazy_output, expected_output)
                 if module.weight is not None:
                     self.assertEqual(lazy_module.weight.shape, module.weight.shape)
                     self.assertEqual(lazy_module.weight, module.weight)
@@ -17639,7 +17708,7 @@ class TestLazyModules(TestCase):
                     self.assertEqual(lazy_module.num_batches_tracked.shape, module.num_batches_tracked.shape)
                     self.assertEqual(lazy_module.num_batches_tracked, module.num_batches_tracked)
 
-    def _check_lazy_batchnorm_pickle(self, cls, lazy_cls, input_shape):
+    def _check_lazy_norm_pickle(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
             for track_running_stats in [False, True]:
                 module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
@@ -17684,37 +17753,89 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
             module.load_state_dict(lazy_module.state_dict())
 
+    def _check_lazy_instancenorm_state(self, cls, lazy_cls):
+        for affine in [False, True]:
+            for track_running_stats in [False, True]:
+                module = cls(10, affine=affine, track_running_stats=track_running_stats)
+                lazy_module = lazy_cls(affine=affine, track_running_stats=track_running_stats)
+                lazy_module.load_state_dict(module.state_dict())
+                # Parameters have been initialized but the module won't become a full
+                # InstanceNorm one until the first iteration. This is due to
+                # limitations on the state_dict loading logic
+                self.assertFalse(lazy_module.has_uninitialized_params())
+                if affine:
+                    self.assertEqual(lazy_module.weight.shape, (10,))
+                    self.assertEqual(lazy_module.bias.shape, (10,))
+                if track_running_stats:
+                    self.assertEqual(lazy_module.running_mean.shape, (10,))
+                    self.assertEqual(lazy_module.running_var.shape, (10,))
+
+        module = cls(10, affine=True, track_running_stats=True)
+        lazy_module = lazy_cls(affine=True, track_running_stats=True)
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            module.load_state_dict(lazy_module.state_dict())
+
     def test_lazy_batchnorm1d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
-        self._check_lazy_batchnorm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
+        self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
+        self._check_lazy_norm(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
 
     def test_lazy_batchnorm1d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
+        self._check_lazy_norm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 3, 6))
+        self._check_lazy_norm_pickle(nn.BatchNorm1d, nn.LazyBatchNorm1d, (16, 6))
 
     def test_lazy_batchnorm1d_state(self):
         self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
         self._check_lazy_batchnorm_state(nn.BatchNorm1d, nn.LazyBatchNorm1d)
 
     def test_lazy_batchnorm2d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
+        self._check_lazy_norm(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
 
     def test_lazy_batchnorm2d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
+        self._check_lazy_norm_pickle(nn.BatchNorm2d, nn.LazyBatchNorm2d, (16, 3, 6, 7))
 
     def test_lazy_batchnorm2d_state(self):
         self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
         self._check_lazy_batchnorm_state(nn.BatchNorm2d, nn.LazyBatchNorm2d)
 
     def test_lazy_batchnorm3d(self):
-        self._check_lazy_batchnorm(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
+        self._check_lazy_norm(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
 
     def test_lazy_batchnorm3d_pickle(self):
-        self._check_lazy_batchnorm_pickle(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
+        self._check_lazy_norm_pickle(nn.BatchNorm3d, nn.LazyBatchNorm3d, (16, 3, 6, 7, 8))
 
     def test_lazy_batchnorm3d_state(self):
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
         self._check_lazy_batchnorm_state(nn.BatchNorm3d, nn.LazyBatchNorm3d)
+
+    def test_lazy_instancenorm1d(self):
+        self._check_lazy_norm(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+
+    def test_lazy_instancenorm1d_pickle(self):
+        self._check_lazy_norm_pickle(nn.InstanceNorm1d, nn.LazyInstanceNorm1d, (16, 3, 6))
+
+    def test_lazy_instancenorm1d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm1d, nn.LazyInstanceNorm1d)
+
+    def test_lazy_instancenorm2d(self):
+        self._check_lazy_norm(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_instancenorm2d_pickle(self):
+        self._check_lazy_norm_pickle(nn.InstanceNorm2d, nn.LazyInstanceNorm2d, (16, 3, 6, 7))
+
+    def test_lazy_instancenorm2d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm2d, nn.LazyInstanceNorm2d)
+
+    def test_lazy_instancenorm3d(self):
+        self._check_lazy_norm(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_instancenorm3d_pickle(self):
+        self._check_lazy_norm_pickle(nn.InstanceNorm3d, nn.LazyInstanceNorm3d, (16, 3, 6, 7, 8))
+
+    def test_lazy_instancenorm3d_state(self):
+        self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
+        self._check_lazy_instancenorm_state(nn.InstanceNorm3d, nn.LazyInstanceNorm3d)
 
     @suppress_warnings
     def test_materialize_dtype(self):
