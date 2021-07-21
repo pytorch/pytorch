@@ -1136,7 +1136,7 @@ Example:
 
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, *, deterministic=False, out=None) -> Tensor
+bmm(input, mat2, *, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -1161,10 +1161,6 @@ Args:
     mat2 (Tensor): the second batch of matrices to be multiplied
 
 Keyword Args:
-    deterministic (bool, optional): flag to choose between a faster non-deterministic
-                                    calculation, or a slower deterministic calculation.
-                                    This argument is only available for sparse-dense CUDA bmm.
-                                    Default: ``False``
     {out}
 
 Example::
@@ -1490,16 +1486,51 @@ add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
 
-Splits a tensor into a specific number of chunks. Each chunk is a view of
+Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
 
-Last chunk will be smaller if the tensor size along the given dimension
-:attr:`dim` is not divisible by :attr:`chunks`.
+
+.. note::
+
+    This function may return less then the specified number of chunks!
+
+.. seealso::
+
+    :func:`torch.tensor_split` a function that always returns exactly the specified number of chunks
+
+If the tensor size along the given dimesion :attr:`dim` is divisible by :attr:`chunks`,
+all returned chunks will be the same size.
+If the tensor size along the given dimension :attr:`dim` is not divisible by :attr:`chunks`,
+all returned chunks will be the same size, except the last one.
+If such division is not possible, this function may return less
+than the specified number of chunks.
 
 Arguments:
     input (Tensor): the tensor to split
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
+
+Example::
+    >>> torch.arange(11).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10]))
+    >>> torch.arange(12).chunk(6)
+    (tensor([0, 1]),
+     tensor([2, 3]),
+     tensor([4, 5]),
+     tensor([6, 7]),
+     tensor([8, 9]),
+     tensor([10, 11]))
+    >>> torch.arange(13).chunk(6)
+    (tensor([0, 1, 2]),
+     tensor([3, 4, 5]),
+     tensor([6, 7, 8]),
+     tensor([ 9, 10, 11]),
+     tensor([12]))
 """)
 
 add_docstr(torch.unsafe_chunk,
@@ -2047,7 +2078,9 @@ matrices.
 
     .. code:: python
 
-        U = torch.linalg.cholesky(A.transpose(-2, -1).conj()).transpose(-2, -1).conj()
+        U = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+
+    This transform will produce equivalent results for all valid (symmetric positive definite) inputs.
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
