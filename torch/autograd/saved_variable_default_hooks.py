@@ -20,4 +20,4 @@ def set_save_on_cpu(save_on_cpu):
         device, tensor = packed
         return tensor.to(device)
 
-    torch._C._autograd._register_default_hooks(self.pack_hook, self.unpack_hook)
+    torch._C._autograd._register_default_hooks(pack_hook, unpack_hook)
