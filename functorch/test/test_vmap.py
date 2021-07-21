@@ -16,6 +16,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
 from functorch_lagging_op_db import functorch_lagging_op_db
+from functorch_additional_op_db import additional_op_db
 from common_utils import (
     parameterized,
     parameterized_with_device,
@@ -2858,7 +2859,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
 
 class TestVmapOperatorsOpInfo(TestCase):
     @onlyCPU
-    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vmap_exhaustive(self, device, dtype, op):
         # These are ops that we can't generate fallbacks for
         op_skip = {
@@ -2882,7 +2883,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             return
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
-        vmap_fail = {'__getitem__', 'squeeze', 'unfold'}
+        vmap_fail = {'__getitem__', 'squeeze', 'unfold', 'nn.functional.linear'}
         if op.name in vmap_fail:
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
