@@ -2874,9 +2874,8 @@ static void lu_solve_looped_magma(const Tensor& b, const Tensor& lu, const Tenso
 static void lu_solve_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
-  auto b1 = b.size(-2);
   auto b2 = b.size(-1);
-  bool over_magma_dim_limit = m > 1024 || b1 > 1024 || b2 > 1024;  // magma implementation of LU solve cannot handle tensors with dimensions > 1024
+  bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
 #ifdef USE_CUSOLVER
   if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
     lu_solve_looped_cusolver(b, lu, pivots);
