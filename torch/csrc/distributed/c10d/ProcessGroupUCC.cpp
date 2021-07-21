@@ -164,13 +164,29 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   auto& tensor = tensors[0];
   lazyInitUCP();
 
-  // ucp_tag_t ucp_tag;
-  // ucc_coll_req_h request = comm->recv_nb(
-  //     tensor.data_ptr(),
-  //     ucs_mtype_map.at(tensor.device().type()),
-  //     tensor.numel() * tensor.element_size(),
-  //     tag);
-  // return comm->enqueue_p2p(OpType::RECV, request);
+  ucp_request_param_t params;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
+  params.memory_type = getUCSMemoryType(tensor.device().type());
+  params.cb.recv = [](void* request,
+                      ucs_status_t status,
+                      const ucp_tag_recv_info_t* info,
+                      void* user_data) {
+    *static_cast<bool *>(request) = true;
+  };
+  ucs_status_ptr_t request = ucp_tag_recv_nbx(
+    UCPContext::get()->worker, tensor.data_ptr(), 1, tag, 0, &params);
+  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
+
+  if (request == nullptr) {
+    // If the operation is finished immediately, then the callback will
+    // not be invoked.
+    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
+  }
+
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
+  return work;
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
