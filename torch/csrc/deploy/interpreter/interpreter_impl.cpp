@@ -115,6 +115,7 @@ extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* startup = R"RAW(
+import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
 import sys
 import importlib.abc
 import linecache
