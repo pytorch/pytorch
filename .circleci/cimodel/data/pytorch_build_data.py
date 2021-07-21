@@ -40,23 +40,21 @@ CONFIG_TREE_DATA = [
                             ('shard_test', [XImportant(True)]),
                         ]),
                     ]),
-                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
-                    # ("libtorch", [
-                    #     (True, [
-                    #         ('build_only', [X(True)]),
-                    #     ]),
-                    # ]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
             ("11.1", [
                 ("3.8", [
                     ("shard_test", [XImportant(True)]),
-                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
-                    # ("libtorch", [
-                    #     (True, [
-                    #         ('build_only', [X(True)]),
-                    #     ]),
-                    # ]),
+                    ("libtorch", [
+                        (True, [
+                            ('build_only', [X(True)]),
+                        ]),
+                    ]),
                 ]),
             ]),
         ]),

@@ -35,11 +35,9 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::unordered_set<std::string>& written_records =
-      writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records.size(), 2);
-  ASSERT_EQ(written_records.count("key1"), 1);
-  ASSERT_EQ(written_records.count("key2"), 1);
+  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records[0], "key1");
+  ASSERT_EQ(written_records[1], "key2");
 
   writer.writeEndOfFile();
 
@@ -97,11 +95,9 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   }
   writer.writeRecord("key2", data2.data(), data2.size());
 
-  const std::unordered_set<std::string>& written_records =
-      writer.getAllWrittenRecords();
-  ASSERT_EQ(written_records.size(), 2);
-  ASSERT_EQ(written_records.count("key1"), 1);
-  ASSERT_EQ(written_records.count("key2"), 1);
+  const std::vector<std::string>& written_records = writer.getAllWrittenRecords();
+  ASSERT_EQ(written_records[0], "key1");
+  ASSERT_EQ(written_records[1], "key2");
 
   writer.writeEndOfFile();
 

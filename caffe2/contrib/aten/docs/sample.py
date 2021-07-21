@@ -1,5 +1,3 @@
-import tempfile
-
 import numpy as np
 
 from torch import nn
@@ -12,8 +10,7 @@ import caffe2.python.onnx.backend
 class MyFunction(Function):
     @staticmethod
     def forward(ctx, x, y):
-        return x * x + y
-
+        return x*x + y
     @staticmethod
     def symbolic(graph, x, y):
         x2 = graph.at("mul", x, x)
@@ -29,20 +26,21 @@ class MyModule(nn.Module):
         x = nn.ReLU()(x)
         return MyFunction.apply(x, y)
 
-f = tempfile.NamedTemporaryFile()
 torch.onnx.export(MyModule(),
-                  (Variable(torch.ones(3, 4)), Variable(torch.ones(3, 4))),
-                  f, verbose=True)
+                  (Variable(torch.ones(3,4)), Variable(torch.ones(3,4))),
+                  "output.onnx",
+                  verbose=True)
 
 # prints the graph for debugging:
-# graph(%input : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu),
-#       %y : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
-#   %2 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::Relu(%input)
-#   %3 : Tensor = onnx::ATen[operator="mul"](%2, %2)
-#   %4 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu) = onnx::ATen[operator="add"](%3, %y)
-#   return (%4)
+# graph(%1 : Float(3, 4)
+#       %2 : Float(3, 4)) {
+#   %3 : Float(3, 4) = Relu(%1), uses = [%4.i0, %4.i1];
+#   %4 : UNKNOWN_TYPE = ATen[operator=mul](%3, %3), uses = [%5.i0];
+#   %5 : Float(3, 4) = ATen[operator=add](%4, %2), uses = [%0.i0];
+#   return (%5);
+# }
 
-graph = onnx.load(f.name)
+graph = onnx.load("output.onnx")
 
 a = np.random.randn(3, 4).astype(np.float32)
 b = np.random.randn(3, 4).astype(np.float32)
@@ -52,5 +50,5 @@ W = {graph.graph.input[0].name: a, graph.graph.input[1].name: b}
 c2_out = prepared_backend.run(W)[0]
 
 x = np.maximum(a, 0)
-r = x * x + b
+r = x*x + b
 np.testing.assert_array_almost_equal(r, c2_out)

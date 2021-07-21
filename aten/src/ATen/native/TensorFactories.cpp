@@ -350,9 +350,8 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
-  // never propagate Conjugate and Negative dispatch key
+  // never propagate Conjugate key
   result._set_conj(false);
-  result._set_neg(false);
   return result;
 }
 

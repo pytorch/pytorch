@@ -30,8 +30,14 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
         grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grads[0]));
       }
 
-      at::DeviceGuard device_guard(src_options.device());
-      grad_inputs[1] = grad->to(src_options);
+      at::DeviceGuard device_guard(src_device);
+      // TODO: What if !grad.is_cuda(), but src_device is CUDA?
+      // This code is kind of weirdly asymmetric.
+      const bool copy = (grad->is_cuda() && grad->device() != src_device);
+      grad_inputs[1] = grad->to(
+          src_options,
+          /*non_blocking=*/false,
+          /*copy=*/copy);
     }
   }
   return grad_inputs;

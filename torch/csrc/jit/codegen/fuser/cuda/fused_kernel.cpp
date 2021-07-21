@@ -91,12 +91,15 @@ FusedKernelCUDA::FusedKernelCUDA(
           has_random),
       device_(device) {
   // Initializes driver's API context (if necessary)
-  CUcontext pctx = nullptr;
+  // NOLINTNEXTLINE(modernize-use-nullptr)
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  CUcontext pctx = 0;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     std::unique_lock<std::mutex> cudaFreeMutexLock(
         *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
-    cudaFree(nullptr);
+    // NOLINTNEXTLINE(modernize-use-nullptr)
+    cudaFree(0);
   }
 
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work

@@ -935,7 +935,7 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 3
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
 
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
@@ -956,26 +956,23 @@ class _NnapiSerializer(object):
             in_oper.shape[end_dim + 1:]
         )
 
-        if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
-            raise Exception("Flattening flexible dims is not supported yet")
-        non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
-        if non_flattened_dims.count(0) > 1:
-            raise Exception("Only 1 dim can be flexible")
+        # TODO(axit): To add support for runtime
+        # if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+        #     raise Exception("Flattened dims can't be flexible")
+        # non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        # if non_flattened_dims.count(0) > 1:
+        #     raise Exception("Only 1 dim can be flexible")
+        # out_shape = tuple(
+        #     dim if dim != 0 else -1
+        #     for dim in out_shape
+        # )
 
         out_oper = in_oper._replace(shape=out_shape)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
-        for idx, dim in enumerate(out_shape):
-            if dim == 0:
-                self.forward_operand_shape(out_id, idx, in_id, in_oper.shape.index(0))
-
-        inputs_1 = tuple(
-            dim if dim != 0 else -1
-            for dim in out_shape
-        )
         inputs = [None] * 2
         inputs[0] = in_id
-        inputs[1] = self.add_immediate_int_vector(inputs_1)
+        inputs[1] = self.add_immediate_int_vector(out_shape)
 
         outputs = [None] * 1
         outputs[0] = out_id
@@ -1067,7 +1064,7 @@ class _NnapiSerializer(object):
         out_oper = None
         out_dim_size = 0
         for inp in tensors:
-            in_id, in_oper = self.get_tensor_operand_by_jitval(inp)
+            in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(inp)
             if out_oper is None:
                 out_shape = change_element(in_oper.shape, dim, -1)
                 out_oper = in_oper._replace(shape=out_shape)
@@ -1088,19 +1085,10 @@ class _NnapiSerializer(object):
         else:
             nnapi_dim = dim
 
-        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
-        for idx, d in enumerate(out_oper.shape):
-            if d == 0:
-                if idx == dim:
-                    shape = " + ".join(flex_name(ip_id, dim) for ip_id in in_ids)
-                    self.compute_operand_shape(out_id, idx, shape)
-                else:
-                    self.forward_operand_shape(out_id, idx, in_ids[0], idx)
-
         inputs = in_ids + [self.add_immediate_int_scalar(nnapi_dim)]
 
         outputs = [None] * 1
-        outputs[0] = out_id
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         self.add_operation(NNAPI_OperationCode.CONCATENATION, inputs, outputs)
 
@@ -1570,7 +1558,7 @@ class _NnapiSerializer(object):
         self.add_addmm_or_linear(node, False, jit_input, jit_weight, jit_bias)
 
     def add_addmm_or_linear(self, node, transpose_weight, jit_input, jit_weight, jit_bias):
-        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
         bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
 
         assert len(input_oper.shape) == 2
@@ -1587,10 +1575,6 @@ class _NnapiSerializer(object):
         weight_oper = self.operands[weight_id]
 
         out_shape = (input_oper.shape[0], weight_oper.shape[0])
-        out_id = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
-
-        if input_oper.shape[0] == 0:
-            self.forward_operand_shape(out_id, 0, input_id, 0)
 
         inputs = [None] * 4
         inputs[0] = input_id
@@ -1599,7 +1583,7 @@ class _NnapiSerializer(object):
         inputs[3] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
 
         outputs = [None] * 1
-        outputs[0] = out_id
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
 
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
@@ -1674,11 +1658,10 @@ class _NnapiSerializer(object):
 
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
-    def get_optional_bias(self, jit_bias, weight_tensor, transpose=False):
+    def get_optional_bias(self, jit_bias, weight_tensor):
         ctype, value = self.get_constant_value(jit_bias)
         if ctype.kind() == "NoneType":
-            bias_idx = 1 if transpose else 0
-            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[bias_idx], dtype=weight_tensor.dtype)
+            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[0], dtype=weight_tensor.dtype)
             bias_id = self.add_tensor_operand_for_weight(nnapi_bias_tensor)
             bias_oper = self.operands[bias_id]
             return bias_id, bias_oper
@@ -1736,10 +1719,10 @@ class _NnapiSerializer(object):
             _,
         ) = node.inputs()
 
+        # XXX check jit_transpose
 
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
-        _, transpose = self.get_constant_value(jit_transpose)
-        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor, transpose)
+        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
         args = self.get_conv_pool_args_2d_from_jit(
             weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups)
 
@@ -1751,7 +1734,7 @@ class _NnapiSerializer(object):
             weight_tensor,
             bias_id,
             args,
-            transpose,
+            False,  # transpose
             NNAPI_FuseCode.FUSED_NONE,
         )
 
@@ -1858,10 +1841,7 @@ class _NnapiSerializer(object):
         if args.group == 1:
             # Full convolution
             depthwise = False
-            if transpose:
-                weight_permutation = (1, 2, 3, 0)
-            else:
-                weight_permutation = (0, 2, 3, 1)
+            weight_permutation = (0, 2, 3, 1)
         elif args.group == in_c:
             # Depthwise convolution
             depthwise = True
@@ -1903,7 +1883,8 @@ class _NnapiSerializer(object):
             assert out_c == in_c
         else:
             # Full convolution
-            out_c, kern_h, kern_w, kern_d = weight_oper.shape
+            kern_nf, kern_h, kern_w, kern_d = weight_oper.shape
+            out_c = kern_nf
             assert kern_d == in_c
 
         assert out_c == bias_oper.shape[0]
@@ -1955,10 +1936,9 @@ class _NnapiSerializer(object):
         image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
         batch, in_ch, in_h, in_w = image_oper.shape
 
-        if batch == 0:
-            self.forward_operand_shape(out_id, 0, image_id, 0)
-        if in_ch == 0:
-            raise Exception("Input channels can't be flexible")
+        if batch == 0 or in_ch == 0:
+            raise Exception("Only H & W can be flexible")
+
         # H & W
         if transpose:
             if in_h == 0:

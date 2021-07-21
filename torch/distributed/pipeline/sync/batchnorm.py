@@ -29,7 +29,6 @@ class DeferredBatchNorm(_BatchNorm):
     sum_squares: Tensor
     running_mean: Tensor
     running_var: Tensor
-    num_batches_tracked: Tensor
 
     def __init__(
         self,
