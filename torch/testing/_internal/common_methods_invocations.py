@@ -2164,10 +2164,9 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
     S = 3
     L = 5
 
+    align_corners_options: Tuple[Any, ...] = (None,)
     if mode in ('linear', 'bilinear', 'bicubic', 'trilinear'):
         align_corners_options = (True, False, None)
-    else:
-        align_corners_options = (None,)
     ranks_for_mode = {
         'nearest': [1, 2, 3],
         'linear': [1],
@@ -6310,7 +6309,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT alias info internal asserts here
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -6321,7 +6320,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT alias info internal asserts here
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -6333,7 +6332,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT alias info internal asserts here
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -6345,7 +6344,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT alias info internal asserts here
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -6369,7 +6368,7 @@ op_db: List[OpInfo] = [
            skips=(
                # JIT alias info internal asserts here
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
-            ),
+           ),
            supports_out=False),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
