@@ -1,3 +1,5 @@
+# coding=utf-8
+
 from functools import wraps, partial
 from itertools import product, chain
 import itertools
@@ -1413,6 +1415,24 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         sample_inputs.append(SampleInput(args[0], args=args[1:], kwargs=dict(value=3.14), broadcasts_input=broadcasts_input))
 
     return tuple(sample_inputs)
+
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    # Three inputs: q, k, v that are all 2-D tensors (m × n).
+    # qₘ = kₘ = vₘ = m
+    # qₙ = kₙ = n
+    # vₙ is unconstrained
+    #
+    # Thus there are three shape variables that can vary
+    # independently: (m, n, vₙ). The Cartesian cube of an integral set
+    # generates test cases for (m, n, vₙ).
+    test_cases = itertools.product({1, S, M, L}, repeat=3)
+    sample_inputs = []
+    for m, n, vn in test_cases:
+        q = make_tensor((m, n), device=device, dtype=dtype, requires_grad=requires_grad)
+        k = make_tensor((m, n), device=device, dtype=dtype, requires_grad=requires_grad)
+        v = make_tensor((m, vn), device=device, dtype=dtype, requires_grad=requires_grad)
+        sample_inputs.append(SampleInput(q, args=(k, v)))
+    return sample_inputs
 
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
@@ -5035,6 +5055,11 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
            ),
            sample_inputs_func=sample_inputs_addbmm),
+    OpInfo('attn',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_attn),
     OpInfo('baddbmm',
            dtypes=floating_types_and(torch.half),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
