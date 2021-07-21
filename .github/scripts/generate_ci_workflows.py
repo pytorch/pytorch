@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import Set
 
 import jinja2
 from typing_extensions import Literal
@@ -27,6 +28,55 @@ LINUX_RUNNERS = {
 }
 
 
+# TODO: ------------- Remove the comment once fully rollout -------------------
+#       Rollout Strategy:
+#       1. Manual Phase
+#          step 1. Add 'ciflow/default' label to the PR
+#          step 2. Once there's an [unassigned] event from PR, it should rerun
+#          step 3. Remove 'ciflow/default' label
+#          step 4. Trigger the [unassigned] event again, it should not rerun
+#       2. Probot Phase 1 (manual on 1 workflow)
+#          step 1. Probot automatically add labels based on the context
+#          step 2. Manually let probot trigger [unassigned] event
+#       3. Probot Phase 2 (auto on 1 workflows)
+#          step 1. Modify the workflows so that they only listen on [unassigned] events
+#          step 2. Probot automatically adds labels automatically based on the context
+#          step 3. Probot automatically triggers [unassigned] event
+#       4. Probot Phase 3 (auto on many workflows)
+#          step 1. Enable it for all workflows
+#       -----------------------------------------------------------------------
+@dataclass
+class CIFlowConfig:
+    enabled: bool = False
+    labels: Set[str] = field(default_factory=set)
+    trigger_action: str = 'unassigned'
+    trigger_actor: str = 'pytorchbot'
+    root_job_name: str = 'ciflow_should_run'
+    root_job_condition: str = ''
+
+    def gen_root_job_condition(self) -> None:
+        # TODO: Make conditions strict
+        # At the beginning of the rollout of ciflow, we keep everything the same as what we have
+        # Once fully rollout, we can have strict constraints
+        # e.g. ADD      env.GITHUB_ACTOR == '{self.trigger_actor}
+        #      REMOVE   github.event.action !='{self.trigger_action}'
+        label_conditions = [f"github.event.action == '{self.trigger_action}'"] + \
+            [f"contains(github.event.pull_request.labels.*.name, '{label}')" for label in self.labels]
+        self.root_job_condition = f"(github.event_name != 'pull_request') || " \
+            f"(github.event.action !='{self.trigger_action}') || " \
+            f"({' && '.join(label_conditions)})"
+
+    def reset_root_job(self) -> None:
+        self.root_job_name = ''
+        self.root_job_condition = ''
+
+    def __post_init__(self) -> None:
+        if not self.enabled:
+            self.reset_root_job()
+            return
+        self.gen_root_job_condition()
+
+
 @dataclass
 class CIWorkflow:
     # Required fields
@@ -35,6 +85,7 @@ class CIWorkflow:
     test_runner_type: str
 
     # Optional fields
+    ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
@@ -56,7 +107,11 @@ class CIWorkflow:
     def __post_init__(self) -> None:
         if self.is_libtorch:
             self.exclude_test = True
-        self.only_build_on_pull_request = self.only_build_on_pull_request and self.on_pull_request
+        if not self.on_pull_request:
+            self.only_build_on_pull_request = False
+            self.ciflow_config.enabled = False
+            self.ciflow_config.reset_root_job()
+        self.assert_valid()
 
     def assert_valid(self) -> None:
         err_message = f"invalid test_runner_type for {self.arch}: {self.test_runner_type}"
@@ -70,7 +125,7 @@ class CIWorkflow:
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            output_file.write(workflow_template.render(**asdict(workflow)))
+            output_file.write(workflow_template.render(asdict(workflow)))
             output_file.write("\n")
         print(output_file_path)
 
@@ -236,6 +291,10 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         num_test_shards=2,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels=set(['ciflow/default']),
+        ),
     ),
     # CIWorkflow(
     #     arch="linux",
@@ -315,5 +374,4 @@ if __name__ == "__main__":
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
-            workflow.assert_valid()
             workflow.generate_workflow_file(workflow_template=template)

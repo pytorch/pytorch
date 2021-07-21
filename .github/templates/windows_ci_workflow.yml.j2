@@ -5,6 +5,9 @@ name: Windows CI (!{{ build_environment }})
 on:
 {%- if on_pull_request %}
   pull_request:
+{%- if ciflow_config.enabled %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+{%- endif %}
 {%- endif %}
 {%- if is_scheduled %}
   schedule:
@@ -40,11 +43,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: !{{ ciflow_config.root_job_condition }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+{%- endif %}
   build:
     runs-on: "windows.4xlarge"
     defaults:
       run:
         working-directory: pytorch-${{ github.run_id }}
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
@@ -108,6 +120,7 @@ jobs:
 {%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
 {%- endif %}
+    needs: [!{{ ciflow_config.root_job_name }}]
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
@@ -135,9 +148,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
-    needs:
-      - build
-      - generate-test-matrix
+    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -224,9 +235,7 @@ jobs:
 {%- else %}
     if: always()
 {%- endif %}
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
