@@ -326,18 +326,14 @@ Tensor run(
   xnn_status setup_status;
   if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
       (context.cached_output_ptr != output.data_ptr<float>()) ||
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       (padded_input_nhwc.size(Layout::Activation4D::batch) !=
-        context.batch_size) ||
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+        static_cast<int64_t>(context.batch_size)) ||
       (padded_input_nhwc.size(Layout::Activation4D::channels) !=
-        context.input_channels) ||
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+        static_cast<int64_t>(context.input_channels)) ||
       (padded_input_nhwc.size(Layout::Activation4D::height) !=
-        context.input_height) ||
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+        static_cast<int64_t>(context.input_height)) ||
       (padded_input_nhwc.size(Layout::Activation4D::width) !=
-        context.input_width)
+        static_cast<int64_t>(context.input_width))
       ) {
 
       if (context.transposed_) {
