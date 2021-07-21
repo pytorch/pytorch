@@ -1,5 +1,5 @@
 from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, _filter_name,
+    EventList, FunctionEvent, MemRecordsAcc, _filter_name,
     _filter_stack_entry, _rewrite_name
 )
 
@@ -13,6 +13,7 @@ import torch.cuda
 from torch.futures import Future
 from typing import Any, Dict, List, Tuple, Optional
 from warnings import warn
+
 
 try:
     # Available in Python >= 3.2
@@ -262,6 +263,7 @@ class profile(object):
 
         trace_start_us = result.trace_start_us()
         mem_records = [[evt, False] for evt in result.events() if evt.name() == "[memory]"]
+        mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
             return mem_record.nbytes() if \
@@ -288,16 +290,15 @@ class profile(object):
             cuda_memory_usage = 0
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
-                for mem_record in mem_records:
-                    if (mem_record[0].start_us() >= kineto_event.start_us() and
-                            mem_record[0].start_us() <= abs_end_us):
-                        mem_record[1] = True
-                        cpu_memory_usage += _cpu_memory_usage(mem_record[0])
-                        cuda_memory_usage += _cuda_memory_usage(mem_record[0])
+                for mem_record in mem_records_acc.in_interval(kineto_event.start_us(), abs_end_us):
+                    cpu_memory_usage += _cpu_memory_usage(mem_record[0].cpu_memory_usage())
+                    cuda_memory_usage += _cuda_memory_usage(mem_record[0].cuda_memory_usage())
+                    mem_record[1] = True
 
             is_async = kineto_event.is_async() or (
                 kineto_event.start_thread_id() != kineto_event.end_thread_id()
             )
+
             fe = FunctionEvent(
                 id=kineto_event.correlation_id(),
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
