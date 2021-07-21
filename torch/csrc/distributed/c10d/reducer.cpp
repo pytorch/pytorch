@@ -1380,7 +1380,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
     }
 
     if (!gradient_as_bucket_view_) {
-      copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
+      // Don't do copy when optimizer runs inplace as part of a comm. hook
+//      copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
     } else {
       const auto& bucket_view_out =
           replica.bucket_views_out[intra_bucket_index];
