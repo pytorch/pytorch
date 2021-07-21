@@ -15797,7 +15797,7 @@ class TestNNDeviceType(NNTestCase):
             module_affine.bias.zero_()
 
         data = torch.rand([3] * ndim, device=device, dtype=dtype, requires_grad=True)
-        grad = torch.rand([3] * ndim, device=device, dtype=dtype)
+        grad = torch.ones_like(data, requires_grad=False)
 
         # With weights all ones and bias all zeros
         res1 = module_affine(data)
