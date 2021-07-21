@@ -4,6 +4,7 @@ import os
 import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
+from copy import copy
 from typing import List, Dict, Union, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
@@ -174,7 +175,7 @@ def main() -> None:
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path)
 
-def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str] = None) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -188,6 +189,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     native_yaml_path = os.path.join(pytorch_root, 'aten/src/ATen/native/native_functions.yaml')
     parsed_yaml = parse_native_yaml(native_yaml_path)
     native_functions, backend_indices = parsed_yaml.native_functions, parsed_yaml.backend_indices
+    backend_indices = copy(backend_indices)
     grouped_native_functions = get_grouped_native_functions(native_functions)
     parsed_backend_yaml = parse_backend_yaml(source_yaml, grouped_native_functions, backend_indices)
     backend_key = parsed_backend_yaml.backend_key
