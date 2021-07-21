@@ -10378,6 +10378,12 @@ class TestNN(NNTestCase):
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
+    def test_bias(self):
+        m = nn.Bias(5)
+        inp = torch.randn(2, 3, 5)
+        expected = inp.add(m.bias)
+        self.assertEqual(expected, m(inp))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         input1 = torch.randn(4, 10, requires_grad=True)

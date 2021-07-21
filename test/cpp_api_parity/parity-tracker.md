@@ -96,6 +96,7 @@ torch::nn::TransformerDecoder|No|No
 torch::nn::TransformerEncoderLayer|Yes|No
 torch::nn::TransformerDecoderLayer|Yes|No
 torch::nn::Identity|Yes|No
+torch::nn::Bias|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
 torch::nn::Flatten|Yes|No

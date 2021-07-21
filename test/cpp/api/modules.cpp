@@ -1111,6 +1111,27 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST_F(ModulesTest, Bias) {
+  {
+    Bias bias(5);
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = bias(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 10);
+    ASSERT_EQ(y.size(1), 5);
+
+    ASSERT_EQ(bias->bias.grad().numel(), 2 * 5);
+
+    auto y_exp = torch::add(x, bias->bias);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(ModulesTest, Linear) {
   {
     Linear model(5, 2);
