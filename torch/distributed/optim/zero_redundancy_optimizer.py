@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
 import torch.distributed as dist
-from torch.distributed.algorithms.join import _JoinHook
+from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -118,16 +118,8 @@ class _ZeROJoinHook(_JoinHook):
         """
         self.zero.step()
 
-    @property
-    def device(self):
-        return self.zero._default_device
 
-    @property
-    def process_group(self):
-        return self.zero.process_group
-
-
-class ZeroRedundancyOptimizer(Optimizer):
+class ZeroRedundancyOptimizer(Optimizer, _Joinable):
     r"""
     This class wraps an arbitrary :class:`optim.Optimizer
     <torch.optim.Optimizer>` and shards its states across ranks in the group as
@@ -207,7 +199,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         # between the parent and child.
         self.initialized = False
 
-        super().__init__(self._all_params, defaults)
+        Optimizer.__init__(self, self._all_params, defaults)
+        _Joinable.__init__(self)
         # Now, all parameters are held in both `self._all_params` and
         # `self.param_groups`
 
@@ -367,7 +360,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             self._partition_parameters_cache = [list() for _ in range(self.world_size)]
             sizes = [0] * self.world_size
             for param_group in self.param_groups:
-                param_lists = [list() for _ in range(self.world_size)]
+                param_lists: List[List] = [list() for _ in range(self.world_size)]
                 # Sort the parameters by size (largest first)
                 params_sorted = sorted(param_group["params"], key=lambda t: t.numel(), reverse=True)
                 for param in params_sorted:
@@ -493,6 +486,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         .. note: Any extra parameters are passed to the base optimizer as-is.
         """
+        _Join.notify_join_context(self)
         # Check if the model trainability has changed
         is_trainable_mask = self._get_is_trainable_mask()
         if is_trainable_mask != self._is_trainable_mask:
@@ -522,14 +516,28 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         return loss
 
-    def _join_hook(self):
+    def _join_hook(self, **kwargs):
         r"""
         Returns the ZeRO join hook, which enables training on uneven inputs by
         shadowing the collective communications in the optimizer step.
 
         Gradients must be properly set before this hook is called.
+
+        Arguments:
+            kwargs (dict): a :class:`dict` containing any keyword arguments
+                to modify the behavior of the join hook at run time; all
+                :class:`_Joinable` instances sharing the same join context
+                manager are forwarded the same value for ``kwargs``.
         """
         return _ZeROJoinHook(self)
+
+    @property
+    def _join_device(self) -> torch.device:
+        return self._default_device
+
+    @property
+    def _join_process_group(self) -> Any:
+        return self.process_group
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
         r"""
@@ -752,7 +760,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         """
         assert self._optim_constructor is not None
         self._clear_cache()
-        self.optim = self._optim_constructor(self._partition_parameters()[self.rank], **self._optim_defaults)
+        self.optim: Optimizer = self._optim_constructor(self._partition_parameters()[self.rank], **self._optim_defaults)
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
     def _get_is_trainable_mask(self) -> List[bool]:
