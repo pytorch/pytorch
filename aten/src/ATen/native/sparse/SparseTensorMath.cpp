@@ -11,6 +11,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 
 #include <algorithm>
@@ -645,13 +646,15 @@ void add_dense_sparse_worker_cpu(Tensor& r, const Scalar& value, const SparseTen
   auto values_accessor = values.accessor<scalar_t, 1>();
 
   scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  auto r_strides = r.strides();
   scalar_t cast_value = value.to<scalar_t>();
+  const auto sparse_dim = sparse.sparse_dim();
 
   at::parallel_for(0, sparse._nnz(), 0, [&](int64_t start, int64_t end) {
     for (auto k: c10::irange(start, end)) {
       int64_t index = r.storage_offset();
-      for (auto d: c10::irange(sparse.sparse_dim())) {
-        index += r.stride(d) * indices_accessor[d][k];
+      for (auto d: c10::irange(sparse_dim)) {
+        index += r_strides[d] * indices_accessor[d][k];
       }
       r_ptr[index] += cast_value * values_accessor[k];
     }
@@ -1447,16 +1450,35 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
       auto input_indices_1D_accessor = input_indices_1D.accessor<int64_t, 1>();
 
-      // binary search to find matching indices
+      const auto copy_iter = TensorIteratorConfig()
+        .add_output(grad_input_values)
+        .add_input(grad_values_expand)
+        .resize_outputs(false)
+        .declare_static_shape(grad_values_expand.sizes(), /*squash_dims=*/0)
+        .build();
+      const auto device_type = kCPU;
 
+      const auto gIv_data = reinterpret_cast<char*>(grad_input_values.data_ptr());
+      const auto gOv_data = reinterpret_cast<char*>(grad_values_expand.data_ptr());
+      const auto gIv_stride = (grad_input_values.strides()[0] *
+                               grad_input_values.element_size());
+      const auto gOv_stride = (grad_values_expand.strides()[0] *
+                               grad_values_expand.element_size());
+
+      // binary search to find matching indices
       at::parallel_for(0, input_nnz, 0, [&](int64_t start, int64_t end) {
+        TensorIterator copy_iter_local(copy_iter);
+
         for (auto i: c10::irange(start, end)) {
           int64_t input_idx = input_indices_1D_accessor[i];
           int64_t l = 0, r = grad_nnz - 1;
           while (l <= r) {
             int64_t m = l + (r - l) / 2;
             if (grad_indices_1D_accessor[m] == input_idx) {
-              grad_input_values[i].copy_(grad_values_expand[m]);
+              // grad_input_values[i].copy_(grad_values_expand[m])
+              copy_iter_local.unsafe_replace_operand(0, gIv_data + i * gIv_stride);
+              copy_iter_local.unsafe_replace_operand(1, gOv_data + m * gOv_stride);
+              copy_stub(device_type, copy_iter_local, /*non_blocking=*/false);
               break;
             }
             if (grad_indices_1D_accessor[m] < input_idx) {
@@ -1644,14 +1666,6 @@ Tensor& bmm_out_sparse_cpu(const SparseTensor& self, const Tensor& mat2, Tensor&
   );
   return result;
 }
-
-// Tensor conj_physical_sparse(const Tensor& input) {
-//   if (!input.is_complex()) {
-//     return input;
-//   }
-//   Tensor result = at::native::empty_like(input);
-//   return conj_physical_out_sparse(input, result);
-// }
 
 Tensor& conj_physical_out_sparse(const Tensor& input, Tensor& result) {
   TORCH_INTERNAL_ASSERT(input.is_sparse());
