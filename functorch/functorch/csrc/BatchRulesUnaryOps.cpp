@@ -41,6 +41,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_(op ## _); \
   VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op>));
 
+  UNARY_POINTWISE(alias);
   UNARY_POINTWISE_ALL(abs);
   UNARY_POINTWISE_ALL(acos);
   UNARY_POINTWISE_ALL(acosh);

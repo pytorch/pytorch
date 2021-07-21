@@ -347,3 +347,30 @@ additional_op_db.extend([
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False),
 ])
+
+def sample_inputs_pad(self, device, dtype, requires_grad, mode='constant', value=None):
+    inp = make_tensor((2, 3, 4, 5), device=device, dtype=dtype,
+                      requires_grad=requires_grad, low=-1, high=1)
+    sample_inputs = []
+    for pad in [(1, 1, 1, 1), (1, 2, 3, 0)]:
+        args = (pad, mode) if value is None else (pad, mode, value)
+        sample_inputs.append(SampleInput(inp, args=args))
+    return sample_inputs
+
+for mode in ['constant', 'reflect', 'replicate', 'circular']:
+    additional_op_db.append(
+        OpInfo('nn.functional.pad',
+               aten_name="pad",
+               variant_test_name=mode,
+               supports_autograd=True,
+               sample_inputs_func=partial(sample_inputs_pad, mode=mode),
+               dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+               supports_out=False))
+additional_op_db.append(
+    OpInfo('nn.functional.pad',
+           aten_name="pad",
+           variant_test_name='constant_value',
+           supports_autograd=True,
+           sample_inputs_func=partial(sample_inputs_pad, mode='constant', value=100),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           supports_out=False))
