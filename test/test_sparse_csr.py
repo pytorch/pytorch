@@ -318,6 +318,23 @@ class TestSparseCSR(TestCase):
     @coalescedonoff
     @dtypes(torch.double)
     def test_coo_to_csr_convert(self, device, dtype, coalesced):
+        with self.assertRaisesRegex(RuntimeError, "Input needs to be 1-dimensional"):
+            torch._convert_coo_to_csr(
+                torch.randint(100, (5, 5), device=device),
+                size=100)
+
+        with self.assertRaisesRegex(RuntimeError, "Output needs to be 1-dimensional"):
+            torch._convert_coo_to_csr(
+                torch.randint(100, (5, ), device=device),
+                size=100,
+                out=torch.empty((5, 5), device=device, dtype=torch.long))
+
+        with self.assertRaisesRegex(RuntimeError, "Output needs 101 elements, but got 10 elements"):
+            torch._convert_coo_to_csr(
+                torch.randint(100, (5, ), device=device),
+                size=100,
+                out=torch.empty((10, ), device=device, dtype=torch.long))
+
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
