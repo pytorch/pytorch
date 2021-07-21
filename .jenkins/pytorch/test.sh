@@ -172,7 +172,9 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+    SITE_DIR=$(python -c "import site; print(site.getsitepackages()[0])")
+    TORCH_LIB_PATH="$SITE_DIR"/torch/lib
+    TORCH_BIN_PATH="$SITE_DIR"/torch/bin
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -180,13 +182,13 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* $TORCH_BIN_PATH
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* $TORCH_BIN_PATH
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* $TORCH_BIN_PATH
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* $TORCH_BIN_PATH
 
-    ls build/bin
-    aten/tools/run_tests.sh build/bin
+    ls $TORCH_BIN_PATH
+    aten/tools/run_tests.sh $TORCH_BIN_PATH
     assert_git_not_dirty
   fi
 }
