@@ -2477,6 +2477,32 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(generator())
 
+def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
+    y_shape_x_shape_and_kwargs = [
+        ((2, 3), (2, 3), {}),
+        ((2, 3), (2, 3), {'dim': 1}),
+        ((6,), (6,), {}),
+        ((6,), None, {}),
+        # When 'trapezoid' is called with an empty input, it does not produce an output with requires_grad
+        # See Issue #{61619}
+        # ((6,0), (6,0), {}),
+        ((2, 3), (1, 3), {}),
+        ((3, 3), (3, 3), {}),
+        ((3, 3), (3, 3), {'dim': -2}),
+        ((5,), None, {'dx': 2.0}),
+        ((2, 2), None, {'dx': 3.0})
+    ]
+    samples = []
+    for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
+        y_tensor = make_tensor(y_shape, device, dtype, low=None, high=None,
+                               requires_grad=requires_grad)
+        if x_shape is not None:
+            x_tensor = make_tensor(x_shape, device, dtype, low=None, high=None,
+                                   requires_grad=requires_grad)
+            samples.append(SampleInput(y_tensor, args=(x_tensor,), kwargs=kwarg))
+        else:
+            samples.append(SampleInput(y_tensor, kwargs=kwarg))
+    return samples
 
 def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_axes = [
@@ -6292,6 +6318,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo('topk',
            dtypes=all_types(),
+           dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_topk,
            skips=(
@@ -6598,7 +6625,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::mul'],),
     OpInfo('__rand__',
            op=torch.Tensor.__rand__,
-           dtypes=integral_types_and(),
+           dtypes=integral_types_and(torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
@@ -6606,7 +6633,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,),
     OpInfo('__ror__',
            op=torch.Tensor.__ror__,
-           dtypes=integral_types_and(),
+           dtypes=integral_types_and(torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
@@ -6614,7 +6641,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,),
     OpInfo('__rxor__',
            op=torch.Tensor.__rxor__,
-           dtypes=integral_types_and(),
+           dtypes=integral_types_and(torch.bool),
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            skips=(SkipInfo('TestCommon', 'test_variant_consistency_jit',),),
@@ -7054,6 +7081,34 @@ op_db: List[OpInfo] = [
                        #            ~~~~~~~~~~~~~~~ <--- HERE
                        SkipInfo('TestJit', 'test_variant_consistency_jit'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
+    # A separate OpInfo entry for special.polygamma is needed to reorder the arguments
+    # for the alias. See the discussion here: https://github.com/pytorch/pytorch/pull/59691#discussion_r650261939
+    UnaryUfuncInfo('special.polygamma',
+                   op=lambda x, n, **kwargs: torch.special.polygamma(n, x, **kwargs),
+                   variant_test_name='special_polygamma_n_0',
+                   ref=reference_polygamma if TEST_SCIPY else _NOTHING,
+                   dtypes=all_types_and(torch.bool),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                   safe_casts_outputs=True,
+                   supports_forward_ad=True,
+                   sample_inputs_func=sample_inputs_polygamma,
+                   skips=(
+                       # Probably related to the way the function is
+                       # scripted for JIT tests (or maybe not).
+                       # RuntimeError:
+                       # Arguments for call are not valid.
+                       # The following variants are available:
+                       #   aten::polygamma(int n, Tensor self) -> (Tensor):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       #   aten::polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> (Tensor(a!)):
+                       #   Expected a value of type 'Tensor' for argument 'self' but instead found type 'int'.
+                       # The original call is:
+                       #   File "<string>", line 3
+                       # def the_method(i0):
+                       #     return torch.polygamma(i0, 1)
+                       #            ~~~~~~~~~~~~~~~ <--- HERE
+                       SkipInfo('TestJit', 'test_variant_consistency_jit'),),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
@@ -7398,6 +7453,14 @@ op_db: List[OpInfo] = [
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                   supports_out=False,
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('trapz',  # TODO: in the future, 'trapz' should be made a proper alias of 'trapezoid'
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_trapezoid),
+    OpInfo('trapezoid',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_trapezoid),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
