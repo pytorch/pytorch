@@ -503,6 +503,7 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
         else:
             torch_root = Path(__file__).resolve().parent.parent.parent
             p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
+        torch.ops.load_library(str(p))
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
