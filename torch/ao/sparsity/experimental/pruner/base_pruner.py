@@ -7,7 +7,7 @@ from torch import nn
 from torch import Tensor
 from torch.nn.utils import parametrize
 
-from torch.nn.modules.container import ModuleDict
+from torch.nn.modules.container import ModuleDict, ModuleList
 
 from .parametrization import PruningParametrization, LinearActivationReconstruction, Conv2dActivationReconstruction
 
@@ -137,7 +137,7 @@ class BasePruner(abc.ABC):
                                                  unsafe=True)
 
             assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
-            assert isinstance(module.parametrizations.weight, Tensor)
+            assert isinstance(module.parametrizations.weight, ModuleList)
             if isinstance(module, nn.Linear):
                 self.activation_handles.append(module.register_forward_hook(
                     LinearActivationReconstruction(module.parametrizations.weight[0])
