@@ -479,14 +479,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     ncclDebugLevel = "UNSET";
   }
 
-  LOG(INFO) << "[Rank " << rank_
-            << "] ProcessGroupNCCL initialized with following options:"
-            << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
-            << "\nTIMEOUT(ms): " << options_->timeout.count()
-            << "\nUSE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << "\nNCCL_DEBUG: " << ncclDebugLevel;
+  VLOG(2) << "[Rank " << rank_
+          << "] ProcessGroupNCCL initialized with following options:"
+          << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+          << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
+          << "\nTIMEOUT(ms): " << options_->timeout.count()
+          << "\nUSE_HIGH_PRIORITY_STREAM: "
+          << options_->is_high_priority_stream
+          << "\nNCCL_DEBUG: " << ncclDebugLevel;
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -578,10 +578,10 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
-    LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
+    VLOG(2) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
     ncclCommWatchdogInternal();
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated normally";
+    VLOG(2) << "[Rank " << rank_
+            << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated with exception: "
