@@ -44,6 +44,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
   ${JIT_TEST_ROOT}/test_graph_executor.cpp
+  ${JIT_TEST_ROOT}/test_graph_iterator.cpp
   ${JIT_TEST_ROOT}/test_cs_debug_info_serialization.cpp
   ${JIT_TEST_ROOT}/test_inliner.cpp
   ${JIT_TEST_ROOT}/test_interface.cpp
