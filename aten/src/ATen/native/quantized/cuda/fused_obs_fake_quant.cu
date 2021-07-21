@@ -9,6 +9,7 @@ namespace native {
 
 namespace {
 __global__ void ChooseQuantizationParamsKernelImpl(
+    const int64_t* fake_quant_on,
     const float* x_min,
     const float* x_max,
     int32_t qmin,
@@ -18,7 +19,7 @@ __global__ void ChooseQuantizationParamsKernelImpl(
     float* scale,
     int32_t* zero_point) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < size) {
+  if (i < size && *fake_quant_on == 1) {
     float min_val = x_min[i];
     float max_val = x_max[i];
 
@@ -165,6 +166,7 @@ void _calculate_moving_average(
 
 void _calc_moving_avg_qparams_helper(
     const at::Tensor& x,
+    const at::Tensor fake_quant_on,
     at::Tensor& running_min,
     at::Tensor& running_max,
     float* scale_ptr,
@@ -175,13 +177,14 @@ void _calc_moving_avg_qparams_helper(
     const int64_t size,
     bool per_row_fq = false) {
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
-
+  int64_t* fake_quant_on_data = fake_quant_on.data_ptr<int64_t>();
   if (per_row_fq) {
     float* running_min_data = running_min.data_ptr<float>();
     float* running_max_data = running_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
     const uint64_t num_blocks = cuda::ATenCeilDiv<uint64_t>(size, num_threads);
     ChooseQuantizationParamsKernelImpl<<<num_blocks, num_threads, 0, cuda_stream>>>(
+        fake_quant_on_data,
         running_min_data,
         running_max_data,
         qmin,
@@ -195,6 +198,7 @@ void _calc_moving_avg_qparams_helper(
     float* running_min_data = running_min.data_ptr<float>();
     float* running_max_data = running_max.data_ptr<float>();
     ChooseQuantizationParamsKernelImpl<<<1, 1, 0, cuda_stream>>>(
+        fake_quant_on_data,
         running_min_data,
         running_max_data,
         qmin,
@@ -234,34 +238,35 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
       size,
       per_row_fq);
 
-  auto fake_quant = fake_quant_on.item().toInt();
 
-  if (fake_quant == 1) {
-    float* scale_ptr = scale.data_ptr<float>();
-    int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
+  float* scale_ptr = scale.data_ptr<float>();
+  int32_t* zp_ptr = zero_point.data_ptr<int32_t>();
 
-    _calc_moving_avg_qparams_helper(
-        x_contig,
-        running_min,
-        running_max,
-        scale_ptr,
-        zp_ptr,
-        qmin,
-        qmax,
-        symmetric_quant,
-        size,
-        per_row_fq);
+  _calc_moving_avg_qparams_helper(
+      x_contig,
+      fake_quant_on,
+      running_min,
+      running_max,
+      scale_ptr,
+      zp_ptr,
+      qmin,
+      qmax,
+      symmetric_quant,
+      size,
+      per_row_fq);
 
-    if (per_row_fq) {
+  if (per_row_fq) {
+    if (fake_quant_on.item().toInt()) {
       return at::fake_quantize_per_channel_affine_cachemask(
           x, scale, zero_point, 0, qmin, qmax);
     } else {
-      return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-          x, scale, zero_point, qmin, qmax);
+      auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
+      return std::make_tuple(x.clone(), mask);
     }
+  } else {
+    return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+        x, scale, zero_point, fake_quant_on, qmin, qmax);
   }
-  auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
-  return std::make_tuple(x.clone(), mask);
 }
 } // namespace native
 } // namespace at
