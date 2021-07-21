@@ -363,3 +363,15 @@ add_custom_target(
   DEPENDS ${TORCH_SRC_DIR}/version.py
 )
 add_dependencies(torch_python gen_torch_version)
+
+# Skip building this library under MacOS, since it is currently failing to build on Mac
+# Github issue #61930
+if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  # Add Android Nnapi delegate library
+  add_library(nnapi_backend SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+          )
+  # Pybind11 requires explicit linking of the torch_python library
+  target_link_libraries(nnapi_backend torch torch_python)
+endif()
