@@ -63,7 +63,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
-#if defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301 || defined(__CUDA_BF16_TYPES_EXIST__)
+#if (defined(__HIP_PLATFORM_HCC__) && TORCH_HIP_VERSION >= 301) || (defined(__CUDA_BF16_TYPES_EXIST__) && NCCL_VERSION_MIN(2, 10, 1))
     {at::kBFloat16, ncclBfloat16},
 #endif
 };

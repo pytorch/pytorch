@@ -8,6 +8,13 @@
 #include <cstddef>
 #include <vector>
 
+// Duplicate of macro in cuda_nccl_gpu.h
+#define NCCL_VERSION_MIN(major, minor, patch) \
+  ((NCCL_MAJOR > major) ||                    \
+   ((NCCL_MAJOR == major) &&                  \
+    ((NCCL_MINOR > minor) ||                  \
+     ((NCCL_MINOR == minor) && (NCCL_PATCH >= patch)))))
+
 namespace torch {
 namespace cuda {
 namespace nccl {
