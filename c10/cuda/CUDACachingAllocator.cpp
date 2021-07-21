@@ -1160,16 +1160,22 @@ class DeviceCachingAllocator {
     C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     total_allocated_memory -= block->size;
 
+    auto* pool = block->pool;
+    if (pool->owner_PrivatePool) {
+      // The cudaFreed block belonged to a CUDA graph's PrivatePool.
+      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->cudaMalloc_count > 0);
+      pool->owner_PrivatePool->cudaMalloc_count--;
+    }
+
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
-        true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
     update_stat_array(stats.segment, -1, stat_types);
     update_stat_array(stats.reserved_bytes, -block->size, stat_types);
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
 
-    block->pool->blocks.erase(block);
+    pool->blocks.erase(block);
     delete block;
   }
 
@@ -1181,12 +1187,6 @@ class DeviceCachingAllocator {
       ++it;
       if (!block->prev && !block->next) {
         release_block(block);
-
-        if (pool.owner_PrivatePool) {
-          // The cudaFreed block belonged to a CUDA graph's PrivatePool.
-          TORCH_INTERNAL_ASSERT(pool.owner_PrivatePool->cudaMalloc_count > 0);
-          pool.owner_PrivatePool->cudaMalloc_count--;
-        }
       }
     }
   }
