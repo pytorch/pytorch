@@ -1,7 +1,5 @@
 import torch
 
-from typing import Any
-
 def set_saved_tensors_default_hooks(pack_hook, unpack_hook):
     torch._C._autograd._register_default_hooks(pack_hook, unpack_hook)
 
