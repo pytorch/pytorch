@@ -1151,6 +1151,17 @@ class AnnotatedConvBnReLUModel(torch.nn.Module):
     def fuse_model(self):
         torch.quantization.fuse_modules(self, [['conv', 'bn', 'relu']], inplace=True)
 
+class TwoLayerConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        self.conv2 = torch.nn.Conv2d(5, 5, 1, bias=False).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
 class TwoLayerLinearModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -1230,6 +1241,44 @@ class LinearReluAddModel(torch.nn.Module):
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
         self.relu = torch.nn.ReLU()
         self.fc2 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = torch.add(x, 5)
+        x = self.fc2(x)
+        self.relu = torch.nn.ReLU()
+        return x
+
+class ConvReluModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc(x))
+        return x
+
+class ConvReluConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Conv2d(5, 5, 1).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return x
+
+class ConvReluAddModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Conv2d(3, 5, 3).to(dtype=torch.float)
+        self.relu = torch.nn.ReLU()
+        self.fc2 = torch.nn.Conv2d(5, 5, 1).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
@@ -1435,6 +1484,62 @@ class FunctionalLinearReluLinearModel(nn.Module):
         x = self.linear2(x)
         return x
 
+class FunctionalConv2d(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.weight = torch.rand(3, 3, 3, 3)
+        self.bias = torch.rand(3)
+        self.stride = (1, 1)
+        self.padding = (0, 0)
+        self.dilation = (1, 1)
+        self.groups = 1
+
+    def forward(self, x):
+        return F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+
+class SingleLayerFunctionalConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        return x
+
+class TwoLayerFunctionalConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = FunctionalConv2d()
+        self.conv2 = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        return x
+
+class FunctionalConvReluModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = F.relu(x)
+        return x
+
+class FunctionalConvReluConvModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = FunctionalConv2d()
+        self.relu = nn.ReLU()
+        self.conv2 = FunctionalConv2d()
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.conv2(x)
+        return x
+
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
@@ -1580,7 +1685,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.view(-1, 36).contiguous()
+        x = x.reshape(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)
