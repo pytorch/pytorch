@@ -418,6 +418,16 @@
   dispatch:
     CPU: add_relu_out
 
+- func: _add_relu.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_relu
+
+- func: _add_relu_.Scalar(Tensor(a!) self, Scalar other, Scalar alpha=1) -> Tensor(a!)
+  variants: function
+  dispatch:
+    CPU: add_relu_
+
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -6444,14 +6454,14 @@
 
 - func: index_select.out(Tensor self, int dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU: index_select_out_cpu_
-    CUDA: index_select_out_cuda
+    CPU, QuantizedCPU: index_select_out_cpu_
+    CUDA, QuantizedCUDA: index_select_out_cuda
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
   dispatch:
-    CPU: index_select_cpu_
-    CUDA: index_select_cuda
+    CPU, QuantizedCPU: index_select_cpu_
+    CUDA, QuantizedCUDA: index_select_cuda
     SparseCPU: index_select_sparse
     SparseCUDA: index_select_sparse
 
@@ -9752,6 +9762,36 @@
   dispatch:
     CompositeExplicitAutograd: special_xlog1py_out
 
+- func: special_xlogy(Tensor self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.self_scalar(Scalar self, Tensor other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.other_scalar(Tensor self, Scalar other) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.self_scalar_out(Scalar self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
+- func: special_xlogy.other_scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+
 - func: special_zeta(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   python_module: special
@@ -9846,6 +9886,13 @@
   variants: function
 
 - func: special_logit.out(Tensor self, float? eps=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+
+- func: special_polygamma(int n, Tensor self) -> Tensor
+  python_module: special
+  variants: function, method
+
+- func: special_polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
 
 - func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor

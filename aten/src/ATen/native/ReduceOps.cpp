@@ -155,6 +155,12 @@ TORCH_META_FUNC2(sum, dim_IntList)
 
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto self_dtype = self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(self_dtype) || at::isComplexType(self_dtype),
+      "Can only calculate the mean of floating types. Got ",
+      toString(self_dtype), " instead.");
+
   ScalarType dtype;
   const auto& result = maybe_get_output();
 
