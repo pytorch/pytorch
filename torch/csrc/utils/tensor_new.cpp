@@ -311,7 +311,6 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
             dispatch_key == c10::DispatchKey::CUDA ||
             dispatch_key == c10::DispatchKey::HIP ||
             dispatch_key == c10::DispatchKey::XLA ||
-            dispatch_key == c10::DispatchKey::Lazy ||
             dispatch_key == c10::DispatchKey::XPU,
         "new(): expected DispatchKey: ",
         c10::DispatchKey::CPU,
@@ -322,13 +321,11 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         " or ",
         c10::DispatchKey::XLA,
         " or ",
-        c10::DispatchKey::Lazy,
-        " or ",
         c10::DispatchKey::XPU,
         " but got: ",
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
-    // NOTE: no sparse XLA or Lazy
+    // NOTE: no sparse XLA
     TORCH_CHECK(
         dispatch_key == c10::DispatchKey::SparseCPU ||
             dispatch_key == c10::DispatchKey::SparseCUDA ||
