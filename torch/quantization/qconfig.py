@@ -147,7 +147,7 @@ def add_module_to_qconfig_obs_ctr(
         module: Union[nn.Module, None]) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
     the constructors stored in the qconfig will create observers on the same device that
-    'module' is on. This is intended to be used when the qconfigs are propagated to each 
+    'module' is on. This is intended to be used when the qconfigs are propagated to each
     module in order to avoid potential device alignment issues.
 
     Args:
