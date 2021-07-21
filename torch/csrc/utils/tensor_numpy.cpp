@@ -118,7 +118,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       " layout tensor to numpy.",
       "convert the tensor to a strided layout first.");
 
-  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+  TORCH_CHECK_TYPE(!(at::GradMode::is_enabled() && tensor.requires_grad()),
       "Can't call numpy() on Tensor that requires grad. "
       "Use tensor.detach().numpy() instead.");
 
