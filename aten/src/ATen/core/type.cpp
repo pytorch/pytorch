@@ -1098,7 +1098,7 @@ bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const
     if (this == rhs_p.get()) {
       return true;
     }
-    return *merge(*rhs_p) == *rhs_p;
+    return *merge(*rhs_p) == *this;
   }
   return Type::isSubtypeOfExt(rhs, why_not);
 }
