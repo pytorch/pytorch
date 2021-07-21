@@ -57,12 +57,11 @@ bool Function::append_operator(
   auto it = operator_cache.find(opname);
   if (it != operator_cache.end()) {
     // Operator (with fully qualified name) was found in the cache.
-    if (it->second.num_specified_args == num_specified_args) {
+    if (it->second.has_same_arg_num(num_specified_args)) {
       // And it has the same number (or unspecified number) or arguments.
       code_->operators_.emplace_back(it->second.fn);
       return true;
     }
-    std::cerr << "Found, but different args!\n";
     // Operator found, but different argument list or specified/unspecified.
     // Fall back to creating one from scratch.
   }
