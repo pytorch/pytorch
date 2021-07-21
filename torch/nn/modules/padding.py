@@ -37,8 +37,8 @@ class ConstantPad1d(_ConstantPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -188,8 +188,8 @@ class ReflectionPad1d(_ReflectionPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
@@ -341,8 +341,8 @@ class ReplicationPad1d(_ReplicationPadNd):
             (:math:`\text{padding\_left}`, :math:`\text{padding\_right}`)
 
     Shape:
-        - Input: :math:`(N, C, W_{in})`
-        - Output: :math:`(N, C, W_{out})` where
+        - Input: :math:`(C, W_{in})` or :math:`(N, C, W_{in})`.
+        - Output: :math:`(C, W_{out})` or :math:`(N, C, W_{out})`, where
 
           :math:`W_{out} = W_{in} + \text{padding\_left} + \text{padding\_right}`
 
