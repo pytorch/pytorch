@@ -116,3 +116,20 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             inputs[1].setType(inputs[1].type().with_sizes(size_2))
             torch._C._jit_pass_propagate_shapes_on_graph(t.graph)
             self.assertEqual(next(t.graph.outputs()).type().symbolic_sizes(), [4, 4, 8])
+
+    def test_size_and_sizes(self):
+        @torch.jit.script
+        def foo(x, y):
+            return x.view(y.size(0), 8, y.size(-1))
+
+        @torch.jit.script
+        def foo2(x, y):
+            return x.view(y.size())
+
+        for graph in [foo.graph, foo2.graph]:
+            inputs = list(graph.inputs())
+            sym1 = torch._C._new_symbolic_shape_symbol()
+
+            inputs[1].setType(inputs[1].type().with_sizes([5, 8, sym1]))
+            torch._C._jit_pass_propagate_shapes_on_graph(graph)
+            self.assertEqual(next(graph.outputs()).type().symbolic_sizes(), [5, 8, sym1])
