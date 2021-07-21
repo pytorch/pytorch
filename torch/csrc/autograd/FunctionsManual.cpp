@@ -3040,7 +3040,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
-// Helper for layernorm_double_backward
+// Helper for layer_norm_double_backward
 // sum across normalized_shape (inner dimensions)
 Tensor sum_inner(const Tensor& to_sum, int axis, bool keepdim=true) {
   auto r = to_sum;
@@ -3070,7 +3070,7 @@ Tensor unsqueeze_inner(const Tensor& src, int ndim) {
   return src_expanded;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
     const Tensor& ggI,
@@ -3178,111 +3178,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> layernorm_double_backward(
 
   Tensor gB;
   return std::tuple<Tensor, Tensor, Tensor, Tensor>{gI, gG, gB, ggO};
-}
-
-std::tuple<Tensor, Tensor, Tensor>
-infinitely_differentiable_native_layer_norm_backward(
-    const Tensor& dY,
-    const Tensor& dmean,
-    const Tensor& drstd,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
-    const c10::optional<Tensor>& gamma,
-    IntArrayRef normalized_shape,
-    double eps,
-    std::array<bool, 3> grad_input_mask) {
-
-  const int normalized_ndim = normalized_shape.size();
-  const auto input_shape = X.sizes();
-  const auto input_ndim = X.dim();
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  const int axis = input_ndim - normalized_ndim;
-  const int64_t M =
-      c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
-  const int64_t N =
-      c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
-
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-
-  const Tensor X_tensor = X.reshape({M, N});
-  const Tensor mean_tensor = mean.reshape({M, 1});
-  const Tensor rstd_tensor = rstd.reshape({M, 1});
-  const double s = 1.0 / static_cast<double>(N);
-
-  Tensor dY_tensor;
-  if (dY.defined()) {
-    dY_tensor = dY.reshape({M, N});
-  }
-
-  if (grad_input_mask[0]) {
-    Tensor gamma_tensor;
-    if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, N});
-    }
-    Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
-    Tensor var;
-    Tensor dvar;
-    if (drstd.defined()) {
-      var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
-      dvar = -0.5 * rstd_cube * drstd.view({M, 1});
-    }
-    Tensor ds;
-    Tensor db;
-    if (dY.defined()) {
-      ds = (isDefined(gamma) ? dY_tensor * X_tensor * gamma_tensor
-                            : dY_tensor * X_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      db = (isDefined(gamma) ? dY_tensor * gamma_tensor : dY_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      const Tensor& a = rstd_tensor;
-      const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
-      const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      if (isDefined(gamma)) {
-        dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
-      } else {
-        dX = a * dY_tensor + b * X_tensor + c;
-      }
-      if (dmean.defined() && drstd.defined()) {
-        dX += var_std_mean_backward(
-            {dvar, dmean.view({M, 1})},
-            X_tensor,
-            var,
-            mean_tensor,
-            /*dim=*/IntArrayRef{1},
-            /*correction=*/0,
-            /*keepdim=*/true,
-            /*is_std=*/false);
-      }
-      dX = dX.reshape_as(X);
-    } else if (dmean.defined() && drstd.defined()) {
-      dX = var_std_mean_backward(
-               {dvar, dmean.view({M, 1})},
-               X_tensor,
-               var,
-               mean_tensor,
-               /*dim=*/IntArrayRef{1},
-               /*correction=*/0,
-               /*keepdim=*/true,
-               /*is_std=*/false)
-               .reshape_as(X);
-    }
-  }
-
-  if (grad_input_mask[1] && dY.defined()) {
-    dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
-                 .sum(0)
-                 .reshape_as(toNonOptTensor(gamma));
-  }
-  if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
-  }
-
-  return std::make_tuple(dX, dgamma, dbeta);
 }
 
 std::tuple<Tensor, Tensor, Tensor>
