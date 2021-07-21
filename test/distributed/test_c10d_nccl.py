@@ -191,6 +191,7 @@ class ProcessGroupNCCLTest(TestCase):
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        self.num_gpus = torch.cuda.device_count()
 
     def tearDown(self):
         pass
@@ -584,10 +585,7 @@ class DistributedDataParallelTest(test_c10d_common.AbstractDistributedDataParall
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def _test_nccl_backend(
             self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -1889,7 +1887,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         super(NcclErrorHandlingTest, self).tearDown()
@@ -2093,10 +2091,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        if sys.platform == "win32":
-            self._spawn_processes()
-        else:
-            self._fork_processes()
+        self._spawn_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()

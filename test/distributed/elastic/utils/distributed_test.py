@@ -8,6 +8,7 @@
 import multiprocessing as mp
 import os
 import socket
+import sys
 import unittest
 from contextlib import closing
 

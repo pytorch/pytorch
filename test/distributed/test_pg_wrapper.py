@@ -21,7 +21,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TSAN,
-    sandcastle_skip_if,
 )
 
 
@@ -255,7 +254,6 @@ if not TEST_WITH_TSAN:
 
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
         def test_collective_hang(self):
             pg = self._create_wrapper_pg(timeout=2.0)
             self._test_collective_hang(pg)
@@ -266,7 +264,6 @@ if not TEST_WITH_TSAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
-        @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
         def test_collectives_op_mismatch_debug_mode(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collectives_op_mismatch(pg, use_cuda=True)
@@ -274,7 +271,6 @@ if not TEST_WITH_TSAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["OFF"])
-        @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
         def test_collectives_op_mismatch(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collectives_op_mismatch(pg, use_cuda=True)
@@ -282,7 +278,6 @@ if not TEST_WITH_TSAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["DETAIL"])
-        @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
         def test_collective_shape_mismatch_debug_mode(self):
             pg = self._create_wrapper_pg(with_new_group=True)
             self._test_collective_shape_mismatch(pg, use_cuda=True)
@@ -290,7 +285,6 @@ if not TEST_WITH_TSAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @with_dist_debug_levels(levels=["OFF"])
-        @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
         def test_collective_shape_mismatch(self):
             pg = self._create_wrapper_pg(with_new_group=False)
             self._test_collective_shape_mismatch(pg, use_cuda=True)

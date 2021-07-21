@@ -590,7 +590,7 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
-if (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
+if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS or IS_IN_CI):
     class StartProcessesNotCITest(StartProcessesTest):
         def test_wrap_bad(self):
             none = ""
