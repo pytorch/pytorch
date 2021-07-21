@@ -3451,7 +3451,6 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
-
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
