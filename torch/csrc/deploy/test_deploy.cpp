@@ -261,3 +261,29 @@ TEST(TorchpyTest, RegisterModule) {
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
   }
 }
+
+TEST(TorchpyTest, FxModule) {
+  size_t nthreads = 3;
+  torch::deploy::InterpreterManager manager(nthreads);
+  torch::deploy::Package p = manager.load_package(path(
+      "SIMPLE_LEAF_FX", "torch/csrc/deploy/example/generated/simple_leaf_fx"));
+  auto model = p.load_pickle("model", "model.pkl");
+
+  std::vector<at::Tensor> outputs;
+  auto input = torch::ones({5, 10});
+  for (const auto i : c10::irange(nthreads)) {
+    outputs.push_back(model({input.alias()}).toTensor());
+  }
+
+  // reference model
+  auto ref_model = torch::jit::load(path(
+      "SIMPLE_LEAF_JIT",
+      "torch/csrc/deploy/example/generated/simple_leaf_jit"));
+
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
+
+  // Compare all to reference
+  for (const auto i : c10::irange(nthreads)) {
+    ASSERT_TRUE(ref_output.equal(outputs[i]));
+  }
+}
