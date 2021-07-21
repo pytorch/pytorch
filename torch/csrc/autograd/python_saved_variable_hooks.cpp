@@ -46,16 +46,22 @@ namespace torch { namespace autograd {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  PyObject* PyDefaultSavedVariableHooks::pack_hook_ = nullptr;
+  std::atomic<PyObject*> PyDefaultSavedVariableHooks::pack_hook_(nullptr);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  PyObject* PyDefaultSavedVariableHooks::unpack_hook_ = nullptr;
+  std::atomic<PyObject*> PyDefaultSavedVariableHooks::unpack_hook_(nullptr);
 
   void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
+    PyObject* expected = nullptr;
     TORCH_CHECK(!pack_hook_ && !unpack_hook_,
         "Setting default hooks but they have already been set. "
         "Hint: only one pair of hooks is allowed at a time.");
-    pack_hook_ = pack_hook.release().ptr();
-    unpack_hook_ = unpack_hook.release().ptr();
+    PyObject* pack_hook_ptr = pack_hook.release().ptr();
+    PyObject* unpack_hook_ptr = unpack_hook.release().ptr();
+    if (!pack_hook_.compare_exchange_strong(expected, pack_hook_ptr) ||
+        !pack_hook_.compare_exchange_strong(expected, unpack_hook_ptr)) {
+      reset_hooks();
+      TORCH_INTERNAL_ASSERT(false); // race condition
+    }
   }
 
   void PyDefaultSavedVariableHooks::reset_hooks() {
@@ -73,8 +79,8 @@ namespace torch { namespace autograd {
     if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
-    py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
-    py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
+    py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_.load());
+    py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_.load());
     return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
   }
 
