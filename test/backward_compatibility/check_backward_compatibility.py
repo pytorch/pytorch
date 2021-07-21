@@ -99,6 +99,8 @@ allow_list = [
     ("aten::segment_reduce", datetime.date(2021, 8, 26)),
     ("aten::_segment_reduce_backward", datetime.date(2021, 8, 26)),
     ("aten::_view_as_real_physical", datetime.date(2021, 8, 1)),
+    ("aten::_bmm", datetime.date(2021, 8, 14)),
+    ("aten::_bmm.out", datetime.date(2021, 8, 14)),
 ]
 
 def allow_listed(schema, allow_list):
