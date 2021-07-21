@@ -137,7 +137,7 @@ public:
 
 private:
   c10::intrusive_ptr<Store> store;
-  void lazyInitUCX();
+  void lazyInitUCP();
   std::vector<ucp_ep_h> ucp_endpoints = {};
 };
 

@@ -129,9 +129,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     int dstRank,
     int tag) {
   TORCH_CHECK(false, "ProcessGroupUCC does not support send");
-  // check_tensor(tensors);
-  // auto& tensor = tensors[0];
-  // lazyInit();
+  check_tensor(tensors);
+  auto& tensor = tensors[0];
+  lazyInitUCP();
 
   // ucc_coll_req_h request = comm->send_nb(
   //     eps[dstRank],
@@ -147,9 +147,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     int srcRank,
     int tag) {
   TORCH_CHECK(false, "ProcessGroupUCC does not support recv");
-  // check_tensor(tensors);
-  // auto& tensor = tensors[0];
-  // lazyInit();
+  check_tensor(tensors);
+  auto& tensor = tensors[0];
+  lazyInitUCP();
 
   // ucp_tag_t ucp_tag;
   // ucc_coll_req_h request = comm->recv_nb(
