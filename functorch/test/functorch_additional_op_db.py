@@ -374,3 +374,53 @@ additional_op_db.append(
            sample_inputs_func=partial(sample_inputs_pad, mode='constant', value=100),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_out=False))
+
+def sample_inputs_normalize(self, device, dtype, requires_grad):
+    inp = make_tensor((2, 3, 4, 5), device=device, dtype=dtype,
+                      requires_grad=requires_grad, low=-1, high=1)
+    sample_inputs = []
+    for dim in (0, -1, 2):
+        for p in (1., 2.):
+            sample_inputs.append(SampleInput(inp, args=(p, dim)))
+    return sample_inputs
+
+additional_op_db.append(
+    OpInfo('nn.functional.normalize',
+           aten_name="normalize",
+           supports_autograd=True,
+           sample_inputs_func=sample_inputs_normalize,
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           supports_out=True))
+
+def sample_inputs_cross_entropy(self, device, dtype, requires_grad, reduction):
+    N = 2
+    C = 10
+    inp = make_tensor((2, C), device=device, dtype=dtype,
+                      requires_grad=requires_grad, low=-1, high=1)
+    target = torch.randint(0, C, (N,), device=device)
+    inp4d = make_tensor((2, C, 4, 5), device=device, dtype=dtype,
+                        requires_grad=requires_grad, low=-1, high=1)
+    target4d = torch.randint(0, C, (N, 4, 5), device=device)
+    weight = make_tensor((C,), device=device, dtype=dtype,
+                         low=0.5, high=1)
+    sample_inputs = [
+        SampleInput(inp, args=(target,), kwargs={'reduction': reduction}),
+        SampleInput(inp, args=(target,), kwargs={'ignore_index': 1, 'reduction': reduction}),
+        SampleInput(inp, args=(target, weight), kwargs={'ignore_index': 1, 'reduction': reduction}),
+    ]
+    sample_inputs.extend([
+        SampleInput(inp4d, args=(target4d,), kwargs={'reduction': reduction}),
+        SampleInput(inp4d, args=(target4d,), kwargs={'ignore_index': 1, 'reduction': reduction}),
+        SampleInput(inp4d, args=(target4d, weight), kwargs={'ignore_index': 1, 'reduction': reduction}),
+    ])
+    return sample_inputs
+
+for reduction in ['mean', 'sum', 'none']:
+    additional_op_db.append(
+        OpInfo('nn.functional.cross_entropy',
+               aten_name="cross_entropy",
+               variant_test_name=reduction,
+               supports_autograd=True,
+               sample_inputs_func=partial(sample_inputs_cross_entropy, reduction=reduction),
+               dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+               supports_out=True))
