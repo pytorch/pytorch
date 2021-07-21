@@ -499,25 +499,61 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             # note that relu should already be fused into conv module in the fusion step
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            if convert_custom_config_dict is None:
-                convert_custom_config_dict = {}
-            additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-            # 1. attach activation post process to module
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
-            self.conv.activation_post_process = output_activation_post_process
-            # 2. select quantized class
-            qconv_cls = get_static_quant_module_class(
-                type(self.conv), additional_static_quant_mapping, is_reference=is_reference)
-            quantized = qconv_cls.from_float(self.conv)
-            parent_name, name = _parent_name(self.conv_node.target)
-            setattr(modules[parent_name], name, quantized)
-            return quantized_graph.create_node(
-                'call_module',
-                self.conv_node.target,
-                (load_arg(quantized=torch.quint8)(self.conv_node.args[0]),),
-                {})
+            if is_reference:
+                # produce dequant - float_op - quant pattern
+                dtype = torch.float
+                if activation_int8_quantized:
+                    dtype = activation_dtype(qconfig)
+                activation = load_arg(quantized=dtype)(self.conv_node.args[0])
+                args = load_arg(quantized=torch.float)(self.conv_node.args)
+                if isinstance(
+                        self.conv,
+                        (torch.nn.qat.Conv2d,
+                         torch.nn.qat.Conv3d,
+                         torch.nn.intrinsic.qat.ConvBn2d,
+                         torch.nn.intrinsic.qat.ConvBnReLU2d,
+                         torch.nn.intrinsic.qat.ConvReLU2d,
+                         torch.nn.intrinsic.qat.ConvBn3d,
+                         torch.nn.intrinsic.qat.ConvBnReLU3d,
+                         torch.nn.intrinsic.qat.ConvReLU3d)):
+                    float_conv = self.conv.to_float()
+                    # change qat conv to conv
+                    parent_name, name = _parent_name(self.conv_node.target)
+                    setattr(modules[parent_name], name, float_conv)
+                op_out = quantized_graph.create_node(
+                    'call_module',
+                    self.conv_node.target,
+                    args, {})
+                if output_activation_post_process:
+                    op_out = quantize_node(
+                        op_out,
+                        output_activation_post_process,
+                        node,
+                        modules,
+                        quantized_graph,
+                        node_name_to_scope,
+                        is_input=False)
+                return op_out
+            else:
+                if convert_custom_config_dict is None:
+                    convert_custom_config_dict = {}
+                additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
+                # 1. attach activation post process to module
+                self.conv.activation_post_process = output_activation_post_process
+                # 2. select quantized class
+                qconv_cls = get_static_quant_module_class(
+                    type(self.conv), additional_static_quant_mapping, is_reference=is_reference)
+                quantized = qconv_cls.from_float(self.conv)
+                parent_name, name = _parent_name(self.conv_node.target)
+                setattr(modules[parent_name], name, quantized)
+                return quantized_graph.create_node(
+                    'call_module',
+                    self.conv_node.target,
+                    (load_arg(quantized=torch.quint8)(self.conv_node.args[0]),),
+                    {})
         else:  # call_function
             assert self.conv_node.op == "call_function"
             if is_reference:
