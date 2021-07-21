@@ -49,7 +49,7 @@ LINUX_RUNNERS = {
 class CIFlowConfig:
     enabled: bool = False
     labels: Set[str] = field(default_factory=set)
-    trigger_action_only: bool = False # only trigger the workflow on PR with trigger_action
+    trigger_action_only: bool = False
     trigger_action: str = 'unassigned'
     trigger_actor: str = 'pytorchbot'
     root_job_name: str = 'ciflow_should_run'
