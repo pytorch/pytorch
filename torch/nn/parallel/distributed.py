@@ -1111,29 +1111,29 @@ class DistributedDataParallel(Module, _Joinable):
 
         Example::
 
-          >>>  import torch
-          >>>  import torch.distributed as dist
-          >>>  import os
-          >>>  import torch.multiprocessing as mp
-          >>>  import torch.nn as nn
-          >>>  # On each spawned worker
-          >>>  def worker(rank):
-          >>>      dist.init_process_group("nccl", rank=rank, world_size=2)
-          >>>      torch.cuda.set_device(rank)
-          >>>      model = nn.Linear(1, 1, bias=False).to(rank)
-          >>>      model = torch.nn.parallel.DistributedDataParallel(
-          >>>          model, device_ids=[rank], output_device=rank
-          >>>      )
-          >>>      # Rank 1 gets one more input than rank 0.
-          >>>      inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
-          >>>      with model.join():
-          >>>          for _ in range(5):
-          >>>              for inp in inputs:
-          >>>                  loss = model(inp).sum()
-          >>>                  loss.backward()
-          >>>  # Without the join() API, the below synchronization will hang
-          >>>  # blocking for rank 1's allreduce to complete.
-          >>>  torch.cuda.synchronize(device=rank)
+            >>> import torch
+            >>> import torch.distributed as dist
+            >>> import os
+            >>> import torch.multiprocessing as mp
+            >>> import torch.nn as nn
+            >>> # On each spawned worker
+            >>> def worker(rank):
+            >>>     dist.init_process_group("nccl", rank=rank, world_size=2)
+            >>>     torch.cuda.set_device(rank)
+            >>>     model = nn.Linear(1, 1, bias=False).to(rank)
+            >>>     model = torch.nn.parallel.DistributedDataParallel(
+            >>>         model, device_ids=[rank], output_device=rank
+            >>>     )
+            >>>     # Rank 1 gets one more input than rank 0.
+            >>>     inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
+            >>>     with model.join():
+            >>>         for _ in range(5):
+            >>>             for inp in inputs:
+            >>>                 loss = model(inp).sum()
+            >>>                 loss.backward()
+            >>>     # Without the join() API, the below synchronization will hang
+            >>>     # blocking for rank 1's allreduce to complete.
+            >>>     torch.cuda.synchronize(device=rank)
         """
         return _Join(
             [self],
@@ -1156,6 +1156,18 @@ class DistributedDataParallel(Module, _Joinable):
                 to modify the behavior of the join hook at run time; all
                 :class:`_Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
+
+        The hook supports the following keyword arguments:
+            divide_by_initial_world_size (bool, optional):
+                If ``True``, then gradients are divided by the initial world
+                size that DDP was launched with.
+                If ``False``, then gradients are divided by the effective world
+                size (i.e. the number of non-joined processes), meaning that
+                the uneven inputs contribute more toward the global gradient.
+                Typically, this should be set to ``True`` if the degree of
+                unevenness is small but can be set to ``False`` in extreme
+                cases for possibly better results.
+                Default is ``True``.
         """
         divide_by_initial_world_size = kwargs.get("divide_by_initial_world_size", True)
         return _DDPJoinHook(
@@ -1189,21 +1201,23 @@ class DistributedDataParallel(Module, _Joinable):
 
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
-            hook (callable): Averages gradient tensors across workers and defined as:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future``:
+            hook (callable): Callable with the following signature:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
                              a Future indicating completion of any async work (ex: allreduce).
-                             If the hook doesn't perform any communication, it can also
-                             just return a completed Future. The Future should hold the
+                             If the hook doesn't perform any communication, it still
+                             must return a completed Future. The Future should hold the
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
+                             Note that the future's return type must be a list with a
+                             tensor as its single element.
 
                              We also provide an API called ``get_future`` to retrieve a
-                             Future associated with the completion of ``c10d.ProcessGroup.work``.
-                             ``get_future`` is currently supported for MPI and also supported for most
+                             Future associated with the completion of ``c10d.ProcessGroup.Work``.
+                             ``get_future`` is currently supported for NCCL and also supported for most
                              operations on GLOO and MPI, except for peer to peer operations (send/recv).
 
         .. warning ::
@@ -1215,8 +1229,8 @@ class DistributedDataParallel(Module, _Joinable):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a result that has the same
-            shape with the tensors inside grad bucket.
+            The Future object that hook returns should contain a list that contains a
+            single tensor that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             DDP communication hook does not support single-process multiple-device mode.
