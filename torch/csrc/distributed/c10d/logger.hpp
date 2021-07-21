@@ -25,6 +25,12 @@ class TORCH_API Logger {
   // TORCH_DISTRIBUTED_DEBUG.
   friend std::ostream& operator<<(std::ostream& output, const Logger& logger);
 
+  ~Logger() noexcept(false) {
+    // Log if DDP graph is static in Logger dtor instead of Reducer dtor since
+    // Logger is deleted before Reducer.
+    log_if_graph_static(reducer_->ddp_graph_static());
+  }
+
   // Set environment variables.
   void set_env_variables();
   // Set parameters stats.
@@ -66,6 +72,14 @@ class TORCH_API Logger {
     ddp_logging_data_->ints_map["has_error"] = 1;
     auto err = c10::str(ddp_error, args...);
     ddp_logging_data_->strs_map["error"] = err;
+    at::LogPyTorchDDPUsage(*ddp_logging_data_);
+  }
+
+  // When running without static graph, called when reducer is destroyed to log
+  // if graph was actually static and is a candidate for static graph
+  // optimization.
+  void log_if_graph_static(bool is_static) {
+    ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     at::LogPyTorchDDPUsage(*ddp_logging_data_);
   }
 

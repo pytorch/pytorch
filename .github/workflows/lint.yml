@@ -359,13 +359,14 @@ jobs:
             --paths torch/csrc/fx \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
-
       - name: Annotate output
         if: github.event_name == 'pull_request'
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           cd "${GITHUB_WORKSPACE}"
+          # Fix up relative paths since annotations need to happen from the repo root
+          sed --in-place 's/^\.\.\///g' clang-tidy-output.txt
           tools/linter/translate_annotations.py \
             --file=clang-tidy-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
