@@ -183,6 +183,22 @@ int64_t Function::getExceptionDebugHandle() const {
   return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
 }
 
+void Function::reserveInstructions(size_t num_instructions) {
+  code_->instructions_.reserve(num_instructions);
+}
+
+void Function::reserveDebugHandles(size_t num_debug_handles) {
+  code_->debug_handles_.reserve(num_debug_handles);
+}
+
+void Function::reserveConstants(size_t num_constats) {
+  code_->constants_.reserve(num_constats);
+}
+
+void Function::reserveOperators(size_t num_operators) {
+  code_->operators_.reserve(num_operators);
+}
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

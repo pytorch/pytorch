@@ -390,7 +390,15 @@ void BytecodeDeserializer::parseMethods(
       TORCH_CHECK(
           debug_handles_list.size() == ins_list.size(),
           "The numbers of instructions and debug handles strings do not match.");
+
+      // Reserve space to avoid resizing the internal vector since that
+      // is inefficient.
+      function->reserveDebugHandles(debug_handles_list.size());
     }
+
+    // Reserve space to avoid resizing the internal vector since that
+    // is inefficient.
+    function->reserveInstructions(ins_list.size());
 
     for (size_t i = 0; i < ins_list.size(); ++i) {
       auto ins_item = ins_list[i].toTuple()->elements();
@@ -409,6 +417,7 @@ void BytecodeDeserializer::parseMethods(
       }
     }
 
+    function->reserveOperators(ops_list.size());
     std::unordered_set<std::string> unsupported_op_names =
         load_and_find_unsupported_operator_names(
             ops_list, function.get(), model_version, operator_cache);
@@ -417,6 +426,7 @@ void BytecodeDeserializer::parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     }
 
+    function->reserveConstants(consts_list.size());
     for (const auto& constant : consts_list) {
       function->append_constant(constant);
     }

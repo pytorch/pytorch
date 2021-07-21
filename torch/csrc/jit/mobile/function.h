@@ -83,6 +83,26 @@ class Function {
   // If no corresponding debug handle is found then -1 is returned.
   int64_t getExceptionDebugHandle() const;
 
+  // Reserve space in code_->instructions_ for num_instructions
+  // instructions to avoid resizing the storage every time
+  // a new instruction is added to this function.
+  void reserveInstructions(size_t num_instructions);
+
+  // Reserve space in code_->debug_handles_ for num_debug_handles
+  // debug handles to avoid resizing the storage every time
+  // a new debug handle is added to this function.
+  void reserveDebugHandles(size_t num_debug_handles);
+
+  // Reserve space in code_->constants_ for num_constants
+  // constants to avoid resizing the storage every time
+  // a new constant is added to this function.
+  void reserveConstants(size_t num_constants);
+
+  // Reserve space in code_->operators_ for num_operators
+  // operator functions to avoid resizing the storage every time
+  // a new operator is added to this function.
+  void reserveOperators(size_t num_operators);
+
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
