@@ -28,7 +28,9 @@ from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
     retry_on_connect_failures,
-    IS_SANDCASTLE
+    IS_SANDCASTLE,
+    sandcastle_skip_if,
+    sandcastle_skip,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,19 +202,19 @@ def with_dist_debug_levels(levels):
 
 
 def requires_gloo():
-    return unittest.skipUnless(
-        c10d.is_gloo_available(),
+    return sandcastle_skip_if(
+        not c10d.is_gloo_available(),
         "c10d was not compiled with the Gloo backend",
     )
 
 
 def requires_nccl_version(version, msg):
     if not c10d.is_nccl_available():
-        return unittest.skip(
+        return sandcastle_skip(
             "c10d was not compiled with the NCCL backend",
         )
     else:
-        return unittest.skipIf(
+        return sandcastle_skip_if(
             torch.cuda.nccl.version() < version,
             "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
                 version,
@@ -221,30 +223,17 @@ def requires_nccl_version(version, msg):
 
 
 def requires_nccl():
-    return unittest.skipUnless(
-        c10d.is_nccl_available(),
+    return sandcastle_skip_if(
+        not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
 
 
 def requires_mpi():
-    return unittest.skipUnless(
-        c10d.is_mpi_available(),
+    return sandcastle_skip_if(
+        not c10d.is_mpi_available(),
         "c10d was not compiled with the MPI backend",
     )
-
-
-def skip_if_rocm_single_process(func):
-    """Skips a test for ROCm in a single process environment"""
-    func.skip_if_rocm = True
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not TEST_WITH_ROCM:
-            return func(*args, **kwargs)
-        raise unittest.SkipTest("Test skipped for ROCm")
-
-    return wrapper
 
 
 def skip_if_rocm(func):
@@ -261,7 +250,7 @@ def skip_if_rocm(func):
 
 
 def skip_if_win32():
-    return unittest.skipIf(
+    return sandcastle_skip_if(
         sys.platform == 'win32',
         "This unit test case is not supportted on Windows platform",
     )

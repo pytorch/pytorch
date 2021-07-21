@@ -31,7 +31,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
 )
-from torch.testing._internal.common_utils import IS_MACOS, load_tests
+from torch.testing._internal.common_utils import IS_MACOS, load_tests, sandcastle_skip_if
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
@@ -2879,7 +2879,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -3847,7 +3847,7 @@ class RpcTest(RpcAgentTestFixture):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -3878,7 +3878,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -3931,7 +3931,7 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
     )
