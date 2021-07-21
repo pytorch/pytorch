@@ -1034,6 +1034,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'generator'
             elif t.elem.name == BaseTy.Layout:
                 return 'layoutWithDefault' if has_default else 'layoutOptional'
+            elif t.elem.name == BaseTy.Device:
+                return 'deviceWithDefault' if has_default else 'deviceOptional'
 
         elif isinstance(t.elem, ListType):
             if str(t.elem.elem) == 'int':

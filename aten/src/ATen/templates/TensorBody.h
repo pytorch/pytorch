@@ -387,11 +387,23 @@ class TORCH_API Tensor {
   }
 
   // sets the conjugate bit of a tensor.
-  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are extremely sure
+  // NOTE: Conjugate bit is supposed to be a read-only field. Only change this, if you are sure
   // that's what you want. Changing this might lead to incorrect behavior since conjugation is
   // a lazy operation and we rely on this bit to determine if a conjugation needs to be materialized.
   inline void _set_conj(bool conjugate) const {
     impl_->_set_conj(conjugate);
+  }
+
+  inline bool is_neg() const {
+    return impl_->is_neg();
+  }
+
+  // sets the negative bit of a tensor.
+  // NOTE: Negative bit is supposed to be a read-only field. Only change this, if you are sure
+  // that's what you want. Changing this might lead to incorrect behavior since we rely on this
+  // bit to determine if a negation needs to be materialized.
+  inline void _set_neg(bool negative) const {
+    impl_->_set_neg(negative);
   }
 
   /// Returns a `Tensor`'s layout.
@@ -721,8 +733,11 @@ class TORCH_API Tensor {
   /// \param inputs Inputs w.r.t. which the gradient will be accumulated into
   ///     ``at::Tensor::grad``. All other Tensors will be ignored. If not
   ///     provided, the gradient is accumulated into all the leaf Tensors
-  ///     that were used to compute the current tensor. All the provided inputs
-  ///     must be leaf Tensors.
+  ///     that were used to compute the current tensor.
+  ///     When inputs are provided and a given input is not a leaf,
+  ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+  ///     It is an implementation detail on which the user should not rely.
+  ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
   void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen

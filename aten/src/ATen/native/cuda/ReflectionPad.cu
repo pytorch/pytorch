@@ -101,7 +101,7 @@ __global__ void reflection_pad1d_backward_out_kernel(
 
   if (output_x < output_w) {
     auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
-    gpuAtomicAdd(
+    gpuAtomicAddNoReturn(
       &grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
@@ -142,7 +142,7 @@ __global__ void reflection_pad2d_backward_out_kernel(
       pad_l, pad_t,
       output_xy, y_shift, z_shift, nplane);
 
-    gpuAtomicAdd(&grad_input[index_pair.first], grad_output[index_pair.second]);
+    gpuAtomicAddNoReturn(&grad_input[index_pair.first], grad_output[index_pair.second]);
   }
 }
 template <typename scalar_t, typename F>
@@ -249,7 +249,7 @@ __global__ void reflection_pad3d_backward_out_kernel(
           int64_t input_x) {
         auto value_to_add = grad_output[batch][plane][output_z][output_y][output_x];
         auto target = &grad_input[batch][plane][input_z][input_y][input_x];
-        gpuAtomicAdd(target, value_to_add);
+        gpuAtomicAddNoReturn(target, value_to_add);
       });
 }
 

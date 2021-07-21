@@ -32,7 +32,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
   TORCH_CHECK(
       other.is_contiguous(ref.suggest_memory_format()),
       "Float tensor should be contiguous "
-      "in same memory format as quantizd tensor");
+      "in same memory format as quantized tensor");
 }
 
 // ****************** HEY YOU! YES YOU! Read this! ********************
@@ -194,7 +194,7 @@ int64_t hsum(const uint8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2
@@ -230,7 +230,7 @@ int64_t hsum(const int8_t* A, int len) {
 
   alignas(64) int32_t temp[8];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2
@@ -265,7 +265,7 @@ int64_t hsum(const int32_t* A, int len) {
 
   alignas(64) int64_t temp[4];
   _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_epi64);
-  for (int k = 0; k < 4; ++k) {
+  for (const auto k : c10::irange(4)) {
     row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2
@@ -308,7 +308,7 @@ int64_t hsum_sq(const uint8_t* A, int len) {
       sum_v_epu32 = _mm256_add_epi32(sum_v_epu32, sq_hi_epu32);
     }
     _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epu32);
-    for (int k = 0; k < 8; ++k) {
+    for (const auto k : c10::irange(8)) {
       row_sum += temp[k];
     }
     sum_v_epu32 = _mm256_setzero_si256();
@@ -356,7 +356,7 @@ int64_t hsum_sq(const int8_t* A, int len) {
     }
     _mm256_store_si256(reinterpret_cast<__m256i*>(temp), sum_v_epi32);
 
-    for (int k = 0; k < 8; ++k) {
+    for (const auto k : c10::irange(8)) {
       row_sum += temp[k];
     }
     sum_v_epi32 = _mm256_setzero_si256();
@@ -388,7 +388,7 @@ float hsum_sq(const int32_t* A, int len) {
 
   alignas(64) float temp[8];
   _mm256_store_ps(temp, sum_ps);
-  for (int k = 0; k < 8; ++k) {
+  for (const auto k : c10::irange(8)) {
     row_sum += static_cast<float>(temp[k]);
   }
 #endif // CPU_CAPABILITY_AVX2
@@ -493,10 +493,10 @@ static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
            */
           auto dx_vec_vec = qx_vec.dequantize(i_scale_vec, i_zp_vec,
                                               i_scale_zp_neg_premul_vec);
-          for (auto& dx_vec: dx_vec_vec) {
+          for (auto & dx_vec : dx_vec_vec) {
             const auto multiplicand = Vec::blendv(negval_vec, one_vec,
                                                   dx_vec > zero_vec);
-            dx_vec = dx_vec * multiplicand;
+            dx_vec *= multiplicand;
           }
           return qVec::quantize(dx_vec_vec, o_scale, o_zp, o_inv_scale);
         });
@@ -537,7 +537,7 @@ void qsigmoid_kernel(
         [&](Vec value_qx) -> Vec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (auto& value: value_dx) {
+          for (auto & value : value_dx) {
             value = value.neg();
             value = value.exp();
             value = Vectorized<float>(1.0f) + value;
@@ -601,7 +601,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value_qx) -> qVec {
           auto value_dx = value_qx.dequantize(
               scale_vec, zero_point_vec, scale_neg_zp_premul_vec);
-          for (auto& value : value_dx) {
+          for (auto & value : value_dx) {
             value =
                 vec::minimum(
                     vec::maximum(value + kThreeVec, kZeroVec),
@@ -761,7 +761,7 @@ void qthreshold_kernel(
           // dequantize
           auto dx_vec = value_qx.dequantize(
             input_scale_vec, input_zero_point_vec, input_scale_neg_zp_premul_vec);
-          for (auto& value : dx_vec) {
+          for (auto & value : dx_vec) {
             // check if any elements are below threshold
             const auto cmp_to_threshold = value > threshold_vec;
             if (cmp_to_threshold.zero_mask()) {
@@ -807,7 +807,7 @@ void qhardswish_kernel(const Tensor& qx, Tensor& qy) {
         [&](qVec value) -> qVec {
           auto value_dx = value.dequantize(i_scale_vec, i_zero_point_vec,
                                            i_scale_neg_zp_premul_vec);
-          for (auto& value: value_dx) {
+          for (auto & value : value_dx) {
             value = value * vec::minimum(
               vec::maximum(value + three_vec, zero_vec),
               six_vec
@@ -934,11 +934,12 @@ void qelu_kernel(
         // dequantize
         auto dx_vec_vec = value_qx.dequantize(i_scale_vec, i_zero_point_vec,
                                             i_scale_neg_zp_premul_vec);
-        for (auto& value : dx_vec_vec) {
+        for (auto & value : dx_vec_vec) {
           // quickly check if any elements are below zero
           const auto cmp_to_zero = value > zero_vec;
 
           if (cmp_to_zero.zero_mask()) {
+
             Vec dx_vec_copy_neg_elu = value * one_vec;
             // calculate the negative part of ELU on the copy
             dx_vec_copy_neg_elu = dx_vec_copy_neg_elu * input_scale_coef_vec;
@@ -1924,7 +1925,7 @@ void qtopk_kernel(Tensor& values,
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       using underlying_t = typename scalar_t::underlying;
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
-      return topk_impl_loop<underlying_t>(
+      return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
           k, sizes[dim], largest, sorted, data, strides, n);
     };
@@ -2058,14 +2059,16 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_cachemask_kernel(
-    Tensor& output,
-    Tensor& mask,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
+void _fake_quantize_tensor_helper(
+  Tensor& output,
+  Tensor& mask,
+  const Tensor& input,
+  int fake_quant_on,
+  float sc,
+  int64_t z_point,
+  int64_t quant_min,
+  int64_t quant_max) {
+
   float inv_scale = 1.0f / sc;
 
   auto iter_combined = TensorIteratorConfig()
@@ -2083,12 +2086,39 @@ void fake_quantize_tensor_cachemask_kernel(
         scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
         const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        if (fake_quant_on) {
         *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
         *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+        } else {
+          *output_val = *input_val;
+          *mask_val = 1;
+        }
       }
     });
   });
+  }
 
+void fake_quantize_tensor_cachemask_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float sc,
+    int64_t z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, 1, sc, z_point, quant_min, quant_max);
+}
+
+void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& sc,
+    const Tensor& z_point,
+    const Tensor& fake_quant_enabled,
+    int64_t quant_min,
+    int64_t quant_max) {
+  _fake_quantize_tensor_helper(output, mask, input, fake_quant_enabled.item().toInt(), sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
@@ -2153,14 +2183,14 @@ void fake_quant_per_channel_cachemask_cpu(
   //   for simplicity, as we do not expect this to be a bottleneck.
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
     // write mask
-    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int64_t zero_point) -> bool {
+    cpu_kernel(iter_mask, [=](scalar_t self, float scale, int32_t zero_point) -> bool {
       float inv_scale = 1.0f / scale;
       const auto qval = static_cast<int64_t>(zero_point + std::nearbyint(self * inv_scale));
       return ((quant_min <= qval) && (qval <= quant_max));
     });
 
     // write fake_quant
-    cpu_kernel(iter, [=](scalar_t self, float scale, int64_t zero_point) -> scalar_t {
+    cpu_kernel(iter, [=](scalar_t self, float scale, int32_t zero_point) -> scalar_t {
       float inv_scale = 1.0f / scale;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       return (std::fmin(
@@ -3082,6 +3112,9 @@ REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub,
+                  &fake_quantize_tensor_cachemask_tensor_qparams_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);
