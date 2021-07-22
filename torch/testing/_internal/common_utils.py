@@ -1950,21 +1950,20 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         def _for_val(inp):
             val, default_val, extremal_val = _vals_dict[inp][0], _vals_dict[inp][1], _vals_dict[inp][2]
 
-            # val != val returns True if val is float('nan')
             if val != val or val == extremal_val:
                 raise ValueError(f"Found invalid value {val} for {inp}")
             elif val is None:
                 return default_val
             elif inp == 'low':
                 if (val == float('-inf') or val < ranges[0]):
-                    return ranges[0]
+                    return ranges[0]/2
                 elif val > ranges[1]:
                     raise ValueError(f"Expected low value < maximum limit for the dtype, but found {val} > {ranges[1]}")
                 else:
                     return val
             elif inp == 'high':
                 if (val == float('inf') or val > ranges[1]):
-                    return ranges[1]
+                    return ranges[1]/2
                 elif val < ranges[0]:
                     raise ValueError(f"Expected high value > minimum limit for the dtype, but found {val} < {ranges[0]}")
                 else:
@@ -2018,11 +2017,12 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
             replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
-        else:
-            assert dtype in complex_types()
+        elif dtype in complex_types():
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
             float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
+        else:
+            raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
         result[result == 0] = replace_with
 
     if dtype in floating_types_and(torch.half, torch.bfloat16) or\
