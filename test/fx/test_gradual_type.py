@@ -2,12 +2,14 @@ import unittest
 import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.unify_refinements import infer_symbolic_types
+from torch.fx.experimental.refinement_types import Equality
 from torch.fx.tensor_type import TensorType, Dyn, is_consistent, is_more_precise
 from torch.fx.annotate import annotate
-from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
+from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types, Refine
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
+
 
 try:
     from torchvision.models import resnet50
@@ -637,6 +639,23 @@ class TypeCheckerTest(unittest.TestCase):
                 assert n.type == TensorType((1, Dyn, 5, Dyn))
 
 
+    def test_type_check_flatten3(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((2, 3, 4, 5))):
+                return torch.flatten(x, start_dim=1, end_dim=3)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((2, 60))
+        r = Refine(symbolic_traced)
+        r.refine()
+        c = r.constraints
+        assert c == [Equality(2, 2)]
+
 
     def test_type_typechecl_maxpool2d_3dinput(self):
 
@@ -828,14 +847,13 @@ class TypeCheckerTest(unittest.TestCase):
         # apply shape inference to graph and check
         # that the batch size is equal across all layers
         infer_symbolic_types(gm_static)
-        infer_symbolic_types(gm_static)
 
 
-        batch_sizes = []
+        batch_sizes = set()
         for n in gm_static.graph.nodes:
             assert isinstance(n.type, TensorType)
-            batch_sizes.append(n.type.__args__[0])
-        assert (len(set(batch_sizes)) == 1)
+            batch_sizes.add(n.type.__args__[0])
+        assert (len(batch_sizes) == 1)
 
 
     @skipIfNoUnification
@@ -861,7 +879,6 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, traced)
         tc.type_check()
 
-        infer_symbolic_types(traced)
         infer_symbolic_types(traced)
 
 

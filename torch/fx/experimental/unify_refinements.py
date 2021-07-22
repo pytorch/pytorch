@@ -7,7 +7,7 @@ except ImportError:
     pass
 
 
-def infer_symbolic_types(traced):
+def infer_symbolic_types_single_pass(traced):
     """
     Generate constraints over types,
     solve constraints with unification,
@@ -18,6 +18,15 @@ def infer_symbolic_types(traced):
     mgu = unify_eq(r.constraints)
     substitute_all_types(traced.graph, mgu)
 
+def infer_symbolic_types(traced):
+    """
+    Calls our symbolic inferencer twice.
+    This is useful when one pass is not enough
+    to infer all the information such as the case
+    for braodcasting.
+    """
+    infer_symbolic_types_single_pass(traced)
+    infer_symbolic_types_single_pass(traced)
 
 def convert_eq(list_of_eq):
     """
