@@ -6,7 +6,7 @@ import torch.nn.quantized as nnq
 from pt import configs
 
 """
-Microbenchmarks for qConv operators.
+Microbenchmarks for qConv and qConvTranspose operators.
 """
 
 class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
@@ -37,6 +37,33 @@ class QConv1dBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.qconv1d(input)
 
+class QConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, IC, OC, kernel, stride, N, L, device):
+        G = 1
+        pad = 0
+        out_pad = 0
+        self.scale = 1.0 / 255
+        self.zero_point = 0
+        X = torch.randn(N, IC, L, dtype=torch.float32)
+        qX = torch.quantize_per_tensor(
+            X, scale=self.scale, zero_point=self.zero_point, dtype=torch.quint8
+        )
+        # Convert the tensor to NHWC format
+        W = torch.randn(IC, OC // G, kernel, dtype=torch.float32)
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
+
+        self.inputs = {
+            "input": qX
+        }
+
+        self.qconv_transpose1d = nnq.ConvTranspose1d(IC, OC, kernel, stride=stride, padding=pad, output_padding=out_pad, groups=G)
+        self.qconv_transpose1d.set_weight_bias(self.qW, None)
+        self.qconv_transpose1d.scale = torch.tensor(self.scale, dtype=torch.double)
+        self.qconv_transpose1d.zero_point = torch.tensor(self.zero_point, dtype=torch.int)
+        self.set_module_name("QConvTranspose1d")
+
+    def forward(self, input):
+        return self.qconv_transpose1d(input)
 
 class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     # def init(self, N, IC, OC, H, W, G, kernel, stride, pad):
@@ -66,9 +93,89 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input):
         return self.qconv2d(input)
 
+class QConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, IC, OC, kernel, stride, N, H, W, G, pad, device):
+
+        out_pad = 0
+        self.scale = 1.0 / 255
+        self.zero_point = 0
+        X = torch.randn(N, IC, H, W, dtype=torch.float32)
+        qX = torch.quantize_per_tensor(
+            X, scale=self.scale, zero_point=self.zero_point, dtype=torch.quint8
+        )
+        W = torch.randn(IC, OC // G, kernel, kernel, dtype=torch.float32)
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
+
+        self.inputs = {
+            "input": qX
+        }
+
+        self.qconv_transpose2d = nnq.ConvTranspose2d(IC, OC, kernel, stride=stride, padding=pad, output_padding=out_pad, groups=G)
+        self.qconv_transpose2d.set_weight_bias(self.qW, None)
+        self.qconv_transpose2d.scale = torch.tensor(self.scale, dtype=torch.double)
+        self.qconv_transpose2d.zero_point = torch.tensor(self.zero_point, dtype=torch.int)
+        self.set_module_name("QConvTranspose2d")
+
+    def forward(self, input):
+        return self.qconv_transpose2d(input)
+
+class QConv3dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, IC, OC, kernel, stride, N, D, H, W, G, pad, device):
+
+        self.scale = 1.0 / 255
+        self.zero_point = 0
+        X = torch.randn(N, IC, D, H, W, dtype=torch.float32)
+        qX = torch.quantize_per_tensor(
+            X, scale=self.scale, zero_point=self.zero_point, dtype=torch.quint8
+        )
+        W = torch.randn(OC, IC // G, kernel, kernel, kernel, dtype=torch.float32)
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
+
+        self.inputs = {
+            "input": qX
+        }
+
+        self.qconv3d = nnq.Conv3d(IC, OC, kernel, stride=stride, padding=pad, groups=G)
+        self.qconv3d.set_weight_bias(self.qW, None)
+        self.qconv3d.scale = torch.tensor(self.scale, dtype=torch.double)
+        self.qconv3d.zero_point = torch.tensor(self.zero_point, dtype=torch.int)
+        self.set_module_name("QConv3d")
+
+    def forward(self, input):
+        return self.qconv3d(input)
+
+class QConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, IC, OC, kernel, stride, N, D, H, W, G, pad, device):
+
+        out_pad = 0
+        self.scale = 1.0 / 255
+        self.zero_point = 0
+        X = torch.randn(N, IC, D, H, W, dtype=torch.float32)
+        qX = torch.quantize_per_tensor(
+            X, scale=self.scale, zero_point=self.zero_point, dtype=torch.quint8
+        )
+        W = torch.randn(IC, OC // G, kernel, kernel, kernel, dtype=torch.float32)
+        self.qW = torch.quantize_per_tensor(W, scale=self.scale, zero_point=0, dtype=torch.qint8)
+
+        self.inputs = {
+            "input": qX
+        }
+
+        self.qconv_transpose3d = nnq.ConvTranspose3d(IC, OC, kernel, stride=stride, padding=pad, output_padding=out_pad, groups=G)
+        self.qconv_transpose3d.set_weight_bias(self.qW, None)
+        self.qconv_transpose3d.scale = torch.tensor(self.scale, dtype=torch.double)
+        self.qconv_transpose3d.zero_point = torch.tensor(self.zero_point, dtype=torch.int)
+        self.set_module_name("QConvTranspose3d")
+
+    def forward(self, input):
+        return self.qconv_transpose3d(input)
 
 op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
 op_bench.generate_pt_test(configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConv2dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_3d_configs_short + configs.conv_3d_configs_long), QConv3dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConvTranspose1dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConvTranspose2dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_3d_configs_short + configs.conv_3d_configs_long), QConvTranspose3dBenchmark)
 
 
 if __name__ == "__main__":
