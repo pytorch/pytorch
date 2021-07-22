@@ -15,11 +15,6 @@ try:
 except ImportError:
     pass
 
-def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
-    """3x3 convolution with padding"""
-    return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                           padding=dilation, groups=groups, bias=False, dilation=dilation)
-
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
 
@@ -597,14 +592,13 @@ def flatten_refinement_rule(n: Node):
     if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
         l = len(n.type.__args__)
         start_dim = l if start_dim == -1 else start_dim
-        end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
+        end_dim = l + end_dim if end_dim < 0 else end_dim
 
         for t1, t2 in zip(n.type.__args__[0:start_dim], n.args[0].type.__args__[0:start_dim]):
             eq_const.append(Equality(t1, t2))
 
         for t1, t2 in zip(n.type.__args__[start_dim:end_dim], n.args[0].type.__args__[start_dim:end_dim]):
             eq_const.append(Equality(t1, t2))
-
     return eq_const
 
 class Refine:
