@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import torch
-import sys
 
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
@@ -10,10 +9,7 @@ from jit.test_recursive_script import TestRecursiveScript  # noqa: F401
 from jit.test_type_sharing import TestTypeSharing  # noqa: F401
 from jit.test_logging import TestLogging  # noqa: F401
 from jit.test_backends import TestBackends, TestBackendsWithCompiler  # noqa: F401
-# Cannot import test_nnapi on Apple devices
-# TODO: remove this when Android NNAPI preprocess is available for macOS
-if not sys.platform.startswith("darwin"):
-    from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
+from jit.test_backend_nnapi import TestNnapiBackend  # noqa: F401
 from jit.test_list_dict import TestList, TestDict, TestNamedTuple, TestScriptDict, TestScriptList  # noqa: F401
 from jit.test_async import TestAsync  # noqa: F401
 from jit.test_data_parallel import TestDataParallel  # noqa: F401
@@ -125,6 +121,7 @@ import random
 import re
 import shutil
 import string
+import sys
 import tempfile
 import types
 import typing

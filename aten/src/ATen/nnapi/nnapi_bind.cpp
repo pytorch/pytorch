@@ -204,19 +204,21 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 };
 
 #ifndef __APPLE__
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto register_NnapiCompilation = [](){
-  try {
-    return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")
-        .def(torch::jit::init<>())
-        .def("init", &NnapiCompilation::init)
-        .def("run", &NnapiCompilation::run)
-        ;
-  } catch (std::exception& exn) {
-    LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
-    throw;
-  }
-}();
+  #include "TargetConditionals.h"
+  #ifndef TARGET_OS_IPHONE
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+    static auto register_NnapiCompilation = [](){
+      try {
+        return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")
+            .def(torch::jit::init<>())
+            .def("init", &NnapiCompilation::init)
+            .def("run", &NnapiCompilation::run)
+            ;
+      } catch (std::exception& exn) {
+        LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
+        throw;
+      }
+    }();
 #endif
 
 } // namespace
