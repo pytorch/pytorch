@@ -137,7 +137,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  TORCH_CHECK(false, "ProcessGroupUCC does not support recv");
   check_tensor(tensors);
   auto& tensor = tensors[0];
   lazyInitUCP();
