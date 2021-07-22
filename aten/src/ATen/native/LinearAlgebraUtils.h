@@ -401,8 +401,10 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
   auto vt_strides = at::detail::defaultStrides(sizes);
-  u_strides[input.dim() - 1] = sizes[input.dim() - 2];
-  u_strides[input.dim() - 2] = 1;
+  if (!svd_use_cusolver) {
+    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
+    vt_strides[input.dim() - 2] = 1;
+  }
   Tensor VT_empty = compute_uv
       ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));

@@ -506,8 +506,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     auto n = self.size(-1);
     sizes[self.dim() - 1] = m;
     U_tmp = at::empty(sizes, U_working_copy.options());
-    sizes[self.dim() - 2] = some ? std::min(m, n) : n;
-    sizes[self.dim() - 1] = n;
+    sizes[self.dim() - 2] = n;
+    sizes[self.dim() - 1] = some ? std::min(m, n) : n;
     VT_tmp = at::empty(sizes, VT_working_copy.options());
   }
 
