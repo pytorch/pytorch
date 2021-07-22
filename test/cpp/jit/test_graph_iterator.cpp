@@ -92,6 +92,7 @@ graph(%a : Tensor):
       -> (%a)
     block1():
       -> (%b)
+  %e : int = prim::Constant[value=20]()
   return (%d)
 )IR";
     auto ordering = traverse_depth_first(graph_string);
@@ -99,7 +100,8 @@ graph(%a : Tensor):
       "%1 : int = prim::Constant[value=30]()",
       "%2 : int = prim::Constant[value=10]()",
       "%3 : bool = aten::Bool(%1)",
-      "%4 : int = prim::If(%3)"
+      "%4 : int = prim::If(%3)",
+      "%5 : int = prim::Constant[value=20]()"
     });
 }
 
@@ -168,11 +170,14 @@ graph(%a.1 : Tensor):
   %1 : bool = prim::Constant[value=1]()
   %2 : int = prim::Constant[value=10]()
   %3 : int = prim::Constant[value=1]()
-  %b : Tensor = prim::Loop(%2, %1, %a.1)
+  %4 : Tensor = prim::Loop(%2, %1, %a.1)
     block0(%i : int, %b.9 : Tensor):
-      %4 : Tensor = aten::add_(%b.9, %3, %3)
+      %5 : Tensor = aten::add_(%b.9, %3, %3)
+      -> (%1, %5)
+  %6 : Tensor = prim::Loop(%2, %1, %a.1)
+    block0(%i : int, %b.9 : Tensor):
       -> (%1, %4)
-  return (%b)
+  return (%6)
 )IR";
     auto ordering = traverse_depth_first(graph_string);
     assert_ordering(ordering, {
@@ -180,7 +185,8 @@ graph(%a.1 : Tensor):
         "%2 : int = prim::Constant[value=10]()",
         "%3 : int = prim::Constant[value=1]()",
         "%4 : Tensor = prim::Loop(%2, %1, %a.1)",
-        "%7 : Tensor = aten::add_(%b.9, %3, %3)"
+        "%7 : Tensor = aten::add_(%b.10, %3, %3)",
+        "%8 : Tensor = prim::Loop(%2, %1, %a.1)"
     });
 }
 
