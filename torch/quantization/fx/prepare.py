@@ -961,7 +961,11 @@ def insert_observers_for_model(
                             isinstance(qhandler, CopyNodeQuantizeHandler)
                         ) or isinstance(qhandler, BinaryOpQuantizeHandler) and qhandler.num_tensor_args == 1)
 
-                    if is_last_node_of_pattern:
+                    is_tensor_shape_op_node = \
+                        (qhandler is not None and (
+                            isinstance(qhandler, TensorShapeOpQuantizeHandler)))
+
+                    if is_last_node_of_pattern and not is_tensor_shape_op_node:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
