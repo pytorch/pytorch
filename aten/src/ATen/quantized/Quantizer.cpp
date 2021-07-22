@@ -218,15 +218,15 @@ Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
     std::function<void(void*)> deleter,
-    float scale,
-    int64_t zeroPoint,
+    const float scale,
+    const int64_t zeroPoint,
     const TensorOptions& options) {
   auto dtype = typeMetaToScalarType(options.dtype());
   TORCH_CHECK(
       isQIntType(dtype),
-      "from_blob_quantized_per_tensor_affine expects QInt dtypes");
+      "from_blob_quantized_per_tensor_affine expects QInt dtypes, got ", dtype);
 
-  std::size_t itemsize = options.dtype().itemsize();
+  const std::size_t itemsize = options.dtype().itemsize();
   std::size_t size = 1;
   for (std::int64_t s : sizes) {
     size *= static_cast<std::size_t>(s);
