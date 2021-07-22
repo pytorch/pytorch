@@ -3061,25 +3061,7 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
 
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  Tensor U, S, V;
-  std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
-
-  // If compute_uv==false svd_helper returns 0-sized matrices for U and V.
-  // For backwards compatibility we need to return appropriately sized matrices of zeros.
-  if (!compute_uv) {
-    auto sizes = self.sizes().vec();
-    auto m = self.size(-2);
-    auto n = self.size(-1);
-    sizes[self.dim() - 1] = some ? std::min(m, n) : m;
-    U.resize_(sizes);
-    U.zero_();
-    sizes[self.dim() - 2] = some ? std::min(m, n) : n;
-    sizes[self.dim() - 1] = n;
-    V.resize_(sizes);
-    V.zero_();
-  }
-
-  return std::make_tuple(U, S, V);
+  return at::_svd_helper(self, some, compute_uv);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
