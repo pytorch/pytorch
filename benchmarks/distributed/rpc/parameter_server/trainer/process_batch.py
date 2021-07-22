@@ -5,6 +5,7 @@ def process_dummy_batch(rank, batch, before):
     Args:
         rank (int): worker rank
         batch (list): training sample
+        before (bool): indicator to move batch GPU or CPU
     """
     if before:
         batch[0] = batch[0].cuda(rank)
