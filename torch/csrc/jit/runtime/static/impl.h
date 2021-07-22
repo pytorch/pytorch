@@ -86,6 +86,7 @@ class TORCH_API StaticModule {
 
   explicit StaticModule(
       const torch::jit::Module& m,
+      bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
   typedef enum {

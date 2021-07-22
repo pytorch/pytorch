@@ -489,6 +489,7 @@ void PrepareGraphForStaticModule(
 std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
@@ -496,10 +497,14 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  auto module = m.copy();
-  module.eval();
-
-  auto module_ptr = std::make_shared<Module>(freeze_module(module));
+  std::shared_ptr<Module> module_ptr;
+  if (!is_frozen) {
+    auto module = m.copy();
+    module.eval();
+    module_ptr = std::make_shared<Module>(freeze_module(module));
+  } else {
+    module_ptr = std::make_shared<Module>(m.copy());
+  }
 
   Method method = module_ptr->get_method("forward");
   auto graph = module_ptr->get_method("forward").graph();
@@ -527,8 +532,9 @@ StaticModule::StaticModule(
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>

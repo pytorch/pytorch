@@ -130,7 +130,7 @@ void testStaticRuntime(
 
   for (bool enable_out_variant : {true, false}) {
     torch::jit::StaticModule smodule(
-        module, {true, enable_out_variant, enable_out_variant});
+        module, false, {true, enable_out_variant, enable_out_variant});
     auto actual = smodule(args, {});
     smodule.runtime().check_for_memory_leak();
     // first run
@@ -867,7 +867,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               enable_out_variant,
               optimize_memory,
               optimize_graph_output_memory};
-          torch::jit::StaticModule smod(mod, opts);
+          torch::jit::StaticModule smod(mod, false, opts);
 
           for (int batch_size : {1, 8, 32}) {
             for (int i = 0; i < 2; ++i) {
