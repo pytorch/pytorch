@@ -28,6 +28,7 @@ concurrency:
 jobs:
   calculate-docker-image:
     runs-on: linux.2xlarge
+    needs: []
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -101,8 +102,7 @@ jobs:
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
+    needs: [calculate-docker-image, ]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-build-and-test
@@ -239,8 +239,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - build-and-test
+    needs: [build-and-test, ]
     runs-on: linux.2xlarge
     steps:
       - name: Checkout PyTorch
