@@ -395,9 +395,9 @@ test_benchmarks() {
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
     # TODO: Enable these for GHA once we have credentials for forked pull requests
     if [[ -z "${GITHUB_ACTIONS}" ]]; then
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     fi
     assert_git_not_dirty
   fi
