@@ -1159,6 +1159,7 @@
 
 - name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
+  result: auto_linear
 
 - name: round(Tensor self) -> Tensor
   self: zeros_like(grad)
