@@ -5914,22 +5914,38 @@ for shape in [(1,), ()]:
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_graph_save_on_cpu_cuda(self):
-        a = torch.randn(5, requires_grad=True, device="cuda")
+        def f(x):
+            a = x + 1
+            return a * a
+
+        # with grad
+        a = torch.ones(1, requires_grad=True, device="cuda")
+        y = f(a)
+        memory_with_grad = torch.cuda.memory_allocated()
+
+        del a
+        del y
+
+        # without grad
+        a = torch.ones(1, requires_grad=True, device="cuda")
+        with torch.no_grad():
+            y = f(a)
+        memory_without_grad = torch.cuda.memory_allocated()
+
+        self.assertGreater(memory_with_grad, memory_without_grad)
+
+        del a
+        del y
+
+        # with hooks
         try:
             torch.autograd.graph.set_save_on_cpu(True)
-            y = a * a
+            a = torch.ones(1, requires_grad=True, device="cuda")
+            y = f(a)
+            memory_with_hooks = torch.cuda.memory_allocated()
+            self.assertEqual(memory_with_hooks, memory_without_grad)
         finally:
             torch.autograd.graph.set_save_on_cpu(False)
-        self.assertTrue(y.is_cuda)
-        before = CudaMemoryLeakCheck.get_cuda_memory_usage()
-        self.assertTrue(y.grad_fn._saved_self.is_cuda)
-        after = CudaMemoryLeakCheck.get_cuda_memory_usage()
-        self.assertGreater(after, before)
-        self.assertEqual(a, y.grad_fn._saved_self)
-        self.assertEqual(a, y.grad_fn._saved_other)
-        y.sum().backward()
-        self.assertEqual(2 * a, a.grad)
-
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
