@@ -33,6 +33,8 @@ if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]];
   # TODO move this to dockerfile?
   sudo apt-get -qq update
   sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
+  wget https://www.openssl.org/source/openssl-1.1.1k.tar.gz
+  (cd openssl-1.1.1k.tar.gz && ./config && make -j32 && make install)
 fi
 
 echo "Python version:"
