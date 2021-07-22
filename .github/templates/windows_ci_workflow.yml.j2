@@ -52,6 +52,7 @@ jobs:
         run: echo running !{{ ciflow_config.root_job_name }}
 {%- endif %}
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:

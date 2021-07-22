@@ -62,7 +62,7 @@ std::pair<IValue, IValue> getFunctionTuple(
     const Function& func,
     BackendDebugInfoRecorder& debug_info_recorder,
     const std::basic_string<char>& qn,
-    TypeNameUniquer& uniquer) {
+    TypeNameUniquer& type_name_uniquer_) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -220,7 +220,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
     auto namedType = t->cast<c10::NamedType>();
     if (namedType && namedType->name()) {
-      return uniquer.getUniqueName(namedType).qualifiedName();
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
     }
     return c10::nullopt;
   };
@@ -289,21 +289,22 @@ void setstateTuple(
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& uniquer) {
+    TypeNameUniquer& type_name_uniquer_) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn = uniquer.getUniqueName(obj->type()).qualifiedName() + "." +
+    const auto qn =
+        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
         setstate.name();
     if (qn_cache.find(qn) != qn_cache.end()) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple =
-          getFunctionTuple(module, setstate, debug_info_recorder, qn, uniquer);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -317,7 +318,7 @@ void setstateTuple(
           qn_cache,
           debug_info_elements,
           debug_info_recorder,
-          uniquer);
+          type_name_uniquer_);
     }
   }
 }
@@ -402,7 +403,7 @@ void moduleMethodsTuple(
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
     BackendDebugInfoRecorder& debug_info_recorder,
-    TypeNameUniquer& uniquer) {
+    TypeNameUniquer& type_name_uniquer_) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -412,7 +413,7 @@ void moduleMethodsTuple(
       continue;
     }
     auto func_tuple = getFunctionTuple(
-        module, method.function(), debug_info_recorder, qn, uniquer);
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -426,7 +427,7 @@ void moduleMethodsTuple(
       qn_cache,
       debug_info_elements,
       debug_info_recorder,
-      uniquer);
+      type_name_uniquer_);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {

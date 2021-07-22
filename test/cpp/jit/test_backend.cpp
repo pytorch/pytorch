@@ -190,12 +190,10 @@ TEST(BackendTest, TestComposite) {
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
-TEST(BackendTest, TestCompositeWithSetStates) {
+Module getCompositeModuleWithSameNameSubModules() {
   // Two submodules with same module name but different forward and other
   // functions should be serialized and loaded correctly.
 
-  // This test checks the numerical value of the saved and loaded lite module
-  //  with that of a JIT module.
   c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
   c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
   fake_dict.insert("", "");
@@ -229,17 +227,37 @@ TEST(BackendTest, TestCompositeWithSetStates) {
       return y
   )");
 
+  return c;
+}
+
+TEST(BackendTest, TestCompositeWithSetStates) {
+  Module c = getCompositeModuleWithSameNameSubModules();
+
   std::vector<IValue> inputs;
   inputs.emplace_back(torch::ones({}));
   inputs.emplace_back(3.0 * torch::ones({}));
   inputs.emplace_back(3);
   auto res_jit = c.forward(inputs);
 
-  std::stringstream ss, ss_resave;
+  std::stringstream ss;
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
+TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
+  Module c = getCompositeModuleWithSameNameSubModules();
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::ones({}));
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(3);
+
+  std::stringstream ss, ss_resave;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
 
   // check if the methods names are always the same
   // by reloading the script module and saving it back as mobile
