@@ -366,6 +366,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           cd "${GITHUB_WORKSPACE}"
+          sed --in-place 's/^\.\.\///g' clang-tidy-output.txt
           tools/linter/translate_annotations.py \
             --file=clang-tidy-output.txt \
             --regex='^(?P<filename>.*?):(?P<lineNumber>\d+):(?P<columnNumber>\d+): (?P<errorDesc>.*?) \[(?P<errorCode>.*)\]' \
