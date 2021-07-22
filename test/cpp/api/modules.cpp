@@ -1124,7 +1124,7 @@ TEST_F(ModulesTest, Bias) {
     ASSERT_EQ(y.size(0), 10);
     ASSERT_EQ(y.size(1), 5);
 
-    ASSERT_EQ(bias->bias.grad().numel(), 2 * 5);
+    ASSERT_EQ(bias->bias.grad().numel(), 5);
 
     auto y_exp = torch::add(x, bias->bias);
     ASSERT_TRUE(torch::allclose(y, y_exp));
