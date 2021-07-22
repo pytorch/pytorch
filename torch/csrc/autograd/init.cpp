@@ -10,6 +10,8 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -263,6 +265,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   py::class_<DisableTorchDispatch>(_C_m, "_DisableTorchDispatch")
       .def(py::init<>());
 
+  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+    .def(py::init([]()->torch::autograd::SavedVariable {
+      TORCH_CHECK(false, "Trying to create a SavedTensor object from Python is forbidden.");
+    }))
+    .def("register_hooks", [](torch::autograd::SavedVariable &s, py::function &pack_hook, py::function &unpack_hook) {
+        // Because we use a py::object, pybind will increment the refcount of the hook functions for us
+        s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
+    });
+
   Py_RETURN_TRUE;
 }
 
@@ -425,7 +436,10 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   ParsedArgs<1> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
 
-  forward_ad::exit_dual_level(_r.toInt64(0));
+  auto idx = _r.toInt64(0);
+  // Make sure the given index is valid before casting it
+  TORCH_CHECK(idx >= 0, "Dual level must be a positive number.");
+  forward_ad::exit_dual_level(static_cast<uint64_t>(idx));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

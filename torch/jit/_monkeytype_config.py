@@ -1,18 +1,41 @@
 import inspect
 import typing
+import pathlib
 import torch
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
+from types import CodeType
 
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.db.base import CallTraceThunk, CallTraceStore, CallTraceStoreLogger  # type: ignore[import]
-    from monkeytype.config import default_code_filter  # type: ignore[import]
+    from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
+
+def get_optional_of_element_type(types: str):
+    """
+    Helper function to extracts the type of the element to be annotated to Optional
+    from the list of consolidated types and returns `Optional[element type]`.
+
+    TODO: To remove this check once Union support lands.
+    """
+    elements = types.split(",")
+    elem_type = elements[0] if 'NoneType' in elements[1] else elements[1]
+
+    # If the type is from typing module, then extract the element type
+    start = elem_type.find("[")
+    end = elem_type.rfind("]")
+    if start != -1 and end != -1:
+        return elem_type[:start + 1] + 'Optional[' + elem_type[start + 1: end] + ']]'
+
+    # Else return Optional[element type]
+    if elem_type == 'Tensor':
+        elem_type = 'torch.Tensor'
+    return 'Optional[' + elem_type + ']'
 
 def get_qualified_name(func):
     return func.__qualname__
@@ -82,7 +105,10 @@ if _IS_MONKEYTYPE_INSTALLED:
                         _all_type += _type.__name__ + ','
                 _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
 
-                if len(types) > 1:
+                if len(types) == 2 and 'NoneType' in _all_type:
+                    # TODO: To remove this check once Union suppport in TorchScript lands.
+                    all_args[arg] = {get_optional_of_element_type(_all_type)}
+                elif len(types) > 1:
                     all_args[arg] = {'Any'}
                 else:
                     all_args[arg] = {_all_type[:-1]}
@@ -107,7 +133,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             return self.s
 
         def code_filter(self) -> Optional[CodeFilter]:
-            return default_code_filter
+            return jit_code_filter
 else:
     # When MonkeyType is not installed, we provide dummy class definitions
     # for the below classes.
@@ -124,3 +150,22 @@ else:
             pass
 
     monkeytype_trace = None  # noqa: F811
+
+def jit_code_filter(code: CodeType) -> bool:
+    """
+    Custom CodeFilter for Torchscript to trace forward calls.
+    The custom CodeFilter is required while scripting a FX Traced forward calls.
+    FX Traced forward calls have `code.co_filename` start with '<' which is used
+    to exclude tracing of stdlib and site-packages in the default code filter.
+
+    Since we need all forward calls to be traced, this custom code filter
+    checks for code.co_name to be 'forward' and enables tracing for all such calls.
+    The code filter is similar to default code filter for monkeytype and
+    excludes tracing of stdlib and site-packages.
+    """
+    # Filter code without a source file and exclude this check for 'forward' calls.
+    if code.co_name != 'forward' and (not code.co_filename or code.co_filename[0] == '<'):
+        return False
+
+    filename = pathlib.Path(code.co_filename).resolve()
+    return not any(_startswith(filename, lib_path) for lib_path in LIB_PATHS)

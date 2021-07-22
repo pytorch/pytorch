@@ -247,23 +247,23 @@ class Module:
     training: bool
     _is_full_backward_hook: Optional[bool]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
-        self._parameters = OrderedDict()
-        self._buffers = OrderedDict()
-        self._non_persistent_buffers_set = set()
-        self._backward_hooks = OrderedDict()
+        self._parameters: Dict[str, Optional[Parameter]] = OrderedDict()
+        self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
+        self._non_persistent_buffers_set: Set[str] = set()
+        self._backward_hooks: Dict[int, Callable] = OrderedDict()
         self._is_full_backward_hook = None
-        self._forward_hooks = OrderedDict()
-        self._forward_pre_hooks = OrderedDict()
-        self._state_dict_hooks = OrderedDict()
-        self._load_state_dict_pre_hooks = OrderedDict()
-        self._modules = OrderedDict()
+        self._forward_hooks: Dict[int, Callable] = OrderedDict()
+        self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -525,7 +525,7 @@ class Module:
 
         buffer: torch.Tensor = getattr(mod, buffer_name)
 
-        if buffer not in mod._buffers.values():
+        if buffer_name not in mod._buffers:
             raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer
@@ -549,29 +549,32 @@ class Module:
                 return False
 
         for key, param in self._parameters.items():
-            if param is not None:
-                # Tensors stored in modules are graph leaves, and we don't want to
-                # track autograd history of `param_applied`, so we have to use
-                # `with torch.no_grad():`
-                with torch.no_grad():
-                    param_applied = fn(param)
-                should_use_set_data = compute_should_use_set_data(param, param_applied)
-                if should_use_set_data:
-                    param.data = param_applied
-                else:
-                    assert isinstance(param, Parameter)
-                    assert param.is_leaf
-                    self._parameters[key] = Parameter(param_applied, param.requires_grad)
+            if param is None:
+                continue
+            # Tensors stored in modules are graph leaves, and we don't want to
+            # track autograd history of `param_applied`, so we have to use
+            # `with torch.no_grad():`
+            with torch.no_grad():
+                param_applied = fn(param)
+            should_use_set_data = compute_should_use_set_data(param, param_applied)
+            if should_use_set_data:
+                param.data = param_applied
+                out_param = param
+            else:
+                assert isinstance(param, Parameter)
+                assert param.is_leaf
+                out_param = Parameter(param_applied, param.requires_grad)
+                self._parameters[key] = out_param
 
-                if param.grad is not None:
-                    with torch.no_grad():
-                        grad_applied = fn(param.grad)
-                    should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
-                    if should_use_set_data:
-                        param.grad.data = grad_applied
-                    else:
-                        assert param.grad.is_leaf
-                        self._parameters[key].grad = grad_applied.requires_grad_(param.grad.requires_grad)
+            if param.grad is not None:
+                with torch.no_grad():
+                    grad_applied = fn(param.grad)
+                should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
+                if should_use_set_data:
+                    out_param.grad.data = grad_applied
+                else:
+                    assert param.grad.is_leaf
+                    out_param.grad = grad_applied.requires_grad_(param.grad.requires_grad)
 
         for key, buf in self._buffers.items():
             if buf is not None:
@@ -768,7 +771,7 @@ class Module:
         .. function:: to(memory_format=torch.channels_last)
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
-        floating point or complex :attr:`dtype`s. In addition, this method will
+        floating point or complex :attr:`dtype`\ s. In addition, this method will
         only cast the floating point or complex parameters and buffers to :attr:`dtype`
         (if given). The integral parameters and buffers will be moved
         :attr:`device`, if that is given, but with dtypes unchanged. When
@@ -1059,9 +1062,7 @@ class Module:
         if self._backward_hooks or _global_backward_hooks:
             full_backward_hooks, non_full_backward_hooks = self._get_backward_hooks()
         if _global_forward_pre_hooks or self._forward_pre_hooks:
-            for hook in itertools.chain(
-                    _global_forward_pre_hooks.values(),
-                    self._forward_pre_hooks.values()):
+            for hook in (*_global_forward_pre_hooks.values(), *self._forward_pre_hooks.values()):
                 result = hook(self, input)
                 if result is not None:
                     if not isinstance(result, tuple):
@@ -1075,9 +1076,7 @@ class Module:
 
         result = forward_call(*input, **kwargs)
         if _global_forward_hooks or self._forward_hooks:
-            for hook in itertools.chain(
-                    _global_forward_hooks.values(),
-                    self._forward_hooks.values()):
+            for hook in (*_global_forward_hooks.values(), *self._forward_hooks.values()):
                 hook_result = hook(self, input, result)
                 if hook_result is not None:
                     result = hook_result
@@ -1375,6 +1374,11 @@ class Module:
             ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
                 * **missing_keys** is a list of str containing the missing keys
                 * **unexpected_keys** is a list of str containing the unexpected keys
+
+        Note:
+            If a parameter or buffer is registered as ``None`` and its corresponding key
+            exists in :attr:`state_dict`, :meth:`load_state_dict` will raise a
+            ``RuntimeError``.
         """
         missing_keys: List[str] = []
         unexpected_keys: List[str] = []

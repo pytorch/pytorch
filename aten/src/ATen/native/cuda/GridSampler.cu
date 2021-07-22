@@ -17,7 +17,7 @@ using at::native::detail::GridSamplerPadding;
 
 namespace {
   template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(1024)
+  C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_kernel(
       const index_t nthreads,
       TensorInfo<scalar_t, index_t> input,
@@ -122,6 +122,7 @@ namespace {
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
           scalar_t coefficients[4];
 
+          #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
             coefficients[i] = cubic_interp1d(
               get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -143,7 +144,7 @@ namespace {
   }
 
   template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(1024)
+  C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_kernel(
       const index_t nthreads,
       TensorInfo<scalar_t, index_t> input,
@@ -297,7 +298,7 @@ namespace {
 // including batch * channel offset (NC_offset).
 
   template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(1024)
+  C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_backward_kernel(
       const index_t nthreads,
       TensorInfo<scalar_t, index_t> grad_output,
@@ -458,7 +459,9 @@ namespace {
         for (index_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, NC_offset += gInp_sC, inp_ptr_NC+= inp_sC) {
           scalar_t gOut = *gOut_ptr_NCHW;
 
+          #pragma unroll 4
           for (index_t i = 0; i < 4; ++i) {
+            #pragma unroll 4
             for (index_t j = 0; j < 4; ++j) {
 
               // set input gradient. See Note [Passing pointer and offset to fastAtomicAdd].
@@ -487,7 +490,7 @@ namespace {
   }
 
   template <typename scalar_t, typename index_t>
-  C10_LAUNCH_BOUNDS_1(1024)
+  C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_3d_backward_kernel(
       const index_t nthreads,
       TensorInfo<scalar_t, index_t> grad_output,
@@ -721,7 +724,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_2d_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(input),
             getTensorInfo<scalar_t, int>(grid),
@@ -732,7 +735,7 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(input),
             getTensorInfo<scalar_t, int64_t>(grid),
@@ -762,7 +765,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_3d_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(input),
             getTensorInfo<scalar_t, int>(grid),
@@ -773,7 +776,7 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(input),
             getTensorInfo<scalar_t, int64_t>(grid),
@@ -807,7 +810,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_2d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(grad_output),
             getTensorInfo<scalar_t, int>(input),
@@ -821,7 +824,7 @@ grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_2d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(grad_output),
             getTensorInfo<scalar_t, int64_t>(input),
@@ -859,7 +862,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_3d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
             getTensorInfo<scalar_t, int>(grad_output),
             getTensorInfo<scalar_t, int>(input),
@@ -873,7 +876,7 @@ grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
         grid_sampler_3d_backward_kernel<scalar_t>
-          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+          <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
             getTensorInfo<scalar_t, int64_t>(grad_output),
             getTensorInfo<scalar_t, int64_t>(input),
