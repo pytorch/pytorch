@@ -376,19 +376,3 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
 
 def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-
-# 'dtype': (rtol, atol)
-_default_tolerances = {
-    'float64': (1e-5, 1e-8),  # NumPy default
-    'float32': (1e-4, 1e-5),  # This may need to be changed
-    'float16': (1e-3, 1e-3),  # This may need to be changed
-}
-
-
-def _get_default_tolerance(a, b=None) -> Tuple[float, float]:
-    if b is None:
-        dtype = str(a.dtype).split('.')[-1]  # e.g. "float32"
-        return _default_tolerances.get(dtype, (0, 0))
-    a_tol = _get_default_tolerance(a)
-    b_tol = _get_default_tolerance(b)
-    return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))

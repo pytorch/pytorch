@@ -51,8 +51,11 @@ def _get_default_rtol_and_atol(actual: torch.Tensor, expected: torch.Tensor) -> 
     return max(actual_rtol, expected_rtol), max(actual_atol, expected_atol)
 
 
-# TODO: include better migration instructions.
-@warn_deprecated("Use torch.testing.assert_close instead.")
+# TODO: include the deprecation as soon as torch.testing.assert_close is stable
+# @warn_deprecated(
+#     "Use torch.testing.assert_close instead. "
+#     "For detailed upgrade instructions see https://github.com/pytorch/pytorch/issues/61844."
+# )
 def assert_allclose(
     actual: Any,
     expected: Any,
