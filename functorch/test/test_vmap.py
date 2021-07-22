@@ -2877,6 +2877,7 @@ class TestVmapOperatorsOpInfo(TestCase):
             'resolve_conj',
             'resize_',
             'to_sparse',
+            'resolve_neg',
         }
         # Unsupported input types
         if op.name in op_skip:
