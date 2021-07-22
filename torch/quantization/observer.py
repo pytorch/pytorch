@@ -16,12 +16,11 @@ class _PartialWrapper(object):
         self.callable_args = {}
 
     def __call__(self, *args, **keywords):
-        # call each arg in callable_args and add them to keyword
-        # unless already there (so constructor can be overwritten)
+        # call each arg in callable_args and add them partial, then run with keywords
+        # skip if arg_name in keywords so its possible to overwrite
         for arg_name in self.callable_args:
             if arg_name not in keywords:
                 keywords = {**keywords, **{arg_name: self.callable_args[arg_name]()}}
-
         return self.p(*args, **keywords)
 
     def __repr__(self):
@@ -73,7 +72,7 @@ def _with_callable_args(cls_or_self, **kwargs):
         >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
         False
     """
-    r = _PartialWrapper(partial(cls_or_self, {}))
+    r = _PartialWrapper(partial(cls_or_self))
     return r.with_callable_args(**kwargs)
 
 

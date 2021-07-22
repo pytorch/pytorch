@@ -142,6 +142,7 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
 QConfigAny = Union[QConfig,
                    QConfigDynamic, None]
 
+
 def add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
         module: Union[nn.Module, None]) -> Any:
@@ -158,16 +159,7 @@ def add_module_to_qconfig_obs_ctr(
         qconfig: configured so that obs constructors set to construct on the same device as module
     """
 
-    if (module is None or qconfig is None):
-        return qconfig
-
-    # need to make sure observer can accept factory_kwargs as an argument
-    try:
-        qconfig.activation(factory_kwargs=None)
-        qconfig.weight(factory_kwargs=None)
-    except AttributeError:  # qconfig doesn't have activation or weight
-        return qconfig
-    except TypeError:  # activation or weight don't have factory_kwargs argument
+    if module is None or qconfig is None or qconfig._fields != ('activation', 'weight'):
         return qconfig
 
     def get_factory_kwargs_based_on_module_device():
@@ -177,8 +169,19 @@ def add_module_to_qconfig_obs_ctr(
         device = next(iter(devices)) if len(devices) > 0 else None
         return None if device is None else {'device': device}
 
-    activation = qconfig.activation.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
-    weight = qconfig.weight.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+    def configure_constructor_to_put_obs_on_module_device(original_constructor):
+        try:
+            # check if constructor can accept factory_kwargs
+            check = original_constructor.with_args(factory_kwargs=None)
+            check()
+            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+        except AttributeError:  # qconfig doesn't have activation or weight
+            return original_constructor
+        except TypeError:  # the class doesn't accept factory_kwargs argument
+            return original_constructor
+
+    activation = configure_constructor_to_put_obs_on_module_device(qconfig.activation)
+    weight = configure_constructor_to_put_obs_on_module_device(qconfig.weight)
 
     if isinstance(qconfig, QConfig):
         return QConfig(activation, weight)
