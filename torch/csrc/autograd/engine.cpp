@@ -577,6 +577,12 @@ void GraphTask::exec_post_processing() {
     //  2. The callback's results can safely be used on (user-facing) caller_current_streams
     //     after backward().
     c10::MultiStreamGuard g(caller_current_streams_filtered);
+
+    // Set the ThreadLocalState before calling the function.
+    // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+    // always saves ThreadLocalState without grad_mode.
+    at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
     // NOLINTNEXTLINE(modernize-loop-convert)
