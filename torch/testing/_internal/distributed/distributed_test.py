@@ -7095,8 +7095,10 @@ class DistributedTest:
             # certain parameters.
             self._test_ddp_multiple_nested_unused_params_error(ignore_sparse=True)
 
-        @sandcastle_skip_if(BACKEND != 'nccl' and BACKEND != 'gloo',
-                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @sandcastle_skip_if(
+            BACKEND != 'nccl' and BACKEND != 'gloo',
+            "Only Nccl & Gloo backend support DistributedDataParallel"
+        )
         @skip_if_lt_x_gpu(2)
         def test_ddp_inference(self):
             # tests that DDP module can be run on a single node with no_grad
@@ -7139,8 +7141,10 @@ class DistributedTest:
             self._barrier(timeout=30)
 
 
-        @sandcastle_skip_if(BACKEND != 'nccl' and BACKEND != 'gloo',
-                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @sandcastle_skip_if(
+            BACKEND != 'nccl' and BACKEND != 'gloo',
+            "Only Nccl & Gloo backend support DistributedDataParallel"
+        )
         @skip_if_lt_x_gpu(2)
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank

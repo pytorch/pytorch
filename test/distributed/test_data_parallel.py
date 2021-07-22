@@ -1,6 +1,5 @@
 import contextlib
 import io
-import unittest
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
