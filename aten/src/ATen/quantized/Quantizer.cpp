@@ -260,6 +260,13 @@ Tensor from_blob_quantized_per_channel_affine(
     const int64_t axis,
     const TensorOptions& options) {
   checkPerChannelParamDims(scales, zero_points);
+  int64_t channel = sizes[axis];
+  TORCH_CHECK(
+      channel == int64_t(scales.numel()),
+      "length of scales must equal to channel, expected ", channel, " got, ", scales.numel());
+  TORCH_CHECK(
+      channel == int64_t(zero_points.numel()),
+      "length of zero_points must equal to channel, expected ", channel, " got, ", zero_points.numel());
 
   auto dtype = typeMetaToScalarType(options.dtype());
   TORCH_CHECK(
