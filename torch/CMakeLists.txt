@@ -297,6 +297,13 @@ if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
+if(USE_IWYU)
+    message(STATUS "Using IWYU @ ${USE_IWYU} on torch_python")
+    set_property(
+            TARGET torch_python
+            PROPERTY CXX_INCLUDE_WHAT_YOU_USE ${USE_IWYU}
+    )
+endif()
 add_dependencies(torch_python torch_python_stubs)
 
 # Required workaround for generated sources

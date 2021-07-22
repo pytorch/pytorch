@@ -28,6 +28,9 @@
 #   USE_CUDNN=0
 #     disables the cuDNN build
 #
+#   USE_IWYU=0
+#     path to include-what-you-use
+
 #   USE_FBGEMM=0
 #     disables the FBGEMM build
 #
@@ -303,9 +306,9 @@ cmake = CMake()
 def get_submodule_folders():
     git_modules_path = os.path.join(cwd, ".gitmodules")
     default_modules_path = [os.path.join(third_party_path, name) for name in [
-                            "gloo", "cpuinfo", "tbb", "onnx",
-                            "foxi", "QNNPACK", "fbgemm"
-                            ]]
+        "gloo", "cpuinfo", "tbb", "onnx",
+        "foxi", "QNNPACK", "fbgemm"
+    ]]
     if not os.path.exists(git_modules_path):
         return default_modules_path
     with open(git_modules_path) as f:
@@ -1050,20 +1053,20 @@ if __name__ == '__main__':
         python_requires='>={}'.format(python_min_version_str),
         # PyPI package information.
         classifiers=[
-            'Development Status :: 5 - Production/Stable',
-            'Intended Audience :: Developers',
-            'Intended Audience :: Education',
-            'Intended Audience :: Science/Research',
-            'License :: OSI Approved :: BSD License',
-            'Topic :: Scientific/Engineering',
-            'Topic :: Scientific/Engineering :: Mathematics',
-            'Topic :: Scientific/Engineering :: Artificial Intelligence',
-            'Topic :: Software Development',
-            'Topic :: Software Development :: Libraries',
-            'Topic :: Software Development :: Libraries :: Python Modules',
-            'Programming Language :: C++',
-            'Programming Language :: Python :: 3',
-        ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
+                        'Development Status :: 5 - Production/Stable',
+                        'Intended Audience :: Developers',
+                        'Intended Audience :: Education',
+                        'Intended Audience :: Science/Research',
+                        'License :: OSI Approved :: BSD License',
+                        'Topic :: Scientific/Engineering',
+                        'Topic :: Scientific/Engineering :: Mathematics',
+                        'Topic :: Scientific/Engineering :: Artificial Intelligence',
+                        'Topic :: Software Development',
+                        'Topic :: Software Development :: Libraries',
+                        'Topic :: Software Development :: Libraries :: Python Modules',
+                        'Programming Language :: C++',
+                        'Programming Language :: Python :: 3',
+                    ] + ['Programming Language :: Python :: 3.{}'.format(i) for i in range(python_min_version[1], version_range_max)],
         license='BSD-3',
         keywords='pytorch machine learning',
     )
