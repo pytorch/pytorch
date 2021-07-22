@@ -289,25 +289,21 @@ class ParameterProxy(Proxy):
     def shape(self):
         return self.param.shape
 
-    @property
     def size(self):
-        return self.param.size
+        return self.param.size()
 
-    @property
     def dim(self):
-        return self.param.dim
+        return self.param.dim()
 
     @property
     def ndim(self):
         return self.param.ndim
 
-    @property
     def numel(self):
-        return self.param.numel
+        return self.param.numel()
 
-    @property
     def nelement(self):
-        return self.param.nelement
+        return self.param.nelement()
 
 
 for method in magic_methods:

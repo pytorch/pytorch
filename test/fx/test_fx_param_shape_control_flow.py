@@ -3,36 +3,101 @@ import torch
 import torch.fx
 
 
-class MyModule(torch.nn.Module):
+class MyModuleBase(torch.nn.Module):
+    def forward(self, x):
+        matrx = self.get_mul_matrix()
+        if self.no_relu():
+            return torch.mm(x, matrx)
+        else:
+            return torch.relu(torch.mm(x, matrx))
+
+    def get_mul_matrix(self):
+        return self.param
+
+    def no_relu(self):
+        raise Exception("not implemented")
+
+class MyModuleParamShape(MyModuleBase):
     def __init__(self, in_channels):
         super().__init__()
         self.param = torch.nn.Parameter(torch.randn(in_channels, 3))
 
-    def forward(self, x):
-        if self.param.shape[0] < 10:
-            return torch.mm(x, self.param)
-        else:
-            return torch.relu(torch.mm(x, self.param))
+    def no_relu(self):
+        return self.param.shape[0] < 10
+
+
+class MyModuleParamSize(MyModuleBase):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(in_channels, 3))
+
+    def no_relu(self):
+        return self.param.size()[0] < 10
+
+
+class MyModuleParamDim(MyModuleBase):
+    def __init__(self, param):
+        super().__init__()
+        self.param = param
+
+    def get_mul_matrix(self):
+        return self.param[0] if (self.param.dim() == 3) else self.param
+
+    def no_relu(self):
+        return self.param.dim() == 3
+
+
+class MyModuleParamNDim(MyModuleBase):
+    def __init__(self, param):
+        super().__init__()
+        self.param = param
+
+    def get_mul_matrix(self):
+        return self.param[0] if (self.param.ndim == 3) else self.param
+
+    def no_relu(self):
+        return self.param.ndim == 3
+
+
+class MyModuleParamNumEl(MyModuleBase):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(in_channels, 3))
+
+    def no_relu(self):
+        return self.param.numel() < 10 * 3
+
+
+
+class MyModuleParamNElement(MyModuleBase):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.param = torch.nn.Parameter(torch.randn(in_channels, 3))
+
+    def no_relu(self):
+        return self.param.nelement() < 10 * 3
+
 
 
 class TestConstParamShapeInControlFlow(unittest.TestCase):
-    def test_param_shape_const(self):
-        mymod = MyModule(in_channels=5)
 
-        # Test that we go down the True branch in forward
+    def verify_mm_relu_mods(self, mm_only_mod, relu_mod):
+        """
+        Verify one module only does a mm op while the other
+        performs both mm and relu ops in cascade
+        """
         x = torch.randn(10, 5)
-        torch.testing.assert_allclose(mymod(x), torch.mm(x, mymod.param))
+        torch.testing.assert_allclose(mm_only_mod(x), torch.mm(x, mm_only_mod.get_mul_matrix()))
         tracer = torch.fx.Tracer(param_shapes_constant=True)
-        traced_graph = tracer.trace(mymod)
+        traced_graph = tracer.trace(mm_only_mod)
 
         # Make a new module with different parameter shape to go down the different
         # code path
-        mymod2 = MyModule(in_channels=15)
         x = torch.randn(10, 15)
-        torch.testing.assert_allclose(mymod2(x), torch.relu(torch.mm(x, mymod2.param)))
+        torch.testing.assert_allclose(relu_mod(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix())))
 
         tracer2 = torch.fx.Tracer(param_shapes_constant=True)
-        traced_graph2 = tracer2.trace(mymod2)
+        traced_graph2 = tracer2.trace(relu_mod)
 
         graph1_node_names = [n.name for n in traced_graph.nodes]
         graph2_node_names = [n.name for n in traced_graph2.nodes]
@@ -40,6 +105,37 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         # the second graph has an exta relu function call node
         assert 'mm' in graph1_node_names and 'mm' in graph2_node_names
         assert 'relu' not in graph1_node_names and 'relu' in graph2_node_names
+
+    def test_param_shape_const(self):
+        mymod = MyModuleParamShape(in_channels=5)
+        mymod2 = MyModuleParamShape(in_channels=15)
+        self.verify_mm_relu_mods(mymod, mymod2)
+
+    def test_param_size_const(self):
+        mymod = MyModuleParamSize(in_channels=5)
+        mymod2 = MyModuleParamSize(in_channels=15)
+        self.verify_mm_relu_mods(mymod, mymod2)
+
+    def test_param_dim_const(self):
+        mymod = MyModuleParamDim(torch.nn.Parameter(torch.randn(2, 5, 3)))
+        mymod2 = MyModuleParamDim(torch.nn.Parameter(torch.randn(15, 3)))
+        self.verify_mm_relu_mods(mymod, mymod2)
+
+    def test_param_ndim_const(self):
+        mymod = MyModuleParamNDim(torch.nn.Parameter(torch.randn(2, 5, 3)))
+        mymod2 = MyModuleParamNDim(torch.nn.Parameter(torch.randn(15, 3)))
+        self.verify_mm_relu_mods(mymod, mymod2)
+
+    def test_param_numel_const(self):
+        mymod = MyModuleParamNumEl(in_channels=5)
+        mymod2 = MyModuleParamNumEl(in_channels=15)
+        self.verify_mm_relu_mods(mymod, mymod2)
+
+    def test_param_nelement_const(self):
+        mymod = MyModuleParamNElement(in_channels=5)
+        mymod2 = MyModuleParamNElement(in_channels=15)
+        self.verify_mm_relu_mods(mymod, mymod2)
+
 
 if __name__ == '__main__':
     unittest.main()
