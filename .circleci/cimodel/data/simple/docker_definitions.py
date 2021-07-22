@@ -30,11 +30,18 @@ IMAGE_NAMES = [
     "pytorch-linux-bionic-rocm4.2-py3.6",
 ]
 
+# This entry should be an element from the list above
+# This should contain the image matching the "slow_gradcheck" entry in
+# pytorch_build_data.py
+SLOW_GRADCHECK_IMAGE_NAME = "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
 
-def get_workflow_jobs():
+def get_workflow_jobs(only_slow_gradcheck=False):
     """Generates a list of docker image build definitions"""
     ret = []
     for image_name in IMAGE_NAMES:
+        if only_slow_gradcheck and image_name is not SLOW_GRADCHECK_IMAGE_NAME:
+            continue
+
         parameters = OrderedDict({
             "name": quote(f"docker-{image_name}"),
             "image_name": quote(image_name),
