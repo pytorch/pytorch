@@ -230,7 +230,7 @@ test_libtorch() {
     if [ -n "${IN_CI}" ]; then
       SITE_DIR=$(python -c "import site; print(site.getsitepackages()[0])")
       BIN_DIR="$SITE_DIR"/torch/bin
-      LIB_DIR="$SITE_DIR"/torch/bin
+      LIB_DIR="$SITE_DIR"/torch/lib
       ${SUDO} ln -sf "$LIB_DIR"/libjitbackend* "$BIN_DIR"
       ls -l "$BIN_DIR"
       ls -l "$LIB_DIR"
