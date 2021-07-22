@@ -320,7 +320,7 @@ def match_differentiability_info(
                     # is out of place
                     formula = f"self_t_raw.defined() ? self_t_raw.copy_({formula}) : {formula}"
 
-                required_original_self_value = re.search(IDENT_REGEX.format("original_self_p"), formula)
+                required_original_self_value = bool(re.search(IDENT_REGEX.format("original_self_p"), formula))
 
                 forward_derivatives = [ForwardDerivative(
                     formula=formula,
