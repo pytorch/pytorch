@@ -1339,6 +1339,9 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # input_shape, batch1_shape, batch2_shape, beta_val, alpha_val
     test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1),
                   ((1,), (S, S, S), (S, S, M), 1, 1),
                   ((S, M), (S, S, S), (S, S, M), 0.6, 0.2),
@@ -1346,24 +1349,17 @@ def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
                   ((), (S, S, S), (S, S, M), 1, 1),
                   ((), (S, S, S), (S, S, M), 0.6, 0.2),
                   ]
-    sample_inputs = []
-    for input_args in test_cases:
-        args = (make_tensor(input_args[0], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[1], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad),
-                make_tensor(input_args[2], device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad))
-        alpha, beta = input_args[3], input_args[4]
-        sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]), kwargs=dict(beta=beta, alpha=alpha)))
-        if dtype.is_complex:
-            sample_inputs.append(SampleInput(args[0], args=(args[1], args[2]),
-                                             kwargs=dict(beta=beta * (1 + 2j), alpha=alpha * (2 + 3j))))
 
-    return tuple(sample_inputs)
+    def generator():
+        for input_shape, batch1_shape, batch2_shape, beta, alpha in test_cases:
+            if dtype.is_complex:
+                beta_complex, alpha_complex = beta * (1 + 2j), alpha * (2 + 3j)
+                yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
+                                  kwargs=dict(beta=beta_complex, alpha=alpha_complex))
+            yield SampleInput(make_arg(input_shape), args=(make_arg(batch1_shape), make_arg(batch2_shape)),
+                              kwargs=dict(beta=beta, alpha=alpha))
+
+    return list(generator())
 
 def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = [(((S, S), (S, S), (S, S)), False),
@@ -4969,6 +4965,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_addmv),
     OpInfo('addbmm',
+           ref=lambda M, batch1, batch2, beta=1, alpha=1: np.add(np.multiply(np.asarray(beta, dtype=M.dtype), M),
+                                                                 np.multiply(np.asarray(alpha, dtype=batch1.dtype),
+                                                                             np.sum(np.matmul(batch1, batch2), axis=0))),
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -4976,6 +4975,11 @@ op_db: List[OpInfo] = [
            dtypesIfROCM=floating_types_and(torch.half),
            backward_dtypesIfROCM=floating_types_and(torch.half),
            supports_forward_ad=True,
+           decorators=[
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.3e-05),
+                                      torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
+                   'TestCommon', 'test_reference_testing')],
            skips=(
                # FIXME: bfloat16 backward support likely depends on CUDA11+
                #   and SM53+
