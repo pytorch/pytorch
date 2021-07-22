@@ -137,9 +137,6 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    'linalg.cholesky',
-    'linalg.inv',
-    'linalg.matrix_power',
     'linalg.matrix_norm',
     'linalg.norm',
     'nanquantile',
@@ -147,7 +144,6 @@ vjp_fail = {
     'tensor_split',
     'norm',
     'to_sparse',
-    'cross',
     'fft.hfft',
 }
 
