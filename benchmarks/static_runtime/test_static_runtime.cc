@@ -643,6 +643,42 @@ TEST(StaticRuntime, IndividualOps_FullLike) {
   testStaticRuntime(full_like_script, args, args2);
 }
 
+TEST(StaticRuntime, Linear) {
+  auto input = at::randn({1, 2});
+  auto weights = at::randn({1, 2});
+  auto bias = at::randn({1, 1});
+
+  std::vector<IValue> args{input, weights, bias};
+  std::vector<IValue> args_no_bias{input, weights, c10::nullopt};
+
+  auto input2 = at::randn({2, 3});
+  auto weights2 = at::randn({2, 3});
+  auto bias2 = at::randn({2, 2});
+
+  std::vector<IValue> args2{input2, weights2, bias2};
+  std::vector<IValue> args2_no_bias{input2, weights2, c10::nullopt};
+
+  testStaticRuntime(linear_script, args);
+  testStaticRuntime(linear_script, args_no_bias);
+
+  testStaticRuntime(linear_script, args, args2);
+  testStaticRuntime(linear_script, args, args2_no_bias);
+}
+
+TEST(StaticRuntime, IndividualOps_VarCat) {
+  // 2D tensors - cat dim = 0
+  std::vector<IValue> args1 = {at::randn({4, 6}), at::randn({5, 6}), 0};
+  testStaticRuntime(var_cat_script, args1);
+
+  // 3D tensors - cat dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 8, 6}), 1};
+  testStaticRuntime(var_cat_script, args2);
+
+  // 3D tensors - cat dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
+  testStaticRuntime(var_cat_script, args3);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});
