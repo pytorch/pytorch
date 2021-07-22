@@ -2950,9 +2950,9 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto S_data = S.data_ptr<value_t>();
   auto VT_data = VT.data_ptr<scalar_t>();
   auto self_stride = matrixStride(self);
-  auto U_stride = matrixStride(U);
+  auto U_stride = jobz == 'N' ? 1 : matrixStride(U);
   auto S_stride = S.size(-1);
-  auto VT_stride = matrixStride(VT);
+  auto VT_stride = jobz == 'N' ? 1 : matrixStride(VT);
   auto batchsize = batchCount(self);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -2960,7 +2960,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   auto m = self.size(-2);
   auto n = self.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  auto ldvt = std::max<int64_t>(1, n);
+  auto ldvt = std::max<int64_t>(1, jobz == 'N' ? 1 : VT.size(-2));
   auto mn = std::min(m, n);
   Tensor iwork = at::empty({8 * mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
@@ -3028,14 +3028,12 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     U_working_copy.zero_();
   }
 
-  if (some) {
-    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
+  if (compute_uv) {
+    // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+    // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
+    VT_working_copy = VT_working_copy.conj();
+    VT_working_copy.transpose_(-2, -1);
   }
-
-  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
-  // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
-  VT_working_copy = VT_working_copy.conj();
-  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
@@ -3057,7 +3055,25 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
 
   TORCH_CHECK(self.dim() >= 2,
               "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_svd_helper(self, some, compute_uv);
+  Tensor U, S, V;
+  std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
+
+  // If compute_uv==false svd_helper returns 0-sized matrices for U and V.
+  // For backwards compatibility we need to return appropriately sized matrices of zeros.
+  if (!compute_uv) {
+    auto sizes = self.sizes().vec();
+    auto m = self.size(-2);
+    auto n = self.size(-1);
+    sizes[self.dim() - 1] = some ? std::min(m, n) : m;
+    U.resize_(sizes);
+    U.zero_();
+    sizes[self.dim() - 2] = some ? std::min(m, n) : n;
+    sizes[self.dim() - 1] = n;
+    V.resize_(sizes);
+    V.zero_();
+  }
+
+  return std::make_tuple(U, S, V);
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, bool compute_uv, Tensor& U, Tensor& S, Tensor& V) {
@@ -3143,7 +3159,7 @@ Tensor linalg_svdvals(const Tensor& input) {
   // the singular vectors are not exposed to the user
   const bool input_requires_grad = (at::GradMode::is_enabled() && input.requires_grad());
   std::tie(std::ignore, singular_values, std::ignore) =
-      at::_svd_helper(input, /*some=*/input_requires_grad, /*compute_uv=*/input_requires_grad);
+      at::_svd_helper(input, /*some=*/true, /*compute_uv=*/input_requires_grad);
   return singular_values;
 }
 

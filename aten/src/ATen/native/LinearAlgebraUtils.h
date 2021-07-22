@@ -385,27 +385,31 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
-  sizes[input.dim() - 1] = (compute_uv && some) ? std::min(m, n) : m;
-  auto strides = at::detail::defaultStrides(sizes);
+  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
+  auto u_strides = at::detail::defaultStrides(sizes);
   // U should be a column-major or a batch of column-major matrices
   // ... x m x ucol will have strides: ...., ucol, 1
   // We require: ...., 1, m
-  strides[input.dim() - 1] = m;
-  strides[input.dim() - 2] = 1;
+  u_strides[input.dim() - 1] = m;
+  u_strides[input.dim() - 2] = 1;
 
-  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
-  U_empty.zero_();
+  Tensor U_empty = compute_uv
+      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
 
   // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = n;
+  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  // VT should be a column-major or a batch of column-major matrices
-  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
-  VT_empty.transpose_(-2, -1);
+  auto vt_strides = at::detail::defaultStrides(sizes);
+  u_strides[input.dim() - 1] = sizes[input.dim() - 2];
+  u_strides[input.dim() - 2] = 1;
+  Tensor VT_empty = compute_uv
+      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  ScalarType dtype = toValueType(input.scalar_type());
   Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
 
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
