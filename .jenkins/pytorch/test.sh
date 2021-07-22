@@ -236,6 +236,7 @@ test_libtorch() {
     echo "Checking libtorch (trung)"
     ls "$BIN_DIR"
     ls "$BIN_DIR"/../lib
+    ${SUDO} ln -sf "$BIN_DIR"/../lib/libjitbackend_test.so "$BIN_DIR"
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
