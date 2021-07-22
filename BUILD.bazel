@@ -415,7 +415,6 @@ filegroup(
         "aten/src/THCUNN/SoftShrink.cu.cc",
         "aten/src/THCUNN/SpatialClassNLLCriterion.cu.cc",
         "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
-        "aten/src/THCUNN/SpatialDepthwiseConvolution.cu.cc",
         "aten/src/THCUNN/Tanh.cu.cc",
     ],
 )

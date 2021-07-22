@@ -110,47 +110,4 @@ TORCH_CUDA_CU_API void THNN_(SpatialConvolutionMM_accGradParameters)(
     int padH,
     accreal scale);
 
-TORCH_CUDA_CU_API void THNN_(SpatialDepthwiseConvolution_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    THCTensor* weight,
-    THCTensor* bias, // [OPTIONAL]
-    int kW,
-    int kH,
-    int dW,
-    int dH,
-    int padW,
-    int padH,
-    int dilationW,
-    int dilationH);
-
-TORCH_CUDA_CU_API void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    THCTensor* weight,
-    int kW,
-    int kH,
-    int dW,
-    int dH,
-    int padW,
-    int padH,
-    int dilationW,
-    int dilationH);
-
-TORCH_CUDA_CU_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradWeight,
-    int kW,
-    int kH,
-    int dW,
-    int dH,
-    int padW,
-    int padH,
-    int dilationW,
-    int dilationH);
 #endif
