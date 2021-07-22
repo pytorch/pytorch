@@ -20,7 +20,6 @@ import os
 import os.path
 import re
 import shutil
-import subprocess
 import sys
 import asyncio
 import shlex
@@ -35,12 +34,293 @@ Patterns = collections.namedtuple("Patterns", "positive, negative")
 # compiled -- translation units are, of which there is one per implementation
 # (c/cc/cpp) file.
 DEFAULT_FILE_PATTERN = re.compile(r"^.*\.c(c|pp)?$")
-
-CLANG_WARNING_PATTERN = re.compile(r"([^:]+):(\d+):\d+:\s+warning:.*\[([^\]]+)\]")
-
-
+CLANG_WARNING_PATTERN = re.compile(
+    r"([^:]+):(\d+):\d+:\s+(warning|error):.*\[([^\]]+)\]"
+)
 # Set from command line arguments in main().
 VERBOSE = False
+QUIET = False
+
+
+def log(*args: Any, **kwargs: Any) -> None:
+    if not QUIET:
+        print(*args, **kwargs)
+
+
+class CommandResult:
+    def __init__(self, returncode: int, stdout: str, stderr: str):
+        self.returncode = returncode
+        self.stdout = stdout.strip()
+        self.stderr = stderr.strip()
+
+    def failed(self) -> bool:
+        return self.returncode != 0
+
+    def __add__(self, other: "CommandResult") -> "CommandResult":
+        return CommandResult(
+            self.returncode + other.returncode,
+            f"{self.stdout}\n{other.stdout}",
+            f"{self.stderr}\n{other.stderr}",
+        )
+
+    def __str__(self) -> str:
+        return f"{self.stdout}"
+
+    def __repr__(self) -> str:
+        return (
+            f"returncode: {self.returncode}\n"
+            + f"stdout: {self.stdout}\n"
+            + f"stderr: {self.stderr}"
+        )
+
+
+class ProgressMeter:
+    def __init__(
+        self, num_items: int, start_msg: str = "", disable_progress_bar: bool = False
+    ) -> None:
+        self.num_items = num_items
+        self.num_processed = 0
+        self.width = 80
+        self.disable_progress_bar = disable_progress_bar
+
+        # helper escape sequences
+        self._clear_to_end = "\x1b[2K"
+        self._move_to_previous_line = "\x1b[F"
+        self._move_to_start_of_line = "\r"
+        self._move_to_next_line = "\n"
+
+        if self.disable_progress_bar:
+            log(start_msg)
+        else:
+            self._write(
+                start_msg
+                + self._move_to_next_line
+                + "[>"
+                + (self.width * " ")
+                + "]"
+                + self._move_to_start_of_line
+            )
+            self._flush()
+
+    def _write(self, s: str) -> None:
+        sys.stderr.write(s)
+
+    def _flush(self) -> None:
+        sys.stderr.flush()
+
+    def update(self, msg: str) -> None:
+        if self.disable_progress_bar:
+            return
+
+        # Once we've processed all items, clear the progress bar
+        if self.num_processed == self.num_items - 1:
+            self._write(self._clear_to_end)
+            return
+
+        # NOP if we've already processed all items
+        if self.num_processed > self.num_items:
+            return
+
+        self.num_processed += 1
+
+        self._write(
+            self._move_to_previous_line
+            + self._clear_to_end
+            + msg
+            + self._move_to_next_line
+        )
+
+        progress = int((self.num_processed / self.num_items) * self.width)
+        padding = self.width - progress
+        self._write(
+            self._move_to_start_of_line
+            + self._clear_to_end
+            + f"({self.num_processed} of {self.num_items}) "
+            + f"[{progress*'='}>{padding*' '}]"
+            + self._move_to_start_of_line
+        )
+        self._flush()
+
+    def print(self, msg: str) -> None:
+        if QUIET:
+            return
+        elif self.disable_progress_bar:
+            print(msg)
+        else:
+            self._write(
+                self._clear_to_end
+                + self._move_to_previous_line
+                + self._clear_to_end
+                + msg
+                + self._move_to_next_line
+                + self._move_to_next_line
+            )
+            self._flush()
+
+
+class ClangTidyWarning:
+    def __init__(self, name: str, occurrences: List[Tuple[str, int]]):
+        self.name = name
+        self.occurrences = occurrences
+
+    def __str__(self) -> str:
+        base = f"[{self.name}] occurred {len(self.occurrences)} times\n"
+        for occ in self.occurrences:
+            base += f"    {occ[0]}:{occ[1]}\n"
+        return base
+
+
+async def run_shell_command(
+    cmd: List[str], on_completed: Any = None, *args: Any
+) -> CommandResult:
+    """Executes a shell command and runs an optional callback when complete"""
+    if VERBOSE:
+        log("Running: ", " ".join(cmd))
+
+    proc = await asyncio.create_subprocess_shell(
+        " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    output = await proc.communicate()
+    result = CommandResult(
+        returncode=proc.returncode if proc.returncode is not None else -1,
+        stdout=output[0].decode("utf-8").strip(),
+        stderr=output[1].decode("utf-8").strip(),
+    )
+
+    if on_completed:
+        on_completed(result, *args)
+
+    return result
+
+
+async def _run_clang_tidy_in_parallel(
+    commands: List[Tuple[List[str], str]], disable_progress_bar: bool
+) -> CommandResult:
+    progress_meter = ProgressMeter(
+        len(commands),
+        f"Processing {len(commands)} clang-tidy jobs",
+        disable_progress_bar=disable_progress_bar,
+    )
+
+    async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
+        semaphore = asyncio.Semaphore(n)
+
+        async def sem_task(task: Any) -> Any:
+            async with semaphore:
+                return await task
+
+        return await asyncio.gather(
+            *(sem_task(task) for task in tasks), return_exceptions=True
+        )
+
+    async def helper() -> Any:
+        def on_completed(result: CommandResult, filename: str) -> None:
+            if result.failed():
+                msg = str(result) if not VERBOSE else repr(result)
+                progress_meter.print(msg)
+            progress_meter.update(f"Processed {filename}")
+
+        coros = [
+            run_shell_command(cmd, on_completed, filename)
+            for (cmd, filename) in commands
+        ]
+        return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
+
+    results = await helper()
+    return sum(results, CommandResult(0, "", ""))
+
+
+async def _run_clang_tidy(
+    options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]
+) -> CommandResult:
+    """Executes the actual clang-tidy command in the shell."""
+
+    base = [options.clang_tidy_exe]
+
+    # Apply common options
+    base += ["-p", options.compile_commands_dir]
+    if not options.config_file and os.path.exists(".clang-tidy"):
+        options.config_file = ".clang-tidy"
+    if options.config_file:
+        import yaml
+
+        with open(options.config_file) as config:
+            # Here we convert the YAML config file to a JSON blob.
+            base += [
+                "-config",
+                json.dumps(yaml.load(config, Loader=yaml.SafeLoader)),
+            ]
+    if options.print_include_paths:
+        base += ["--extra-arg", "-v"]
+    if options.include_dir:
+        for dir in options.include_dir:
+            base += ["--extra-arg", f"-I{dir}"]
+    base += options.extra_args
+    if line_filters:
+        base += ["-line-filter", json.dumps(line_filters)]
+
+    # Apply per-file options
+    commands = []
+    for f in files:
+        command = list(base) + [map_filename(options.compile_commands_dir, f)]
+        commands.append((command, f))
+
+    if options.dry_run:
+        return CommandResult(0, str([c for c, _ in commands]), "")
+
+    return await _run_clang_tidy_in_parallel(commands, options.disable_progress_bar)
+
+
+def extract_warnings(
+    output: str, base_dir: str = "."
+) -> Tuple[Dict[str, Dict[int, Set[str]]], List[ClangTidyWarning]]:
+    warn2occ: Dict[str, List[Tuple[str, int]]] = {}
+    fixes: Dict[str, Dict[int, Set[str]]] = {}
+    for line in output.splitlines():
+        p = CLANG_WARNING_PATTERN.match(line)
+        if p is None:
+            continue
+        if os.path.isabs(p.group(1)):
+            path = os.path.abspath(p.group(1))
+        else:
+            path = os.path.abspath(os.path.join(base_dir, p.group(1)))
+        line_no = int(p.group(2))
+
+        # Filter out any options (which start with '-')
+        warning_names = set([w for w in p.group(4).split(",") if not w.startswith("-")])
+
+        for name in warning_names:
+            if name not in warn2occ:
+                warn2occ[name] = []
+            warn2occ[name].append((path, line_no))
+
+        if path not in fixes:
+            fixes[path] = {}
+        if line_no not in fixes[path]:
+            fixes[path][line_no] = set()
+        fixes[path][line_no].update(warning_names)
+
+    warnings = [ClangTidyWarning(name, sorted(occ)) for name, occ in warn2occ.items()]
+
+    return fixes, warnings
+
+
+def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
+    with open(fname, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    line_offset = -1  # As in .cpp files lines are numbered starting from 1
+    for line_no in sorted(warnings.keys()):
+        nolint_diagnostics = ",".join(warnings[line_no])
+        line_no += line_offset
+        indent = " " * (len(lines[line_no]) - len(lines[line_no].lstrip(" ")))
+        lines.insert(line_no, f"{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n")
+        line_offset += 1
+
+    with open(fname, mode="w") as f:
+        f.write("".join(lines))
 
 
 # Functions for correct handling of "ATen/native/cpu" mapping
@@ -61,19 +341,6 @@ def map_filename(build_folder: str, fname: str) -> str:
 
 def map_filenames(build_folder: str, fnames: Iterable[str]) -> List[str]:
     return [map_filename(build_folder, fname) for fname in fnames]
-
-
-def run_shell_command(arguments: List[str]) -> str:
-    """Executes a shell command."""
-    if VERBOSE:
-        print(" ".join(arguments))
-    try:
-        output = subprocess.check_output(arguments).decode().strip()
-    except subprocess.CalledProcessError as error:
-        error_output = error.output.decode().strip()
-        raise RuntimeError(f"Error executing {' '.join(arguments)}: {error_output}")
-
-    return output
 
 
 def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
@@ -109,20 +376,20 @@ def get_file_patterns(globs: Iterable[str], regexes: Iterable[str]) -> Patterns:
 def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]:
     """Returns all files that match any of the patterns."""
     if VERBOSE:
-        print("Filtering with these file patterns: {}".format(file_patterns))
+        log("Filtering with these file patterns: {}".format(file_patterns))
     for file in files:
         if not any(n.match(file) for n in file_patterns.negative):
             if any(p.match(file) for p in file_patterns.positive):
                 yield file
                 continue
         if VERBOSE:
-            print("{} omitted due to file filters".format(file))
+            log(f"{file} omitted due to file filters")
 
 
-def get_all_files(paths: List[str]) -> List[str]:
+async def get_all_files(paths: List[str]) -> List[str]:
     """Returns all files that are tracked by git in the given paths."""
-    output = run_shell_command(["git", "ls-files"] + paths)
-    return output.split("\n")
+    output = await run_shell_command(["git", "ls-files"] + paths)
+    return str(output).strip().splitlines()
 
 
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
@@ -148,138 +415,6 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
             files[file.path].append((start, end))
 
     return dict(files)
-
-
-ninja_template = """
-rule do_cmd
-  command = $cmd
-  description = Running clang-tidy
-
-{build_rules}
-"""
-
-build_template = """
-build {i}: do_cmd
-  cmd = {cmd}
-"""
-
-
-def run_shell_commands_in_parallel(commands: Iterable[List[str]]) -> str:
-    """runs all the commands in parallel with ninja, commands is a List[List[str]]"""
-
-    async def run_command(cmd: List[str]) -> str:
-        proc = await asyncio.create_subprocess_shell(
-            " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        return f">>>\nstdout:\n{stdout.decode()}\nstderr:\n{stderr.decode()}\n<<<"
-
-    async def gather_with_concurrency(n: int, tasks: List[Any]) -> Any:
-        semaphore = asyncio.Semaphore(n)
-
-        async def sem_task(task: Any) -> Any:
-            async with semaphore:
-                return await task
-
-        return await asyncio.gather(
-            *(sem_task(task) for task in tasks), return_exceptions=True
-        )
-
-    async def helper() -> Any:
-        coros = [run_command(cmd) for cmd in commands]
-        return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
-
-    loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(helper())
-    return "\n".join(results)
-
-
-def run_clang_tidy(
-    options: Any, line_filters: List[Dict[str, Any]], files: Iterable[str]
-) -> str:
-    """Executes the actual clang-tidy command in the shell."""
-    command = [options.clang_tidy_exe, "-p", options.compile_commands_dir]
-    if not options.config_file and os.path.exists(".clang-tidy"):
-        options.config_file = ".clang-tidy"
-    if options.config_file:
-        import yaml
-
-        with open(options.config_file) as config:
-            # Here we convert the YAML config file to a JSON blob.
-            command += [
-                "-config",
-                json.dumps(yaml.load(config, Loader=yaml.SafeLoader)),
-            ]
-    if options.print_include_paths:
-        command += ["--extra-arg", "-v"]
-    if options.include_dir:
-        for dir in options.include_dir:
-            command += ["--extra-arg", f"-I{dir}"]
-
-    command += options.extra_args
-
-    if line_filters:
-        command += ["-line-filter", json.dumps(line_filters)]
-
-    if options.parallel:
-        commands = [
-            list(command) + [map_filename(options.compile_commands_dir, f)]
-            for f in files
-        ]
-        output = run_shell_commands_in_parallel(commands)
-    else:
-        command += map_filenames(options.compile_commands_dir, files)
-        if options.dry_run:
-            command = [re.sub(r"^([{[].*[]}])$", r"'\1'", arg) for arg in command]
-            return " ".join(command)
-
-        output = run_shell_command(command)
-
-    if not options.keep_going and "[clang-diagnostic-error]" in output:
-        message = "Found clang-diagnostic-errors in clang-tidy output: {}"
-        raise RuntimeError(message.format(output))
-
-    return output
-
-
-def extract_warnings(
-    output: str, base_dir: str = "."
-) -> Dict[str, Dict[int, Set[str]]]:
-    rc: Dict[str, Dict[int, Set[str]]] = {}
-    for line in output.split("\n"):
-        p = CLANG_WARNING_PATTERN.match(line)
-        if p is None:
-            continue
-        if os.path.isabs(p.group(1)):
-            path = os.path.abspath(p.group(1))
-        else:
-            path = os.path.abspath(os.path.join(base_dir, p.group(1)))
-        line_no = int(p.group(2))
-        warnings = set(p.group(3).split(","))
-        if path not in rc:
-            rc[path] = {}
-        if line_no not in rc[path]:
-            rc[path][line_no] = set()
-        rc[path][line_no].update(warnings)
-    return rc
-
-
-def apply_nolint(fname: str, warnings: Dict[int, Set[str]]) -> None:
-    with open(fname, encoding="utf-8") as f:
-        lines = f.readlines()
-
-    line_offset = -1  # As in .cpp files lines are numbered starting from 1
-    for line_no in sorted(warnings.keys()):
-        nolint_diagnostics = ",".join(warnings[line_no])
-        line_no += line_offset
-        indent = " " * (len(lines[line_no]) - len(lines[line_no].lstrip(" ")))
-        lines.insert(line_no, f"{indent}// NOLINTNEXTLINE({nolint_diagnostics})\n")
-        line_offset += 1
-
-    with open(fname, mode="w") as f:
-        f.write("".join(lines))
 
 
 def filter_from_diff(
@@ -311,52 +446,62 @@ def filter_from_diff_file(
     return filter_from_diff(paths, [diff])
 
 
-def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
-    return get_all_files(paths), []
+async def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
+    return await get_all_files(paths), []
 
 
-def run(options: Any) -> int:
-    # This flag is pervasive enough to set it globally. It makes the code
+async def _run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
+    # These flags are pervasive enough to set it globally. It makes the code
     # cleaner compared to threading it through every single function.
     global VERBOSE
+    global QUIET
     VERBOSE = options.verbose
+    QUIET = options.quiet
 
-    # Normalize the paths first.
+    # Normalize the paths first
     paths = [path.rstrip("/") for path in options.paths]
 
+    # Filter files
     if options.diff_file:
         files, line_filters = filter_from_diff_file(options.paths, options.diff_file)
     else:
-        files, line_filters = filter_default(options.paths)
+        files, line_filters = await filter_default(options.paths)
 
     file_patterns = get_file_patterns(options.glob, options.regex)
     files = list(filter_files(files, file_patterns))
 
-    # clang-tidy error's when it does not get input files.
+    # clang-tidy errors when it does not get input files.
     if not files:
-        print("No files detected.")
-        sys.exit()
+        log("No files detected")
+        return CommandResult(0, "", ""), []
 
-    clang_tidy_output = run_clang_tidy(options, line_filters, files)
-    warnings = extract_warnings(
-        clang_tidy_output, base_dir=options.compile_commands_dir
+    result = await _run_clang_tidy(options, line_filters, files)
+    fixes, warnings = extract_warnings(
+        result.stdout, base_dir=options.compile_commands_dir
     )
+
     if options.suppress_diagnostics:
-        warnings = extract_warnings(
-            clang_tidy_output, base_dir=options.compile_commands_dir
-        )
-        for fname in warnings.keys():
+        for fname in fixes.keys():
             mapped_fname = map_filename(options.compile_commands_dir, fname)
-            print(f"Applying fixes to {mapped_fname}")
-            apply_nolint(fname, warnings[fname])
+            log(f"Applying fixes to {mapped_fname}")
+            apply_nolint(fname, fixes[fname])
             if os.path.relpath(fname) != mapped_fname:
                 shutil.copyfile(fname, mapped_fname)
 
-    pwd = os.getcwd() + "/"
     if options.dry_run:
-        print(clang_tidy_output)
-    for line in clang_tidy_output.splitlines():
-        if line.startswith(pwd):
-            print(line[len(pwd) :])
+        log(result)
+    elif result.failed():
+        # If you change this message, update the error checking logic in
+        # .github/workflows/lint.yml
+        msg = "Warnings detected!"
+        log(msg)
+        log("Summary:")
+        for w in warnings:
+            log(str(w))
 
-    return len(warnings.keys())
+    return result, warnings
+
+
+def run(options: Any) -> Tuple[CommandResult, List[ClangTidyWarning]]:
+    loop = asyncio.get_event_loop()
+    return loop.run_until_complete(_run(options))
