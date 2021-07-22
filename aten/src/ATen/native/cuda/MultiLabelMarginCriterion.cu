@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 
 namespace {
-const int MULTILABELMARGIN_THREADS = 1024;
+const int MULTILABELMARGIN_THREADS = 128;
 
 void check_shape(const Tensor& input, const Tensor& target) {
   int64_t ndims = input.dim();
