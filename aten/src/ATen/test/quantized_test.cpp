@@ -231,9 +231,14 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   for (auto i = 0; i < numel; ++i) {
     custom_data[i] = i;
   }
+  bool customDataDeleted{false};
   auto deleteWhenDone = custom_vec.release();
-  auto deleter = [deleteWhenDone, custom_data](void* inp) { ASSERT_EQ((void*)inp, (void*)custom_data);  delete deleteWhenDone; };
-
+  auto deleter = [deleteWhenDone, custom_data, &customDataDeleted](void* inp) {
+    ASSERT_EQ((void*)inp, (void*)custom_data);
+    delete deleteWhenDone;
+    customDataDeleted = true;
+  };
+  {
   Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
 
   uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
@@ -242,6 +247,8 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   }
   ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
   ASSERT_EQ(qtensor.q_zero_point(), zero_point);
+  }
+  TORCH_CHECK(customDataDeleted);
 }
 
 TEST(TestQTensor, FromBlobQuantizedPerChannel) {
@@ -260,9 +267,14 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   for (auto i = 0; i < numel; ++i) {
     custom_data[i] = i;
   }
+  bool customDataDeleted{false};
   auto deleteWhenDone = custom_vec.release();
-  auto deleter = [deleteWhenDone, custom_data](void* inp) { ASSERT_EQ((void*)inp, (void*)custom_data);  delete deleteWhenDone; };
-
+  auto deleter = [deleteWhenDone, custom_data, &customDataDeleted](void* inp) {
+    ASSERT_EQ((void*)inp, (void*)custom_data);
+    delete deleteWhenDone;
+    customDataDeleted = true;
+  };
+  {
   Tensor qtensor = at::from_blob_quantized_per_channel_affine(custom_data, shape, deleter, scales, zero_points, ch_axis, options);
   uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
   for (auto i = 0; i < numel; ++i) {
@@ -271,4 +283,6 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));
   ASSERT_TRUE(at::allclose(qtensor.q_per_channel_zero_points(), zero_points));
   ASSERT_TRUE(qtensor.is_quantized());
+  }
+  TORCH_CHECK(customDataDeleted);
 }
