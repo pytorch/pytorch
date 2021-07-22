@@ -8,6 +8,7 @@
 using namespace ::testing;
 using namespace caffe2;
 
+// TODO(T96218435): Enable the following tests in OSS.
 TEST(IMethodTest, CallMethod) {
   auto script_model = torch::jit::load(getenv("SIMPLE_JIT"));
   auto script_method = script_model.get_method("forward");

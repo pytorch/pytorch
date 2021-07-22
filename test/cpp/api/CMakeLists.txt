@@ -8,7 +8,6 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/expanding-array.cpp
   ${TORCH_API_TEST_DIR}/fft.cpp
   ${TORCH_API_TEST_DIR}/functional.cpp
-  ${TORCH_API_TEST_DIR}/imethod.cpp
   ${TORCH_API_TEST_DIR}/integration.cpp
   ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
