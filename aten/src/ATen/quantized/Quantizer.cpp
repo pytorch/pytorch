@@ -231,28 +231,22 @@ Tensor from_blob_quantized_per_tensor_affine(
   for (std::int64_t s : sizes) {
     size *= static_cast<std::size_t>(s);
   }
-  const auto datasize = size * itemsize;
+  const std::size_t datasize = size * itemsize;
 
-  DataPtr dataPtr = InefficientStdFunctionContext::makeDataPtr(
+  DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
       data, deleter, options.device());
 
-  auto storage = c10::make_intrusive<StorageImpl>(
-      StorageImpl::use_byte_size_t(),
-      datasize,
-      std::move(dataPtr),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
+  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
 
   QuantizerPtr quantizer =
       make_per_tensor_affine_quantizer(scale, zeroPoint, dtype);
 
   Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
-      storage,
+      std::move(storage),
       at::DispatchKeySet(options.computeDispatchKey()),
       options.dtype(),
       quantizer);
   get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
-
   return qtensor;
 }
 
@@ -277,23 +271,18 @@ Tensor from_blob_quantized_per_channel_affine(
   for (std::int64_t s : sizes) {
     size *= static_cast<std::size_t>(s);
   }
-  const auto datasize = size * itemsize;
+  const std::size_t datasize = size * itemsize;
 
-  DataPtr dataPtr = InefficientStdFunctionContext::makeDataPtr(
+  DataPtr data_ptr = InefficientStdFunctionContext::makeDataPtr(
       data, deleter, options.device());
 
-  auto storage = c10::make_intrusive<StorageImpl>(
-      StorageImpl::use_byte_size_t(),
-      datasize,
-      std::move(dataPtr),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
+  Storage storage{Storage::use_byte_size_t{}, datasize, std::move(data_ptr)};
 
   QuantizerPtr quantizer =
       make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
 
   Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
-      storage,
+      std::move(storage),
       at::DispatchKeySet(options.computeDispatchKey()),
       options.dtype(),
       quantizer);
