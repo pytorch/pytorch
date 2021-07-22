@@ -137,7 +137,12 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
+    'linalg.matrix_norm',
+    'linalg.norm',
+    'nanquantile',
+    'quantile',
     'tensor_split',
+    'norm',
     'to_sparse',
     'fft.hfft',
 }
