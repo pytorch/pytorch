@@ -203,22 +203,26 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   int32_t num_outputs_;
 };
 
-#ifndef __APPLE__
+// Include library for differentiating macOS and iOS
+#ifdef __APPLE__
   #include <TargetConditionals.h>
-  #ifndef TARGET_OS_IPHONE
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-    static auto register_NnapiCompilation = [](){
-      try {
-        return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")
-            .def(torch::jit::init<>())
-            .def("init", &NnapiCompilation::init)
-            .def("run", &NnapiCompilation::run)
-            ;
-      } catch (std::exception& exn) {
-        LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
-        throw;
-      }
-    }();
+#endif
+
+// Avoid registering class on iOS
+#if !defined(__APPLE__) || !defined(TARGET_OS_IPHONE)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static auto register_NnapiCompilation = [](){
+    try {
+      return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")
+          .def(torch::jit::init<>())
+          .def("init", &NnapiCompilation::init)
+          .def("run", &NnapiCompilation::run)
+          ;
+    } catch (std::exception& exn) {
+      LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
+      throw;
+    }
+  }();
 #endif
 
 } // namespace
