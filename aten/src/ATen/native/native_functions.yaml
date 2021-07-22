@@ -3443,6 +3443,17 @@
   device_check: NoCheck
   device_guard: False
 
+# NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
+# They are not user-facing, hence the leading underscore. Please don't use it
+# anywhere else.
+- func: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: _reshape_alias
+    # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
+
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
   device_guard: False
