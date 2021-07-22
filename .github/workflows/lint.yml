@@ -86,6 +86,10 @@ jobs:
         if: always()
         run: |
           (! git --no-pager grep -I -no $'#include <cub/' --  ./aten  ':(exclude)aten/src/ATen/cuda/cub.cuh' || (echo "The above files have direct cub include; please include ATen/cuda/cub.cuh instead and wrap your cub calls in at::native namespace if necessary"; false))
+      - name: Ensure no raw cuda api calls
+        if: always()
+        run: |
+          (! git --no-pager grep -I -no $'cudaStreamSynchronize' --  ./aten ./c10 ':(exclude)aten/src/ATen/test' ':(exclude)c10/cuda/CUDAFunctions.h' || (echo "The above files call raw cuda APIs directly; please use at::cuda wrappers instead"; false))
 
   clang-format:
     runs-on: ubuntu-18.04
