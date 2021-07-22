@@ -283,6 +283,7 @@ class TestOperators(TestCase):
             'vsplit',
             'vstack',
             'resolve_conj',
+            'resolve_neg',
         }
         op_skip = op_skip.union(vjp_fail)
         if op.name in op_skip:
@@ -335,6 +336,7 @@ class TestOperators(TestCase):
             'resolve_conj',
             'to_sparse',
             'clamp',
+            'resolve_neg',
         }
         if op.name in op_skip:
             self.skipTest("Skipped; Expected failures")
