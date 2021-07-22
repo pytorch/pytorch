@@ -1246,6 +1246,7 @@ def sample_inputs_binary_pwise(
             make_tensor(shape_a, device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs),
             args=(make_tensor(shape_b, device=device, dtype=dtype, **rhs_make_tensor_kwargs),),
             kwargs=op_kwargs,
+            broadcasts_input=torch.broadcast_shapes(shape_a, shape_b) != shape_a,
         )
         for shape_a, shape_b in shapes
     ]
