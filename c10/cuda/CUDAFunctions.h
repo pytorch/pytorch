@@ -8,7 +8,12 @@
 // The naming convention used here matches the naming convention of torch.cuda
 
 #include <c10/core/Device.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
+#include <cuda_runtime_api.h>
 
 namespace c10 {
 namespace cuda {
@@ -30,7 +35,25 @@ C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
 
-C10_CUDA_API const char* get_cuda_check_suffix() noexcept;
+// the subsequent functions are defined in the header because for performance
+// reasons we want them to be inline
+C10_CUDA_API void __inline__ memcpy_and_sync(
+    void* dst,
+    void* src,
+    int64_t nbytes,
+    cudaMemcpyKind kind,
+    cudaStream_t stream) {
+#if defined(HIP_VERSION) && (HIP_VERSION >= 301)
+  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#else
+  C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
+}
+
+C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+}
 
 } // namespace cuda
 } // namespace c10
