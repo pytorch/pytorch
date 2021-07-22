@@ -890,6 +890,7 @@ class TypeCheckerTest(unittest.TestCase):
         for n in graph.nodes:
             assert n.type == next(my_types)
 
+    @skipIfNoUnification
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -917,6 +918,30 @@ class TypeCheckerTest(unittest.TestCase):
         for n in symbolic_traced.graph.nodes:
             assert n.type == next(expected_iter)
 
+
+    @skipIfNoUnification
+    def test_symbolic_add_with_broadcast_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        infer_symbolic_types(symbolic_traced)
+        r = Refine(symbolic_traced)
+        r.refine()
+
+        infer_symbolic_types(symbolic_traced)
+
+        expected_ph_types = [TensorType((1, 2)),
+                             TensorType((Var(1), 2)),
+                             TensorType((Var(1), 2)),
+                             TensorType((Var(1), 2))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
 
 if __name__ == '__main__':
     unittest.main()
