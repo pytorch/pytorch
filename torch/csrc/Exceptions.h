@@ -163,7 +163,7 @@ struct python_error : public std::exception {
     }
   }
 
-   const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return message.c_str();
   }
 
