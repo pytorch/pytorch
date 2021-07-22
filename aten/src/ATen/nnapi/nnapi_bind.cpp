@@ -204,7 +204,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 };
 
 #ifndef __APPLE__
-  #include "TargetConditionals.h"
+  #include <TargetConditionals.h>
   #ifndef TARGET_OS_IPHONE
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     static auto register_NnapiCompilation = [](){
