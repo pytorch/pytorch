@@ -665,6 +665,20 @@ TEST(StaticRuntime, Linear) {
   testStaticRuntime(linear_script, args, args2_no_bias);
 }
 
+TEST(StaticRuntime, IndividualOps_VarCat) {
+  // 2D tensors - cat dim = 0
+  std::vector<IValue> args1 = {at::randn({4, 6}), at::randn({5, 6}), 0};
+  testStaticRuntime(var_cat_script, args1);
+
+  // 3D tensors - cat dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 8, 6}), 1};
+  testStaticRuntime(var_cat_script, args2);
+
+  // 3D tensors - cat dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
+  testStaticRuntime(var_cat_script, args3);
+}
+
 TEST(StaticRuntime, LongModel) {
   torch::jit::Module mod = getLongScriptModel();
   auto a = torch::randn({2, 2});
