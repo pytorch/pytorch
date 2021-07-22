@@ -217,8 +217,8 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
 }
 
 TEST(TestQTensor, FromBlobQuantizedPerTensor) {
-  auto scale = 0.1;
-  auto zero_point = 10;
+  const double scale = 0.1;
+  const int64_t zero_point = 10;
   std::vector<int64_t> shape = {10, 10};
   auto numel = c10::multiply_integers(shape);
 
@@ -240,5 +240,6 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   for (auto i = 0; i < numel; ++i) {
     ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
   }
-
+  ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
+  ASSERT_EQ(qtensor.q_zero_point(), zero_point);
 }
