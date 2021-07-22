@@ -29,7 +29,9 @@ struct PyDefaultSavedVariableHooks {
   static std::unique_ptr<SavedVariableHooks> get_hooks();
 
 private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::atomic<PyObject*> pack_hook_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::atomic<PyObject*> unpack_hook_;
 };
 
