@@ -25,6 +25,7 @@ from .quantization_patterns import (
     CatQuantizeHandler,
     CopyNodeQuantizeHandler,
     BinaryOpQuantizeHandler,
+    TensorShapeOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -694,7 +695,7 @@ def maybe_propagate_dtype_for_node(
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if isinstance(qhandler, CopyNodeQuantizeHandler):
+    if isinstance(qhandler, TensorShapeOpQuantizeHandler):
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
