@@ -65,6 +65,7 @@ UCPEndpoint::~UCPEndpoint() {
 
   ucs_status_ptr_t request = ucp_ep_close_nb(endpoint, UCP_EP_CLOSE_MODE_FLUSH);
   if (UCS_PTR_IS_ERR(request)) {
+    // It is generally not a good idea to throw in a destructor. So we raise a warning instead.
     TORCH_WARN("Will leak endpoint because it fails to close. Error: ", ucs_status_string(UCS_PTR_STATUS(request)));
   }
   if (UCS_PTR_IS_PTR(request)) {
