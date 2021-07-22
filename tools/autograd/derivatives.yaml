@@ -1144,6 +1144,9 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
+- name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+  self: grad.reshape(self.sizes())
+
 - name: round(Tensor self) -> Tensor
   self: zeros_like(grad)
 
