@@ -201,6 +201,20 @@ void UpdateTorchValueByOnnxValueInfo(
   return true;
 }
 
+bool IsValidONNXControlflowNode(const Node* n) {
+  // Skip when block size is zero. This is when the node is being created,
+  // and doesn't have subblocks attached yet. Run shape inference for these
+  // nodes later, when the subgraph has already completed shape inferencing.
+  auto node_kind = n->kind();
+  if (node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) {
+    if (n->blocks().size() == 0) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool IsValidONNXNode(const Node* n) {
   auto node_kind = n->kind();
 
@@ -1502,20 +1516,17 @@ void ONNXShapeTypeInference(
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
-  if (!IsSupportedNode(n)) {
-    UpdateReliable(n);
-    return;
-  }
-  // Create a Graph containing only the single node n.
-  // This graph is later converted to ONNX to run shape inference.
-  auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
-  n_graph->insertNode(clone_node);
+  if (IsValidONNXNode(n)) {
+    // Create a Graph containing only the single node n.
+    // This graph is later converted to ONNX to run shape inference.
+    auto n_graph = std::make_shared<Graph>();
+    auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
+    n_graph->insertNode(clone_node);
 
-  // Register all node outputs as graph outputs.
-  for (auto output : clone_node->outputs()) {
-    n_graph->registerOutput(output);
-  }
+    // Register all node outputs as graph outputs.
+    for (auto output : clone_node->outputs()) {
+      n_graph->registerOutput(output);
+    }
 
     // Use scalar_type_analysis without low precision cast
     ScalarTypeAnalysisForONNX(n_graph, false, opset_version);
@@ -1553,23 +1564,23 @@ void ONNXShapeTypeInference(
         // NOLINTNEXTLINE(modernize-use-nullptr)
         if ((strstr(ex.what(), shape_err) == NULL) &&
             // NOLINTNEXTLINE(modernize-use-nullptr)
-            (strstr(ex.what(), type_err) == NULL)) {
+            (strstr(ex.what(), type_err) == NULL))
           throw;
-        }
       }
       GRAPH_DEBUG(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
-  } else {
-    UpdateReliable(n);
   }
 
   SpecialPostProcess(n);
-  ProcessConstantValueMap(n, opset_version);
-  if (n->kind() != prim::ListConstruct) {
-    for (auto input : n->inputs()) {
-      if (input->node()->kind() == prim::ListConstruct) {
-        UpdateReliable(input, AreInputsReliableOrStatic(input->node()));
+
+  if (IsValidONNXNode(n)) {
+    ProcessConstantValueMap(n, opset_version);
+    if (n->kind() != prim::ListConstruct) {
+      for (auto input : n->inputs()) {
+        if (input->node()->kind() == prim::ListConstruct) {
+          UpdateReliable(input, AreInputsReliableOrStatic(input->node()));
+        }
       }
     }
   }

@@ -361,7 +361,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
          const ::c10::SymbolicShape& b) -> ::c10::SymbolicShape {
     std::vector<::c10::ShapeSymbol> dims;
     if (a.rank() && b.rank() && a.rank() == b.rank()) {
-      for (const auto j : c10::irange(a.rank().value())) {
+      for (size_t j = 0; j < a.rank().value(); ++j) {
         if (a[j] == b[j]) {
           dims.emplace_back(a[j]);
         } else {
@@ -464,12 +464,12 @@ std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
 void FixupONNXControlflowNodeOutputs(Node* n) {
   switch (n->kind()) {
     case ::c10::onnx::Loop: {
-      auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
-      for (auto i : c10::irange(n->outputs().size())) {
-        auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
+      for (size_t i = 0; i < n->outputs().size(); ++i) {
+        auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
         if (i < loop_carried_output_size) {
-          n->output(i)->setType(type);
+          n->output(i)->setType(n->blocks().at(0)->outputs().at(i + 1)->type());
         } else {
+          auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
           if (auto t_type = type->cast<TensorType>()) {
             auto sizes = t_type->symbolic_sizes().sizes();
             if (sizes.has_value()) {
