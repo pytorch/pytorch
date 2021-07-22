@@ -4759,6 +4759,10 @@ class TestNN(NNTestCase):
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
+        # no batch dims
+        input = torch.randn(50, 20, 64, 64)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -12836,6 +12840,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
+        # no batch dims
+        input = torch.empty(20, 64, 64)
+        self._test_dropout(nn.Dropout2d, device, input)
+
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -12847,6 +12855,10 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
+
+        # no batch dims
+        input = torch.empty(50, 20, 64, 64)
+        self._test_dropout(nn.Dropout3d, device, input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -13049,11 +13061,6 @@ class TestNNDeviceType(NNTestCase):
                 (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
                 (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
-
-        with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
-            mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 10, device=device, dtype=dtype)
-            mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
             mod = torch.nn.ReplicationPad1d(2)
