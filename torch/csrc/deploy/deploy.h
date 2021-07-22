@@ -1,10 +1,9 @@
 #pragma once
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <cassert>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -228,7 +227,7 @@ class PythonMethodWrapper : public torch::IMethod {
 
   c10::IValue operator()(
       std::vector<c10::IValue> args,
-      const IValueMap& kwargs = IValueMap()) override {
+      const IValueMap& kwargs = IValueMap()) const override {
     // TODO(whc) ideally, pickle the method itself as replicatedobj, to skip
     // this lookup each time
     auto model_session = model_.acquire_session();
@@ -236,11 +235,9 @@ class PythonMethodWrapper : public torch::IMethod {
     return method.call_kwargs(args, kwargs).toIValue();
   }
 
-  std::vector<std::string> getArgumentNames() override {
-    throw std::runtime_error("getArgumentNames not yet implemented");
-  }
-
  private:
+  void setArgumentNames(std::vector<std::string>&) const override;
+
   torch::deploy::ReplicatedObj model_;
   std::string method_name_;
 };

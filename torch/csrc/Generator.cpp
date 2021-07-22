@@ -195,7 +195,6 @@ PyTypeObject THPGeneratorType = {
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
   THPGenerator_dealloc,                        /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
