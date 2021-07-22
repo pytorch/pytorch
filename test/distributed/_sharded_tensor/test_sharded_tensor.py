@@ -15,11 +15,11 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
-if TEST_WITH_ASAN:
-    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
 
 class ShardedTensorTestBase(object):

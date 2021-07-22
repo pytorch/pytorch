@@ -11,13 +11,13 @@ if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ASAN, NO_MULTIPROCESSING_SPAWN
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN, NO_MULTIPROCESSING_SPAWN
 from torch.testing._internal.distributed.distributed_test import (
     DistributedTest, TestDistBackend
 )
 
-if TEST_WITH_ASAN:
-    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+if TEST_WITH_DEV_DBG_ASAN:
+    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
 
 if NO_MULTIPROCESSING_SPAWN:
