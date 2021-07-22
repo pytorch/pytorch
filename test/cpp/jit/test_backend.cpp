@@ -235,13 +235,49 @@ TEST(BackendTest, TestCompositeWithSetStates) {
   inputs.emplace_back(3);
   auto res_jit = c.forward(inputs);
 
-  std::stringstream ss;
+  std::stringstream ss, ss_resave;
   c._save_for_mobile(ss);
   auto mc = _load_for_mobile(ss);
   auto res_mobile = mc.forward(inputs);
-
-  std::cout << res_jit.toTensor();
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+
+  // check if the methods names are always the same
+  // by reloading the script module and saving it back as mobile
+  // The below checks ensure that the names of Methods
+  // and numerical outputs of mobile and reloaded mobile
+  // modules are same.
+  auto script_module_load = torch::jit::load(ss);
+  script_module_load._save_for_mobile(ss_resave);
+  auto mc_reload = _load_for_mobile(ss_resave);
+  auto res_mobile_reload = mc_reload.forward(inputs);
+
+  AT_ASSERT(res_mobile_reload.toTensor().equal(res_mobile.toTensor()));
+
+  auto mc_methods = mc.get_methods();
+  auto mc_reload_methods = mc_reload.get_methods();
+
+  std::vector<std::string> mc_method_qns, mc_reload_method_qns;
+
+  auto get_qual_name = [](mobile::Method method) -> std::string {
+    return method.function().qualname().qualifiedName();
+  };
+
+  std::transform(
+      mc_methods.begin(),
+      mc_methods.end(),
+      std::back_inserter(mc_method_qns),
+      get_qual_name);
+
+  std::transform(
+      mc_reload_methods.begin(),
+      mc_reload_methods.end(),
+      std::back_inserter(mc_reload_method_qns),
+      get_qual_name);
+
+  AT_ASSERT(std::equal(
+      mc_method_qns.begin(),
+      mc_method_qns.end(),
+      mc_reload_method_qns.begin()));
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

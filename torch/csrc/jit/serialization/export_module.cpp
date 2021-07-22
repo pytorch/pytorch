@@ -241,6 +241,17 @@ std::pair<IValue, IValue> getFunctionTuple(
       TORCH_CHECK(
           !arg.kwarg_only(),
           "Keyword-only arguments are not supported in mobile modules.");
+      /*
+        This part adds the argument's name, type and default_value in
+        `bytecode.pkl` This has to be consistent with the `code/` directory
+        which has annotated py code of the entire module. `type_printer` uses
+        `TypeNameUniquer` to get the managled name of the argument. This helps
+        in having the right object reference when a class method is called using
+        the `self` argument.
+
+        arg.type()->annotation_str(type_printer) => mangled unique name of the
+        module/submodule
+      */
       argTables.emplace_back(Table({
           {"name", arg.name()},
           {"type", arg.type()->annotation_str(type_printer)},

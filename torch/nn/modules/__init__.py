@@ -17,7 +17,8 @@ from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxP
     AdaptiveMaxPool1d, AdaptiveMaxPool2d, AdaptiveMaxPool3d, AdaptiveAvgPool1d, AdaptiveAvgPool2d, AdaptiveAvgPool3d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d, SyncBatchNorm, \
     LazyBatchNorm1d, LazyBatchNorm2d, LazyBatchNorm3d
-from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
+from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d, \
+    LazyInstanceNorm1d, LazyInstanceNorm2d, LazyInstanceNorm3d
 from .normalization import LocalResponseNorm, CrossMapLRN2d, LayerNorm, GroupNorm
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout, FeatureAlphaDropout
 from .padding import ReflectionPad1d, ReflectionPad2d, ReflectionPad3d, ReplicationPad1d, ReplicationPad2d, \
@@ -60,5 +61,6 @@ __all__ = [
     'LazyLinear', 'LazyConv1d', 'LazyConv2d', 'LazyConv3d',
     'LazyConvTranspose1d', 'LazyConvTranspose2d', 'LazyConvTranspose3d',
     'LazyBatchNorm1d', 'LazyBatchNorm2d', 'LazyBatchNorm3d',
+    'LazyInstanceNorm1d', 'LazyInstanceNorm2d', 'LazyInstanceNorm3d',
     'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU', 'Mish', 'TripletMarginWithDistanceLoss', 'ChannelShuffle'
 ]
