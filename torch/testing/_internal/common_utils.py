@@ -1956,14 +1956,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
                 return default_val
             elif inp == 'low':
                 if (val == float('-inf') or val < ranges[0]):
-                    return ranges[0]/2
+                    return ranges[0] / 2
                 elif val > ranges[1]:
                     raise ValueError(f"Expected low value < maximum limit for the dtype, but found {val} > {ranges[1]}")
                 else:
                     return val
             elif inp == 'high':
                 if (val == float('inf') or val > ranges[1]):
-                    return ranges[1]/2
+                    return ranges[1] / 2
                 elif val < ranges[0]:
                     raise ValueError(f"Expected high value > minimum limit for the dtype, but found {val} < {ranges[0]}")
                 else:
