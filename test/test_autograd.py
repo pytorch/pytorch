@@ -5947,6 +5947,7 @@ for shape in [(1,), ()]:
         finally:
             torch.autograd.graph.set_save_on_cpu(False)
 
+
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
         shape = (shape,)
