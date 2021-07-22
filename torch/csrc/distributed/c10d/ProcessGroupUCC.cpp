@@ -124,13 +124,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   lazyInitUCP();
 
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
   params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
   params.memory_type = getUCSMemoryType(tensor.device().type());
-  params.cb.send = [](void* request, ucs_status_t status, void* user_data) {
-    *static_cast<bool *>(request) = true;
-  };
   ucs_status_ptr_t request = ucp_tag_send_nbx(
     ucp_endpoints[dstRank]->endpoint, tensor.data_ptr(), 1, tag, &params);
   TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
@@ -155,16 +151,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   lazyInitUCP();
 
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
-      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
   params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
   params.memory_type = getUCSMemoryType(tensor.device().type());
-  params.cb.recv = [](void* request,
-                      ucs_status_t status,
-                      const ucp_tag_recv_info_t* info,
-                      void* user_data) {
-    *static_cast<bool *>(request) = true;
-  };
   ucs_status_ptr_t request = ucp_tag_recv_nbx(
     UCPContext::get()->worker, tensor.data_ptr(), 1, tag, 0, &params);
   TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "Failed to send message.", ucs_status_string(UCS_PTR_STATUS(request)));

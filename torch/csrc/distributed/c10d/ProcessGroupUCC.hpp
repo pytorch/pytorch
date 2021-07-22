@@ -54,11 +54,11 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 class TORCH_API ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
-    bool *finished;
+    ucs_status_ptr_t request;
   public:
-    WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
-    bool isCompleted() override { return *finished; };
-    bool isSuccess() const override { return *finished; };
+    WorkUCP(ucs_status_ptr_t ptr) : request(ptr) {}
+    bool isCompleted() override { return UCS_PTR_STATUS(request) != UCS_INPROGRESS; };
+    bool isSuccess() const override { return UCS_PTR_STATUS(request) == UCS_OK; };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted());
       return true;
