@@ -8,3 +8,9 @@ class Equality:
 
     def __repr__(self):
         return f'{self.lhs} = {self.rhs}'
+
+    def __eq__(self, other):
+        if isinstance(other, Equality):
+            return self.lhs == other.lhs and self.rhs == other.rhs
+        else:
+            return False
