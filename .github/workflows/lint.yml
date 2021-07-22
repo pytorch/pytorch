@@ -361,6 +361,7 @@ jobs:
 
           python3 -m tools.linter.clang_tidy \
             --paths torch/csrc/fx \
+            --paths torch/csrc/jit \
             --clang-tidy-exe "$(which clang-tidy)" \
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
