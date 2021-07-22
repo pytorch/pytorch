@@ -108,7 +108,7 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   TORCH_CHECK(is_numpy_available(), "Numpy is not available");
 
-  TORCH_CHECK(tensor.device().type() == DeviceType::CPU,
+  TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
       "can't convert ", tensor.device().str().c_str(),
       " device type tensor to numpy. Use Tensor.cpu() to ",
       "copy the tensor to host memory first.");
@@ -118,7 +118,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
       " layout tensor to numpy.",
       "convert the tensor to a strided layout first.");
 
-  TORCH_CHECK_TYPE(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
       "Can't call numpy() on Tensor that requires grad. "
       "Use tensor.detach().numpy() instead.");
 
