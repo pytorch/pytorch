@@ -9,10 +9,15 @@ on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
-{%- if ciflow_config.enabled %}
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
 {%- endif %}
-{%- endif %}
+
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
