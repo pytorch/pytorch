@@ -1305,7 +1305,7 @@ TEST_F(FunctionalTest, LocalResponseNorm) {
 TEST_F(FunctionalTest, Bias) {
   {
     const auto x = torch::arange(100., 118).resize_({3, 3, 2});
-    const auto b = torch::arange(300., 303);
+    const auto b = torch::arange(300., 302);
     const auto y = F::bias(x, b);
     ASSERT_EQ(y.ndimension(), 3);
     ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
