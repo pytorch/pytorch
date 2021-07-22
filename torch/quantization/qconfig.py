@@ -157,19 +157,20 @@ def add_module_to_qconfig_obs_ctr(
     Return:
         qconfig: configured so that obs constructors set to construct on the same device as module
     """
-    if (module is None or qconfig is None or
-            qconfig.activation.__module__ != 'torch.quantization.observer' or
-            qconfig.weight.__module__ != 'torch.quantization.observer'):
+
+    if (module is None or qconfig is None):
         return qconfig
 
     # need to make sure observer can accept factory_kwargs as an argument
     try:
         qconfig.activation(factory_kwargs=None)
         qconfig.weight(factory_kwargs=None)
-    except TypeError:
+    except AttributeError:  # qconfig doesn't have activation or weight
+        return qconfig
+    except TypeError:  # activation or weight don't have factory_kwargs argument
         return qconfig
 
-    def get_factory_kwargs_based_on_module_device() -> Any:
+    def get_factory_kwargs_based_on_module_device():
         assert isinstance(module, torch.nn.Module)
         devices = {p.device for p in module.parameters()} | \
             {p.device for p in module.buffers()}

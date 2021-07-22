@@ -94,7 +94,7 @@ import copy
 import itertools
 import operator
 import unittest
-
+import io
 from typing import Callable
 
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
