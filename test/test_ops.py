@@ -527,6 +527,7 @@ class TestGradients(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs)
 
         for sample in samples:
+            sample.log()
             if sample.broadcasts_input and is_inplace(variant):
                 continue
 
