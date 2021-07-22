@@ -1206,8 +1206,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
-    // NOLINTNEXTLINE(modernize-make-shared)
-    queue.reset(new ReadyQueue());
+    queue = std::make_shared<ReadyQueue>();
   }
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
