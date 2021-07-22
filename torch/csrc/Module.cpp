@@ -108,7 +108,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
-    names.push_back(name + "." + type->tp_name);
+    names.emplace_back(name + "." + type->tp_name);
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
