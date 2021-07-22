@@ -16,7 +16,7 @@ ExternalProject_Add(
   UPDATE_COMMAND ""
   PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/cpython_patch.diff
   BUILD_IN_SOURCE True
-  CONFIGURE_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC <SOURCE_DIR>/configure --prefix ${PYTHON_INSTALL_DIR}
+  CONFIGURE_COMMAND PYTHON_INSTALL_DIR=${PYTHON_INSTALL_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/configure_cpython.sh
   BUILD_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
   INSTALL_COMMAND make install
   BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB} ${PYTHON_BIN}
@@ -105,4 +105,4 @@ target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
 
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
-target_link_libraries(torch_deployinterpreter PRIVATE -l:libssl.a -l:libcrypto.a)
+target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)
