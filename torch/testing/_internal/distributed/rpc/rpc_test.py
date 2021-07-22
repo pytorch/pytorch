@@ -5,7 +5,6 @@ import os
 import sys
 import threading
 import time
-import unittest
 
 from collections import namedtuple
 from functools import partial
