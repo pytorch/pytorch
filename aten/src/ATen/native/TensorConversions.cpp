@@ -20,6 +20,13 @@ static inline Device ensure_has_index(Device device) {
   return impl->getDevice();
 }
 
+static inline optional<Device> ensure_has_index(optional<Device> device) {
+  if (!device.has_value()) {
+    return nullopt;
+  }
+  return ensure_has_index(device.value());
+}
+
 Tensor _to_copy(
     const Tensor& self,
     c10::optional<ScalarType> dtype,
@@ -100,6 +107,12 @@ static inline Tensor to_impl(
       is_null_or_equal_to(layout, self.layout()) &&
       is_null_or_equal_to(device, self.device()) &&
       !copy &&
+      // TODO(#62027): The following seems to be wrong.
+      // self.suggest_memory_format() suggests MemoryFormat::Contiguous
+      // for non-contiguous tensors that don't look ChannelsLast.
+      // This leads to `x.to(memory_format=torch.contiguous_format)`
+      // not always returning a contiguous tensor. Maybe the condition should
+      // actually be `self.is_contiguous(memory_format)`?
       (memory_format == MemoryFormat::Preserve ||
        self.suggest_memory_format() == memory_format)) {
     return self;
@@ -123,7 +136,7 @@ Tensor to(
       self,
       dtype,
       layout,
-      device.has_value() ? ensure_has_index(*device) : device,
+      ensure_has_index(device),
       pin_memory,
       non_blocking,
       copy,

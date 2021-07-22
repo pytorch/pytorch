@@ -382,13 +382,13 @@ def create_differentiability_info(
     output_differentiability_conditions = None
     if output_differentiability and any([isinstance(diff, str) for diff in output_differentiability]):
         if len(output_differentiability) != 1:
-            raise RuntimeError(f'Not supported: for {specification} output_differentiability '
-                               f'must either '
-                               f'be List[bool] or a List[str] where each str is a '
+            raise RuntimeError(f'Not supported: for {specification},'
+                               f'output_differentiability must either be '
+                               f'List[bool] or a List[str] where each str is a '
                                f'condition. In the case where it is a condition, '
                                f'we only support single-output functions. '
                                f'Please file us an issue. ')
-        output_differentiability_conditions = [output_differentiability[0]]
+        output_differentiability_conditions = output_differentiability
         output_differentiability = [True]
 
     schema_function = functions_by_schema.get(specification)
