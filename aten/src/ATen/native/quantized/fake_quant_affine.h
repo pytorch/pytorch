@@ -24,6 +24,7 @@ using fake_quant_tensor_cachemask_tensor_qparams_fn = void (*)(
     const Tensor& input,
     const Tensor& sc,
     const Tensor& z_point,
+    const Tensor& fake_quant_enabled,
     int64_t quant_min,
     int64_t quant_max);
 
