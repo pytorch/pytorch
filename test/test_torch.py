@@ -46,7 +46,7 @@ from torch.testing._internal.common_device_type import (
 from typing import Dict, List, Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, TEST_CUDA
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -559,6 +559,12 @@ class AbstractTestCases:
             # Testing in-place copy where it attempt to write from many memory
             # storage to a single storage would cause RuntimeError to be thrown
             self.assertRaises(RuntimeError, lambda: torch.zeros(1, 6).expand(5, 6).copy_(torch.zeros(5, 6)))
+
+        @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+        def test_memory_error_cuda(self):
+            # Will always raise an error because tensor is greater than 1EB of memory.
+            self.assertRaises(torch.CUDAOutOfMemoryError,
+                              lambda: torch.empty(int(1e18), device='cuda', dtype=torch.float32))
 
         def test_slice(self):
             empty = torch.empty(0, 4)

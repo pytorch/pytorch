@@ -11,12 +11,18 @@
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_FatalError;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyObject *THPException_CUDAOutOfMemoryError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
 {
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
+
+  ASSERT_TRUE(THPException_CUDAOutOfMemoryError = PyErr_NewExceptionWithDoc(
+    "torch.CUDAOutOfMemoryError", "CUDA out of memory.", PyExc_RuntimeError, nullptr));
+  ASSERT_TRUE(PyModule_AddObject(module, "CUDAOutOfMemoryError", THPException_CUDAOutOfMemoryError) == 0);
   return true;
 }
 

@@ -590,4 +590,5 @@ Utilities
     set_warn_always
     is_warn_always_enabled
     vmap
+    CUDAOutOfMemoryError
     _assert

@@ -7,6 +7,7 @@
 #include <mutex>
 
 #include <c10/util/Exception.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -77,6 +78,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::CUDAOutOfMemoryError& e) {                     \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(THPException_CUDAOutOfMemoryError, torch::processErrorMsg(msg)); \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
@@ -128,6 +135,8 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+extern PyObject *THPException_CUDAOutOfMemoryError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
