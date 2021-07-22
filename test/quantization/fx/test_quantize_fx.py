@@ -4555,6 +4555,20 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m(torch.rand(1, 2, 3, 4), torch.rand(3, 4).bool())
         return m
 
+    def test_chunk(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x, y = torch.chunk(x, 2)
+                x = x + y
+                return x
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        data = torch.rand(2, 2, 2, 2)
+        m(data)
+        m = convert_fx(m)
+        m(data)
+        # make sure everything runs
+
 
 class TestQuantizeFxModels(QuantizationTestCase):
     def _test_model_impl(
