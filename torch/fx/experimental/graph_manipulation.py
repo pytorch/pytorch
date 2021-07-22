@@ -370,7 +370,9 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
                 # For quantized embedding tables we need to update the shape/type,
                 # so we check if the users of this get_attr is a quantized EB and this is the weight for the EB.
                 user_targets = {
-                    _get_qualified_name(n.target).replace("glow.fb.fx.", ""): n
+                    _get_qualified_name(
+                        n.target
+                    ).replace("glow.fb.fx.oss_acc_tracer.", "").replace("glow.fb.fx.", ""): n
                     for n in node.users.keys()
                 }
                 if (
