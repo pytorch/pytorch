@@ -230,13 +230,13 @@ test_libtorch() {
     if [ -n "${IN_CI}" ]; then
       SITE_DIR=$(python -c "import site; print(site.getsitepackages()[0])")
       BIN_DIR="$SITE_DIR"/torch/bin
+      LIB_DIR="$SITE_DIR"/torch/bin
+      ${SUDO} ln -sf "$LIB_DIR"/libjitbackend* "$BIN_DIR"
+      ls -l "$BIN_DIR"
+      ls -l "$LIB_DIR"
     else
       BIN_DIR=build/bin
     fi
-    echo "Checking libtorch (trung)"
-    ls "$BIN_DIR"
-    ls "$BIN_DIR"/../lib
-    ${SUDO} ln -sf "$BIN_DIR"/../lib/libjitbackend_test.so "$BIN_DIR"
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
