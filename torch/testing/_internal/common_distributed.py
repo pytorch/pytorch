@@ -22,7 +22,14 @@ import torch.distributed as c10d
 import torch.cuda.nccl
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA, find_free_port, retry_on_connect_failures
+from torch.testing._internal.common_utils import (
+    TestCase,
+    TEST_WITH_ROCM,
+    FILE_SCHEMA,
+    find_free_port,
+    retry_on_connect_failures,
+    IS_SANDCASTLE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +43,14 @@ TEST_SKIPS = {
     "backend_unavailable": TestSkip(72, "Skipped because distributed backend is not available."),
     "small_worldsize": TestSkip(73, "Skipped due to small world size."),
     "no_cuda": TestSkip(74, "CUDA is not available."),
-    "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
+    "multi-gpu-1": TestSkip(75, "Need at least 1 CUDA device"),
+    "multi-gpu-2": TestSkip(77, "Need at least 2 CUDA devices"),
+    "multi-gpu-3": TestSkip(80, "Need at least 3 CUDA devices"),
+    "multi-gpu-4": TestSkip(81, "Need at least 4 CUDA devices"),
+    "multi-gpu-5": TestSkip(82, "Need at least 5 CUDA devices"),
+    "multi-gpu-6": TestSkip(83, "Need at least 6 CUDA devices"),
+    "multi-gpu-7": TestSkip(84, "Need at least 7 CUDA devices"),
+    "multi-gpu-8": TestSkip(85, "Need at least 8 CUDA devices"),
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
     "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
@@ -49,10 +63,9 @@ def skip_if_no_gpu(func):
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-        if torch.cuda.device_count() < int(os.environ["WORLD_SIZE"]):
-            message = "Need at least {} CUDA devices".format(os.environ["WORLD_SIZE"])
-            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-            sys.exit(TEST_SKIPS["multi-gpu"].exit_code)
+        world_size = int(os.environ["WORLD_SIZE"])
+        if torch.cuda.device_count() < world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{world_size}"].exit_code)
 
         return func(*args, **kwargs)
 
@@ -75,9 +88,7 @@ def require_n_gpus_for_nccl_backend(n, backend):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if backend == "nccl" and torch.cuda.device_count() < n:
-                message = "Need at least {} CUDA devices".format(n)
-                TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-                sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+                sys.exit(TEST_SKIPS[f'multi-gpu-{n}'].exit_code)
             else:
                 return func(*args, **kwargs)
         return wrapper
@@ -91,9 +102,7 @@ def skip_if_lt_x_gpu(x):
         def wrapper(*args, **kwargs):
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            message = "Need at least {} CUDA devices".format(x)
-            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+            sys.exit(TEST_SKIPS[f'multi-gpu-{x}'].exit_code)
         return wrapper
 
     return decorator
@@ -108,9 +117,7 @@ def nccl_skip_if_lt_x_gpu(backend, x):
                 return func(*args, **kwargs)
             if torch.cuda.is_available() and torch.cuda.device_count() >= x:
                 return func(*args, **kwargs)
-            message = "Need at least {} CUDA devices".format(x)
-            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+            sys.exit(TEST_SKIPS[f'multi-gpu-{x}'].exit_code)
         return wrapper
 
     return decorator
@@ -415,8 +422,6 @@ class MultiProcessTestCase(TestCase):
         self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
-        global TEST_SKIPS
-        self.old_test_skips = TEST_SKIPS.copy()
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
@@ -435,17 +440,6 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc) -> None:
-        # Creating a Manager will spawn a subprocess which will in turn launch
-        # a thread. TSAN doesn't like this because there could have been other
-        # threads already in the parent process and mixing all this is unsafe.
-        # Instead we should exec after the fork (i.e., use the "spawn" method)
-        # so that we reset the subprocess's state before creating new threads.
-        test_skips_manager = torch.multiprocessing.get_context("spawn").Manager()
-        test_skips = test_skips_manager.dict()
-        global TEST_SKIPS
-        test_skips.update(TEST_SKIPS)
-        TEST_SKIPS = test_skips
-
         self.processes = []
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
@@ -613,9 +607,6 @@ class MultiProcessTestCase(TestCase):
             for pid, pipe in self.pid_to_pipe.items():
                 pipe.close()
 
-            global TEST_SKIPS
-            TEST_SKIPS = self.old_test_skips
-
     def _check_no_test_errors(self, elapsed_time) -> None:
         """
         Checks that we didn't have any errors thrown in the child processes.
@@ -665,7 +656,15 @@ class MultiProcessTestCase(TestCase):
             )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
-                raise unittest.SkipTest(skip.message)
+                if IS_SANDCASTLE:
+                    # Don't use unittest.skip to skip the test on sandcastle
+                    # since it creates tasks for skipped tests assuming there
+                    # is some follow-up needed. Instead just "pass" the test
+                    # with an appropriate message.
+                    logger.info(f'Skipping {self.id()} on sandcastle for the following reason: {skip.message}')
+                    return
+                else:
+                    raise unittest.SkipTest(skip.message)
         self.assertEqual(
             first_process.exitcode,
             0,
