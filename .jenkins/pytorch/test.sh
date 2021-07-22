@@ -233,7 +233,9 @@ test_libtorch() {
     else
       BIN_DIR=build/bin
     fi
-
+    echo "Checking libtorch (trung)"
+    ls "$BIN_DIR"
+    ls "$BIN_DIR"/../lib
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -241,6 +243,7 @@ test_libtorch() {
     else
       "$BIN_DIR"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
+    echo "Checking libtorch (end)"
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
