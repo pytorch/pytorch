@@ -26,7 +26,7 @@ class TSBackendImpl : public BackendImplInterface {
 
   std::unique_ptr<ir::LoweringContext> CreateLoweringContext(
       const std::string& name, Device device) const override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    return std::make_unique<ts_backend::TSLoweringContext>(name, device);
   }
 
   lazy_tensors::ComputationClient* GetComputationClient() const override {
@@ -64,7 +64,10 @@ class TSBackendImpl : public BackendImplInterface {
 
   lazy_tensors::StatusOr<std::string> GetComputationBackendText(
       const lazy_tensors::GenericComputation* computation) const override {
-    LTC_LOG(FATAL) << "Not implemented yet.";
+    auto ts_computation = static_cast<
+        const torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
+        computation);
+    return ts_computation->executor()->graph()->toString();
   }
 };
 

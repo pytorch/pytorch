@@ -8,7 +8,9 @@ namespace ts_backend {
 
 TSLoweringContext::TSLoweringContext(const std::string& name, Device device)
     : ir::LoweringContext(name, device),
-      graph_(std::make_shared<torch::jit::Graph>()) {}
+      graph_(std::make_shared<torch::jit::Graph>()) {
+  lowering_ = NodeLowering::Create(this);
+}
 
 TSLoweringContext::TSLoweringContext(
     const std::string& name, Device device,
