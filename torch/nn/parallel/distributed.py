@@ -575,6 +575,7 @@ class DistributedDataParallel(Module, _Joinable):
             param_to_name_mapping = {}
         # Builds reducer.
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        self._has_rebuilt_buckets = False
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -856,6 +857,7 @@ class DistributedDataParallel(Module, _Joinable):
             # This should be called only once during whole training period.
             if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
+                self._has_rebuilt_buckets = True
 
             if self.require_forward_param_sync:
                 self._sync_params()
