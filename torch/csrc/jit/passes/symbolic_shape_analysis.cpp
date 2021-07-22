@@ -338,8 +338,8 @@ void PropagateShapesWithShapeFunction(
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   std::lock_guard<std::mutex> guard(lock);
   for (Node* n : graph->nodes()) {
-    if (n->maybeOperator()) {
-      if (auto maybe_graph = shapeComputeGraphForOperator(n->getOperator())) {
+    if (n->maybeSchema()) {
+      if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
         PropagateShapesWithShapeFunction(n, *maybe_graph);
       }
     }
