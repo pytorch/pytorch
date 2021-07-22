@@ -4014,7 +4014,6 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
             input,
             target,
             weight=weight,
-            ignore_index=ignore_index,
             reduction=reduction)
     else:
         return nlllossNd_reference(
