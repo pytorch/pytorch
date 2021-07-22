@@ -9187,6 +9187,9 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
+      - docker_build_job:
+          name: "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          image_name: "pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
     when: << pipeline.parameters.run_slow_gradcheck_build >>
   # The following allows the equivalent periodic jobs on GHA to run on CircleCI ci-all and release branches
   debuggable-scheduled-ci:
