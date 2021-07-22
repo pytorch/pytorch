@@ -35,7 +35,7 @@ if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]];
   sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
   wget https://www.openssl.org/source/openssl-1.1.1k.tar.gz
   tar xf openssl-1.1.1k.tar.gz
-  (cd openssl-1.1.1k && ./config && make -j32 && sudo make install)
+  (cd openssl-1.1.1k && ./config --prefix=/usr && make -j32 && sudo make install)
 fi
 
 echo "Python version:"
