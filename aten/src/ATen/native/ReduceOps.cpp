@@ -132,7 +132,7 @@ void meta_func_cum_ops(
     out_dtype = dtype.value_or(result.scalar_type());
     // This check is still here because the inline version of structured kernels
     // does not do any checks on 'set_output'.
-    TORCH_CHECK_VALUE(
+    TORCH_CHECK(
         out_dtype == result.scalar_type(),
         name, "(): provided dtype must match dtype of result tensor. Got: ",
         toString(out_dtype), ". Expected: ", toString(result.scalar_type()));
