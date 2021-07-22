@@ -16,8 +16,14 @@ UCPContext::UCPContext() {
   TORCH_UCX_CHECK(st, "Failed to read UCP config.");
 
   // initialize context
-  params.field_mask = UCP_PARAM_FIELD_FEATURES;
+  params.field_mask = UCP_PARAM_FIELD_FEATURES | UCP_PARAM_FIELD_REQUEST_SIZE |
+      UCP_PARAM_FIELD_REQUEST_INIT | UCP_PARAM_FIELD_REQUEST_CLEANUP;
+  params.request_size = sizeof(bool);
   params.features = UCP_FEATURE_TAG;
+  params.request_init = [](void* request) {
+    *static_cast<bool *>(request) = false;
+  };
+  params.request_cleanup = [](void*) {};
   st = ucp_init(&params, config, &context);
   ucp_config_release(config);
   TORCH_UCX_CHECK(st, "Failed to init UCP context.");

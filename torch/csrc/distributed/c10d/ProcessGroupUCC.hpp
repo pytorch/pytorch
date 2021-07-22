@@ -54,16 +54,24 @@ constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 class TORCH_API ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
-    ucs_status_ptr_t request;
+    bool *finished;
   public:
-    WorkUCP(ucs_status_ptr_t ptr) : request(ptr) {}
-    ~WorkUCP() { ucp_request_free(request); }
-    bool isCompleted() override { return UCS_PTR_STATUS(request) != UCS_INPROGRESS; };
-    bool isSuccess() const override { return UCS_PTR_STATUS(request) == UCS_OK; };
+    WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
+    bool isCompleted() override { return *finished; };
+    bool isSuccess() const override { return *finished; };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       while(!isCompleted()) {
         ucp_worker_progress(UCPContext::get()->worker);
       }
+      return true;
+    };
+  };
+
+  class ImmediatelyCompletedWork : public ProcessGroup::Work {
+  public:
+    bool isCompleted() override { return true; };
+    bool isSuccess() const override { return true; };
+    bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
       return true;
     };
   };

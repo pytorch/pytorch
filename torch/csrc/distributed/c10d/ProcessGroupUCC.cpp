@@ -124,13 +124,21 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
   lazyInitUCP();
 
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
   params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
   params.memory_type = getUCSMemoryType(tensor.device().type());
+  params.cb.send = [](void* request, ucs_status_t status, void* user_data) {
+    *static_cast<bool *>(request) = true;
+  };
   ucs_status_ptr_t request = ucp_tag_send_nbx(
     ucp_endpoints[dstRank]->endpoint, tensor.data_ptr(), 1, tag, &params);
-  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
-  return work;
+  if (UCS_PTR_STATUS(request) == UCS_OK) {
+    // If the operation is finished immediately, then the callback will
+    // not be invoked.
+    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
+  }
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
@@ -142,13 +150,24 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   lazyInitUCP();
 
   ucp_request_param_t params;
-  params.op_attr_mask = UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
+  params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
+      UCP_OP_ATTR_FIELD_DATATYPE | UCP_OP_ATTR_FIELD_MEMORY_TYPE;
   params.datatype = ucp_dt_make_contig(tensor.numel() * tensor.element_size());  // TODO: support all contiguity types
   params.memory_type = getUCSMemoryType(tensor.device().type());
+  params.cb.recv = [](void* request,
+                      ucs_status_t status,
+                      const ucp_tag_recv_info_t* info,
+                      void* user_data) {
+    *static_cast<bool *>(request) = true;
+  };
   ucs_status_ptr_t request = ucp_tag_recv_nbx(
     UCPContext::get()->worker, tensor.data_ptr(), 1, tag, 0, &params);
-  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
-  return work;
+  if (UCS_PTR_STATUS(request) == UCS_OK) {
+    // If the operation is finished immediately, then the callback will
+    // not be invoked.
+    return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
+  }
+  return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recvAnysource(
