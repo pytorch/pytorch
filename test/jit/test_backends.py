@@ -12,6 +12,7 @@ from pathlib import Path
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    IS_IN_CI,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -74,8 +75,12 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
+        if IS_IN_CI:
+            torch_root = Path(torch.__file__).resolve().parent
+            p = torch_root / 'lib' / 'libjitbackend_test.so'
+        else:
+            torch_root = Path(__file__).resolve().parent.parent.parent
+            p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
         torch.ops.load_library(str(p))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
