@@ -20,16 +20,14 @@ from .ns_types import (
 
 from typing import List, Optional, Dict, Callable
 
-# TODO(future PR): change signature to torch.Tensor and fix the LSTM
-# issues.
-def mod_weight_detach(mod: nn.Module) -> List[torch.Tensor]:
-    return [mod.weight.detach()]  # type: ignore[operator]
+def mod_weight_detach(mod: nn.Module) -> torch.Tensor:
+    return mod.weight.detach()  # type: ignore[operator]
 
-def mod_0_weight_detach(mod: nn.Module) -> List[torch.Tensor]:
-    return [mod[0].weight.detach()]  # type: ignore[index]
+def mod_0_weight_detach(mod: nn.Module) -> torch.Tensor:
+    return mod[0].weight.detach()  # type: ignore[index]
 
-def mod_weight_bias_0(mod: nn.Module) -> List[torch.Tensor]:
-    return [mod._weight_bias()[0]]  # type: ignore[operator]
+def mod_weight_bias_0(mod: nn.Module) -> torch.Tensor:
+    return mod._weight_bias()[0]  # type: ignore[operator]
 
 def get_lstm_weight(mod: nn.Module) -> List[torch.Tensor]:
     res = []
@@ -247,7 +245,7 @@ def extract_weight_from_node(
                 weight = weight_extraction_fn(mod)
                 return {
                     'type': res_type,
-                    'values': weight,
+                    'values': [weight],
                     'prev_node_name': node.name,
                     'prev_node_target_type': str(type(mod)),
                     'ref_node_name': node.name,
