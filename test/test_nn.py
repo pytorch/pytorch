@@ -13266,13 +13266,17 @@ class TestNNDeviceType(NNTestCase):
             device_list.append('cuda')
 
         for device in device_list:
+            inp = torch.ones(0, 10, dtype=dtype).to(device)
+            mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
+            self._test_module_empty_input(mod, inp, check_size=False)
+
             inp = torch.ones(0, 10, 10, dtype=dtype).to(device)
             mod = torch.nn.AdaptiveAvgPool2d((5,5)).to(device)
-            self._test_module_empty_input(mod, inp)
+            self._test_module_empty_input(mod, inp, check_size=False)
 
             inp = torch.ones(0, 10, 10, 10, dtype=dtype).to(device)
             mod = torch.nn.AdaptiveAvgPool3d((5,5,5)).to(device)
-            self._test_module_empty_input(mod, inp)
+            self._test_module_empty_input(mod, inp, check_size=False)
 
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
