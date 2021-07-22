@@ -154,7 +154,10 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    slow_gradcheck_jobs = pytorch_build_definitions.get_workflow_jobs(only_slow_gradcheck=True)
+    slow_gradcheck_jobs = [
+        pytorch_build_definitions.get_workflow_jobs,
+        cimodel.data.simple.docker_definitions.get_workflow_jobs,
+    ]
 
     return {
         "workflows": {
@@ -172,7 +175,7 @@ def gen_build_workflows_tree():
             },
             "slow_gradcheck_build": {
                 "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
-                "jobs": slow_gradcheck_jobs,
+                "jobs": [f(only_slow_gradcheck=True) for f in slow_gradcheck_jobs],
             },
         }
     }
