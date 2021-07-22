@@ -76,8 +76,10 @@ class Tensor(torch._C._TensorBase):
                             self.q_per_channel_axis()
                     else:
                         raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
+                    # TODO: Once we decide to break serialization FC, no longer
+                    # need to wrap with TypedStorage
                     new_tensor = torch._utils._rebuild_qtensor(
-                        new_storage,
+                        torch.storage.TypedStorage(new_storage, self.dtype),
                         self.storage_offset(),
                         self.size(),
                         self.stride(),
@@ -153,7 +155,9 @@ class Tensor(torch._C._TensorBase):
                                     self.q_per_channel_axis())
             else:
                 raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
-            args_qtensor = (self.storage(),
+            # TODO: Once we decide to break serialization FC, no longer
+            # need to wrap with TypedStorage
+            args_qtensor = (torch.storage.TypedStorage(self.storage(), self.dtype),
                             self.storage_offset(),
                             tuple(self.size()),
                             self.stride(),
@@ -172,7 +176,9 @@ class Tensor(torch._C._TensorBase):
                     'sparse tensor __reduce_ex__ for layout `%s`' % (self.layout))
             return (torch._utils._rebuild_sparse_tensor, args_sparse)
         else:
-            args = (self.storage(),
+            # TODO: Once we decide to break serialization FC, no longer
+            # need to wrap with TypedStorage
+            args = (torch.storage.TypedStorage(self.storage(), self.dtype),
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
@@ -189,6 +195,10 @@ class Tensor(torch._C._TensorBase):
             raise RuntimeError('__setstate__ can be only called on leaf Tensors')
         if len(state) == 4:
             # legacy serialization of Tensor
+
+            # TODO: This is a hacky workaround. It would be better to avoid
+            # giving a TypedStorage in the first place
+            state = [item.storage if isinstance(item, torch.storage.TypedStorage) else item for item in state]
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -725,7 +735,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.storage().element_size()
+        itemsize = self.element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():

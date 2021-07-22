@@ -321,7 +321,6 @@ typedef PyObject *(*getter)(PyObject *, void *);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_(properties)[] = {
   {"device", (getter)THPStorage_(device), nullptr, nullptr, nullptr},
-  {"dtype",  (getter)THPStorage_(dtype), nullptr, nullptr, nullptr},
   {nullptr}
 };
 

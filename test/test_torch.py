@@ -33,7 +33,8 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor,
+    bytes_to_scalar)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -1270,9 +1271,6 @@ class AbstractTestCases:
             d_cpu = torch.randn((2, 3), dtype=torch.float64)
 
             # change dtype
-            self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu.storage()))
-            self.assertRaises(RuntimeError,
-                              lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
             self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
 
             # change device
@@ -1323,18 +1321,19 @@ class AbstractTestCases:
             self.assertFalse(torch.equal(s1, s4))
 
         def test_element_size(self):
-            byte = torch.ByteStorage().element_size()
-            char = torch.CharStorage().element_size()
-            short = torch.ShortStorage().element_size()
-            int = torch.IntStorage().element_size()
-            long = torch.LongStorage().element_size()
-            float = torch.FloatStorage().element_size()
-            double = torch.DoubleStorage().element_size()
-            bool = torch.BoolStorage().element_size()
-            bfloat16 = torch.BFloat16Storage().element_size()
-            complexfloat = torch.ComplexFloatStorage().element_size()
-            complexdouble = torch.ComplexDoubleStorage().element_size()
+            byte = torch._utils._element_size(torch.uint8)
+            char = torch._utils._element_size(torch.int8)
+            short = torch._utils._element_size(torch.short)
+            int = torch._utils._element_size(torch.int)
+            long = torch._utils._element_size(torch.long)
+            float = torch._utils._element_size(torch.float)
+            double = torch._utils._element_size(torch.double)
+            bool = torch._utils._element_size(torch.bool)
+            bfloat16 = torch._utils._element_size(torch.bfloat16)
+            complexfloat = torch._utils._element_size(torch.cfloat)
+            complexdouble = torch._utils._element_size(torch.cdouble)
 
+            self.assertEqual(byte, torch.ByteStorage().element_size())
             self.assertEqual(byte, torch.ByteTensor().element_size())
             self.assertEqual(char, torch.CharTensor().element_size())
             self.assertEqual(short, torch.ShortTensor().element_size())
@@ -1732,123 +1731,28 @@ class AbstractTestCases:
 
         def test_from_buffer(self):
             a = bytearray([1, 2, 3, 4])
-            self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
-            shorts = torch.ShortStorage.from_buffer(a, 'big')
-            self.assertEqual(shorts.size(), 2)
-            self.assertEqual(shorts.tolist(), [258, 772])
-            ints = torch.IntStorage.from_buffer(a, 'little')
-            self.assertEqual(ints.size(), 1)
-            self.assertEqual(ints[0], 67305985)
-            f = bytearray([0x40, 0x10, 0x00, 0x00])
-            floats = torch.FloatStorage.from_buffer(f, 'big')
-            self.assertEqual(floats.size(), 1)
-            self.assertEqual(floats[0], 2.25)
+            bytes = torch.ByteStorage.from_buffer(a)
+            self.assertEqual(bytes.nbytes(), 4)
+            self.assertEqual(bytes.tolist(), [1, 2, 3, 4])
 
-            f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
-            bools = torch.BoolStorage.from_buffer(f, 'big')
-            self.assertEqual(bools.size(), 8)
-            self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
-            self.assertEqual(bools.type(), 'torch.BoolStorage')
+        def test_storage_byte(self):
+            storage = torch.ByteStorage([255, 0, 1, 2, 3, 4])
 
-            f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
-            bools = torch.BoolStorage.from_buffer(f, 'big')
-            self.assertEqual(bools.size(), 19)
-
-            f = bytearray(b'\0x4A')
-            bools = torch.BoolStorage.from_buffer(f, 'big')
-            self.assertEqual(bools.size(), 4)
-            self.assertEqual(bools.tolist(), [False, True, True, True])
-
-        def test_storage_casts(self):
-            storage = torch.IntStorage([-1, 0, 1, 2, 3, 4])
-            self.assertEqual(storage.size(), 6)
-            self.assertEqual(storage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(storage.type(), 'torch.IntStorage')
-            self.assertIs(storage.dtype, torch.int32)
-
-            floatStorage = storage.float()
-            self.assertEqual(floatStorage.size(), 6)
-            self.assertEqual(floatStorage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(floatStorage.type(), 'torch.FloatStorage')
-            self.assertEqual(floatStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(floatStorage.dtype, torch.float32)
-
-            halfStorage = storage.half()
-            self.assertEqual(halfStorage.size(), 6)
-            self.assertEqual(halfStorage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(halfStorage.type(), 'torch.HalfStorage')
-            self.assertEqual(halfStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(halfStorage.dtype, torch.float16)
-
-            bfloat16Storage = storage.bfloat16()
-            self.assertEqual(bfloat16Storage.size(), 6)
-            self.assertEqual(bfloat16Storage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(bfloat16Storage.type(), 'torch.BFloat16Storage')
-            self.assertEqual(bfloat16Storage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(bfloat16Storage.dtype, torch.bfloat16)
-
-            longStorage = storage.long()
-            self.assertEqual(longStorage.size(), 6)
-            self.assertEqual(longStorage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(longStorage.type(), 'torch.LongStorage')
-            self.assertEqual(longStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(longStorage.dtype, torch.int64)
-
-            shortStorage = storage.short()
-            self.assertEqual(shortStorage.size(), 6)
-            self.assertEqual(shortStorage.tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertEqual(shortStorage.type(), 'torch.ShortStorage')
-            self.assertEqual(shortStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(shortStorage.dtype, torch.int16)
-
-            doubleStorage = storage.double()
-            self.assertEqual(doubleStorage.size(), 6)
-            self.assertEqual(doubleStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
-            self.assertEqual(doubleStorage.type(), 'torch.DoubleStorage')
-            self.assertEqual(doubleStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(doubleStorage.dtype, torch.float64)
-
-            charStorage = storage.char()
-            self.assertEqual(charStorage.size(), 6)
-            self.assertEqual(charStorage.tolist(), [-1.0, 0.0, 1.0, 2.0, 3.0, 4.0])
-            self.assertEqual(charStorage.type(), 'torch.CharStorage')
-            self.assertEqual(charStorage.int().tolist(), [-1, 0, 1, 2, 3, 4])
-            self.assertIs(charStorage.dtype, torch.int8)
-
-            byteStorage = storage.byte()
-            self.assertEqual(byteStorage.size(), 6)
+            byteStorage = storage
+            self.assertEqual(byteStorage.nbytes(), 6)
             self.assertEqual(byteStorage.tolist(), [255, 0, 1, 2, 3, 4])
+
             self.assertEqual(byteStorage.type(), 'torch.ByteStorage')
-            self.assertEqual(byteStorage.int().tolist(), [255, 0, 1, 2, 3, 4])
-            self.assertIs(byteStorage.dtype, torch.uint8)
-
-            boolStorage = storage.bool()
-            self.assertEqual(boolStorage.size(), 6)
-            self.assertEqual(boolStorage.tolist(), [True, False, True, True, True, True])
-            self.assertEqual(boolStorage.type(), 'torch.BoolStorage')
-            self.assertEqual(boolStorage.int().tolist(), [1, 0, 1, 1, 1, 1])
-            self.assertIs(boolStorage.dtype, torch.bool)
-
-            complexfloat_storage = torch.ComplexFloatStorage([-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
-            self.assertEqual(complexfloat_storage.size(), 6)
-            self.assertEqual(complexfloat_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
-            self.assertEqual(complexfloat_storage.type(), 'torch.ComplexFloatStorage')
-            self.assertIs(complexfloat_storage.dtype, torch.complex64)
-
-            complexdouble_storage = complexfloat_storage.complex_double()
-            self.assertEqual(complexdouble_storage.size(), 6)
-            self.assertEqual(complexdouble_storage.tolist(), [-1, 0, 1 + 2j, 2.5j, 3.5, 4 - 2j])
-            self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
-            self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
         def test_from_file(self):
             def assert_with_filename(filename):
                 size = 10000
-                s1 = torch.FloatStorage.from_file(filename, True, size)
+                size_bytes = size * 4
+                s1 = torch.ByteStorage.from_file(filename, True, size_bytes)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
                 # check mapping
-                s2 = torch.FloatStorage.from_file(filename, True, size)
+                s2 = torch.ByteStorage.from_file(filename, True, size_bytes)
                 t2 = torch.FloatTensor(s2)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
@@ -1920,12 +1824,8 @@ class AbstractTestCases:
             obj.__repr__()
             str(obj)
             for t in torch._storage_classes:
-                if t == torch.BFloat16Storage:
-                    continue  # Fix once fill is enabled for bfloat16
                 if t.is_cuda and not torch.cuda.is_available():
                     continue
-                if t == torch.BoolStorage or t == torch.cuda.BoolStorage:
-                    obj = t(100).fill_(True)
                 else:
                     obj = t(100).fill_(1)
                 obj.__repr__()
@@ -2214,7 +2114,12 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             self.assertRaises(TypeError, lambda: x.new(z))
             # TypeError would be better
-            self.assertRaises(RuntimeError, lambda: x.new(z.storage()))
+
+            # TODO: Probably should add more test cases like the following for
+            # better coverage
+            x_new_z = x.new(z.storage())
+            self.assertEqual(x_new_z.dtype, x.dtype)
+            self.assertEqual(x_new_z.storage(), z.storage())
 
         @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")
         def test_pin_memory(self):
@@ -3006,11 +2911,49 @@ class TestTorchDeviceType(TestCase):
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
 
-    @dtypes(torch.float32, torch.complex64)
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.bool, torch.float32, torch.complex64, torch.float64,
+            torch.complex128)
+    def test_bytes_to_scalar(self, device, dtype):
+        def rand_byte():
+            if dtype == torch.bool:
+                return torch.randint(0, 2, ()).item()
+            else:
+                return torch.randint(0, 256, ()).item()
+
+        element_size = torch._utils._element_size(dtype)
+
+        for i in range(10):
+            bytes_list = [rand_byte() for _ in range(element_size)]
+            scalar = bytes_to_scalar(bytes_list, dtype, device)
+            self.assertEqual(scalar.storage().tolist(), bytes_list)
+
+    @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64,
+            torch.bool, torch.float32, torch.complex64, torch.float64,
+            torch.complex128)
     def test_storage(self, device, dtype):
-        v = torch.randn(3, 5, dtype=dtype, device=device)
-        self.assertEqual(v.storage()[0], v[0][0])
-        self.assertEqual(v.storage()[14], v[2][4])
+        v = make_tensor((3, 5), device, dtype, low=-9, high=9)
+        v_s = v.storage()
+        el_size = v.element_size()
+
+        for el_num in range(v.numel()):
+            start = el_num * el_size
+            end = start + el_size
+            dim0 = el_num // v.size(1)
+            dim1 = el_num % v.size(1)
+            self.assertEqual(
+                bytes_to_scalar(v_s[start:end], dtype, device),
+                v[dim0][dim1])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_tensor_from_storage(self, device, dtype):
+        a = make_tensor((4, 5, 3), device, dtype, low=-9, high=9)
+        a_s = a.storage()
+
+        b = torch.tensor(a_s, device=device, dtype=dtype).reshape(a.size())
+        self.assertEqual(a, b)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy(self, device, dtype):
@@ -3028,12 +2971,21 @@ class TestTorchDeviceType(TestCase):
 
         # Check that deepcopy preserves sharing
         w[0].add_(1)
+        element_size = a.element_size()
         for i in range(a.numel()):
-            self.assertEqual(w[1][0][i], q[1][0][i] + 1)
+            start = i * element_size
+            end = start + element_size
+            self.assertEqual(
+                bytes_to_scalar(w[1][0][start:end], dtype, device),
+                bytes_to_scalar(q[1][0][start:end], dtype, device) + 1)
         self.assertEqual(w[3], c + 1)
         w[2].sub_(1)
         for i in range(a.numel()):
-            self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+            start = i * element_size
+            end = start + element_size
+            self.assertEqual(
+                bytes_to_scalar(w[1][1][start:end], dtype, device),
+                bytes_to_scalar(q[1][1][start:end], dtype, device) - 1)
 
     @dtypes(torch.float32, torch.complex64)
     def test_deepcopy_scalar(self, device, dtype):
@@ -7088,14 +7040,8 @@ else:
 
     def test_storage_device(self, device):
         x = torch.tensor([], device=device)
-        self.assertEqual(x.dtype, x.storage().dtype)
-
-    @deviceCountAtLeast(2)
-    @onlyCUDA
-    def test_storage_multigpu(self, devices):
-        for device in devices:
-            x = torch.tensor([], device=device)
-            self.assertEqual(x.dtype, x.storage().dtype)
+        self.assertEqual(x.dtype, torch.float32)
+        self.assertEqual(x.storage().device, x.device)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypes(torch.float, torch.double)

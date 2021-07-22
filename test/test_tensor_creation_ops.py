@@ -1899,25 +1899,25 @@ class TestTensorCreation(TestCase):
 
         torch.set_default_tensor_type('torch.FloatTensor')
         self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.FloatStorage, torch.Storage)
+        self.assertIs(torch.ByteStorage, torch.Storage)
 
         torch.set_default_dtype(torch.float64)
         self.assertIs(torch.float64, torch.get_default_dtype())
-        self.assertIs(torch.DoubleStorage, torch.Storage)
+        self.assertIs(torch.ByteStorage, torch.Storage)
 
         torch.set_default_tensor_type(torch.FloatTensor)
         self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.FloatStorage, torch.Storage)
+        self.assertIs(torch.ByteStorage, torch.Storage)
 
         if torch.cuda.is_available():
             torch.set_default_tensor_type(torch.cuda.FloatTensor)
             self.assertIs(torch.float32, torch.get_default_dtype())
             self.assertIs(torch.float32, torch.cuda.FloatTensor.dtype)
-            self.assertIs(torch.cuda.FloatStorage, torch.Storage)
+            self.assertIs(torch.cuda.ByteStorage, torch.Storage)
 
             torch.set_default_dtype(torch.float64)
             self.assertIs(torch.float64, torch.get_default_dtype())
-            self.assertIs(torch.cuda.DoubleStorage, torch.Storage)
+            self.assertIs(torch.cuda.ByteStorage, torch.Storage)
 
         # don't support integral or sparse default types.
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
@@ -2411,7 +2411,7 @@ class TestTensorCreation(TestCase):
                 # as_strided checks the storage size is big enough to support such a strided tensor;
                 # instead of repeating this calculation, we just use empty_strided which does the same
                 # calculation when setting the storage size.
-                as_strided = torch.empty(empty_strided.storage().size(),
+                as_strided = torch.empty(empty_strided.storage().nbytes() // empty_strided.element_size(),
                                          device=device).as_strided(shape, strides)
                 self.assertEqual(empty_strided.shape, as_strided.shape)
                 self.assertEqual(empty_strided.stride(), as_strided.stride())

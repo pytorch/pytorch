@@ -67,11 +67,18 @@ class TestShapeOps(TestCase):
 
         table1D = [1., 2., 3.]
         tensor1D = torch.tensor(table1D)
-        storage = torch.Storage(table1D)
+
+        # Convert table1D to a list of byte values and create a storage from it
+        import struct
+        import itertools
+        table1D_bytes = list(itertools.chain.from_iterable(
+            [struct.pack('f', value) for value in table1D]))
+        storage = torch.Storage(table1D_bytes)
+        self.assertEqual(tensor1D.storage(), storage)
+
+        tensor1D_check = torch.tensor(storage, dtype=tensor1D.dtype)
         self.assertEqual(tensor1D.tolist(), table1D)
-        self.assertEqual(storage.tolist(), table1D)
-        self.assertEqual(tensor1D.tolist(), table1D)
-        self.assertEqual(storage.tolist(), table1D)
+        self.assertEqual(tensor1D_check.tolist(), table1D)
 
         table2D = [[1, 2], [3, 4]]
         tensor2D = torch.tensor(table2D)

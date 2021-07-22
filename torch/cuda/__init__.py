@@ -506,15 +506,16 @@ from .random import *  # noqa: F403
 from ..storage import _StorageBase
 
 
-if not hasattr(torch._C, 'CudaDoubleStorageBase'):
+if not hasattr(torch._C, 'CudaByteStorageBase'):
     # Define dummy base classes
     for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
               'ComplexDouble', 'ComplexFloat']:
-        storage_name = 'Cuda{0}StorageBase'.format(t)
         tensor_name = 'Cuda{0}TensorBase'.format(t)
 
-        torch._C.__dict__[storage_name] = _dummy_type(storage_name)
         torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
+
+    storage_name = 'CudaByteStorageBase'
+    torch._C.__dict__[storage_name] = _dummy_type(storage_name)
 
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
@@ -541,65 +542,10 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-
-class DoubleStorage(_CudaBase, torch._C.CudaDoubleStorageBase, _StorageBase):
-    pass
-
-
-class FloatStorage(_CudaBase, torch._C.CudaFloatStorageBase, _StorageBase):
-    pass
-
-
-class LongStorage(_CudaBase, torch._C.CudaLongStorageBase, _StorageBase):
-    pass
-
-
-class IntStorage(_CudaBase, torch._C.CudaIntStorageBase, _StorageBase):
-    pass
-
-
-class ShortStorage(_CudaBase, torch._C.CudaShortStorageBase, _StorageBase):
-    pass
-
-
-class CharStorage(_CudaBase, torch._C.CudaCharStorageBase, _StorageBase):
-    pass
-
-
 class ByteStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
     pass
 
-
-class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
-    pass
-
-
-class BoolStorage(_CudaBase, torch._C.CudaBoolStorageBase, _StorageBase):
-    pass
-
-
-class BFloat16Storage(_CudaBase, torch._C.CudaBFloat16StorageBase, _StorageBase):
-    pass
-
-class ComplexDoubleStorage(_CudaBase, torch._C.CudaComplexDoubleStorageBase, _StorageBase):
-    pass
-
-
-class ComplexFloatStorage(_CudaBase, torch._C.CudaComplexFloatStorageBase, _StorageBase):
-    pass
-
-torch._storage_classes.add(DoubleStorage)
-torch._storage_classes.add(FloatStorage)
-torch._storage_classes.add(LongStorage)
-torch._storage_classes.add(IntStorage)
-torch._storage_classes.add(ShortStorage)
-torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
-torch._storage_classes.add(HalfStorage)
-torch._storage_classes.add(BoolStorage)
-torch._storage_classes.add(BFloat16Storage)
-torch._storage_classes.add(ComplexDoubleStorage)
-torch._storage_classes.add(ComplexFloatStorage)
 
 from . import sparse
 from . import profiler

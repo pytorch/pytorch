@@ -14,8 +14,11 @@ class _StorageBase(object):
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
     def copy_(self, source: T) -> T: ...  # noqa: E704
-    def size(self) -> int: ...  # noqa: E704
-    def type(self, dtype: str = None, non_blocking: bool = False) -> T: ...  # noqa: E704
+    def nbytes(self) -> int: ...  # noqa: E704
+
+    def type(self):
+        return _type(self)
+
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T: ...  # noqa: E704
     def element_size(self) -> int: ...  # noqa: E704
     def get_device(self) -> int: ...  # noqa: E704
@@ -36,7 +39,7 @@ class _StorageBase(object):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], range(self.size())))
+        return iter(map(lambda i: self[i], range(self.nbytes())))
 
     def __copy__(self):
         return self.clone()
@@ -55,13 +58,13 @@ class _StorageBase(object):
         return (_load_from_bytes, (b.getvalue(),))
 
     def __sizeof__(self):
-        return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
+        return super(_StorageBase, self).__sizeof__() + self.nbytes()
 
     def clone(self):
         """Returns a copy of this storage"""
         device = self.get_device() if self.is_cuda else -1
         with torch.cuda.device(device):
-            return type(self)(self.size()).copy_(self)
+            return type(self)(self.nbytes()).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
@@ -69,55 +72,7 @@ class _StorageBase(object):
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
-        return self.type(getattr(torch, self.__class__.__name__))
-
-    def double(self):
-        """Casts this storage to double type"""
-        return self.type(type(self).__module__ + '.DoubleStorage')
-
-    def float(self):
-        """Casts this storage to float type"""
-        return self.type(type(self).__module__ + '.FloatStorage')
-
-    def half(self):
-        """Casts this storage to half type"""
-        return self.type(type(self).__module__ + '.HalfStorage')
-
-    def long(self):
-        """Casts this storage to long type"""
-        return self.type(type(self).__module__ + '.LongStorage')
-
-    def int(self):
-        """Casts this storage to int type"""
-        return self.type(type(self).__module__ + '.IntStorage')
-
-    def short(self):
-        """Casts this storage to short type"""
-        return self.type(type(self).__module__ + '.ShortStorage')
-
-    def char(self):
-        """Casts this storage to char type"""
-        return self.type(type(self).__module__ + '.CharStorage')
-
-    def byte(self):
-        """Casts this storage to byte type"""
-        return self.type(type(self).__module__ + '.ByteStorage')
-
-    def bool(self):
-        """Casts this storage to bool type"""
-        return self.type(type(self).__module__ + '.BoolStorage')
-
-    def bfloat16(self):
-        """Casts this storage to bfloat16 type"""
-        return self.type(type(self).__module__ + '.BFloat16Storage')
-
-    def complex_double(self):
-        """Casts this storage to complex double type"""
-        return self.type(type(self).__module__ + '.ComplexDoubleStorage')
-
-    def complex_float(self):
-        """Casts this storage to complex float type"""
-        return self.type(type(self).__module__ + '.ComplexFloatStorage')
+        return _type(self, getattr(torch, self.__class__.__name__))
 
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
@@ -125,7 +80,7 @@ class _StorageBase(object):
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
         import torch.cuda
         allocator = torch.cuda._host_allocator()  # type: ignore[attr-defined]
-        return type(self)(self.size(), allocator=allocator).copy_(self)
+        return type(self)(self.nbytes(), allocator=allocator).copy_(self)
 
     def share_memory_(self):
         """Moves the storage to shared memory.
@@ -146,20 +101,91 @@ class _StorageBase(object):
         return self
 
     @classmethod
-    def _new_shared(cls, size):
+    def _new_shared(cls, *, nbytes):
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
         if cls.is_cuda:
-            return cls(size)
+            return cls(nbytes)
         elif get_sharing_strategy() == 'file_system':
-            return cls._new_using_filename(size)
+            return cls._new_using_filename(nbytes)
         else:
-            return cls._new_using_fd(size)
+            return cls._new_using_fd(nbytes)
 
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
 
 
-_StorageBase.type = _type  # type: ignore[assignment]
 _StorageBase.cuda = _cuda  # type: ignore[assignment]
+
+
+def _dtype_to_pickle_storage_type_map():
+    return {
+        torch.double: 'DoubleStorage',
+        torch.float: 'FloatStorage',
+        torch.half: 'HalfStorage',
+        torch.long: 'LongStorage',
+        torch.int: 'IntStorage',
+        torch.short: 'ShortStorage',
+        torch.int8: 'CharStorage',
+        torch.uint8: 'ByteStorage',
+        torch.bool: 'BoolStorage',
+        torch.bfloat16: 'BFloat16Storage',
+        torch.cdouble: 'ComplexDoubleStorage',
+        torch.cfloat: 'ComplexFloatStorage',
+        torch.qint8: 'QInt8Storage',
+        torch.qint32: 'QInt32Storage',
+        torch.quint8: 'QUInt8Storage',
+        torch.quint4x2: 'QUInt4x2Storage',
+    }
+
+def _pickle_storage_type_to_dtype_map():
+    if not hasattr(_pickle_storage_type_to_dtype_map, 'cache'):
+        _pickle_storage_type_to_dtype_map.cache = {  # type: ignore[attr-defined]
+            val: key for key, val in _dtype_to_pickle_storage_type_map().items()}
+    return _pickle_storage_type_to_dtype_map.cache  # type: ignore[attr-defined]
+
+class TypedStorage:
+    def __init__(self, storage, dtype: torch.dtype):
+
+        if not isinstance(storage, torch.ByteStorage) and not isinstance(storage, torch.cuda.ByteStorage):
+            raise RuntimeError(
+                f'expected a ByteStorage, but got {type(storage)}')
+
+        self.storage = storage
+        self.dtype = dtype
+
+    def __str__(self):
+        return f'TypedStorage(storage={self.storage}, dtype={self.dtype})'
+
+    def __iter__(self):
+        return self.storage.__iter__()
+
+    def __len__(self):
+        return self.storage.__len__()
+
+    def numel(self):
+        element_size = torch._utils._element_size(self.dtype)
+        return self.storage.nbytes() // element_size
+
+    def nbytes(self):
+        return self.storage.nbytes()
+
+    def pickle_storage_type(self):
+        try:
+            return _dtype_to_pickle_storage_type_map()[self.dtype]
+        except KeyError:
+            raise KeyError(f'dtype {self.dtype} is not recognized')
+
+    def __reduce__(self):
+        b = io.BytesIO()
+        torch.save(self, b, _use_new_zipfile_serialization=False)
+        return (_load_from_bytes, (b.getvalue(),))
+
+
+def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
+    try:
+        return _pickle_storage_type_to_dtype_map()[pickle_storage_type]
+    except KeyError:
+        raise KeyError(
+            f'pickle storage type "{pickle_storage_type}" is not recognized')

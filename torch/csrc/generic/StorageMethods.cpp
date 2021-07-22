@@ -13,11 +13,11 @@
 #define LSEEK lseek
 #endif
 
-static PyObject * THPStorage_(size)(PyObject *_self, PyObject *noargs)
+static PyObject * THPStorage_(nbytes)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return THPUtils_packUInt64(self->cdata->nbytes() / sizeof(scalar_t));
+  return THPUtils_packUInt64(self->cdata->nbytes());
   END_HANDLE_TH_ERRORS
 }
 
@@ -219,17 +219,17 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   HANDLE_TH_ERRORS
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char *filename;
-  Py_ssize_t size = 0;
+  Py_ssize_t nbytes = 0;
   int shared = 0;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char *kwlist[] = {"filename", "shared", "size", nullptr};
+  static char *kwlist[] = {"filename", "shared", "nbytes", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
-              &filename, &shared, &size)) {
+              &filename, &shared, &nbytes)) {
     return nullptr;
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
-  THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
+  THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, nbytes, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
 }
@@ -241,27 +241,37 @@ PyObject * THPStorage_(writeFile)(PyObject *_self, PyObject *args)
   PyObject *file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
   bool save_size = PyTuple_GetItem(args, 2) == Py_True;
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 3);
+
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_write_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
   if (!is_real_file) {
-    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size);
+    THPStorage_(writeFileRaw<PyObject*>)(self->cdata, file, save_size, element_size);
     Py_RETURN_NONE;
   }
 
   int fd = PyObject_AsFileDescriptor(file);
   THPUtils_assert(fd != -1, "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_(writeFileRaw)(self->cdata, fd, save_size);
+  THPStorage_(writeFileRaw)(self->cdata, fd, save_size, element_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *file)
+PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  int fd = PyObject_AsFileDescriptor(file);
+  int fd = PyObject_AsFileDescriptor(PyTuple_GetItem(args, 0));
   THPUtils_assert(fd != -1, "_new_with_file couldn't retrieve a file "
       "descriptor from given object");
-  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr);
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 1);
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_new_with_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
+
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, nullptr, element_size);
   if (storage == nullptr)
     return nullptr;
   PyObject *result = THPStorage_(New)(storage);
@@ -277,12 +287,18 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   PyObject *offset = PyTuple_GET_ITEM(args, 1);
   bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
 
+  PyObject *element_size_obj = PyTuple_GET_ITEM(args, 3);
+
+  THPUtils_assert(element_size_obj != Py_None,
+                  "_set_from_file: need to specify element size");
+  uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
+
   if (!is_real_file) {
     // offset can be implemented with a call to the Python object's seek()
     // but it is currently unnecessary to support this.
     THPUtils_assert(offset == Py_None,
                     "_set_from_file: offset is NYI for filelike objects");
-    THWStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata);
+    THWStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata, element_size);
     if (storage == nullptr) {
       return nullptr;
     }
@@ -298,7 +314,7 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata);
+  THWStorage *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata, element_size);
   if (storage == nullptr)
     return nullptr;
   Py_INCREF(self);
@@ -352,11 +368,11 @@ static PyMethodDef THPStorage_(methods)[] = {
   {"fill_", THPStorage_(fill_), METH_O, nullptr},
   {"new", THPStorage_(new), METH_NOARGS, nullptr},
   {"resize_", THPStorage_(resize_), METH_O, nullptr},
-  {"size", THPStorage_(size), METH_NOARGS, nullptr},
+  {"nbytes", THPStorage_(nbytes), METH_NOARGS, nullptr},
   {"data_ptr", THPStorage_(dataPtr), METH_NOARGS, nullptr},
   {"is_pinned", THPStorage_(isPinned), METH_NOARGS, nullptr},
   {"_write_file", THPStorage_(writeFile), METH_VARARGS, nullptr},
-  {"_new_with_file", THPStorage_(newWithFile), METH_O | METH_STATIC, nullptr},
+  {"_new_with_file", THPStorage_(newWithFile), METH_VARARGS | METH_STATIC, nullptr},
   {"_set_from_file", THPStorage_(setFromFile), METH_VARARGS, nullptr},
 #if !defined(THC_GENERIC_FILE)
   {"from_buffer", castPyCFunctionWithKeywords(THPStorage_(fromBuffer)),

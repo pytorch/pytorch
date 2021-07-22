@@ -493,18 +493,7 @@ static PyObject * THCPModule_initExtension(PyObject *self, PyObject *noargs)
   if (!m) throw python_error();
 
   // Register Storage Python objects with DynamicTypes.cpp
-  THCPDoubleStorage_postInit(m);
-  THCPFloatStorage_postInit(m);
-  THCPHalfStorage_postInit(m);
-  THCPLongStorage_postInit(m);
-  THCPIntStorage_postInit(m);
-  THCPShortStorage_postInit(m);
-  THCPCharStorage_postInit(m);
   THCPByteStorage_postInit(m);
-  THCPBoolStorage_postInit(m);
-  THCPBFloat16Storage_postInit(m);
-  THCPComplexDoubleStorage_postInit(m);
-  THCPComplexFloatStorage_postInit(m);
 
   bool has_half = true;
 

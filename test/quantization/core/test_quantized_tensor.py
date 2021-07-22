@@ -191,7 +191,7 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(qr.q_zero_point(), zero_point)
             self.assertTrue(qr.is_quantized)
             self.assertFalse(r.is_quantized)
-            self.assertEqual(qr.storage().size(), 5)
+            self.assertEqual(qr.storage().nbytes(), 5)
 
             int_repr = qr.int_repr()
             for num in int_repr[0:5]:
@@ -200,7 +200,7 @@ class TestQuantizedTensor(TestCase):
             # Test tensor creation
             q = torch._empty_affine_quantized([num_elements], scale=scale, zero_point=zero_point,
                                               dtype=torch.quint4x2)
-            self.assertEqual(q.storage().size(), 5)
+            self.assertEqual(q.storage().nbytes(), 5)
 
             # Test save/load
             with tempfile.NamedTemporaryFile() as f:

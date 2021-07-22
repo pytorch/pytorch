@@ -529,68 +529,66 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 from ._tensor import Tensor
 from .storage import _StorageBase
 
-
-class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
-    pass
-
-
-class FloatStorage(_C.FloatStorageBase, _StorageBase):
-    pass
-
-
-class HalfStorage(_C.HalfStorageBase, _StorageBase):
-    pass
-
-
-class LongStorage(_C.LongStorageBase, _StorageBase):
-    pass
-
-
-class IntStorage(_C.IntStorageBase, _StorageBase):
-    pass
-
-
-class ShortStorage(_C.ShortStorageBase, _StorageBase):
-    pass
-
-
-class CharStorage(_C.CharStorageBase, _StorageBase):
-    pass
-
-
 class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
+class FakeStorage():
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError('Only ByteStorage can be instantiated')
 
-class BoolStorage(_C.BoolStorageBase, _StorageBase):
+# TODO: These fake storage types are only used for pickling. PyTorch's pickle
+# format historically includes the storage type, and pickle requires class
+# names to be importable. So for BC and FC, we need to have these class names.
+# However, there could be some trick that would let us get rid of these and
+# still have the same pickle format.
+
+class DoubleStorage(FakeStorage):
     pass
 
-
-class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
+class FloatStorage(FakeStorage):
     pass
 
-class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
+class HalfStorage(FakeStorage):
     pass
 
-class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
+class LongStorage(FakeStorage):
     pass
 
-class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
+class IntStorage(FakeStorage):
     pass
 
-class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
+class ShortStorage(FakeStorage):
     pass
 
-class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
+class CharStorage(FakeStorage):
     pass
 
-class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
+class BoolStorage(FakeStorage):
+    pass
+
+class BFloat16Storage(FakeStorage):
+    pass
+
+class ComplexDoubleStorage(FakeStorage):
+    pass
+
+class ComplexFloatStorage(FakeStorage):
+    pass
+
+class QUInt8Storage(FakeStorage):
+    pass
+
+class QInt8Storage(FakeStorage):
+    pass
+
+class QInt32Storage(FakeStorage):
+    pass
+
+class QUInt4x2Storage(FakeStorage):
     pass
 
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    ByteStorage
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
@@ -647,19 +645,7 @@ from .functional import *  # noqa: F403
 # Remove unnecessary members
 ################################################################################
 
-del DoubleStorageBase
-del FloatStorageBase
-del LongStorageBase
-del IntStorageBase
-del ShortStorageBase
-del CharStorageBase
 del ByteStorageBase
-del BoolStorageBase
-del QUInt8StorageBase
-del BFloat16StorageBase
-del ComplexDoubleStorageBase
-del ComplexFloatStorageBase
-del QUInt4x2StorageBase
 
 ################################################################################
 # Define _assert

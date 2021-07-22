@@ -99,7 +99,7 @@ def rebuild_tensor(cls, storage, metadata):
 
 
 def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
-                        storage_cls, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
+                        storage_cls, dtype, storage_device, storage_handle, storage_size_bytes, storage_offset_bytes,
                         requires_grad, ref_counter_handle, ref_counter_offset, event_handle, event_sync_required):
     # If storage_handle is None, storage points to nullptr.
     if storage_handle is None or storage_size_bytes == 0:
@@ -122,7 +122,7 @@ def rebuild_cuda_tensor(tensor_cls, tensor_size, tensor_stride, tensor_offset,
             # We already ref counting this Storage, but producer needs new ref-counters to be released.
             storage_cls._release_ipc_counter(ref_counter_handle, ref_counter_offset)
 
-    t = torch._utils._rebuild_tensor(storage, tensor_offset, tensor_size, tensor_stride)
+    t = torch._utils._rebuild_tensor(torch.storage.TypedStorage(storage, dtype), tensor_offset, tensor_size, tensor_stride)
 
     if tensor_cls == torch.nn.parameter.Parameter:
         # It is crucial for integer tensors to receive
@@ -255,6 +255,7 @@ def reduce_tensor(tensor):
                  tensor.stride(),
                  tensor_offset,  # tensor offset in its storage
                  type(storage),
+                 tensor.dtype,
                  device,
                  handle,  # identifier which CUDA allocation is the storage in.
                  storage_size_bytes,  # size(in bytes) of the storage
@@ -267,7 +268,7 @@ def reduce_tensor(tensor):
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (tensor.storage_offset(), tensor.size(), tensor.stride(), tensor.requires_grad)
-    return (rebuild_tensor, (type(tensor), storage, metadata))
+    return (rebuild_tensor, (type(tensor), torch.storage.TypedStorage(storage, tensor.dtype), metadata))
 
 
 def fd_id(fd):
@@ -310,6 +311,11 @@ def rebuild_storage_filename(cls, manager, handle, size):
 def rebuild_storage_empty(cls):
     return cls()
 
+def rebuild_typed_storage(storage, dtype):
+    return torch.storage.TypedStorage(storage, dtype)
+
+def reduce_typed_storage(storage):
+    return (rebuild_typed_storage, (storage.storage, storage.dtype))
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
@@ -320,7 +326,7 @@ def reduce_storage(storage):
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
         storage._shared_incref()
-    elif storage.size() == 0:
+    elif storage.nbytes() == 0:
         # This is special cased because Empty tensors
         # (with size 0) cannot be mmapped.
         return (rebuild_storage_empty, (type(storage),))
@@ -340,6 +346,8 @@ def init_reductions():
 
     for t in torch._storage_classes:
         ForkingPickler.register(t, reduce_storage)
+
+    ForkingPickler.register(torch.storage.TypedStorage, reduce_typed_storage)
 
     for t in torch._tensor_classes:
         ForkingPickler.register(t, reduce_tensor)

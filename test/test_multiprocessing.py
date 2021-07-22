@@ -99,7 +99,7 @@ def sum_tensors(inq, outq):
         tensors = inq.get()
         for tensor in tensors:
             outq.put((tensor.sum().item(), tensor.get_device(),
-                      tensor.numel(), tensor.storage().size()))
+                      tensor.numel(), tensor.storage().nbytes()))
 
 
 def queue_get_exception(inqueue, outqueue):
@@ -351,7 +351,7 @@ class TestMultiprocessing(TestCase):
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
     def test_fs(self):
         def queue_put():
-            x = torch.DoubleStorage(4)
+            x = torch.ByteStorage(32)
             q = mp.Queue()
             self.assertFalse(lc.has_shm_files())
             q.put(x)

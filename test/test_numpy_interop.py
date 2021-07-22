@@ -365,7 +365,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
 
             # numpy integral type parses like a python int in custom python bindings:
-            self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore[attr-defined]
+            self.assertEqual(torch.Storage(np_val).nbytes(), scalar)  # type: ignore[attr-defined]
 
             tensor = torch.tensor([2], dtype=torch.int)
             tensor[0] = np_val

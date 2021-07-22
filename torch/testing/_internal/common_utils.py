@@ -38,7 +38,8 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+import ctypes
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple
 
 import numpy as np
 
@@ -2482,6 +2483,45 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+# Returns scalar tensor representation of a list of integer byte values
+def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.device):
+    # TODO: Is it possible for ctypes to have different byte
+    # lengths on different systems?
+    dtype_to_ctype: Dict[torch.dtype, Tuple[Any, int]] = {
+        # dtype: (ctype, bytes per element)
+        torch.int8: (ctypes.c_int8, 1),
+        torch.uint8: (ctypes.c_uint8, 1),
+        torch.int16: (ctypes.c_int16, 2),
+        torch.int32: (ctypes.c_int32, 4),
+        torch.int64: (ctypes.c_int64, 8),
+        torch.bool: (ctypes.c_bool, 1),
+        torch.float32: (ctypes.c_float, 4),
+        torch.complex64: (ctypes.c_float, 4),
+        torch.float64: (ctypes.c_double, 8),
+        torch.complex128: (ctypes.c_double, 8),
+    }
+    ctype, num_bytes = dtype_to_ctype[dtype]
+
+    def check_bytes(byte_list):
+        for byte in byte_list:
+            assert 0 <= byte <= 255
+
+    if dtype.is_complex:
+        assert len(byte_list) == (num_bytes * 2)
+        check_bytes(byte_list)
+        real = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[:num_bytes])).value
+        imag = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list[num_bytes:])).value
+        res = real + 1j * imag
+    else:
+        assert len(byte_list) == num_bytes
+        check_bytes(byte_list)
+        res = ctype.from_buffer((ctypes.c_byte * num_bytes)(
+            *byte_list)).value
+
+    return torch.tensor(res, device=device, dtype=dtype)
 
 def has_breakpad() -> bool:
     # If not on a special build, check that the library was actually linked in

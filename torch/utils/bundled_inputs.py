@@ -350,7 +350,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
 
     if isinstance(arg, torch.Tensor):
         # Small-storage tensors can just be saved directly.
-        if arg.storage().size() <= MAX_RAW_TENSOR_SIZE:
+        if (arg.storage().nbytes() // arg.element_size()) <= MAX_RAW_TENSOR_SIZE:
             return arg, ref
         # Small contiguous tensors can be cloned to have small storage.
         # TODO: Should we do this even for non-contiguous tensors?
@@ -366,7 +366,7 @@ def _inflate_expr(arg: T, ref: str) -> Tuple[Union[T, torch.Tensor], str]:
         # TODO: Provide more useful diagnostics.
         raise Exception(
             f"Bundled input argument at position '{ref}' is "
-            f"a tensor with storage size {arg.storage().size()}. "
+            f"a tensor with storage byte size {arg.storage().nbytes()}. "
             f"You probably don't want to bundle this as an input. "
         )
     else:
