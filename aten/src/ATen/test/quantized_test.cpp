@@ -243,3 +243,32 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
   ASSERT_EQ(qtensor.q_zero_point(), zero_point);
 }
+
+TEST(TestQTensor, FromBlobQuantizedPerChannel) {
+  int C = 64, H = 10, W = 5;
+  std::vector<int64_t> shape = {1, C, H, W};
+  auto scales = rand({C}).toType(kDouble);
+  auto zero_points = randint(10, {C}).toType(kLong);
+  auto numel = c10::multiply_integers(shape);
+  int ch_axis = 1;
+  TensorOptions options(at::kQUInt8);
+
+  auto custom_vec = std::make_unique<std::vector<uint8_t>>();
+  custom_vec->reserve(numel);
+
+  auto custom_data = custom_vec->data();
+  for (auto i = 0; i < numel; ++i) {
+    custom_data[i] = i;
+  }
+  auto deleteWhenDone = custom_vec.release();
+  auto deleter = [deleteWhenDone](void*) { delete deleteWhenDone; };
+
+  Tensor qtensor = at::from_blob_quantized_per_channel_affine(custom_data, shape, deleter, scales, zero_points, ch_axis, options);
+  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+  for (auto i = 0; i < numel; ++i) {
+    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+  }
+  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));
+  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_zero_points(), zero_points));
+  ASSERT_TRUE(qtensor.is_quantized());
+}

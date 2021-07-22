@@ -256,4 +256,50 @@ Tensor from_blob_quantized_per_tensor_affine(
   return qtensor;
 }
 
+
+Tensor from_blob_quantized_per_channel_affine(
+    void* data,
+    IntArrayRef sizes,
+    std::function<void(void*)> deleter,
+    const Tensor& scales,
+    const Tensor& zero_points,
+    const int64_t axis,
+    const TensorOptions& options) {
+  checkPerChannelParamDims(scales, zero_points);
+
+  auto dtype = typeMetaToScalarType(options.dtype());
+  TORCH_CHECK(
+      isQIntType(dtype),
+      "from_blob_quantized_per_channel_affine expects QInt dtypes, got ", dtype);
+
+  const std::size_t itemsize = options.dtype().itemsize();
+  std::size_t size = 1;
+  for (std::int64_t s : sizes) {
+    size *= static_cast<std::size_t>(s);
+  }
+  const auto datasize = size * itemsize;
+
+  DataPtr dataPtr = InefficientStdFunctionContext::makeDataPtr(
+      data, deleter, options.device());
+
+  auto storage = c10::make_intrusive<StorageImpl>(
+      StorageImpl::use_byte_size_t(),
+      datasize,
+      std::move(dataPtr),
+      /*allocator=*/nullptr,
+      /*resizable=*/false);
+
+  QuantizerPtr quantizer =
+      make_per_channel_affine_quantizer(scales, zero_points, axis, dtype);
+
+  Tensor qtensor = at::detail::make_tensor<QTensorImpl>(
+      storage,
+      at::DispatchKeySet(options.computeDispatchKey()),
+      options.dtype(),
+      quantizer);
+  get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
+
+  return qtensor;
+}
+
 } // namespace at
