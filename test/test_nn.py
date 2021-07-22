@@ -13258,6 +13258,12 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
+    @onlyOnCPUAndCUDA
+    def test_FractionalMaxPool2d_zero_batch(self, device):
+        mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5)).to(device)
+        inp = torch.ones(0, 16, 50, 32).to(device)
+
+        self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
