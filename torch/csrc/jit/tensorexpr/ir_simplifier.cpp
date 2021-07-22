@@ -2491,12 +2491,31 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
 }
 
 // Simplify division using distributive laws for the following cases:
-// 1) (i + 24) / 6, i is the index var of a for-stmt and the range of i is
-// contained in [0, 6)
-//    -> 4
-// 2) (i + j*6) / 6, i, j are index vars of for-stmts and the range of i is
-// contained in [0, 6) + the start value of j is not less than 0
-//    -> j
+// 1) (i + x) / n => x/n, if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) x is a constant and the end value of i's range is less than n - x%n;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when x is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) x is not negative
+//
+// 2) (i + j*n) / n => j, if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) j is an integer variable;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when j is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) j is not negative
 const Expr* distributeDiv(
     const Expr* lhs,
     const Expr* rhs,
@@ -2504,10 +2523,24 @@ const Expr* distributeDiv(
   if (!lhs || !rhs) {
     return nullptr;
   }
-  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
-  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  // return if not integer division
+  if (lhs->dtype().is_floating_point() || rhs->dtype().is_floating_point()) {
+    return nullptr;
+  }
 
-  if (!lhsAdd || !rhsScalar) {
+  // identify n: a positive integer constant
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (!rhsScalar) {
+    return nullptr;
+  }
+  const Expr* check_n_value =
+      IRSimplifier::simplify(new CompareSelect(rhsScalar, new IntImm(0), kGT));
+  if (!immediateEquals(check_n_value, 1)) {
+    return nullptr;
+  }
+
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  if (!lhsAdd) {
     return nullptr;
   }
   const Expr* lhsAdd1 = lhsAdd->lhs();
@@ -2521,54 +2554,88 @@ const Expr* distributeDiv(
     main = lhsAdd1;
   }
 
-  if (var_key != nullptr) {
-    auto got = var_bound_info.find(var_key);
+  if (var_key == nullptr) {
+    return nullptr;
+  }
+
+  auto got = var_bound_info.find(var_key);
+  if (got == var_bound_info.end()) {
+    return nullptr;
+  }
+
+  // check the bounds of 'i'
+  auto start = got->second.first;
+  // open upper bound, i.e.,  end is one more than the maximum value in the
+  // range
+  auto end = got->second.second;
+  const Expr* check_start =
+      IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+  const Expr* check_end =
+      IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+  if (!check_start->isConstant() || !check_end->isConstant() ||
+      !immediateEquals(check_start, 1) || !immediateEquals(check_end, 1)) {
+    return nullptr;
+  }
+
+  const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
+
+  // simplify type 1) exprs: '(i+x)/n' => 'x/n'
+  const Expr* sign_check =
+      IRSimplifier::simplify(new CompareSelect(main, new IntImm(0), kGE));
+  const Expr* main_mod = IRSimplifier::simplify(new Mod(main, rhsScalar));
+  const Expr* mod_check = IRSimplifier::simplify(
+      new CompareSelect(new Add(main_mod, end), rhsScalar, kLE));
+  if (sign_check->isConstant() && immediateEquals(sign_check, 1) &&
+      mod_check->isConstant() && immediateEquals(mod_check, 1)) {
+    return ret;
+  }
+
+  // simplify type 2 exprs: '(i+j*n)/n' => 'j'
+  auto ret_var = dynamic_cast<const Var*>(ret);
+  if (ret_var && ret_var->dtype() == kInt) {
+    // retrieve j's range info
+    auto got = var_bound_info.find(ret_var);
     if (got == var_bound_info.end()) {
       return nullptr;
     }
 
-    // check the bounds of 'i'
-    auto start = got->second.first;
-    auto end = got->second.second;
-    const Expr* check_start =
-        IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
-    const Expr* check_end =
-        IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
-    if (check_start->isConstant() && check_end->isConstant() &&
-        immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-      const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
-
-      // simplify type 1 exprs: '(i+24)/6'
-      const Expr* mod_check = IRSimplifier::simplify(new Mod(main, rhsScalar));
-      if (mod_check->isConstant() && immediateEquals(mod_check, 0)) {
-        return ret;
-      }
-
-      // simplify type 2 exprs: '(i+j*6)/6'
-      auto ret_var = dynamic_cast<const Var*>(ret);
-      if (ret_var) {
-        auto got = var_bound_info.find(ret_var);
-        if (got == var_bound_info.end()) {
-          return nullptr;
-        }
-        check_start = IRSimplifier::simplify(
-            new CompareSelect(start, new IntImm(0), kGE));
-        if (check_start->isConstant() && immediateEquals(check_start, 1)) {
-          return ret_var;
-        }
-      }
+    // check if j is not negative
+    sign_check = IRSimplifier::simplify(
+        new CompareSelect(got->second.first, new IntImm(0), kGE));
+    if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
+      return ret_var;
     }
   }
+
   return nullptr;
 }
 
 // Simplify mod using distributive laws for the following cases:
-// 1) (i + 24) % 6, i is the index var of a for-stmt and the range of i is
-// contained in [0, 6)
-//    -> i
-// 2) (i + j*6) % 6, i, j are index vars of for-stmts and the range of i is
-// contained in [0, 6) + the start value of j is not less than 0
-//    -> i
+// 1) (i + x) % n => i + x%n if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) x is a constant and the end value of i's range is less than n - x%n;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when x is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) x is not negative
+//
+// 2) (i + j*n) % n => i if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) j is an integer variable;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when j is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, j has to be not negative. d) j is not negative
 const Expr* distributeMod(
     const Expr* lhs,
     const Expr* rhs,
@@ -2576,9 +2643,26 @@ const Expr* distributeMod(
   if (!lhs || !rhs) {
     return nullptr;
   }
-  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
-  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  // return if not integer mod
+  if (lhs->dtype().is_floating_point() || rhs->dtype().is_floating_point()) {
+    return nullptr;
+  }
 
+  // identify n: a positive integer constant
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (!rhsScalar) {
+    return nullptr;
+  }
+  const Expr* check_n_value =
+      IRSimplifier::simplify(new CompareSelect(rhsScalar, new IntImm(0), kGT));
+  if (!immediateEquals(check_n_value, 1)) {
+    return nullptr;
+  }
+
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  if (!lhsAdd) {
+    return nullptr;
+  }
   if (!lhsAdd || !rhsScalar) {
     return nullptr;
   }
@@ -2592,43 +2676,55 @@ const Expr* distributeMod(
     var_key = dynamic_cast<const Var*>(lhsAdd2);
     main = lhsAdd1;
   }
+  if (var_key == nullptr) {
+    return nullptr;
+  }
 
-  if (var_key != nullptr) {
-    auto got = var_bound_info.find(var_key);
+  auto got = var_bound_info.find(var_key);
+  if (got == var_bound_info.end()) {
+    return nullptr;
+  }
+
+  // check the bounds of 'i'
+  auto start = got->second.first;
+  // open upper bound, i.e.,  end is one more than the maximum value in the
+  // range
+  auto end = got->second.second;
+  const Expr* check_start =
+      IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+  const Expr* check_end =
+      IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+  if (!check_start->isConstant() || !check_end->isConstant() ||
+      !immediateEquals(check_start, 1) || !immediateEquals(check_end, 1)) {
+    return nullptr;
+  }
+
+  // simplify type 1) exprs: '(i+x)%n' => 'i+x%n'
+  const Expr* sign_check =
+      IRSimplifier::simplify(new CompareSelect(main, new IntImm(0), kGE));
+  const Expr* main_mod = IRSimplifier::simplify(new Mod(main, rhsScalar));
+  const Expr* mod_check = IRSimplifier::simplify(
+      new CompareSelect(new Add(main_mod, end), rhsScalar, kLE));
+  if (sign_check->isConstant() && immediateEquals(sign_check, 1) &&
+      mod_check->isConstant() && immediateEquals(mod_check, 1)) {
+    return new Add(var_key, main_mod);
+  }
+
+  // simplify type 2) exprs: '(i+j*n)%n' => 'i'
+  const Expr* main_div = IRSimplifier::simplify(new Div(main, rhsScalar));
+  auto j_var = dynamic_cast<const Var*>(main_div);
+  if (j_var && j_var->dtype() == kInt) {
+    // retrieve j's range info
+    auto got = var_bound_info.find(j_var);
     if (got == var_bound_info.end()) {
       return nullptr;
     }
 
-    // check the bounds of 'i'
-    auto start = got->second.first;
-    auto end = got->second.second;
-    const Expr* check_start =
-        IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
-    const Expr* check_end =
-        IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
-    if (check_start->isConstant() && check_end->isConstant() &&
-        immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
-      const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
-
-      // simplify type 1 exprs: '(i+24)%6'
-      const Expr* mod_check = IRSimplifier::simplify(new Mod(main, rhsScalar));
-      if (mod_check->isConstant() && immediateEquals(mod_check, 0)) {
-        return var_key;
-      }
-
-      // simplify type 2 exprs: '(i+j*6)%6'
-      auto ret_var = dynamic_cast<const Var*>(ret);
-      if (ret_var) {
-        auto got = var_bound_info.find(ret_var);
-        if (got == var_bound_info.end()) {
-          return nullptr;
-        }
-        check_start = IRSimplifier::simplify(
-            new CompareSelect(start, new IntImm(0), kGE));
-        if (check_start->isConstant() && immediateEquals(check_start, 1)) {
-          return var_key;
-        }
-      }
+    // check if j is not negative
+    sign_check = IRSimplifier::simplify(
+        new CompareSelect(got->second.first, new IntImm(0), kGE));
+    if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
+      return var_key;
     }
   }
 
