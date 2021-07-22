@@ -4521,7 +4521,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         expected_occurrence = {
             # input and weight of first and second linear, output of first and second linear
             ns.call_module(torch.quantization.MinMaxObserver): 6,
-            ns.call_module(torch.quantization.PlaceholderObserver): 2
+            # we don't insert placeholder observer for output of reshape
+            ns.call_module(torch.quantization.PlaceholderObserver): 1
         }
         self.checkGraphModuleNodes(
             m,
