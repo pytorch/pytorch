@@ -897,14 +897,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 
   std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
       findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers in the innermost
-  // possible scope.
+  // Insert allocations and frees for temporary buffers at global scope.
   for (const Buf* buf : intermediate_bufs) {
-    Stmt* alloc = new Allocate(buf);
-    Stmt* free = new Free(buf);
-    Block* alloc_block = findLowestContainingBlock(uses.at(buf));
-    alloc_block->prepend_stmt(alloc);
-    alloc_block->append_stmt(free);
+    b->prepend_stmt(new Allocate(buf));
+    b->append_stmt(new Free(buf));
   }
 
   return b;
@@ -1519,10 +1515,28 @@ std::vector<For*> LoopNest::distributeLoop(For* loop) {
   return distributeLoop(loop, stmtsInBlock);
 }
 
+std::vector<For*> LoopNest::distributeLoopAndParents(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoop(loop);
+  if (parentLoop) {
+    return distributeLoopAndParents(parentLoop);
+  }
+  return result;
+}
+
 std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   auto loops = NodeFinder<For>::find(loop);
   std::unordered_set<Stmt*> loopsSet(loops.begin(), loops.end());
   return distributeLoop(loop, loopsSet);
+}
+
+std::vector<For*> LoopNest::distributeLoopAndParentsOverInnerLoops(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoopOverInnerLoops(loop);
+  if (parentLoop) {
+    return distributeLoopAndParentsOverInnerLoops(parentLoop);
+  }
+  return result;
 }
 
 bool areEqual(const Expr* expr1, const Expr* expr2) {
@@ -1660,7 +1674,7 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
   return false;
 }
 
-bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+bool LoopNest::unsafeFuseLoops(const std::vector<For*>& loops, For** fused) {
   if (loops.empty()) {
     return false;
   }
@@ -1703,6 +1717,30 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     ++it;
   }
 
+  auto first_loop = loops.front();
+  // Fuse the loops by taking all the statements from the second loops
+  // onwards and moving them into the first loop's body.
+  // This way the final fused loop will be the same as the first loop.
+  for (size_t i = 1; i < loops.size(); ++i) {
+    auto body = dynamic_cast<Block*>(Substitute(
+        Stmt::clone(loops[i]->body()), {{loops[i]->var(), first_loop->var()}}));
+    first_loop->body()->splice(first_loop->body()->end(), body);
+    root_block->remove_stmt(loops[i]);
+  }
+
+  *fused = loops.front();
+  return true;
+}
+
+bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
+  if (loops.empty()) {
+    return false;
+  }
+  if (loops.size() == 1) {
+    *fused = loops.front();
+    return true;
+  }
+
   // Check if bounds are the same for all the loops.
   auto first_loop = loops.front();
   auto first_loop_start = IRSimplifier::simplify(first_loop->start());
@@ -1719,41 +1757,27 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
     }
   }
 
-  // A lambda to fuse all the given loops.
-  auto fuse_all_loops = [](const std::vector<For*>& loops) {
-    auto first_loop = loops.front();
-    // Fuse the loops by taking all the statements from the second loops
-    // onwards and moving them into the first loop's body.
-    // This way the final fused loop will be the same as the first loop.
-    for (size_t i = 1; i < loops.size(); ++i) {
-      auto body = dynamic_cast<Block*>(Substitute(
-          Stmt::clone(loops[i]->body()),
-          {{loops[i]->var(), first_loop->var()}}));
-      first_loop->body()->splice(first_loop->body()->end(), body);
-    }
-  };
-
   // We need to check if fusing the loops results in a loop-carried dependence.
   // This check can be done only after the loops are fused into one. But if the
   // check is violated, we need to return the given loops in the original form.
   // So, we create a clone of all the loops, fuse them and check for this.
   std::vector<For*> loops_copy;
   loops_copy.reserve(loops.size());
+  Block* parent = new Block({});
   for (const auto& l : loops) {
-    loops_copy.push_back(dynamic_cast<For*>(Stmt::clone(l)));
+    auto l_copy = Stmt::clone(l);
+    loops_copy.push_back(dynamic_cast<For*>(l_copy));
+    parent->append_stmt(l_copy);
   }
-  fuse_all_loops(loops_copy);
-  if (hasLoopCarriedDependence(loops_copy.front())) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  For* fused_copy;
+  bool ret = unsafeFuseLoops(loops_copy, &fused_copy);
+  if (!ret || hasLoopCarriedDependence(fused_copy)) {
     return false;
   }
 
   // Now that all conditions are satisfied, we fuse the given loops.
-  fuse_all_loops(loops);
-  *fused = loops.front();
-  for (size_t i = 1; i < loops.size(); ++i) {
-    root_block->remove_stmt(loops[i]);
-  }
-  return true;
+  return unsafeFuseLoops(loops, fused);
 }
 
 For* findOuterFor(For* a, For* b) {
@@ -1946,7 +1970,7 @@ std::vector<For*> LoopNest::reorder(
   // Reorder the loops according to the permutation.
   std::vector<For*> result(loops.size());
   for (size_t i = 0; i < loops.size(); ++i) {
-    result[permutation[i]] = loops[i];
+    result[i] = loops[permutation[i]];
   }
 
   // Remove the bodies from all the loops.
@@ -2229,11 +2253,6 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   auto writes = WritesToBuf::find(stmt, buf);
   auto reads = StmtsReadingBuf::find(stmt, buf);
 
-  // All buffers must be read and written at least once.
-  // Is this a valid assumption? TODO
-  TORCH_INTERNAL_ASSERT(!writes.empty());
-  TORCH_INTERNAL_ASSERT(!reads.empty());
-
   // Find the parent common to all the buffer accesses.
   const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
   TORCH_INTERNAL_ASSERT(parent);
@@ -2318,6 +2337,12 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
     if (l->buf() == buf) {
       l->set_indices(get_new_indices(l->indices()));
     }
+  }
+}
+
+void LoopNest::compressAllBuffers(Stmt* stmt) {
+  for (auto buf : BufFinder::find(stmt)) {
+    compressBuffer(const_cast<Buf*>(buf), stmt);
   }
 }
 
