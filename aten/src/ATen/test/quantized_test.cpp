@@ -217,7 +217,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
 }
 
 TEST(TestQTensor, FromBlobQuantizedPerTensor) {
-  const double scale = 0.1;
+  const float scale = 0.1;
   const int64_t zero_point = 10;
   std::vector<int64_t> shape = {10, 10};
   auto numel = c10::multiply_integers(shape);
@@ -227,12 +227,12 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   auto custom_vec = std::make_unique<std::vector<uint8_t>>();
   custom_vec->reserve(numel);
 
-  auto custom_data = custom_vec->data();
+  uint8_t* custom_data = custom_vec->data();
   for (auto i = 0; i < numel; ++i) {
     custom_data[i] = i;
   }
   auto deleteWhenDone = custom_vec.release();
-  auto deleter = [deleteWhenDone](void*) { delete deleteWhenDone; };
+  auto deleter = [deleteWhenDone, custom_data](void* inp) { ASSERT_EQ((void*)inp, (void*)custom_data);  delete deleteWhenDone; };
 
   Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
 
