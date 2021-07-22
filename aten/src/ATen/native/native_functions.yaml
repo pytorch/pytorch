@@ -3441,6 +3441,17 @@
   device_check: NoCheck
   device_guard: False
 
+# NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
+# They are not user-facing, hence the leading underscore. Please don't use it
+# anywhere else.
+- func: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: _reshape_alias
+    # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
+
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
   device_guard: False
@@ -5252,7 +5263,7 @@
   dispatch:
     CPU, CUDA: fake_quantize_per_tensor_affine_cachemask
 
-- func: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
+- func: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, Tensor fake_quant_enabled, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
   dispatch:
     CPU, CUDA: _fake_quantize_per_tensor_affine_cachemask_tensor_qparams
@@ -5287,6 +5298,15 @@
 
 - func: _fake_quantize_learnable_per_channel_affine_backward(Tensor grad, Tensor self, Tensor scale, Tensor zero_point, int axis, int quant_min, int quant_max, float grad_factor=1.0) -> (Tensor, Tensor, Tensor)
   variants: function
+
+- func: fused_moving_avg_obs_fake_quant(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> Tensor
+  variants: function
+
+- func: _fused_moving_avg_obs_fq_helper(Tensor self, Tensor observer_on, Tensor fake_quant_on, Tensor(a!) running_min, Tensor(b!) running_max, Tensor(c!) scale, Tensor(d!) zero_point, float averaging_const, int quant_min, int quant_max, int ch_axis, bool per_row_fake_quant=False, bool symmetric_quant=False) -> (Tensor output, Tensor mask)
+  dispatch:
+    CPU: fused_moving_avg_obs_fake_quant_cpu
+    CUDA: fused_moving_avg_obs_fake_quant_cuda
+
 
 - func: _choose_qparams_per_tensor(Tensor self, bool reduce_range=False) -> (float, int)
   variants: function
@@ -8628,7 +8648,8 @@
 - func: adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   dispatch:
-    CPU, CUDA: adaptive_avg_pool2d_out_cpu
+    CPU: adaptive_avg_pool2d_out_cpu
+    CUDA: adaptive_avg_pool2d_out_cuda
     MkldnnCPU: mkldnn_adaptive_avg_pool2d_out
 
 - func: adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
