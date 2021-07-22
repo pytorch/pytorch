@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/Optional.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
@@ -34,11 +35,19 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
 
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense() && options.device().supports_as_strided()) {
-      // Copy all strides
-      auto r = at::empty_strided(self.sizes(),
-                                 self.strides(),
-                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
-      r.copy_(self, non_blocking);
+      Tensor r;
+      if (self.is_quantized()) {
+        r = at::empty_quantized(self.sizes(), self, options);
+        at::QuantizerPtr quantizer = r.quantizer();
+        r.copy_(self, non_blocking);
+        set_quantizer_(r, quantizer);
+      } else {
+        r = at::empty_strided(
+            self.sizes(),
+            self.strides(),
+            options.memory_format(c10::nullopt).pinned_memory(pin_out));
+        r.copy_(self, non_blocking);
+      }
       return r;
     } else {
       memory_format = self.suggest_memory_format();
@@ -62,18 +71,12 @@ Tensor to(
   bool copy,
   c10::optional<c10::MemoryFormat> optional_memory_format
 ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
-  auto options = options_.merge_memory_format(optional_memory_format);
-
-  TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
-           "to(options) expects unset requires_grad flag, but got "
-           "options.requires_grad set as ", options.requires_grad());
+  TensorOptions options = TensorOptions()
+      .dtype(dtype)
+      .layout(layout)
+      .device(device)
+      .pinned_memory(pin_memory)
+      .memory_format(optional_memory_format);
 
   TORCH_CHECK(!options.has_layout() || self.layout() == options.layout(),
            "to(options) doesn't support converting to a different layout, "

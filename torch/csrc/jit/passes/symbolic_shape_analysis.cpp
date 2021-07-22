@@ -138,11 +138,8 @@ struct SymbolicShapeAnalyzer {
             } else if (
                 v->node()->kind() == aten::size &&
                 v->node()->input(1)->node()->kind() == prim::Constant) {
-              auto ss = v->node()
-                            ->input(0)
-                            ->type()
-                            ->expect<TensorType>()
-                            ->symbolic_sizes();
+              auto tt = v->node()->input(0)->type()->expect<TensorType>();
+              auto ss = tt->symbolic_sizes();
               if (!ss.rank()) {
                 shape.emplace_back(c10::nullopt);
                 continue;
@@ -163,14 +160,9 @@ struct SymbolicShapeAnalyzer {
         } else if (
             node_->input(i)->node()->kind() == aten::size &&
             node_->input(i)->uses().size() == 1) {
-          node_symbolic_input_indices.emplace_back(
-              i,
-              node_->input(i)
-                  ->node()
-                  ->input()
-                  ->type()
-                  ->expect<TensorType>()
-                  ->symbolic_sizes());
+          auto ten_inp = node_->input(i)->node()->input();
+          auto ss = ten_inp->type()->expect<TensorType>()->symbolic_sizes();
+          node_symbolic_input_indices.emplace_back(i, ss);
         }
       }
     }
@@ -287,10 +279,9 @@ struct SymbolicShapeAnalyzer {
     for (size_t i = 0; i < symbolic_set.size(); ++i) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
-          dominating_value = symbolic_set[j];
+      for (const auto& sym_set : symbolic_set) {
+        if (dominating_value->node()->isDominatedBy(sym_set->node())) {
+          dominating_value = sym_set;
         }
       }
       if (dominating_value != v) {
