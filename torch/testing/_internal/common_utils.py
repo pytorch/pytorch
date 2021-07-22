@@ -2500,7 +2500,7 @@ def has_breakpad() -> bool:
     except RuntimeError as e:
         return False
 
-def find_library_location(lib_name: str, condition: bool) -> Path:
+def find_library_location(condition: bool, lib_name: str) -> Path:
     if condition:
         torch_root = Path(torch.__file__).resolve().parent
         return torch_root / 'lib' / lib_name
