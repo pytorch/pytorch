@@ -291,8 +291,8 @@ class profile(object):
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(kineto_event.start_us(), abs_end_us):
-                    cpu_memory_usage += _cpu_memory_usage(mem_record[0].cpu_memory_usage())
-                    cuda_memory_usage += _cuda_memory_usage(mem_record[0].cuda_memory_usage())
+                    cpu_memory_usage += _cpu_memory_usage(mem_record[0])
+                    cuda_memory_usage += _cuda_memory_usage(mem_record[0])
                     mem_record[1] = True
 
             is_async = kineto_event.is_async() or (
