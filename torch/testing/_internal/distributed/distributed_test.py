@@ -2586,13 +2586,17 @@ class DistributedTest:
             )
 
         # SCATTER
-        def _test_scatter_helper(self, group, group_id, rank):
+        def _test_scatter_helper(self, group, group_id, rank, dtype=torch.float):
             for dest in group:
-                tensor = _build_tensor(dest + 1, -1)
-                expected_tensor = _build_tensor(dest + 1, rank)
+                tensor = _build_tensor(dest + 1, -1, dtype=dtype)
+                expected_tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = (
-                    [_build_tensor(dest + 1, i) for i in group] if rank == dest else []
+                    [_build_tensor(dest + 1, i, dtype=dtype) for i in group] if rank == dest else []
                 )
+                if dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(t).shape for t in tensors]
+                else:
+                    tensor_shapes = [t.shape for t in tensors]
                 self.call_dist_op(
                     ":scatter",
                     False,
@@ -2601,7 +2605,7 @@ class DistributedTest:
                     src=dest,
                     scatter_list=tensors,
                     group=group_id,
-                    tensor_shapes=[t.shape for t in tensors],
+                    tensor_shapes=tensor_shapes,
                 )
                 self.assertEqual(tensor, expected_tensor)
 
@@ -2634,6 +2638,11 @@ class DistributedTest:
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support scatter")
+        def test_scatter_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support scatter")
         @skip_if_small_worldsize
@@ -2929,16 +2938,21 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float
         ):
             if group_id is not None:
                 size = len(group)
-                in_tensor = torch.ones([size, size]) * rank
-                expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
-                out_tensor = torch.ones([size, size]) * -1
+                in_tensor = torch.ones([size, size], dtype=dtype) * rank
+                expected_tensor = torch.cat([torch.ones([1, size], dtype=dtype) * i for i in group])
+                out_tensor = torch.ones([size, size], dtype=dtype) * -1
                 if cuda:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
                     expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
                     out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
+                if dtype == torch.complex64:
+                    tensor_shapes = [torch.view_as_real(in_tensor).shape]
+                else:
+                    tensor_shapes = [in_tensor.shape]
                 self.call_dist_op(
                     ":all_to_all",
                     False,
@@ -2946,7 +2960,7 @@ class DistributedTest:
                     out_tensor,
                     in_tensor,
                     group=group_id,
-                    tensor_shapes=[in_tensor.shape],
+                    tensor_shapes=tensor_shapes,
                 )
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
@@ -2958,15 +2972,16 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float
         ):
             if group_id is not None:
                 size = len(group)
                 in_splits = [i + 1 for i in group]
                 out_splits = [rank + 1 for _ in group]
-                in_tensor = torch.ones([sum(in_splits), size]) * rank
-                out_tensor = torch.ones([(rank + 1) * size, size])
+                in_tensor = torch.ones([sum(in_splits), size], dtype=dtype) * rank
+                out_tensor = torch.ones([(rank + 1) * size, size], dtype=dtype)
                 expected_tensor = torch.cat(
-                    [torch.ones([rank + 1, size]) * i for i in group]
+                    [torch.ones([rank + 1, size], dtype=dtype) * i for i in group]
                 )
                 if cuda:
                     in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
@@ -2985,15 +3000,16 @@ class DistributedTest:
             rank,
             cuda=False,
             rank_to_GPU=None,
+            dtype=torch.float,
         ):
             if group_id is not None:
                 size = len(group)
                 in_splits = [i + 1 for i in group]
                 in_tensors = [
-                    torch.ones([in_splits[i], size]) * rank for i, _ in enumerate(group)
+                    torch.ones([in_splits[i], size], dtype=dtype) * rank for i, _ in enumerate(group)
                 ]
-                out_tensors = [torch.ones([(rank + 1), size]) for _ in group]
-                expected_tensors = [torch.ones([rank + 1, size]) * i for i in group]
+                out_tensors = [torch.ones([(rank + 1), size], dtype=dtype) for _ in group]
+                expected_tensors = [torch.ones([rank + 1, size], dtype=dtype) * i for i in group]
                 if cuda:
                     in_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in in_tensors]
                     expected_tensors = [
@@ -3024,6 +3040,27 @@ class DistributedTest:
             )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
+        def test_all_to_all_single_equal_split_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_single_equal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat
+            )
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
+        @skip_if_no_gpu
+        def test_all_to_all_single_equal_split_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_equal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat
+            )
+
+        @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         def test_all_to_all_single_unequal_split(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
@@ -3041,6 +3078,27 @@ class DistributedTest:
                 rank_to_GPU,
             )
 
+        @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
+        def test_all_to_all_single_unequal_split_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_single_unequal_split_helper(
+                group, group_id, rank, dtype=torch.cfloat
+            )
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single")
+        @skip_if_no_gpu
+        def test_all_to_all_single_unequal_split_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_single_unequal_split_helper(
+                group,
+                group_id,
+                rank,
+                True,
+                rank_to_GPU,
+                dtype=torch.cfloat,
+            )
+
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports all_to_all")
         def test_all_to_all(self):
             group, group_id, rank = self._init_global_test()
@@ -3052,6 +3110,20 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_all_to_all_helper(group, group_id, rank, True, rank_to_GPU)
+
+        @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports all_to_all")
+        def test_all_to_all_complex(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_to_all_helper(group, group_id, rank, dtype=torch.cfloat)
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
+        @skip_if_rocm
+        def test_all_to_all_cuda_complex(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = self._init_multigpu_helper()
+            self._test_all_to_all_helper(
+                group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat
+            )
 
         @sandcastle_skip_if(BACKEND != "mpi", "Only MPI supports CPU all_to_all_single")
         @skip_if_small_worldsize

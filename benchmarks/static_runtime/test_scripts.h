@@ -512,3 +512,8 @@ const auto if_script = R"JIT(
     h = {"e": e, "f": f}
     return [g, h]
 )JIT";
+
+const auto var_cat_script = R"JIT(
+  def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
+   return torch.cat([inp1, inp2], dim).clone()
+)JIT";
