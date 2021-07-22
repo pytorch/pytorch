@@ -13,7 +13,7 @@ from trainer import (
     ddp_model_map,
     hook_state_map,
     iteration_step_map,
-    preprocess_data_map,
+    process_batch_map,
     trainer_map,
 )
 
@@ -142,7 +142,7 @@ def run_trainer(
             c10d.init_process_group(backend="gloo", rank=rank, world_size=trainer_count)
 
     model = load_model(args)
-    preprocess_data = preprocess_data_map[args.preprocess_data]
+    process_batch = process_batch_map[args.process_batch]
     create_criterion = criterion_map[args.create_criterion]
     create_ddp_model = ddp_model_map[args.create_ddp_model]
     iteration_step = iteration_step_map[args.iteration_step]
@@ -156,7 +156,7 @@ def run_trainer(
         server_rref,
         args.backend,
         args.epochs,
-        preprocess_data,
+        process_batch,
         create_criterion,
         create_ddp_model,
         hook_state_class,
@@ -553,9 +553,9 @@ if __name__ == "__main__":
         help="seed for generating random numbers to a random number for the current GPU"
     )
     parser.add_argument(
-        "--preprocess_data",
+        "--process_batch",
         type=str,
-        help="this function will be used to preprocess data before training"
+        help="this function will be used to process batch before and after training"
     )
     parser.add_argument(
         "--create_criterion",

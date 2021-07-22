@@ -3,7 +3,7 @@ from .ddp_models import basic_ddp_model
 from .hook_states import BasicHookState
 from .hooks import allreduce_hook, hybrid_hook, rpc_hook, sparse_rpc_hook
 from .iteration_steps import basic_iteration_step
-from .preprocess_data import preprocess_dummy_data
+from .process_batch import process_dummy_batch
 from .trainer import DdpTrainer
 
 criterion_map = {
@@ -25,8 +25,8 @@ iteration_step_map = {
     "basic_iteration_step": basic_iteration_step
 }
 
-preprocess_data_map = {
-    "preprocess_dummy_data": preprocess_dummy_data
+process_batch_map = {
+    "process_dummy_batch": process_dummy_batch
 }
 
 hook_state_map = {

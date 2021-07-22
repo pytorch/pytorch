@@ -188,7 +188,7 @@ class DdpTrainer(TrainerBase):
         server_rref,
         backend,
         epochs,
-        preprocess_data,
+        process_batch,
         create_criterion,
         create_ddp_model,
         hook_state_class,
@@ -204,8 +204,8 @@ class DdpTrainer(TrainerBase):
             server_rref (RRef): remote reference to the server
             backend (str): distributed communication backend
             epochs (int): epoch count for training
-            preprocess_data (function): preprocesses data passed
-                to the trainer before starting training
+            process_batch (function): process data passed
+                to the trainer before and after training
             create_criterion (function): creates a criterion to calculate loss
             create_ddp_model (function): creates a ddp model for the trainer
             hook_state_class (class): class that will be used to keep tracking of state
@@ -219,7 +219,7 @@ class DdpTrainer(TrainerBase):
         self.server_rref = server_rref
         self.backend = backend
         self.epochs = epochs
-        self.preprocess_data = preprocess_data
+        self.process_batch = process_batch
         self.create_criterion = create_criterion
         self.create_ddp_model = create_ddp_model
         self.hook_state_class = hook_state_class
@@ -247,7 +247,6 @@ class DdpTrainer(TrainerBase):
             data (list): training examples
         """
         model = model.cuda(self.rank)
-        data = self.preprocess_data(self.rank, data)
         criterion = self.create_criterion(self.rank)
         ddp_model, hook_state = self.create_ddp_model(
             self, self.rank, model, self.process_group, self.hook_state_class, self.hook
@@ -258,7 +257,9 @@ class DdpTrainer(TrainerBase):
             if epoch % 5 == 0 and self.rank == 0:
                 print(f"train epoch={epoch}")
             for index, batch in enumerate(data):
+                batch = self.process_batch(self.rank, batch, True)
                 self.iteration_step(
                     self, ddp_model, criterion, optimizer, hook_state, epoch, index, batch
                 )
+                batch = self.process_batch(self.rank, batch, False)
         torch.cuda.synchronize(self.rank)
