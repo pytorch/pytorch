@@ -212,7 +212,7 @@ class TestCommon(TestCase):
             self.skipTest("Skipped! Op doesn't support out= kwarg.")
 
         # NOTE: only tests on first sample
-        sample = op.get_one_sample_inputs(device, dtype)
+        sample = op.get_one_sample_input(device, dtype)
 
         # calls it normally to get the expected result
         expected = op(sample.input, *sample.args, **sample.kwargs)
