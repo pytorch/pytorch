@@ -66,7 +66,6 @@ class DepthFirstGraphNodeIterator {
       return;
     }
 
-
     // Find the owning node of the owning block. We need this
     // because current_ is a pointer to an iterator so we
     // need to find the specific position of the owning node
@@ -98,9 +97,9 @@ class DepthFirstGraphNodeIterator {
       } else {
         // If then block then move to the else block if it is not empty.
         bool else_block_empty =
-          else_block->nodes().begin() == else_block->nodes().end();
+            else_block->nodes().begin() == else_block->nodes().end();
 
-        if (! else_block_empty) {
+        if (!else_block_empty) {
           current_ = else_block->nodes().begin();
         } else {
           // Since it's empty we move to the next node.
@@ -111,7 +110,9 @@ class DepthFirstGraphNodeIterator {
           }
         }
       }
-    } else if (owning_node->kind() == prim::Loop || owning_node->kind() == prim::With) {
+    } else if (
+        owning_node->kind() == prim::Loop ||
+        owning_node->kind() == prim::With) {
       current_ = owning_node_it;
       ++current_;
       if (current_ == owning_node_block->nodes().end()) {
@@ -122,7 +123,8 @@ class DepthFirstGraphNodeIterator {
     }
   }
 
-  // Moves to the next adjacent node or up in to the parent if that is not possible.
+  // Moves to the next adjacent node or up in to the parent if that is not
+  // possible.
   void move_next() {
     auto block = current_->owningBlock();
     Node* previous = *current_;
@@ -156,14 +158,14 @@ class DepthFirstGraphNodeIterator {
       auto* else_block = node->blocks().at(1);
 
       bool then_block_empty =
-        then_block->nodes().begin() == then_block->nodes().end();
+          then_block->nodes().begin() == then_block->nodes().end();
 
       bool else_block_empty =
-        else_block->nodes().begin() == else_block->nodes().end();
+          else_block->nodes().begin() == else_block->nodes().end();
 
-      if (! then_block_empty) {
+      if (!then_block_empty) {
         current_ = then_block->nodes().begin();
-      } else if (! else_block_empty) {
+      } else if (!else_block_empty) {
         current_ = else_block->nodes().begin();
       } else {
         // This `if` block does not have any child nodes so we need to continue
