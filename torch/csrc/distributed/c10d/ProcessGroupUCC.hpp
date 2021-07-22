@@ -57,6 +57,7 @@ public:
     bool *finished;
   public:
     WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
+    ~WorkUCP() { ucp_request_free(finished); }
     bool isCompleted() override { return *finished; };
     bool isSuccess() const override { return *finished; };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
