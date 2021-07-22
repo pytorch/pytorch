@@ -455,19 +455,74 @@ Tensor nll_loss_backward_cpu(
   return grad_input;
 }
 
+Tensor cross_entropy_loss_prob_target(
+    const Tensor& self,
+    const Tensor& target,
+    const Tensor& weight,
+    int64_t reduction) {
+  const auto n_classes = self.size(1);
+  TORCH_CHECK(
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      "weight tensor should be defined either for all ",
+      n_classes,
+      " classes or no classes"
+      " but got weight tensor of shape: ",
+      weight.sizes());
+
+  Tensor ret;
+  Tensor input = at::log_softmax(
+      self, 1, optTypeMetaToScalarType(self.options().dtype_opt()));
+  if (weight.defined()) {
+    // Expand weight to the correct number of dims for broadcasting with input / target
+    auto weight_bc_shape = std::vector<int64_t>(input.dim(), 1);
+    weight_bc_shape[1] = weight.size(0);
+    Tensor weight_ = weight.view(weight_bc_shape);
+
+    ret = -(input * target * weight_).sum(1);
+    if (reduction == Reduction::Mean) {
+      // Compute weighted mean
+      ret = ret.sum() / (target * weight_).sum();
+    } else if (reduction == Reduction::Sum) {
+      ret = ret.sum();
+    }
+  } else {
+    ret = -(input * target).sum(1);
+    if (reduction == Reduction::Mean) {
+      ret = ret.mean();
+    } else if (reduction == Reduction::Sum) {
+      ret = ret.sum();
+    }
+  }
+  return ret;
+}
+
 Tensor cross_entropy_loss(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  return at::nll_loss_nd(
-      at::log_softmax(
-          self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
-      target,
-      weight,
-      reduction,
-      ignore_index);
+  Tensor ret;
+  if (self.sizes() == target.sizes()) {
+    // Assume soft targets when input and target shapes are the same
+    TORCH_CHECK(at::isFloatingType(target.scalar_type()),
+        "Expected floating point type for target with class probabilities, got ", target.scalar_type());
+    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
+
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+    const Tensor& weight_ = *weight_maybe_owned;
+    ret = cross_entropy_loss_prob_target(self, target, weight_, reduction);
+  } else {
+    ret = at::nll_loss_nd(
+        at::log_softmax(
+            self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
+        target,
+        weight,
+        reduction,
+        ignore_index);
+  }
+  return ret;
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {
@@ -485,45 +540,6 @@ Tensor nll_loss(const Tensor & self, const Tensor & target, const c10::optional<
   const Tensor& weight = *weight_maybe_owned;
 
   return std::get<0>(at::nll_loss_forward(self, target, weight, reduction, ignore_index));
-}
-
-Tensor nll_loss_prob_target(
-    const Tensor& self,
-    const Tensor& target,
-    const Tensor& weight,
-    int64_t reduction) {
-  const auto n_classes = self.size(1);
-  TORCH_CHECK(
-      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all ",
-      n_classes,
-      " classes or no classes"
-      " but got weight tensor of shape: ",
-      weight.sizes());
-
-  Tensor ret;
-  if (weight.defined()) {
-    // Expand weight to the correct number of dims for broadcasting with input / target
-    auto weight_bc_shape = std::vector<int64_t>(self.dim(), 1);
-    weight_bc_shape[1] = weight.size(0);
-    Tensor weight_ = weight.view(weight_bc_shape);
-
-    ret = -(self * target * weight_).sum(1);
-    if (reduction == Reduction::Mean) {
-      // Compute weighted mean
-      ret = ret.sum() / (target * weight_).sum();
-    } else if (reduction == Reduction::Sum) {
-      ret = ret.sum();
-    }
-  } else {
-    ret = -(self * target).sum(1);
-    if (reduction == Reduction::Mean) {
-      ret = ret.mean();
-    } else if (reduction == Reduction::Sum) {
-      ret = ret.sum();
-    }
-  }
-  return ret;
 }
 
 Tensor nll_loss_nd(
@@ -550,55 +566,43 @@ Tensor nll_loss_nd(
   Tensor ret;
   Tensor input_ = self;
   Tensor target_ = target;
-  if (input_.sizes() == target_.sizes()) {
-    // Assume soft targets when input and target shapes are the same
-    TORCH_CHECK(at::isFloatingType(target.scalar_type()),
-        "Expected floating point type for target with class probabilities, got ", target.scalar_type());
-    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
-
-    // See [Note: hacky wrapper removal for optional tensor]
-    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
-    const Tensor& weight_ = *weight_maybe_owned;
-    ret = nll_loss_prob_target(input_, target_, weight_, reduction);
+  if (input_.dim() == 2) {
+    ret = at::nll_loss(input_, target_, weight, reduction, ignore_index);
+  } else if (input_.dim() == 4) {
+    ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
   } else {
-    if (input_.dim() == 2) {
-      ret = at::nll_loss(input_, target_, weight, reduction, ignore_index);
-    } else if (input_.dim() == 4) {
+    // dim == 3 or dim > 4
+    auto n = input_.sizes()[0];
+    auto c = input_.sizes()[1];
+    auto out_size = input_.sizes().slice(2).vec();
+    out_size.insert(out_size.begin(), n);
+    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+      TORCH_CHECK(
+          false,
+          "Expected target size ",
+          IntArrayRef(out_size),
+          ", got ",
+          target_.sizes());
+    }
+    input_ = input_.contiguous();
+    target_ = target_.contiguous();
+    // support empty batches, see #15870
+    if (input_.numel() > 0) {
+      input_ = input_.view({n, c, 1, -1});
+    } else {
+      input_ = input_.view({n, c, 0, 0});
+    }
+    if (target_.numel() > 0) {
+      target_ = target_.view({n, 1, -1});
+    } else {
+      target_ = target_.view({n, 0, 0});
+    }
+    if (!(reduction == Reduction::None)) {
       ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
     } else {
-      // dim == 3 or dim > 4
-      auto n = input_.sizes()[0];
-      auto c = input_.sizes()[1];
-      auto out_size = input_.sizes().slice(2).vec();
-      out_size.insert(out_size.begin(), n);
-      if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
-        TORCH_CHECK(
-            false,
-            "Expected target size ",
-            IntArrayRef(out_size),
-            ", got ",
-            target_.sizes());
-      }
-      input_ = input_.contiguous();
-      target_ = target_.contiguous();
-      // support empty batches, see #15870
-      if (input_.numel() > 0) {
-        input_ = input_.view({n, c, 1, -1});
-      } else {
-        input_ = input_.view({n, c, 0, 0});
-      }
-      if (target_.numel() > 0) {
-        target_ = target_.view({n, 1, -1});
-      } else {
-        target_ = target_.view({n, 0, 0});
-      }
-      if (!(reduction == Reduction::None)) {
-        ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-      } else {
-        auto out =
-            at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
-        ret = out.view(out_size);
-      }
+      auto out =
+          at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
+      ret = out.view(out_size);
     }
   }
   return ret;

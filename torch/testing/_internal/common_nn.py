@@ -3964,29 +3964,8 @@ def kldivloss_log_target_reference(input, target, reduction='mean'):
     return result
 
 
-def nllloss_prob_target_reference(input, target, weight=None, reduction='mean'):
-    assert input.dim() >= 2
-
-    C = input.size(1)
-    if weight is None:
-        weight = torch.ones(C).type_as(input)
-    weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
-
-    output = -(input * target * weight).sum(dim=1)
-    if reduction == 'mean':
-        total_weight = (weight * target).sum()
-        return output.sum() / total_weight
-    elif reduction == 'sum':
-        return output.sum()
-    return output
-
-
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
-    # Handle target in the form of probabilities.
-    if input.shape == target.shape:
-        return nllloss_prob_target_reference(input, target, weight=weight, reduction=reduction)
-
     assert input.dim() >= 3
     N = input.size(0)
     C = input.size(1)
@@ -4011,20 +3990,43 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     return output
 
 
+def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean'):
+    assert input.dim() >= 2
+
+    input = torch.log_softmax(input, 1)
+    C = input.size(1)
+    if weight is None:
+        weight = torch.ones(C).type_as(input)
+    weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
+
+    output = -(input * target * weight).sum(dim=1)
+    if reduction == 'mean':
+        total_weight = (weight * target).sum()
+        return output.sum() / total_weight
+    elif reduction == 'sum':
+        return output.sum()
+    return output
+
+
 def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, reduction='mean'):
-    return nlllossNd_reference(
-        torch.log_softmax(input, 1),
-        target,
-        weight,
-        ignore_index=ignore_index,
-        reduction=reduction)
+    if input.shape == target.shape:
+        return cross_entropy_loss_prob_target_reference(
+            input,
+            target,
+            weight=weight,
+            ignore_index=ignore_index,
+            reduction=reduction)
+    else:
+        return nlllossNd_reference(
+            torch.log_softmax(input, 1),
+            target,
+            weight,
+            ignore_index=ignore_index,
+            reduction=reduction)
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       reduction='mean'):
-    # Handle target in the form of probabilities.
-    if input.shape == target.shape:
-        return nllloss_prob_target_reference(input, target, weight=weight, reduction=reduction)
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
@@ -4696,36 +4698,6 @@ criterion_tests = [
             loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
         check_sum_reduction=True,
         desc='dim_is_3',
-        check_bfloat16=True,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(5, 3),
-        target_fn=lambda: torch.randn(5, 3).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='2d_prob_target',
-        check_bfloat16=True,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(5, 3, 4),
-        target_fn=lambda: torch.randn(5, 3, 4).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='3d_prob_target',
-        check_bfloat16=True,
-    ),
-    dict(
-        module_name='NLLLoss',
-        input_size=(5, 3, 4, 2),
-        target_fn=lambda: torch.randn(5, 3, 4, 2).softmax(dim=1),
-        reference_fn=lambda i, t, m:
-            loss_reference_fns['NLLLossNd'](i, t, reduction=get_reduction(m)),
-        check_sum_reduction=True,
-        desc='4d_prob_target',
         check_bfloat16=True,
     ),
     dict(

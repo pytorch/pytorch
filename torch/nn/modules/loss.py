@@ -115,53 +115,28 @@ class NLLLoss(_WeightedLoss):
     You may use `CrossEntropyLoss` instead, if you prefer not to add an extra
     layer.
 
-    The `target` that this criterion expects should contain either:
+    The `target` that this loss expects should be a class index in the range :math:`[0, C-1]`
+    where `C = number of classes`; if `ignore_index` is specified, this loss also accepts
+    this class index (this index may not necessarily be in the class range).
 
-    - Class indices in the range :math:`[0, C-1]` where :math:`C` is the number of classes; if
-      `ignore_index` is specified, this loss also accepts this class index (this index
-      may not necessarily be in the class range). The unreduced (i.e. with :attr:`reduction`
-      set to ``'none'``) loss for this case can be described as:
+    The unreduced (i.e. with :attr:`reduction` set to ``'none'``) loss can be described as:
 
-      .. math::
-          \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - w_{y_n} x_{n,y_n} \cdot \mathbb{1}\{y_n \not= \text{ignore\_index}\},
+    .. math::
+        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
+        l_n = - w_{y_n} x_{n,y_n}, \quad
+        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore\_index}\},
 
-      where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
-      :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
-      (default ``'mean'``), then
+    where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
+    :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
+    (default ``'mean'``), then
 
-      .. math::
-          \ell(x, y) = \begin{cases}
-              \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n} \cdot \mathbb{1}\{y_n \not= \text{ignore\_index}\}} l_n, &
-               \text{if reduction} = \text{`mean';}\\
-                \sum_{n=1}^N l_n,  &
-                \text{if reduction} = \text{`sum'.}
-            \end{cases}
-
-    - Probabilities over classes; useful when labels beyond a single class per minibatch item
-      are required, such as for blended labels, label smoothing, etc. The unreduced (i.e. with
-      :attr:`reduction` set to ``'none'``) loss for this case can be described as:
-
-      .. math::
-          \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-          l_n = - \sum_{c=1}^C w_c x_{n,c} y_{n,c}
-
-      where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
-      :math:`N` is the batch size, and :math:`C` is the number of classes. If
-      :attr:`reduction` is not ``'none'`` (default ``'mean'``), then
-
-      .. math::
-          \ell(x, y) = \begin{cases}
-              \sum_{n=1}^N \frac{1}{\sum_{n=1}^N \sum_{c=1}^C w_c y_{n,c}} l_n, &
-               \text{if reduction} = \text{`mean';}\\
-                \sum_{n=1}^N l_n,  &
-                \text{if reduction} = \text{`sum'.}
-            \end{cases}
-
-    .. note::
-        The performance of this criterion is generally better when `target` contains class
-        indices, as this allows for optimized computation. Consider providing `target` as
-        class probabilities only when a single class label per minibatch item is too restrictive.
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, &
+            \text{if reduction} = \text{`mean';}\\
+            \sum_{n=1}^N l_n,  &
+            \text{if reduction} = \text{`sum'.}
+        \end{cases}
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each
@@ -175,8 +150,7 @@ class NLLLoss(_WeightedLoss):
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When
             :attr:`size_average` is ``True``, the loss is averaged over
-            non-ignored targets. Note that :attr:`ignore_index` is only applicable
-            when the target contains class indices.
+            non-ignored targets.
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
@@ -193,17 +167,15 @@ class NLLLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `C = number of classes`, or
           :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: If containing class indices, shape :math:`(N)` where each value is
-          :math:`0 \leq \text{targets}[i] \leq C-1`, or :math:`(N, d_1, d_2, ..., d_K)` with
-          :math:`K \geq 1` in the case of K-dimensional loss. If containing class probabilities,
-          same shape as the input.
+        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
+          :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of
+          K-dimensional loss.
         - Output: If :attr:`reduction` is ``'none'``, shape :math:`(N)` or
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of K-dimensional loss.
           Otherwise, scalar.
 
     Examples::
 
-        >>> # Example of target with class indices
         >>> m = nn.LogSoftmax(dim=1)
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C = 3 x 5
@@ -213,11 +185,6 @@ class NLLLoss(_WeightedLoss):
         >>> output = loss(m(input), target)
         >>> output.backward()
         >>>
-        >>> # Example of target with class probabilities
-        >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.randn(3, 5).softmax(dim=1)
-        >>> output = loss(m(input), target)
-        >>> output.backward()
         >>>
         >>> # 2D loss example (used, for example, with image inputs)
         >>> N, C = 5, 4
@@ -1047,7 +1014,7 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion combines :class:`~torch.nn.LogSoftmax` and :class:`~torch.nn.NLLLoss` in one single class.
+    r"""This criterion computes the cross entropy loss between input and target.
 
     It is useful when training a classification problem with `C` classes.
     If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
@@ -1084,7 +1051,10 @@ class CrossEntropyLoss(_WeightedLoss):
                 \text{if reduction} = \text{`sum'.}
             \end{cases}
 
-    - Probabilities over classes; useful when labels beyond a single class per minibatch item
+      Note that this case is equivalent to the combination of :class:`~torch.nn.LogSoftmax` and
+      :class:`~torch.nn.NLLLoss`.
+
+    - Probabilities for each class; useful when labels beyond a single class per minibatch item
       are required, such as for blended labels, label smoothing, etc. The unreduced (i.e. with
       :attr:`reduction` set to ``'none'``) loss for this case can be described as:
 

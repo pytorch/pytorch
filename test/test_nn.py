@@ -16747,7 +16747,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
 
-    def test_nll_loss_one_hot_target(self, device):
+    def test_cross_entropy_loss_one_hot_target(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
             N, C = 5, 4
@@ -16764,7 +16764,7 @@ class TestNNDeviceType(NNTestCase):
             for reduction in ['none', 'mean', 'sum']:
                 # Ensure loss computed with class indices matches loss
                 # computed with one-hot class probs.
-                m = torch.nn.NLLLoss(weight=weight)
+                m = torch.nn.CrossEntropyLoss(weight=weight)
                 output = m(input, target)
                 output_one_hot = m(input, target_one_hot)
                 self.assertTrue(torch.allclose(output, output_one_hot))
