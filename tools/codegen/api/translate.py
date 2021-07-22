@@ -101,7 +101,7 @@ def translate(
 
         if t.type == ConstRefCType(OptionalCType(BaseCType(scalarT))):
             ctx[NamedCType(t.name, BaseCType(optionalScalarRefT))] = \
-                f'({b.expr}.has_value() ? at::OptionalScalarRef(&({b.expr}.value())) : at::OptionalScalarRef())'
+                f'({b.expr}.has_value() ? at::OptionalScalarRef({b.expr}.value()) : at::OptionalScalarRef())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:

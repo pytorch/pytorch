@@ -455,7 +455,14 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                 }
 #endif // USE_PYTORCH_QNNPACK
                 TORCH_CHECK(false, "Unknown qengine");
-              });
+              })
+              .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
+                   at::Tensor weight;
+                   c10::optional<at::Tensor> bias;
+                   std::tie(weight, bias) = self->unpack();
+                   return bias;
+                 })
+              .def("unpack", &LinearPackedParamsBase::unpack);
   return register_linear_params;
 }
 
