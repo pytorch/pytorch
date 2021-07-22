@@ -61,7 +61,19 @@ UCPEndpoint::UCPEndpoint(ucp_address_t* address) {
 }
 
 UCPEndpoint::~UCPEndpoint() {
-  ucp_ep_destroy(endpoint);
+  ucs_status_t st;
+
+  ucs_status_ptr_t request = ucp_ep_close_nb(endpoint, UCP_EP_CLOSE_MODE_FLUSH);
+  if (UCS_PTR_IS_ERR(request)) {
+    TORCH_WARN("Will leak endpoint because it fails to close. Error: ", ucs_status_string(UCS_PTR_STATUS(request)));
+  }
+  if (UCS_PTR_IS_PTR(request)) {
+    do {
+      ucp_worker_progress(UCPContext::get()->worker);
+      st = ucp_request_check_status(request);
+    } while (st != UCS_OK);
+    ucp_request_free(request);
+  }
 }
 
 } // namespace c10d

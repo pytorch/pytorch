@@ -15,7 +15,7 @@ class UCXError : public c10::Error {
 
 } // namespace c10
 
-#define TORCH_UCX_CHECK(st, ...) TORCH_CHECK_WITH(UCXError, (st) == UCS_OK, __VA_ARGS__, " Error code: ", ucs_status_string(st))
+#define TORCH_UCX_CHECK(st, ...) TORCH_CHECK_WITH(UCXError, (st) == UCS_OK, __VA_ARGS__, " Error: ", ucs_status_string(st))
 
 namespace c10d {
 

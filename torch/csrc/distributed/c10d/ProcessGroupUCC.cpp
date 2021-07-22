@@ -135,7 +135,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     ucp_endpoints[dstRank]->endpoint, tensor.data_ptr(), 1, tag, &params);
   TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
 
-  if (request == nullptr) {
+  if (UCS_PTR_STATUS(request) == UCS_OK) {
     // If the operation is finished immediately, then the callback will
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
@@ -167,15 +167,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
   };
   ucs_status_ptr_t request = ucp_tag_recv_nbx(
     UCPContext::get()->worker, tensor.data_ptr(), 1, tag, 0, &params);
-  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "failed to send message: ", ucs_status_string(UCS_PTR_STATUS(request)));
+  TORCH_CHECK_WITH(UCXError, !UCS_PTR_IS_ERR(request), "Failed to send message.", ucs_status_string(UCS_PTR_STATUS(request)));
 
-  if (request == nullptr) {
+  if (UCS_PTR_STATUS(request) == UCS_OK) {
     // If the operation is finished immediately, then the callback will
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
   }
 
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
+
+  // TODO: ucp_request_free(request)
   return work;
 }
 
