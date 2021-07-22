@@ -6,8 +6,7 @@
 #include "Eigen/Core"
 #include "Eigen/Dense"
 
-#include "caffe2/core/logging.h"
-
+#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 namespace caffe2 {

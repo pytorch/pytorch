@@ -847,6 +847,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         key_set_.has(DispatchKey::SparseHIP);
   }
 
+  bool is_ve() const {
+    // NB: This method is not virtual and avoid dispatches for performance
+    // reasons.
+    return key_set_.has(DispatchKey::VE) || key_set_.has(DispatchKey::SparseVE);
+  }
+
   bool is_mkldnn() const {
     return key_set_.has(DispatchKey::MkldnnCPU);
   }
@@ -1004,6 +1010,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(isComplexType(typeMetaToScalarType(dtype())));
     } else {
       key_set_ = key_set_.remove(DispatchKey::Conjugate);
+    }
+  }
+
+  /**
+   * Whether or not the tensor should be negated
+   */
+  inline bool is_neg() const {
+    return key_set_.has(DispatchKey::Negative);
+  }
+
+  /**
+   * Set whether or not to take the conjugate of the tensor (flip the imaginary
+   * bit).
+   */
+  void _set_neg(bool value) {
+    if (value) {
+      key_set_ = key_set_.add(DispatchKey::Negative);
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::Negative);
     }
   }
 
