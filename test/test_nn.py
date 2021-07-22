@@ -13271,11 +13271,11 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_input(mod, inp, check_size=False)
 
             inp = torch.ones(0, 10, 10, dtype=dtype).to(device)
-            mod = torch.nn.AdaptiveAvgPool2d((5,5)).to(device)
+            mod = torch.nn.AdaptiveAvgPool2d((5, 5)).to(device)
             self._test_module_empty_input(mod, inp, check_size=False)
 
             inp = torch.ones(0, 10, 10, 10, dtype=dtype).to(device)
-            mod = torch.nn.AdaptiveAvgPool3d((5,5,5)).to(device)
+            mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
             self._test_module_empty_input(mod, inp, check_size=False)
 
     @onlyOnCPUAndCUDA
