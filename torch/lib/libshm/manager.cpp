@@ -33,12 +33,9 @@ struct ClientSession {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<struct pollfd> pollfds;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::set<std::string> used_objects;
 
 
