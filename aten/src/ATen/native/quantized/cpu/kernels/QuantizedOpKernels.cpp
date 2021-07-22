@@ -1925,7 +1925,7 @@ void qtopk_kernel(Tensor& values,
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       using underlying_t = typename scalar_t::underlying;
       static_assert(sizeof(scalar_t) == sizeof(underlying_t), "");
-      return topk_impl_loop<underlying_t>(
+      return topk_impl_loop<underlying_t, underlying_t>(
           mode_values_stride, mode_indices_stride, tmp_values_stride,
           k, sizes[dim], largest, sorted, data, strides, n);
     };
@@ -2063,6 +2063,7 @@ void _fake_quantize_tensor_helper(
   Tensor& output,
   Tensor& mask,
   const Tensor& input,
+  int fake_quant_on,
   float sc,
   int64_t z_point,
   int64_t quant_min,
@@ -2085,8 +2086,13 @@ void _fake_quantize_tensor_helper(
         scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
         const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+        if (fake_quant_on) {
         *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
         *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+        } else {
+          *output_val = *input_val;
+          *mask_val = 1;
+        }
       }
     });
   });
@@ -2100,7 +2106,7 @@ void fake_quantize_tensor_cachemask_kernel(
     int64_t z_point,
     int64_t quant_min,
     int64_t quant_max) {
-  _fake_quantize_tensor_helper(output, mask, input, sc, z_point, quant_min, quant_max);
+  _fake_quantize_tensor_helper(output, mask, input, 1, sc, z_point, quant_min, quant_max);
 }
 
 void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
@@ -2109,9 +2115,10 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel(
     const Tensor& input,
     const Tensor& sc,
     const Tensor& z_point,
+    const Tensor& fake_quant_enabled,
     int64_t quant_min,
     int64_t quant_max) {
-  _fake_quantize_tensor_helper(output, mask, input, sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
+  _fake_quantize_tensor_helper(output, mask, input, fake_quant_enabled.item().toInt(), sc.item().toFloat(), z_point.item().toInt(), quant_min, quant_max);
 }
 
 void fake_quantize_learnable_tensor_grad_kernel_cpu(

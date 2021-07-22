@@ -60,7 +60,6 @@ def dist_init(
     "CLEANUP_AUTOGRAD_CONTEXT_REQ") will use the faulty send (this default is
     set from faulty_rpc_agent_test_fixture.py).
     """
-
     # If we use dist_init without arguments (ex: @dist_init), old_test_method is
     # appropriately set and we return the wrapper appropriately. On the other
     # hand if dist_init has arguments (ex: @dist_init(clean_shutdown=False)),
@@ -83,9 +82,7 @@ def dist_init(
         import torch.distributed.rpc.api as api
 
         api._ignore_rref_leak = False
-
         self.worker_id = self.rank
-
         self.setup_fault_injection(faulty_messages, messages_to_delay)
 
         if setup_rpc:
