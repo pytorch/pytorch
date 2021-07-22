@@ -355,7 +355,7 @@ jobs:
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
       - name: Run clang-tidy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: github.event_name == 'pull_request'
         run: |
           cd "${GITHUB_WORKSPACE}"
 
