@@ -115,12 +115,14 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, symbolic_traced)
         tc.type_check()
         expected_ph_types = [TensorType((1, 2, 3, Dyn)),
-                             TensorType((1, 2, 3, 4)),
+                             TensorType((2, 3, 4)),
                              TensorType((1, 2, 3, Dyn)),
                              TensorType((1, 2, 3, Dyn))]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
+            if n.op == 'call_function':
+                assert n.meta['broadcast']
             assert n.type == next(expected_iter)
 
     def test_type_check_add_with_scalar(self):
@@ -887,6 +889,34 @@ class TypeCheckerTest(unittest.TestCase):
 
         for n in graph.nodes:
             assert n.type == next(my_types)
+
+    def test_symbolic_add_with_broadcast(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        infer_symbolic_types(symbolic_traced)
+        r = Refine(symbolic_traced)
+        r.refine()
+
+        assert r.constraints == [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
+        # note that there is no equality constraint between dyn and 4 because
+        # dyn could be 4 or 1
+
+        infer_symbolic_types(symbolic_traced)
+
+        expected_ph_types = [TensorType((1, 2, 3, Var(0))),
+                             TensorType((2, 3, 4)),
+                             TensorType((1, 2, 3, Var(1))),
+                             TensorType((1, 2, 3, Var(1)))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
+
 
 if __name__ == '__main__':
     unittest.main()

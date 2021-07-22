@@ -38,7 +38,7 @@ def expand_to_tensor_dim(t, n):
 
 
 def broadcast_types(t1, t2):
-    if t1 == Dyn or t2 == Dyn:
+    if t1 == Dyn or t2 == Dyn or isinstance(t1, Var) or isinstance(t2, Var):
         return t1, t2
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
@@ -107,11 +107,24 @@ def add_inference_rule(n: Node):
         return n.type
 
     (new_t1, new_t2) = broadcast_types(t1, t2)
-    n.args[0].type = new_t1
-    n.args[1].type = new_t2
+
+    if new_t1 != t1 or new_t2 != t2:
+        n.meta['broadcast'] = True
+        n.meta[str(n.args[0])] = new_t1
+        n.meta[str(n.args[0])] = new_t2
+
+    # Todo: maybe figure out that broadcasting definitely did not happen?
+    else:
+        n.meta['broadcast'] = False
+
+    new_t1 = t1 if not n.meta['broadcast'] else new_t1
+    new_t2 = t2 if not n.meta['broadcast'] else new_t2
 
     if is_consistent(new_t1, new_t2):
-        # we return the more precise type
+        # we return the less precise type because
+        # broadcasting may have happened
+        # for operands with shape [1,2,Dyn] and [1,2,1]
+        # we have to assign the node [1,2,Dyn]
         if is_more_precise(new_t1, new_t2):
             n.type = new_t2
         else:
@@ -551,11 +564,13 @@ def add_eq(n: Node):
         arg_type1 = n.args[0].type
         arg_type2 = n.args[1].type
         if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
-            args1 = arg_type1.__args__
-            args2 = arg_type2.__args__
-            args3 = n.type.__args__
+            args1, args2 = broadcast_types(arg_type1, arg_type2)
+            # by this point, we know for sure that args1 and args2 are the same size.
+            a1 = args1.__args__
+            a2 = args2.__args__
+            a3 = n.type.__args__
             r = []
-            for x, y, z in zip(args1, args2, args3):
+            for x, y, z in zip(a1, a2, a3):
                 if x == y:
                     r.append(Equality(x, z))
             res = r
