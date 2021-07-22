@@ -2405,7 +2405,10 @@ Stmt* TermExpander::mutate(const Block* v) {
 }
 
 // SimplifierUnderContext
-
+//
+// This function records the bounds(range) info of the index var in a for-stmt.
+// The bounds info will be used later when simplifying expressions with the index
+// var.
 Stmt* SimplifierUnderContext::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -2419,6 +2422,20 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
   Stmt* body_new = body;
 
   // save bounds info before this for-stmt
+  //
+  // The same variable could have appeared in a if-stmt which the for-stmt is
+  // nested inside, and we need to restore its bounds info after the for-stmt.
+  //
+  // An example,
+  // if (i>=0 && i<5) {
+  //   for (i=0; i<3; i++){
+  //     A[i] = ...
+  //   }
+  //   x = (i+20) / 5;
+  //}
+  // Inside the if stmt, i is in the range of [0, 5); and if we can restore this
+  // bound info after the for stmt, we can use it to simplify the assignment stmt
+  // x = (i+20)/5 to x = 4.
   bool has_bounds = false;
   std::pair<const Expr*, const Expr*> bound_old;
   const Var* var_key = dynamic_cast<const Var*>(var);
@@ -2432,12 +2449,12 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
       std::make_pair(start_new, stop_new);
   var_bound_info_[var_key] = bound_new;
 
-  const Expr* loops = new Sub(stop_new, start_new);
-  loops = loops->accept_mutator(this);
-  if (loop_options.isDefault() && loops->isConstant()) {
-    if (immediateEquals(loops, 0)) {
+  const Expr* iters = new Sub(stop_new, start_new);
+  iters = iters->accept_mutator(this);
+  if (loop_options.isDefault() && iters->isConstant()) {
+    if (immediateEquals(iters, 0)) {
       return new Block({});
-    } else if (immediateEquals(loops, 1)) {
+    } else if (immediateEquals(iters, 1)) {
       body_new = Substitute(body, {{var_new, start_new}});
       body_new = body_new->accept_mutator(this);
 
@@ -2471,6 +2488,8 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
     }
 
     if (block->nstmts() == 1) {
+      // if the stmt in the loop body is a if-stmt, try to move the branching
+      // out of the loop
       if (auto* cond = dynamic_cast<Cond*>(block->front())) {
         Stmt* reordered = handleForCondReordering(v, cond);
         if (reordered) {
