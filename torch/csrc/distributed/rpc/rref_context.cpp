@@ -9,7 +9,9 @@ namespace distributed {
 namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     RRefContext::userTable_;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool RRefContext::recording_ = false;
 
 namespace callback {
@@ -82,6 +84,7 @@ const std::string kNumForks = "num_forks";
 
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static RRefContext* context = new RRefContext(RpcAgent::getCurrentRpcAgent());
   return *context;
 }
@@ -110,7 +113,7 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
   if (jitFuture.hasError()) {
     auto errMsg = jitFuture.tryRetrieveErrorMessage();
     VLOG(1) << "Got exception: " << errMsg;
-    throw std::runtime_error(errMsg);
+    TORCH_CHECK(false, errMsg);
   }
 }
 

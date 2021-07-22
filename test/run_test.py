@@ -2,9 +2,7 @@
 
 import argparse
 import copy
-import csv
 from datetime import datetime
-import json
 import modulefinder
 import os
 import shutil
@@ -16,23 +14,31 @@ import tempfile
 import torch
 from torch.utils import cpp_extension
 from torch.testing._internal.common_utils import FILE_SCHEMA, IS_IN_CI, TEST_WITH_ROCM, shell, set_cwd
-from torch.testing._internal.framework_utils import calculate_shards
 import torch.distributed as dist
-from typing import Dict, Optional, Tuple, List, Any
-from typing_extensions import TypedDict
+from typing import Dict, Optional, List
 
 try:
+    # using tools/ to optimize test run.
     sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-    from tools.stats_utils.s3_stat_parser import (get_previous_reports_for_branch, Report, HAVE_BOTO3)
+    from tools.testing.test_selections import (
+        export_S3_test_times,
+        get_shard_based_on_S3,
+        get_slow_tests_based_on_S3,
+        get_specified_test_cases,
+        get_reordered_tests,
+        get_test_case_configs,
+    )
+    HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
-    print("Unable to import s3_stat_parser from tools. Running without S3 stats...")
-    HAVE_BOTO3 = False
+    HAVE_TEST_SELECTION_TOOLS = False
+    print("Unable to import test_selections from tools/testing. Running without test selection stats...")
 
 
 TESTS = [
     'test_import_time',
     'test_public_bindings',
     'test_type_hints',
+    'test_ao_sparsity',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
@@ -49,6 +55,7 @@ TESTS = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -60,7 +67,6 @@ TESTS = [
     'distributions/test_constraints',
     'distributions/test_distributions',
     'test_dispatch',
-    'test_expecttest',
     'test_foreach',
     'test_indexing',
     'test_jit',
@@ -119,8 +125,6 @@ TESTS = [
     "distributed/test_launcher",
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -200,8 +204,6 @@ USE_PYTEST_LIST = [
 WINDOWS_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/test_distributed_fork',
@@ -235,8 +237,6 @@ WINDOWS_BLOCKLIST = [
 ROCM_BLOCKLIST = [
     'distributed/nn/jit/test_instantiator',
     'distributed/rpc/test_faulty_agent',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'test_determination',
@@ -248,7 +248,6 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     'test_cpp_extensions_jit',
-    'test_expecttest',
     'test_jit_disabled',
     'test_mobile_optimizer',
     'test_multiprocessing',
@@ -289,8 +288,6 @@ TARGET_DET_LIST = [
     'test_view_ops',
     'distributed/nn/jit/test_instantiator',
     'distributed/test_distributed_fork',
-    'distributed/rpc/test_process_group_agent',
-    'distributed/rpc/cuda/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/rpc/cuda/test_tensorpipe_agent',
     'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
@@ -311,6 +308,7 @@ TARGET_DET_LIST = [
     'distributed/test_c10d_spawn_gloo',
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
+    'distributed/test_pg_wrapper',
     'test_quantization',
     'test_pruning_op',
     'test_determination',
@@ -383,6 +381,8 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
+ENABLE_PR_HISTORY_REORDERING = bool(os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1")
+
 JIT_EXECUTOR_TESTS = [
     'test_jit_cuda_fuser',
     'test_jit_profiling',
@@ -397,7 +397,7 @@ JIT_EXECUTOR_TESTS = [
 #   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
 #   ...
 # }
-# For test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
+# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
 SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
 
 # The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
@@ -409,133 +409,11 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-# Convert something like pytorch_windows_vs2019_py36_cuda10.1_build to pytorch_windows_vs2019_py36_cuda10.1
-def get_stripped_CI_job() -> str:
-    job = os.environ.get("CIRCLE_JOB", "").rstrip('0123456789')
-    if job.endswith('_slow_test'):
-        job = job[:len(job) - len('_slow_test')]
-    elif job.endswith('_test'):
-        job = job[:len(job) - len('_test')]
-    elif job.endswith('_build'):
-        job = job[:len(job) - len('_build')]
-    return job
-
-
-def calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
-    # an entry will be like ("test_file_name" -> (current_avg, # values))
-    jobs_to_times: Dict[str, Tuple[float, int]] = dict()
-    for report in reports:
-        assert report.get('format_version') == 2, "S3 format currently handled is version 2 only"
-        files: Dict[str, Any] = report['files']
-        for name, test_file in files.items():
-            if name not in jobs_to_times:
-                jobs_to_times[name] = (test_file['total_seconds'], 1)
-            else:
-                curr_avg, curr_count = jobs_to_times[name]
-                new_count = curr_count + 1
-                new_avg = (curr_avg * curr_count + test_file['total_seconds']) / new_count
-                jobs_to_times[name] = (new_avg, new_count)
-
-    # if there's 'test_cpp_extensions_aot' entry in jobs_to_times, add 'test_cpp_extensions_aot_ninja'
-    # and 'test_cpp_extensions_aot_no_ninja' duplicate entries to ease future computation since
-    # test_cpp_extensions_aot_no_ninja and test_cpp_extensions_aot_ninja are Python test jobs that
-    # both use the test_cpp_extensions_aot.py file.
-    if 'test_cpp_extensions_aot' in jobs_to_times:
-        jobs_to_times['test_cpp_extensions_aot_ninja'] = jobs_to_times['test_cpp_extensions_aot']
-        jobs_to_times['test_cpp_extensions_aot_no_ninja'] = jobs_to_times['test_cpp_extensions_aot']
-    return {job: time for job, (time, _) in jobs_to_times.items()}
-
-
-def pull_job_times_from_S3() -> Dict[str, float]:
-    if HAVE_BOTO3:
-        ci_job_prefix = get_stripped_CI_job()
-        s3_reports: List["Report"] = get_previous_reports_for_branch('origin/viable/strict', ci_job_prefix)
-    else:
-        print('Uh oh, boto3 is not found. Either it is not installed or we failed to import s3_stat_parser.')
-        print('If not installed, please install boto3 for automatic sharding and test categorization.')
-        s3_reports = []
-
-    if len(s3_reports) == 0:
-        print('Gathered no reports from S3. Please proceed without them.')
-        return dict()
-
-    return calculate_job_times(s3_reports)
-
-
-def get_past_job_times() -> Dict[str, float]:
-    if os.path.exists(TEST_TIMES_FILE):
-        with open(TEST_TIMES_FILE) as file:
-            test_times_json: JobTimeJSON = json.load(file)
-
-        curr_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip()
-        file_commit = test_times_json.get('commit', '')
-        curr_ci_job = get_stripped_CI_job()
-        file_ci_job = test_times_json.get('CIRCLE_JOB', 'N/A')
-        if curr_commit != file_commit:
-            print(f'Current test times file is from different commit {file_commit}.')
-        elif curr_ci_job != file_ci_job:
-            print(f'Current test times file is for different CI job {file_ci_job}.')
-        else:
-            print(f'Found stats for current commit: {curr_commit} and job: {curr_ci_job}. Proceeding with those values.')
-            return test_times_json.get('job_times', {})
-
-        # Found file, but commit or CI job in JSON doesn't match
-        print(f'Overwriting current file with stats based on current commit: {curr_commit} and CI job: {curr_ci_job}')
-
-    job_times = pull_job_times_from_S3()
-    print(f'Exporting S3 test stats to {TEST_TIMES_FILE}.')
-    export_S3_test_times(TEST_TIMES_FILE, job_times)
-
-    return job_times
-
-
-class JobTimeJSON(TypedDict):
-    commit: str
-    job_times: Dict[str, float]
-
-
-def get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
-    return {
-        'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], encoding="ascii").strip(),
-        'CIRCLE_JOB': get_stripped_CI_job(),
-        'job_times': job_times,
-    }
-
-
-def get_shard(which_shard: int, num_shards: int, tests: List[str]) -> List[str]:
-    jobs_to_times = get_past_job_times()
-
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print('Gathered no stats from S3. Proceeding with default sharding plan.')
-        return tests[which_shard - 1 :: num_shards]
-
-    shards = calculate_shards(num_shards, tests, jobs_to_times)
-    _, tests_from_shard = shards[which_shard - 1]
-    return tests_from_shard
-
-
-def get_slow_tests_based_on_S3() -> List[str]:
-    jobs_to_times: Dict[str, float] = get_past_job_times()
-
-    # Got no stats from S3, returning early to save runtime
-    if len(jobs_to_times) == 0:
-        print('Gathered no stats from S3. No new slow tests calculated.')
-        return []
-
-    slow_tests: List[str] = []
-    for test in TESTS:
-        if test in jobs_to_times and test not in TARGET_DET_LIST:
-            if jobs_to_times[test] > SLOW_TEST_THRESHOLD:
-                slow_tests.append(test)
-    return slow_tests
-
-
 def get_test_case_args(test_module, using_pytest) -> List[str]:
-    if test_module not in SPECIFIED_TEST_CASES_DICT:
-        sys.exit(f'Warning! Test module {test_module} is not found in the specified tests dict. This should never'
-                 'happen as we make a check for that before entering this function.')
     args = []
+    # if test_module not specified or specified with '__all__' then run all tests
+    if test_module not in SPECIFIED_TEST_CASES_DICT or '__all__' in SPECIFIED_TEST_CASES_DICT[test_module]:
+        return args
 
     if using_pytest:
         args.append('-k')
@@ -574,6 +452,9 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+    elif IS_IN_CI:
+        # use the downloaded test cases configuration, not supported in pytest
+        unittest_args.extend(['--import-slow-tests', '--import-disabled-tests'])
 
     # Multiprocessing related tests cannot run with coverage.
     # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
@@ -583,6 +464,7 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     executable = get_executable_command(options, allow_pytest=not extra_unittest_args,
                                         disable_coverage=disable_coverage)
 
+    # TODO: move this logic into common_utils.py instead of passing in "-k" individually
     # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
     # to test_distributed and not run_test (this function)
     if options.run_specified_test_cases:
@@ -601,7 +483,7 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
     return run_test(test_module, test_directory, options, extra_unittest_args=['--subprocess'])
 
 
-def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
+def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
         try:
             cpp_extension.verify_ninja_availability()
@@ -631,6 +513,9 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
 
     # "install" the test modules and run tests
     python_path = os.environ.get('PYTHONPATH', '')
+    from shutil import copyfile
+    test_module = 'test_cpp_extensions_aot' + ('_ninja' if use_ninja else '_no_ninja')
+    copyfile(test_directory + '/test_cpp_extensions_aot.py', test_directory + '/' + test_module + '.py')
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = ''
@@ -645,16 +530,16 @@ def _test_cpp_extensions_aot(test_module, test_directory, options, use_ninja):
         return run_test(test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
+        if os.path.exists(test_directory + '/' + test_module + '.py'):
+            os.remove(test_directory + '/' + test_module + '.py')
 
 
 def test_cpp_extensions_aot_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot', test_directory,
-                                    options, use_ninja=True)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=True)
 
 
 def test_cpp_extensions_aot_no_ninja(test_module, test_directory, options):
-    return _test_cpp_extensions_aot('test_cpp_extensions_aot',
-                                    test_directory, options, use_ninja=False)
+    return _test_cpp_extensions_aot(test_directory, options, use_ninja=False)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -739,7 +624,8 @@ class TestChoices(list):
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run the PyTorch unit test suite',
-        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)))
+        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)),
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument(
         '-v',
         '--verbose',
@@ -838,8 +724,25 @@ def parse_args():
         nargs='?',
         type=str,
         const=SPECIFIED_TEST_CASES_FILE,
-        help='runs specified test cases from previous OSS CI stats from a file, format CSV',
-
+        help='load specified test cases file dumped from previous OSS CI stats, format CSV. '
+        ' If all test cases should run for a <test_module> please add a single row: \n'
+        ' test_filename,test_case_name\n'
+        ' ...\n'
+        ' <test_module>,__all__\n'
+        ' ...\n'
+        'how we use the stats will be based on option "--use-specified-test-cases-by".'
+    )
+    parser.add_argument(
+        '--use-specified-test-cases-by',
+        type=str,
+        choices=['include', 'bring-to-front'],
+        default='include',
+        help='used together with option "--run-specified-test-cases". When specified test case '
+        'file is set, this option allows the user to control whether to only run the specified test '
+        'modules or to simply bring the specified modules to front and also run the remaining '
+        'modules. Note: regardless of this option, we will only run the specified test cases '
+        ' within a specified test module. For unspecified test modules with the bring-to-front '
+        'option, all test cases will be run, as one may expect.',
     )
     return parser.parse_args()
 
@@ -893,6 +796,12 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
+    if options.run_specified_test_cases:
+        if options.use_specified_test_cases_by == 'include':
+            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
+        elif options.use_specified_test_cases_by == 'bring-to-front':
+            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
+
     selected_tests = options.include
 
     if options.bring_to_front:
@@ -910,10 +819,6 @@ def get_selected_tests(options):
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
-
-    if options.run_specified_test_cases:
-        # Filter out any unspecified test modules.
-        selected_tests = [t for t in selected_tests if t in SPECIFIED_TEST_CASES_DICT]
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -935,9 +840,11 @@ def get_selected_tests(options):
         assert len(options.shard) == 2, "Unexpected shard format"
         assert min(options.shard) > 0, "Shards must be positive numbers"
         which_shard, num_shards = options.shard
-        assert which_shard <= num_shards, "Selected shard must be less or equal that total number of shards"
+        assert which_shard <= num_shards, "Selected shard must be less than or equal to total number of shards"
         assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
-        selected_tests = get_shard(which_shard, num_shards, selected_tests)
+        # TODO: fix this to use test_times_filename, but currently this is not working
+        # because setting the export arg immeidately halts the test execution.
+        selected_tests = get_shard_based_on_S3(which_shard, num_shards, selected_tests, TEST_TIMES_FILE)
 
     return selected_tests
 
@@ -1093,97 +1000,22 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
         message += f' Received signal: {signal_name}'
     return message
 
-def export_S3_test_times(test_times_filename: str, test_times: Dict[str, float]) -> None:
-    if os.path.exists(test_times_filename):
-        print(f'Overwriting existent file: {test_times_filename}')
-    with open(test_times_filename, 'w+') as file:
-        job_times_json = get_job_times_json(test_times)
-        json.dump(job_times_json, file, indent='    ', separators=(',', ': '))
-        file.write('\n')
-
-
-def load_specified_test_cases(filename: str) -> None:
-    if not os.path.exists(filename):
-        print(f'Could not find specified tests file: {filename}. Proceeding with default behavior.')
-        return
-
-    # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
-    with open(filename, mode='r', encoding="utf-8-sig") as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        line_count = 0
-        global SPECIFIED_TEST_CASES_DICT
-        for row in csv_reader:
-            line_count += 1
-            if line_count == 1:
-                if 'test_filename' not in row or 'test_case_name' not in row:
-                    print('Data is missing necessary columns for test specification. Proceeding with default behavior.')
-                    return
-            test_filename = row['test_filename']
-            test_case_name = row['test_case_name']
-            if test_filename not in TESTS:
-                print(f'Specified test_filename {test_filename} not found in TESTS. Skipping.')
-                continue
-            if test_filename not in SPECIFIED_TEST_CASES_DICT:
-                SPECIFIED_TEST_CASES_DICT[test_filename] = []
-            SPECIFIED_TEST_CASES_DICT[test_filename].append(test_case_name)
-        print(f'Processed {line_count} test cases.')
-
-
-def query_changed_test_files() -> List[str]:
-    cmd = ["git", "diff", "--name-only", "origin/master", "HEAD"]
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if proc.returncode != 0:
-        raise RuntimeError("Unable to get changed files")
-
-    lines = proc.stdout.decode().strip().split("\n")
-    lines = [line.strip() for line in lines]
-    return lines
-
-
-def reorder_tests(tests: List[str]) -> List[str]:
-    try:
-        changed_files = query_changed_test_files()
-    except Exception:
-        # If unable to get changed files from git, quit without doing any sorting
-        return tests
-
-    prefix = f"test{os.path.sep}"
-    changed_tests = [f for f in changed_files if f.startswith(prefix) and f.endswith(".py")]
-    changed_tests = [f[len(prefix):] for f in changed_tests]
-    changed_tests = [f[:-len(".py")] for f in changed_tests]
-
-    bring_to_front = []
-    the_rest = []
-
-    for test in tests:
-        if test in changed_tests:
-            bring_to_front.append(test)
-        else:
-            the_rest.append(test)
-
-    sorted_tests = bring_to_front + the_rest
-
-    if len(sorted_tests) != len(tests):
-        # Something went wrong, bail out without doing any sorting
-        return tests
-
-    return sorted_tests
-
 
 def main():
     options = parse_args()
 
+    # TODO: move this export & download function in tools/ folder
     test_times_filename = options.export_past_test_times
     if test_times_filename:
         print(f'Exporting past test times from S3 to {test_times_filename}, no tests will be run.')
-        export_S3_test_times(test_times_filename, pull_job_times_from_S3())
+        export_S3_test_times(test_times_filename)
         return
 
     specified_test_cases_filename = options.run_specified_test_cases
     if specified_test_cases_filename:
         print(f'Loading specified test cases to run from {specified_test_cases_filename}.')
-        load_specified_test_cases(specified_test_cases_filename)
+        global SPECIFIED_TEST_CASES_DICT
+        SPECIFIED_TEST_CASES_DICT = get_specified_test_cases(specified_test_cases_filename, TESTS)
 
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
@@ -1198,7 +1030,7 @@ def main():
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
-        slow_tests = get_slow_tests_based_on_S3()
+        slow_tests = get_slow_tests_based_on_S3(TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD)
         print('Added the following tests to target_det tests as calculated based on S3:')
         print(slow_tests)
         with open(options.determine_from, 'r') as fh:
@@ -1215,7 +1047,9 @@ def main():
         sys.path.remove('test')
 
     if IS_IN_CI:
-        selected_tests = reorder_tests(selected_tests)
+        selected_tests = get_reordered_tests(selected_tests, ENABLE_PR_HISTORY_REORDERING)
+        # downloading test cases configuration to local environment
+        get_test_case_configs(dirpath=os.path.dirname(os.path.abspath(__file__)))
 
     has_failed = False
     failure_messages = []

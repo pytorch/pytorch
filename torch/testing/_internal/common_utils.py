@@ -23,7 +23,6 @@ import warnings
 import random
 import contextlib
 import shutil
-import datetime
 import pathlib
 import socket
 import subprocess
@@ -37,15 +36,14 @@ from copy import deepcopy
 from numbers import Number
 import tempfile
 import json
-from urllib.request import urlopen
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
 from torch.testing import floating_types_and, integral_types, complex_types
-from torch.testing._internal import expecttest
+import expecttest
 from .._core import \
     (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
 
@@ -63,10 +61,17 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
+# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
 IS_IN_CI = os.getenv('IN_CI') == '1'
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
+
+DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
+SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
+
+slow_tests_dict: Optional[Dict[str, Any]] = None
+disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 class ProfilingMode(Enum):
     LEGACY = 1
@@ -163,6 +168,8 @@ parser.add_argument('--save-xml', nargs='?', type=str,
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
+parser.add_argument('--import-slow-tests', type=str, nargs='?', const=SLOW_TESTS_FILE)
+parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DISABLED_TESTS_FILE)
 
 args, remaining = parser.parse_known_args()
 if args.jit_executor == 'legacy':
@@ -176,6 +183,8 @@ else:
     GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
 
+IMPORT_SLOW_TESTS = args.import_slow_tests
+IMPORT_DISABLED_TESTS = args.import_disabled_tests
 LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
@@ -188,6 +197,9 @@ if not expecttest.ACCEPT:
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
+
+# CI Prefix path used only on CI environment
+CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
 
 def wait_for_process(p):
     try:
@@ -235,9 +247,6 @@ def repeat_test_for_types(dtypes):
         return call_helper
     return repeat_helper
 
-# Environment variable `IS_PYTORCH_CI` is set in `.jenkins/common.sh`.
-IS_PYTORCH_CI = bool(os.environ.get('IS_PYTORCH_CI'))
-
 
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
@@ -255,10 +264,29 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
 def run_tests(argv=UNITTEST_ARGS):
+    # import test files.
+    if IMPORT_SLOW_TESTS:
+        if os.path.exists(IMPORT_SLOW_TESTS):
+            global slow_tests_dict
+            with open(IMPORT_SLOW_TESTS, 'r') as fp:
+                slow_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
+    if IMPORT_DISABLED_TESTS:
+        if os.path.exists(IMPORT_DISABLED_TESTS):
+            global disabled_tests_dict
+            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+                disabled_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
+    # Determine the test launch mechanism
     if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
@@ -306,6 +334,7 @@ def run_tests(argv=UNITTEST_ARGS):
     else:
         unittest.main(argv=argv)
 
+IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
@@ -390,6 +419,12 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # disable them for local runs because you still want to run them
 # (unlike slow tests!)
 TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+
+# Determine whether to enable cuda memory leak check.
+# CUDA mem leak check is expensive and thus we don't want to execute it on every
+# test case / configuration.
+# See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
+TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
 # Disables tests for when on Github Actions
 ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
@@ -826,94 +861,35 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_PYTORCH_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE',
-                                                     'dev')
+        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
-
-FILE_CACHE_LIFESPAN_SECONDS = datetime.timedelta(hours=3).seconds
-
-def fetch_and_cache(name: str, url: str):
-    """
-    Some tests run in a different process so globals like `slow_test_dict` won't
-    always be filled even though the test file was already downloaded on this
-    machine, so cache it on disk
-    """
-    path = os.path.join(tempfile.gettempdir(), name)
-
-    def is_cached_file_valid():
-        # Check if the file is new enough (say 1 hour for now). A real check
-        # could make a HEAD request and check/store the file's ETag
-        fname = pathlib.Path(path)
-        now = datetime.datetime.now()
-        mtime = datetime.datetime.fromtimestamp(fname.stat().st_mtime)
-        diff = now - mtime
-        return diff.total_seconds() < FILE_CACHE_LIFESPAN_SECONDS
-
-    if os.path.exists(path) and is_cached_file_valid():
-        # Another test process already downloaded the file, so don't re-do it
-        with open(path, "r") as f:
-            return json.load(f)
-    try:
-        contents = urlopen(url, timeout=1).read().decode('utf-8')
-        with open(path, "w") as f:
-            f.write(contents)
-        return json.loads(contents)
-    except Exception as e:
-        print(f'Could not download {url} because of error {e}.')
-        return {}
-
-
-slow_tests_dict: Optional[Dict[str, float]] = None
-def check_slow_test_from_stats(test):
-    global slow_tests_dict
-    if slow_tests_dict is None:
-        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
-            url = "https://raw.githubusercontent.com/pytorch/test-infra/master/stats/slow-tests.json"
-            slow_tests_dict = fetch_and_cache(".pytorch-slow-tests.json", url)
-        else:
-            slow_tests_dict = {}
+def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
     test_name = f'{test._testMethodName} ({test_suite})'
-
-    if test_name in slow_tests_dict:
+    if slow_tests_dict is not None and test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-
-
-disabled_test_from_issues: Optional[Dict[str, Any]] = None
-def check_disabled(test_name):
-    global disabled_test_from_issues
-    if disabled_test_from_issues is None:
-        _disabled_test_from_issues: Dict = {}
-
-        def read_and_process():
-            url = 'https://raw.githubusercontent.com/pytorch/test-infra/master/stats/disabled-tests.json'
-            contents = urlopen(url, timeout=1).read().decode('utf-8')
-            the_response = fetch_and_cache(".pytorch-disabled-tests", url)
-            for item in the_response['items']:
-                title = item['title']
-                key = 'DISABLED '
-                if title.startswith(key):
-                    test_name = title[len(key):].strip()
-                    _disabled_test_from_issues[test_name] = item['html_url']
-
-        if not IS_SANDCASTLE and os.getenv("PYTORCH_RUN_DISABLED_TESTS", "0") != "1":
-            try:
-                read_and_process()
-                disabled_test_from_issues = _disabled_test_from_issues
-            except Exception:
-                print("Couldn't download test skip set, leaving all tests enabled...")
-                disabled_test_from_issues = {}
-
-    if disabled_test_from_issues is not None:
-        if test_name in disabled_test_from_issues:
-            raise unittest.SkipTest(
-                "Test is disabled because an issue exists disabling it: {}".format(disabled_test_from_issues[test_name]) +
-                " To enable set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+        if test_name in disabled_tests_dict:
+            issue_url, platforms = disabled_tests_dict[test_name]
+            platform_to_conditional: Dict = {
+                "mac": IS_MACOS,
+                "macos": IS_MACOS,
+                "windows": IS_WINDOWS,
+                "linux": IS_LINUX
+            }
+            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                raise unittest.SkipTest(
+                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
+                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+    if TEST_SKIP_FAST:
+        if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
+            raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 # Acquires the comparison dtype, required since isclose
 # requires both inputs have the same dtype, and isclose is not supported
@@ -954,12 +930,25 @@ class AssertRaisesContextIgnoreNotImplementedError(unittest.case._AssertRaisesCo
             self.test_case.skipTest(f"not_implemented: {exc_value}")  # type: ignore[attr-defined]
         return super().__exit__(exc_type, exc_value, tb)
 
+
+@contextmanager
+def set_warn_always_context(new_val: bool):
+    old_val = torch.is_warn_always_enabled()
+    torch.set_warn_always(new_val)
+    try:
+        yield
+    finally:
+        torch.set_warn_always(old_val)
+
+
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
-    # atol values when comparing tensors. Used by @precisionOverride, for
+    # atol values when comparing tensors. Used by @precisionOverride and @toleranceOverride, for
     # example.
-    # TODO: provide a better mechanism for generated tests to set rtol/atol.
+    # NOTE: "rel_tol" lets classes and generated tests set minimum
+    # rtol values when comparing tensors. Used by @toleranceOverride, for example.
     _precision: float = 0
+    _rel_tol: float = 0
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
@@ -982,6 +971,14 @@ class TestCase(expecttest.TestCase):
     def precision(self, prec: float) -> None:
         self._precision = prec
 
+    @property
+    def rel_tol(self) -> float:
+        return self._rel_tol
+
+    @rel_tol.setter
+    def rel_tol(self, prec: float) -> None:
+        self._rel_tol = prec
+
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
 
@@ -995,10 +992,11 @@ class TestCase(expecttest.TestCase):
         test_method = getattr(self, method_name, None)
         if test_method is not None:
             # Wraps the tested method if we should do CUDA memory check.
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
+            if not TEST_SKIP_CUDA_MEM_LEAK_CHECK:
+                self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+                # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+                if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+                    self.wrap_with_cuda_policy(method_name, self.assertLeaksNoCudaTensors)
 
             # Wraps the tested method if we should enforce non default CUDA stream.
             self._do_cuda_non_default_stream &= getattr(test_method, '_do_cuda_non_default_stream', True)
@@ -1057,13 +1055,158 @@ class TestCase(expecttest.TestCase):
             result.stop()
 
     def setUp(self):
-        check_slow_test_from_stats(self)
-        if TEST_SKIP_FAST:
-            if not getattr(self, self._testMethodName).__dict__.get('slow_test', False):
-                raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
-        check_disabled(str(self))
-
+        check_if_enable(self)
         set_rng_seed(SEED)
+
+    @staticmethod
+    def _make_crow_indices(n_rows, n_cols, nnz,
+                           *, device, dtype, random=True):
+        """Return crow_indices of a CSR tensor with size (n_rows, n_cols) and
+        the number of specified elements nnz.
+
+        If random is True, the column counts of rows are in random
+        order. Otherwise, the column counts of rows are defined by the
+        used sampling method.
+
+        Sampling method
+        ---------------
+
+        The used sampling method was introduced in
+        https://pearu.github.io/csr_sampling.html, and here we give
+        only an overall description of the method.
+
+        Notice that crow_indices can be defined as cumsum(counts)
+        where counts is a sequence of non-negative integers satisfying
+        the following conditions:
+
+          len(counts) == n_rows + 1
+          counts.max() <= n_cols
+
+        while counts[i + 1] is interpreted as the number of specified
+        elements in the i-th row.
+
+        The used sampling method aims at increasing the diversity of
+        CSR samples, that is, a CSR sample should contain (i) rows
+        that are all filled, (ii) rows with no elements at all, and
+        (iii) rows that are partially filled. At the same time and for
+        the given total number of specified elements (nnz), there
+        should be minimal preference to rows with a given number of
+        elements.  To achieve this, the sampling method is built-up on
+        using a sawteeth model for counts. In the simplest case, we
+        would have
+
+          counts = arange(n_rows + 1) % (n_cols + 1)
+
+        that has equal number of all possible column counts per row.
+        This formula can be used only for specific input values of
+        n_rows, n_cols, and nnz. To generalize this model to any
+        combinations of inputs, the counts model above is extended
+        with an incomplete sawtooth, and the right and lower
+        rectangular parts that will guarantee that
+
+          counts.sum() == nnz
+
+        for any combination of n_rows, n_cols, and nnz. Basically,
+        we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
+        that is able to hold a sequence of sawteeth and so-called
+        final correction, while the external part of the window is
+        filled with counts to meet the nnz contraint exactly.
+        """
+        assert 0 <= nnz <= n_rows * n_cols
+
+        def sawteeth(n, m):
+            # return the total number of counts in the sequence of
+            # sawteeth where n and m define a window in (n_rows+1,
+            # n_cols+1) rectangle where the sequence of sawteeth
+            # perfectly fit.
+            M = (n_cols - m) * (n_cols - m + 1) // 2
+            K = (n_rows - n) % (n_cols - m + 1)
+            return M * ((n_rows - n) // (n_cols - m + 1)) + K * (K - 1) // 2
+
+        # Different from the original method description, here counts
+        # has leading 0 required by crow_indices:
+        counts = torch.zeros(n_rows + 1, dtype=dtype, device=torch.device('cpu'))
+
+        n = m = 0
+        N = sawteeth(n, m)
+        if N and nnz >= max(N, n_cols):
+            # determine the width of the sawteeth window. We use bisection to solve
+            #   N(n, 0) == 0 or nnz - n * n_cols < max(N(n, 0), n_cols)
+            # for n
+            n_left = n
+            n_right = n_rows - 1
+            N_right = sawteeth(n_right, m)
+            while n_right - n_left > 1:
+                n_middle = (n_left + n_right) // 2
+                N_middle = sawteeth(n_middle, m)
+                if N_middle == 0 or nnz - n_middle * n_cols < max(N_middle, n_cols):
+                    n_right, N_right = n_middle, N_middle
+                else:
+                    n_left = n_middle
+            n, N = n_right, N_right
+            # fill the right rectangle with counts:
+            assert n
+            counts[-n:].fill_(n_cols)
+
+        if N and nnz - n * n_cols >= max(N, n_rows - n):
+            # determine the height of the sawteeth window. We use bisection to solve
+            #   N(n, m) == 0 or nnz - n * n_cols - m * (n_rows - n) < max(N(n, m), n_rows - n)
+            # for m.
+            m_left = m
+            m_right = n_cols - 1
+            N_right = sawteeth(n, m_right)
+            while m_right - m_left > 1:
+                m_middle = (m_left + m_right) // 2
+                N_middle = sawteeth(n, m_middle)
+                if N_middle == 0 or nnz - n * n_cols - m_middle * (n_rows - n) < max(N_middle, n_rows - n):
+                    m_right, N_right = m_middle, N_middle
+                else:
+                    m_left = m_middle
+            m, N = m_right, N_right
+            # fill the bottom rectangle with counts:
+            assert m
+            counts[1:n_rows - n + 1].fill_(m)
+
+        if N:
+            # fill the sawteeth window with counts
+            q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
+                          (n_cols - m) * (n_cols - m + 1) // 2)
+            p = 1 + q * (n_cols - m + 1)
+            if sys.version_info >= (3, 8):
+                k = math.isqrt(2 * r)
+            else:
+                # math.isqrt(x) is available starting from Python 3.8.
+                # Here we use int(math.sqrt(x)) as an approximation
+                # that appers to give exaxt result for all x values
+                # less than 2**35, at least, the upper limit of x is
+                # TBD.
+                k = int(math.sqrt(2 * r))
+            if k * (k + 1) > 2 * r:
+                k -= 1
+            corr = r - k * (k + 1) // 2
+            assert not ((p > 1) and (m > 0))  # full sawteeth are never on top of a bottom rectangle
+            # sequence of full sawteeth:
+            counts[1:p] = torch.arange(p - 1, dtype=dtype, device=counts.device) % (n_cols - m + 1)
+            # incomplete sawtooth:
+            counts[p:p + k + 1] += torch.arange(k + 1, dtype=dtype, device=counts.device)
+        else:
+            # given input does not support sawteeth
+            p = 1
+            corr = nnz - n * n_cols - m * (n_rows - n)
+
+        # correction that will guarantee counts.sum() == nnz:
+        counts[p] += corr
+
+        if random:
+            # randomize crow_indices by shuffling the sawteeth
+            # sequence:
+            perm = torch.randperm(n_rows, device=counts.device)
+            counts[1:] = counts[1:][perm]
+
+        # compute crow_indices:
+        crow_indices = counts
+        crow_indices.cumsum_(dim=0)
+        return crow_indices.to(device=device)
 
     def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
         sparse_dim = 2
@@ -1071,18 +1214,12 @@ class TestCase(expecttest.TestCase):
         assert len(size) == sparse_dim
 
         def random_sparse_csr(n_rows, n_cols, nnz):
-            nnz_per_row = nnz // n_rows
-            if nnz_per_row > 0:
-                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
-                crow_indices[1:] = nnz_per_row
-                crow_indices.cumsum_(dim=0)
-                col_indices = torch.randint(0, n_cols, size=[nnz_per_row * n_rows], dtype=index_dtype, device=device)
-            else:
-                crow_indices = torch.zeros(n_rows + 1, dtype=index_dtype)
-                crow_indices[1:nnz + 1] = 1
-                crow_indices.cumsum_(dim=0)
-                col_indices = torch.randint(0, n_cols, size=[nnz], dtype=index_dtype, device=device)
-            nnz = col_indices.shape[0]
+            crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
+            col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
+            for i in range(n_rows):
+                count = crow_indices[i + 1] - crow_indices[i]
+                col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
+                    torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
             values = make_tensor([nnz], device=device, dtype=dtype, low=-1, high=1)
             return values, crow_indices, col_indices
 
@@ -1120,6 +1257,17 @@ class TestCase(expecttest.TestCase):
 
     def safeToDense(self, t):
         return t.coalesce().to_dense()
+
+    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Note: only values are compared, type comparison is not done here
+    def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
+        n_inp, n_args, n_kwargs = sample_input.numpy()
+        t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+
+        actual = torch_fn(t_inp, *t_args, **t_kwargs)
+        expected = ref_fn(n_inp, *n_args, **n_kwargs)
+
+        self.assertEqual(actual, expected, exact_device=False)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -1227,6 +1375,7 @@ class TestCase(expecttest.TestCase):
             rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
 
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         # Converts to comparison dtype
         dtype = get_comparison_dtype(a, b)
@@ -1254,6 +1403,7 @@ class TestCase(expecttest.TestCase):
         atol = cast(float, atol)
         assert atol is not None
         atol = max(atol, self.precision)
+        rtol = max(rtol, self.rel_tol)
 
         return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
@@ -1372,6 +1522,41 @@ class TestCase(expecttest.TestCase):
                     assert debug_msg_generic is not None
                     debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
                 super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
+        elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
+            def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
+                if not isinstance(a, np.ndarray):
+                    return a
+
+                try:
+                    return torch.from_numpy(a)
+                except TypeError:
+                    # This happens if the dtype is non-numeric or not supported by torch
+                    return a
+
+            def maybe_to_list(a: Any) -> Any:
+                if not isinstance(a, (np.ndarray, torch.Tensor)):
+                    return a
+
+                return a.tolist()
+
+            x = maybe_to_tensor(x)
+            y = maybe_to_tensor(y)
+
+            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+                self.assertEqual(
+                    x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
+                )
+            else:
+                # In case we can't convert the array to a tensor, we fall back to comparing x and y as iterables
+                self.assertEqual(
+                    maybe_to_list(x),
+                    maybe_to_list(y),
+                    atol=atol,
+                    rtol=rtol,
+                    msg=msg,
+                    exact_dtype=exact_dtype,
+                    exact_device=exact_device
+                )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
                          f"Expected: {repr(x)}; Actual: {repr(y)}.")
@@ -1417,23 +1602,11 @@ class TestCase(expecttest.TestCase):
                 assert debug_msg_scalars is not None
                 debug_msg = "Scalars failed to compare as equal! " + debug_msg_scalars
             super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        # Tensor x Numpy array
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.ndarray):
-            self.assertEqual(x, torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Tensor
-        elif isinstance(x, np.ndarray) and isinstance(y, torch.Tensor):
-            self.assertEqual(torch.from_numpy(x), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Numpy array x Numpy array
-        elif isinstance(x, np.ndarray) and isinstance(y, np.ndarray):
-            self.assertEqual(torch.from_numpy(x), torch.from_numpy(y), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
         else:
             super().assertEqual(x, y, msg=msg)
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
-                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:  # type: ignore[override]
+                       atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
@@ -1495,7 +1668,8 @@ class TestCase(expecttest.TestCase):
         """
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            callable()
+            with set_warn_always_context(True):
+                callable()
             self.assertTrue(len(ws) == 0, msg)
 
     @contextmanager
@@ -1509,12 +1683,8 @@ class TestCase(expecttest.TestCase):
         pattern = re.compile(regex)
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")  # allow any warning to be raised
-            prev = torch.is_warn_always_enabled()
-            torch.set_warn_always(True)
-            try:
+            with set_warn_always_context(True):
                 yield
-            finally:
-                torch.set_warn_always(prev)
             if len(ws) == 0:
                 self.fail('no warning caught')
             self.assertTrue(any([type(w.message) is category for w in ws]))
@@ -2301,6 +2471,7 @@ def coalescedonoff(f):
         f(self, *args, **kwargs, coalesced=False)
     return wrapped
 
+
 @contextlib.contextmanager
 def disable_gc():
     if gc.isenabled():
@@ -2311,3 +2482,11 @@ def disable_gc():
             gc.enable()
     else:
         yield
+
+def has_breakpad() -> bool:
+    # If not on a special build, check that the library was actually linked in
+    try:
+        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
+        return True
+    except RuntimeError as e:
+        return False

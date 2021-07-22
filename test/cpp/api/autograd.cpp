@@ -160,6 +160,13 @@ TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(AutogradAPITests, EmptyInput) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  ASSERT_THROWS_WITH(grad({x * 2}, /*inputs=*/{}, {x}),
+                     "grad requires non-empty inputs.");
+}
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
@@ -866,8 +873,16 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
   Variable z = x * x;
-  Variable w = z + x * y + y * y;
-  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
+  Variable w = y * z + x * y + y * y;
+
+  Variable x_grad_expected = 2 * x * y + y;
+  Variable z_grad_expected = y;
+
+  w.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{x, z});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_VARIABLE_EQ(z.grad(), z_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
 }
 
 TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {

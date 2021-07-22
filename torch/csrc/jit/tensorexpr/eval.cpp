@@ -9,9 +9,6 @@ namespace jit {
 namespace tensorexpr {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_TRIGGER(simple_ir_eval_executed);
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 template <typename T>
@@ -794,8 +791,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       dim->accept(this);
       total_byte_size *= value_.as<int>();
     }
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    int int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    const auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
@@ -994,7 +990,6 @@ void SimpleIREvaluator::call_raw(const std::vector<void*>& args) {
   }
   stmt()->accept(&*impl_);
   impl_->clear();
-  USE_TRIGGER(simple_ir_eval_executed);
 }
 
 void SimpleIREvaluator::bindArg(const BufferArg& bufArg, void* data) {

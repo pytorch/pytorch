@@ -176,6 +176,7 @@ bool ProcessGroupAgent::hasPendingMessage() {
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(worldSize)) {
     outputSnapshots[0].emplace_back(
         torch::zeros({2, worldSize}, {torch::kInt64}));
@@ -290,7 +291,7 @@ c10::intrusive_ptr<JitFuture> ProcessGroupAgent::send(
         "tried to send() a message of type ",
         message->type(),
         " but RPC is no longer running on this node.");
-    throw std::runtime_error(err);
+    TORCH_CHECK(false, err);
   }
   TORCH_CHECK(
       to.id_ < (worker_id_t)pg_->getSize(),

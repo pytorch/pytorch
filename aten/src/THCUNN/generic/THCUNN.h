@@ -5,53 +5,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
 
-TORCH_CUDA_CU_API void THNN_(ClassNLLCriterion_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* output,
-    int64_t reduction,
-    THCTensor* weights, // [OPTIONAL]
-    THCTensor* total_weight,
-    int64_t ignore_index);
-
-TORCH_CUDA_CU_API void THNN_(ClassNLLCriterion_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    int64_t reduction,
-    THCTensor* weights, // [OPTIONAL]
-    THCTensor* total_weight,
-    int64_t ignore_index);
-
-TORCH_CUDA_CU_API void THNN_(GatedLinear_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    int dim);
-
-TORCH_CUDA_CU_API void THNN_(GatedLinear_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    int dim);
-
-TORCH_CUDA_CU_API void THNN_(LogSigmoid_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    THCTensor* buffer);
-
-TORCH_CUDA_CU_API void THNN_(LogSigmoid_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    THCTensor* buffer);
-
 TORCH_CUDA_CU_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
     THCState* state,
     THCTensor* input,
@@ -200,15 +153,4 @@ TORCH_CUDA_CU_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
     int padH,
     int dilationW,
     int dilationH);
-
-TORCH_CUDA_CU_API void THNN_(RReLU_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCTensor* output,
-    THCTensor* noise,
-    double lower,
-    double upper,
-    bool train,
-    bool inplace,
-    c10::optional<at::Generator> generator);
 #endif

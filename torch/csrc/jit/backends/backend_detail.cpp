@@ -7,12 +7,60 @@
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
+#include <memory>
+#include <stack>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace detail {
 namespace {
+
+/*
+ * This is the API via which backend's preprocess function will obtain debug
+ * handles corresponding to the nodes of the graph for the lowered methods of
+ * the module.
+ * Implementation: Given graph
+ * For each node of the graph, request debug handle via debug_info_recorder.
+ * debug_info_recorder returns the next debug handle and record node with
+ * corresponding debug info, such as source range and inlined callstack.
+ *
+ * Backend code for lowering module, preprocess, calls
+ * generate_debug_handles(graph)) which will return debug handles corresponding
+ * to the Node* of the said graph.
+ *
+ * In to_backend, after lowering, stopRecording is called on
+ * BackendModuleDebugInfoRecorder: It will extract debug map. This map gets
+ * stored as part of the lowered module.
+ * During serialization, specifically for bytecode serialization, check is made
+ * to see if the model being serialized has any lowered modules. If so
+ * corresponding debug map is extracted and serialized.
+ */
+
+NodeToDebugHandle generate_debug_handles(
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::shared_ptr<Graph>& graph) {
+  NodeToDebugHandle node_to_debug_handles;
+
+  std::stack<Block*> blocks_to_visit;
+  // TODO: Look into using DepthFirstGraphNodeIterator
+  // At the moment it takes non-const graph but maybe we can make it
+  // general such that it can work with both.
+  blocks_to_visit.push(graph->block());
+  while (!blocks_to_visit.empty()) {
+    Block* b = blocks_to_visit.top();
+    blocks_to_visit.pop();
+    for (Node* n : b->nodes()) {
+      DebugHandleType debug_handle = debug_info_recorder.getNextDebugHandle(n);
+      node_to_debug_handles.emplace(n, debug_handle);
+      for (Block* subblock : n->blocks()) {
+        blocks_to_visit.push(subblock);
+      }
+    }
+  }
+  return node_to_debug_handles;
+}
+
 std::unordered_map<std::string, BackendPreprocessFunction>&
 backendPreprocessFunctions() {
   static std::unordered_map<std::string, BackendPreprocessFunction>
@@ -58,10 +106,10 @@ Module codegen_backend_module(
   // Clone orig_module to make sure backend transformation is
   // functional.
   auto cloned_module = orig_module.clone();
-
+  auto module_name = orig_module.type()->name()->qualifiedName();
   // Generate LoweredModule.
   Module loweredModule(
-      "torch.jit." + backend_name + "LoweredModule",
+      "torch.jit.LoweredModule." + backend_name + "." + module_name,
       std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
@@ -69,7 +117,6 @@ Module codegen_backend_module(
   // 2. Later call debug_info_recorder.stopRecording() to gather
   //    recorded debug info and save it in __backend_debug_info.
   BackendDebugInfoRecorder debug_info_recorder;
-  WithBackendDebugInfoRecorder recorder_context(&debug_info_recorder);
 
   // Generate attributes.
   // This is the preprocessed module.
@@ -77,11 +124,15 @@ Module codegen_backend_module(
   // the backend interface rather than as a separate function, we just pass
   // the cloned original Module.
 
+  BackendDebugHandleGenerator debug_handle_generator =
+      [&](const std::shared_ptr<Graph>& g) {
+        return generate_debug_handles(debug_info_recorder, g);
+      };
   loweredModule.register_attribute(
       "__processed_module",
       AnyType::get(),
       detail::getBackendPreprocessFunction(backend_name)(
-          cloned_module, method_compile_spec),
+          cloned_module, method_compile_spec, debug_handle_generator),
       /*is_param=*/false);
 
   // This is for the method_compile_spec passed in to to_<backend> or
@@ -271,18 +322,18 @@ Module codegen_backend_module(
 
     if (out_tuple_ty) {
       auto tuple_elements = out_tuple_ty->elements();
-      type_check_ss << tuple_elements[0]->str() << ")";
+      type_check_ss << tuple_elements[0]->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
       for (unsigned i = 1, e = tuple_elements.size(); i < e; ++i) {
         type_check_ss.str(std::string());
         type_check_ss.clear();
         out_ss << ", _" << i;
         type_check_ss << "assert isinstance(_" << i << ", "
-                      << tuple_elements[i]->str() << ")";
+                      << tuple_elements[i]->annotation_str() << ")";
         type_checks.emplace_back(type_check_ss.str());
       }
     } else {
-      type_check_ss << out_ty->str() << ")";
+      type_check_ss << out_ty->annotation_str() << ")";
       type_checks.emplace_back(type_check_ss.str());
     }
 

@@ -43,6 +43,8 @@ fi
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
 # Try to pull value from CIRCLE_PULL_REQUEST
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
 IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ]; then
   DETERMINE_FROM="${TMP_DIR}/determine_from"
@@ -62,26 +64,36 @@ run_tests() {
         fi
     done
 
-    if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
+    if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python.bat "$DETERMINE_FROM"
-        "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
-        "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-        "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+
+        if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+          "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+          "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+          "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+        fi
     else
         if [[ "${BUILD_ENVIRONMENT}" == "pytorch-win-vs2019-cpu-py3" ]]; then
           export PYTORCH_COLLECT_COVERAGE=1
           export COVERAGE_RCFILE=$PWD/.coveragerc # coverage config file needed for plug-ins and settings to work
         fi
-        if [[ "${JOB_BASE_NAME}" == *-test1 ]]; then
+        if [[ "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_first_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_libtorch.bat
+              if [[ "${USE_CUDA}" == "1" ]]; then
+                "$SCRIPT_HELPERS_DIR"/test_python_jit_legacy.bat "$DETERMINE_FROM"
+              fi
             fi
-        elif [[ "${JOB_BASE_NAME}" == *-test2 ]]; then
+
+        elif [[ "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
             "$SCRIPT_HELPERS_DIR"/test_python_second_shard.bat "$DETERMINE_FROM"
-            "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
-            "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+
+            if [[ -z ${RUN_SMOKE_TESTS_ONLY} ]]; then
+              "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
+              "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
+            fi
         fi
     fi
 }

@@ -94,10 +94,7 @@ variable_list run_backward(
         grad_fn = impl::try_get_grad_accumulator(input);
       }
       if (accumulate_grad) {
-        TORCH_CHECK(
-          input.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor"
-        )
+        input.retain_grad();
       }
       TORCH_CHECK(
           input.requires_grad(),

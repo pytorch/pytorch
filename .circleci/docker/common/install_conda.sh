@@ -116,6 +116,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     boto3==1.16.34 \
     coverage==5.5 \
     hypothesis==4.53.2 \
+    expecttest==0.1.3 \
     mypy==0.812 \
     tb-nightly
 
