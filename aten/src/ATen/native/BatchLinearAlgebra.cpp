@@ -2944,6 +2944,12 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #if !AT_BUILD_WITH_LAPACK()
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
+  // result might not get filled
+  if (jobz != 'N' && self.numel() == 0) {
+    U.zero_();
+    VT.zero_();
+    return;
+  }
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
