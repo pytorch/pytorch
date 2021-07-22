@@ -8040,7 +8040,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
     is equivalent to Python's modulus operation, and different from Python's
     `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implements
+    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
     the IEEE remainder.
 
 Args:
