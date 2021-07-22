@@ -40,7 +40,7 @@ BoundsInfo mergeTensorAccesses(
       if (!distinctAccessKinds || kind == TABI.kind) {
         TORCH_INTERNAL_ASSERT(TABI.start.size() == access->bounds().size());
         TORCH_INTERNAL_ASSERT(TABI.stop.size() == access->bounds().size());
-        for (size_t i = 0; i < TABI.start.size(); ++i) {
+        for (const auto i : c10::irange(TABI.start.size())) {
           TABI.start[i] = IRSimplifier::simplify(
               new Min(TABI.start[i], access->bounds()[i].start, true));
           TABI.stop[i] = IRSimplifier::simplify(
@@ -182,7 +182,7 @@ std::vector<const Expr*> getBoundExtents(
   }
 
   std::vector<const Expr*> extents;
-  for (size_t i = 0; i < starts.size(); ++i) {
+  for (const auto i : c10::irange(starts.size())) {
     const Expr* dim = IRSimplifier::simplify(
         new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
 
@@ -200,7 +200,7 @@ BoundSet convertBounds(
   BoundSet ret;
   for (auto& TABI : bounds) {
     if (filter == kMutate || TABI.kind == filter) {
-      for (size_t i = 0; i < TABI.start.size(); ++i) {
+      for (const auto i : c10::irange(TABI.start.size())) {
         ret.insert(Bound(TABI.start[i], TABI.stop[i]));
       }
     }
@@ -279,7 +279,7 @@ IndexBounds getIndexBounds(const TensorAccessBoundsInfo& tabi) {
   if (tabi.start.empty()) {
     return ret;
   }
-  for (size_t i = 0; i < tabi.start.size(); ++i) {
+  for (const auto i : c10::irange(tabi.start.size())) {
     ret[i] = Bound(tabi.start[i], tabi.stop[i]);
   }
   return ret;
@@ -322,8 +322,8 @@ bool hasConflictingOverlap(
     auto bIndexBounds = bIndexBoundsInfo[bIt->first];
     auto aTABIs = aBound.second;
     auto bTABIs = bIt->second;
-    for (size_t i = 0; i < aTABIs.size(); ++i) {
-      for (size_t j = 0; j < bTABIs.size(); ++j) {
+    for (const auto i : c10::irange(aTABIs.size())) {
+      for (const auto j : c10::irange(bTABIs.size())) {
         auto aTABI = aTABIs[i];
         auto bTABI = bTABIs[j];
         if (aTABI.kind == kLoad && bTABI.kind == kLoad) {

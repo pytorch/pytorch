@@ -1520,7 +1520,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
-  for (int64_t idx = 0; idx < arguments.size(); idx++) {
+  for (const auto idx : c10::irange(arguments.size())) {
     auto& ivalue = arguments[idx];
     // Search for Tensors (as they may have the torch functions we need)
     if (ivalue.isTensor()) {
@@ -1530,7 +1530,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
-      for (int64_t jdx = 0; jdx < list.size(); jdx++) {
+      for (const auto jdx : c10::irange(list.size())) {
         const auto& nv = list[jdx];
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();

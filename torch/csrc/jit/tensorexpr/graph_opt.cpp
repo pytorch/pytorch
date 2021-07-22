@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -90,7 +91,7 @@ bool doesCatPromoteTypes(Node* node) {
   TORCH_INTERNAL_ASSERT(!inputs.empty());
   auto scalar_type =
       inputs.front()->type()->cast<c10::TensorType>()->scalarType();
-  for (size_t i = 1; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(1, inputs.size())) {
     auto inp_scalar_type =
         inputs[i]->type()->cast<c10::TensorType>()->scalarType();
     if (scalar_type != inp_scalar_type) {

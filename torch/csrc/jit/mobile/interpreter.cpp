@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/record_function.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/observer.h>
 
 #include <torch/csrc/jit/backends/backend_exception.h>
@@ -170,7 +171,7 @@ bool InterpreterState::run(Stack& stack) {
             ++pc;
           } else {
             size_t n_loop_carried = inst.N - 2;
-            for (size_t i = 0; i < n_loop_carried; ++i) {
+            for (const auto i : c10::irange(n_loop_carried)) {
               frame[i] = std::move(frame[i + 3]);
             }
             drop(stack, 3); // iteration_count, max_iter, cond

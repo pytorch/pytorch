@@ -120,10 +120,10 @@ struct AutogradZeroSpecializer {
   void replaceBlockInputsWithGraphInputs(Block* b) {
     TORCH_INTERNAL_ASSERT(graph_->inputs().size() == b->inputs().size());
     size_t num_inputs = graph_->inputs().size();
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->inputs().at(i)->replaceAllUsesWith(graph_->inputs().at(i));
     }
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->eraseInput(num_inputs - (1 + i));
     }
   }

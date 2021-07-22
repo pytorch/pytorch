@@ -3,6 +3,7 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -152,7 +153,7 @@ RegisterOperators mm_tree_reduction_reg({Operator(
         push(stack, at::mm(lhs, rhs));
       } else {
         auto acc = at::mm(inputs[0], inputs[side_num_elems]);
-        for (size_t i = 1; i < side_num_elems; ++i) {
+        for (const auto i : c10::irange(1, side_num_elems)) {
           acc.add_(at::mm(inputs[i], inputs[side_num_elems + i]));
         }
         push(stack, std::move(acc));
@@ -376,7 +377,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     // Filter out dependent MMs. This algorithm might do very badly if e.g. you
     // have a lot of independent MMs, that depend on the first one, but I doubt
     // this will be a common scenario.
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       if (mms[i] == nullptr)
         continue;
       for (size_t j = i + 1; j < mms.size(); ++j) {
@@ -425,7 +426,7 @@ void BatchMMSide(Block* block, AliasDb& alias_db) {
     batch_mm->i_(Symbol::attr("side"), static_cast<int>(side));
     Value* const_side = mms[0]->inputs().at(side == Side::LHS ? 0 : 1);
     batch_mm->addInput(const_side);
-    for (size_t i = 0; i < mms.size(); ++i) {
+    for (const auto i : c10::irange(mms.size())) {
       batch_mm->addInput(mms[i]->inputs().at(side == Side::LHS ? 1 : 0));
       mms[i]->output()->replaceAllUsesWith(batch_mm->outputs().at(i));
     }

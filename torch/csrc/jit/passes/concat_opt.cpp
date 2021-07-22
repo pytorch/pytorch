@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/concat_opt.h>
 
 #include <algorithm>

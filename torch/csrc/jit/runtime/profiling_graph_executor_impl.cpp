@@ -167,7 +167,7 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
     return false;
   };
 
-  for (size_t i = 0; i < go.size(); i++) {
+  for (const auto i : c10::irange(go.size())) {
     auto ty = go[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = go[i]->node();

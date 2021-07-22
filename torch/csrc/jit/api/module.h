@@ -18,6 +18,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <functional>
 #include <memory>
@@ -566,7 +567,7 @@ struct NamedPolicy {
       name = (cursors.back().i_ == -1) ? "" : nameFragment(cursors.back());
     } else {
       std::ostringstream ss;
-      for (size_t i = 0; i < cursors.size(); ++i) {
+      for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
           ss << ".";
         }

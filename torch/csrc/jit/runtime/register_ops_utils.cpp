@@ -336,7 +336,7 @@ void listExtend(Stack* stack) {
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
 
   a.reserve(a.size() + b.size());
-  for (size_t i = 0; i < b.size(); ++i) {
+  for (const auto i : c10::irange(b.size())) {
     a.push_back(b.get(i));
   }
 }
@@ -397,7 +397,7 @@ void listMulIntLeftInPlace(Stack* stack) {
     list.clear();
   } else if (n > 1) {
     size_t list_size = list.size();
-    for (int64_t i = 1; i < n; i++) {
+    for (const auto i : c10::irange(1, n)) {
       for (const auto j : c10::irange(list_size)) {
         list.push_back(list.get(j));
       }
@@ -467,7 +467,7 @@ void listSlice(Stack* stack) {
   sliced_list.reserve(num_values);
 
   int i = start;
-  for (int j = 0; j < num_values; ++j) {
+  for (const auto j : c10::irange(num_values)) {
     sliced_list.push_back(list.get(i));
     i += step;
   }

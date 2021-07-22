@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -648,7 +649,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
       const std::vector<ExprHandle>& params) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const Expr*> params_nodes(params.size());
-    for (size_t i = 0; i < params.size(); i++) {
+    for (const auto i : c10::irange(params.size())) {
       params_nodes[i] = params[i].node();
     }
     return ExprHandle(new Intrinsics(op_type, params_nodes));

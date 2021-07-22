@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 
 #include <c10/core/QScheme.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -126,7 +127,7 @@ std::vector<Value*> insertDeQuantForAllUse(
   // and changing the graph will also change the uses() list
   const std::vector<Use> uses = original_val->uses();
   std::vector<Value*> outputs;
-  for (size_t i = 0; i < uses.size(); ++i) {
+  for (const auto i : c10::irange(uses.size())) {
     auto* user = uses[i].user;
     // Insert dequantize node right before use node, because
     // we want to make sure use node and dequantize node reside
@@ -658,7 +659,7 @@ void checkCalculateQParamsResult(const IValue& qparams) {
       "Tuple of size 2, got Tuple of size ",
       tp->elements().size());
   // Expect first two elements of the tuple to be Tensor
-  for (size_t i = 0; i < 2; ++i) {
+  for (const auto i : c10::irange(2)) {
     TORCH_CHECK(
         tp->elements()[i].isTensor(),
         "Element of Tuple is expected to be Tensor, but element ",
@@ -1412,7 +1413,7 @@ void InsertQuantDeQuantHelper::run(
   // point is the beginning of graph node. This also safe guards against
   // observing a potentially mutated value due to some in-place operation
   std::vector<Value*> input_values;
-  for (size_t idx = 1; idx < method.num_inputs(); ++idx) {
+  for (const auto idx : c10::irange(1, method.num_inputs())) {
     auto& v = graph->inputs()[idx];
     if (v->type()->isSubtypeOf(TensorType::get())) {
       input_values.push_back(v);

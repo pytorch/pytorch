@@ -346,8 +346,8 @@ struct FileCheckImpl {
       }
 
       bool found_highlight = true;
-      for (auto pos = highlight_start_offset; pos < highlight_end_offset;
-           ++pos) {
+      for (const auto pos :
+           c10::irange(highlight_start_offset, highlight_end_offset)) {
         if (source->text()[pos] != '~') {
           found_highlight = false;
         }

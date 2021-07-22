@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/operators/reduction.h>
 
 using namespace torch::jit::tensorexpr;
@@ -7,7 +8,7 @@ static std::vector<VarHandle> squeezeIndices(
     const ParameterList& indices,
     const std::vector<size_t>& axes) {
   std::vector<VarHandle> indices_squeezed;
-  for (size_t dim = 0; dim < indices.size(); ++dim) {
+  for (const auto dim : c10::irange(indices.size())) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       indices_squeezed.push_back(indices[dim]);
     }
@@ -59,7 +60,7 @@ Tensor* computeSum(
   std::vector<DimArg> outputDims;
   // Output dimensions are the complement of axes. When keepdim is set, a
   // one-sized dimension is inserted for each axis.
-  for (size_t dim = 0; dim < rank; ++dim) {
+  for (const auto dim : c10::irange(rank)) {
     if (!std::count(axes.begin(), axes.end(), dim)) {
       outputDims.emplace_back(sizes[dim]);
     } else if (keepdim) {
@@ -115,8 +116,7 @@ Tensor* computeMean(
     mean_dims_expr = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
+    for (const auto idx : c10::irange(static_cast<int64_t>(InputBuf.ndim()))) {
       mean_dims_expr.emplace_back(idx);
     }
   }

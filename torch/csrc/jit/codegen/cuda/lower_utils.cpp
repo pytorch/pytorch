@@ -210,7 +210,7 @@ class ReplaceExprsInScope : public OptOutDispatch {
       : replacement_map_(std::move(replacement_map)) {}
 
   void handleScope(kir::Scope& scope) {
-    for (size_t i = 0; i < scope.size(); ++i) {
+    for (const auto i : c10::irange(scope.size())) {
       const auto it = replacement_map_.find(scope[i]);
       if (it == replacement_map_.end()) {
         handle(scope[i]);

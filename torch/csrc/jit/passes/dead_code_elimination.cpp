@@ -61,7 +61,7 @@ class DeadCodeEliminator {
         continue;
       }
       Graph& g = *node->g(attr::Subgraph);
-      for (size_t i = 0; i < g.inputs().size(); ++i) {
+      for (const auto i : c10::irange(g.inputs().size())) {
         if (!g.inputs().at(i)->hasUses()) {
           GRAPH_UPDATE(
               "Dead ",

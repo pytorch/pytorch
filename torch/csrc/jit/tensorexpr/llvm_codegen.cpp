@@ -279,7 +279,7 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
   // TODO: preserve the func type.
   ParallelCallee callee = reinterpret_cast<ParallelCallee>(func);
   at::parallel_for(start, stop, 1, [&](int64_t f_begin, int64_t f_end) {
-    for (int index = f_begin; index < f_end; index++) {
+    for (const auto index : c10::irange(f_begin, f_end)) {
       callee(index, packed_data);
     }
   });
@@ -1040,7 +1040,7 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
           llvm::dyn_cast<llvm::ConstantInt>(stride)) {
     std::vector<llvm::Constant*> vals = {
         llvm::ConstantInt::get(base->getType(), 0)};
-    for (int i = 1; i < lanes; ++i) {
+    for (const auto i : c10::irange(1, lanes)) {
       vals.push_back(llvm::ConstantExpr::getAdd(vals.back(), const_stride));
     }
 
@@ -1064,7 +1064,7 @@ void LLVMCodeGenImpl::visit(const Ramp* v) {
   }
 
   value_ = llvm::UndefValue::get(vecType);
-  for (int i = 0; i < lanes; ++i) {
+  for (const auto i : c10::irange(lanes)) {
     value_ = irb_.CreateInsertElement(value_, base, i);
     base = irb_.CreateAdd(base, stride);
   }

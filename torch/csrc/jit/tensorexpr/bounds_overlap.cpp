@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
@@ -67,7 +68,7 @@ Bound flattenBounds(const IndexBounds& a) {
   }
   Bound ret = a[0];
 
-  for (size_t i = 1; i < a.size(); ++i) {
+  for (const auto i : c10::irange(1, a.size())) {
     ret.start = new Mul(ret.start, a[i].start);
     ret.end = new Mul(ret.end, a[i].end);
   }
@@ -90,7 +91,7 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
   TORCH_INTERNAL_ASSERT(a.size() == b.size());
 
   OverlapKind overlap = boundOverlap(a[0], b[0]);
-  for (size_t i = 1; i < a.size(); ++i) {
+  for (const auto i : c10::irange(1, a.size())) {
     OverlapKind bOverlap = boundOverlap(a[i], b[i]);
     if (bOverlap == NoOverlap) {
       return NoOverlap;
@@ -199,7 +200,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
   std::vector<IndexBounds> boundSlices;
   std::vector<Bound> remainingOuterBounds;
 
-  for (size_t i = 0; i < A.size(); ++i) {
+  for (const auto i : c10::irange(A.size())) {
     auto slices = subtractBound(A[i], B[i]);
 
     Bound remaining = A[i];
@@ -209,7 +210,7 @@ std::vector<IndexBounds> subtractIndicesBounds(
       newRegion.reserve(A.size());
       TORCH_INTERNAL_ASSERT(remainingOuterBounds.size() == i);
 
-      for (size_t j = 0; j < i; ++j) {
+      for (const auto j : c10::irange(i)) {
         newRegion.push_back(remainingOuterBounds[j]);
       }
       newRegion.push_back(slice);

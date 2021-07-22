@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -24,7 +26,7 @@ public:
     if(STATE == 0) {
       uint4 counter_ = counter;
       uint2 key_ = key;
-      for(int i = 0; i < 9; i++) {
+      for (const auto i : c10::irange(9)) {
         counter_ = single_round(counter_, key_);
         key_.x += (kPhilox10A); key_.y += (kPhilox10B);
       }

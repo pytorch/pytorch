@@ -7,6 +7,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
@@ -30,7 +31,7 @@ bool typeListEqual(
     const std::vector<TypePtr>& rhs) {
   if (lhs.size() != rhs.size())
     return false;
-  for (size_t i = 0; i < lhs.size(); ++i) {
+  for (const auto i : c10::irange(lhs.size())) {
     if (*lhs[i] != *rhs[i]) {
       return false;
     }
@@ -61,7 +62,7 @@ bool attributesEqual(at::ArrayRef<IValue> a1, at::ArrayRef<IValue> a2) {
   if (a1.size() != a2.size()) {
     return false;
   }
-  for (size_t i = 0; i < a1.size(); ++i) {
+  for (const auto i : c10::irange(a1.size())) {
     if (!ivaluesEqual(a1[i], a2[i])) {
       return false;
     }
@@ -244,7 +245,7 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   auto rhs_outputs = rhs->outputs();
   if (lhs_outputs.size() != rhs_outputs.size())
     return false;
-  for (size_t i = 0; i < lhs_outputs.size(); ++i) {
+  for (const auto i : c10::irange(lhs_outputs.size())) {
     if (*lhs_outputs[i]->type() != *rhs_outputs[i]->type())
       return false;
   }

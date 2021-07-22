@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/tensor_info.h>
@@ -517,7 +518,7 @@ std::string generateKernel(
         env.s(
             "load4",
             format(
-                "for(int i = 0; i<4; i++) t${formal}_buf[i] = t${formal}.data[t${formal}_offset + i]",
+                "for (const auto i : c10::irange(4))t${formal}_buf[i] = t${formal}.data[t${formal}_offset + i]",
                 env));
       }
       load << format("${load4};\n", env);
@@ -631,7 +632,7 @@ std::string generateKernel(
       env.s(
           "store4",
           format(
-              "for(int i = 0; i<4; i++) t${formal}.data[t${formal}_offset + i] = t${formal}_buf[i]",
+              "for (const auto i : c10::irange(4))t${formal}.data[t${formal}_offset + i] = t${formal}_buf[i]",
               env));
     }
     store << format("${store4};\n", env);

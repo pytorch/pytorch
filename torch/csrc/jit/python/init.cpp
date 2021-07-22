@@ -98,6 +98,7 @@
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
+#include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
 #include <caffe2/serialize/inline_container.h>
 
@@ -471,7 +472,7 @@ void initJITBindings(PyObject* module) {
             // we want full shape specialization. The alternative would be to
             // have a "complete type inference" function in ArguemntSpecCreator.
             auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -487,7 +488,7 @@ void initJITBindings(PyObject* module) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             auto g_inputs = graph->inputs();
-            for (size_t i = 0; i < inputs.size(); ++i) {
+            for (const auto i : c10::irange(inputs.size())) {
               if (stack[i].isTensor()) {
                 g_inputs[i]->setType(stack[i].type());
               }
@@ -1160,7 +1161,7 @@ void initJITBindings(PyObject* module) {
               [operations, symbol](py::args args, py::kwargs kwargs) {
                 std::vector<py::handle> overloaded_args;
                 size_t total_arg_num = args.size() + kwargs.size();
-                for (size_t i = 0; i < args.size(); ++i) {
+                for (const auto i : c10::irange(args.size())) {
                   is_tensor_and_append_overloaded(
                       args[i].ptr(), &overloaded_args);
                   is_tensor_list_and_append_overloaded(
@@ -1376,7 +1377,7 @@ void initJITBindings(PyObject* module) {
     py::function f = py::cast<py::function>(args[0]);
     py::tuple args_tup(args.size() - 1);
 
-    for (size_t i = 1; i < args.size(); ++i) {
+    for (const auto i : c10::irange(1, args.size())) {
       args_tup[i - 1] = args[i];
     }
 
