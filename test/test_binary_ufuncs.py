@@ -1931,35 +1931,26 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(a >> 1, expected_r)
         self.compare_with_numpy(lambda x: x >> 1, lambda x: np.right_shift(x, 1), a)
 
-    def test_bitwise_and(self, device):
-        for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
-            a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
-            b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
-            expected_res = torch.tensor([0, 0, 3], dtype=dtype, device=device)
-            b_scalar = 2
-            expected_res_scalar = torch.tensor([0, 2, 2], dtype=dtype, device=device)
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_bitwise_and(self, device, dtype):
+        a = torch.tensor([1, -2, 3], dtype=dtype, device=device)
+        b = torch.tensor([2, 1, 3], dtype=dtype, device=device)
 
-            # standard version
-            self.assertEqual(torch.bitwise_and(a, b), expected_res)
-            self.assertEqual(torch.bitwise_and(a, b_scalar), expected_res_scalar)
+        a_np = a.cpu().numpy()
+        b_np = b.cpu().numpy()
 
-            # out
-            c = torch.empty(0, dtype=dtype, device=device)
-            torch.bitwise_and(a, b, out=c)
-            self.assertEqual(c, expected_res)
-            torch.bitwise_and(a, b_scalar, out=c)
-            self.assertEqual(c, expected_res_scalar)
-
-            # in-place
-            a1 = a.clone()
-            a1.bitwise_and_(b)
-            self.assertEqual(a1, expected_res)
-            a.bitwise_and_(b_scalar)
-            self.assertEqual(a, expected_res_scalar)
+        # Tensor x Tensor
+        self.assertEqual(torch.bitwise_and(a, b), torch.tensor(np.bitwise_and(a_np, b_np), device=device))
+        # Tensor x int scaler
+        self.assertEqual(torch.bitwise_and(a, 2), torch.tensor(np.bitwise_and(a_np, 2), device=device))
 
         self.assertEqual(torch.tensor([False, True, False], device=device),
                          torch.bitwise_and(torch.tensor([True, True, False], device=device),
                                            torch.tensor([False, True, False], device=device)))
+
+        # type promotion
+        c = torch.zeros(2) >= 1
+        self.assertEqual(torch.bitwise_and(c, c.byte()), torch.bitwise_and(c.byte(), c))
 
     def test_bitwise_or(self, device):
         for dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
@@ -2536,17 +2527,17 @@ class TestBinaryUfuncs(TestCase):
             _test_atan2(1, -1, math.pi / -4 , device, dtype)
             _test_atan2(-1, 1, math.pi * 3 / 4 , device, dtype)
 
-    def test_trapz(self, device):
+    def test_trapezoid(self, device):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
-            actual = torch.trapz(t, dx=dx, dim=dim)
+            actual = torch.trapezoid(t, dx=dx, dim=dim)
             expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
-            actual = torch.trapz(t, x=torch.tensor(x, device=device), dim=dim)
+            actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
             expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
