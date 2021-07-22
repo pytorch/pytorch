@@ -93,6 +93,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       return true;
     } else if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      cudaGetLastError();
     }
 
     return false;
