@@ -37,7 +37,11 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
 
         def __torch_function__(self, func, types, args=(), kwargs=None):
             kwargs = kwargs if kwargs else {}
+            if False:
+                def func(*args, **kwargs):
+                    return args[0]
             output = super().__torch_function__(func, types, args, kwargs)
+            print('output', output, 'func', func)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:

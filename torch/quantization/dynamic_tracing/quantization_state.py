@@ -31,6 +31,11 @@ def _raise_obs_op_mismatch(func, prev_op):
 # TODO(future PR): maybe better name
 # TODO(future PR): add serialization support
 class AutoQuantizationState(object):
+    """
+    Contains state necessary to perform auto quantization on the parent
+    `nn.Module` instance.
+    """
+
     idx : int
     op_observers : List[Tuple[ObserverBase, Callable]]
 
@@ -41,10 +46,10 @@ class AutoQuantizationState(object):
         # relevant to the parent module
         self.qconfig = qconfig
 
-    def insert_observer(self, op):
+    def _insert_observer(self, op: Callable) -> None:
         self.op_observers.insert(self.idx, (self.qconfig.activation(), op))
 
-    def get_next(self, prev_op):
+    def _get_next(self, prev_op: Callable) -> Tuple[ObserverBase, Callable]:
         try:
             observer, func = self.op_observers[self.idx]
         except IndexError:
@@ -54,14 +59,19 @@ class AutoQuantizationState(object):
         self.idx += 1
         return observer, func
 
-    def observe(self, tensor_to_observe, func):
-        observer, cur_func = self.get_next(func)
+    def _observe(self, tensor_to_observe: torch.Tensor, func: Callable):
+        observer, cur_func = self._get_next(func)
         return observer(tensor_to_observe)
 
     def maybe_update_func_args_kwargs_for_quantized_inference(
-            self, func, args, kwargs, unwrap_scale_zp=False):
+        self,
+        func: Callable,
+        args,
+        kwargs,
+        unwrap_scale_zp: bool = False
+    ):
         if func in fp32_to_int8_fun_mapping:
-            observer, prev_op = self.get_next(func)
+            observer, prev_op = self._get_next(func)
             scale, zp = observer.calculate_qparams()
             # TODO(future PR): remove this boolean flag
             if not unwrap_scale_zp:
@@ -78,8 +88,8 @@ class AutoQuantizationState(object):
         if func in {torch.Tensor.add, torch.Tensor.mul, torch.add, torch.mul,
                     torch.cat}:
             if first_call:
-                self.insert_observer(func)
-            output = self.observe(output, func)
+                self._insert_observer(func)
+            output = self._observe(output, func)
         return output
 
     def reset_to_new_call(self):
