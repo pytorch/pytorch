@@ -3,10 +3,10 @@
 #include <ATen/div_rtn.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/cuda/block_reduce.cuh>
 #include <ATen/native/Resize.h>
 #include <ATen/native/IndexingUtils.h>
-
-#include <THC/THCReduceApplyUtils.cuh>
+#include <ATen/native/ConvUtils.h>
 
 namespace at {
 namespace native {
@@ -16,8 +16,7 @@ using at::cuda::detail::GET_BLOCKS;
 
 template <typename scalar_t, int ndim, template <typename U> class PtrTraits = DefaultPtrTraits>
 PackedTensorAccessor32<scalar_t, ndim, PtrTraits> dummy_packed_accessor32() {
-  std::array<int64_t, ndim> zeros;
-  zeros.fill(0);
+  std::array<int64_t, ndim> zeros{};
   return {nullptr, zeros.data(), zeros.data()};
 }
 
@@ -233,9 +232,7 @@ __global__ void conv_depthwise2d_grad_weight_kernel(
   // accumulate prior to writing the global value
   extern __shared__ char smem[];
   acc_t* buf = reinterpret_cast<acc_t*>(smem);
-  acc_t tval = reduceBlock(buf, blockDim.x, grad,
-                           [] __device__ (acc_t a, acc_t b) { return a + b; },
-                           acc_t(0));
+  acc_t tval = cuda_utils::BlockReduceSum(grad, buf);
 
   // After reduction, first thread in the block has the gradient, so its responsible
   // for writing it to grad_weight
@@ -250,10 +247,10 @@ void conv_depthwise2d_forward_out(
                   const Tensor &output,
                   const Tensor &weight,
                   const Tensor &bias,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  int dilationW, int dilationH) {
+                  const int kW, const int kH,
+                  const int dW, const int dH,
+                  const int padW, const int padH,
+                  const int dilationW, const int dilationH) {
   // Only handle 4D Input Tensors for now
   TORCH_CHECK(input.numel() > 0 && input.dim() == 4);
   TORCH_CHECK(weight.numel() > 0 && weight.dim() == 4);
@@ -281,18 +278,20 @@ void conv_depthwise2d_forward_out(
   int64_t batchSize = in_sizes[0];
   int64_t height = in_sizes[2];
   int64_t width = in_sizes[3];
-  int64_t outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1;
-  int64_t outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int64_t outputChannels = w_sizes[0];
+  auto out_sizes = conv_output_size(in_sizes, weight.sizes(), {padH, padW}, {dH, dW},
+                                    {dilationH, dilationW});
+  const auto outputWidth = out_sizes[3];
+  const auto outputHeight = out_sizes[2];
 
-  resize_output(output, {batchSize, outputChannels, outputHeight, outputWidth});
+  resize_output(output, out_sizes);
 
   int64_t inputChannels = in_sizes[1];
   int64_t depthwiseMultiplier = outputChannels / inputChannels;
 
   // One thread per output value
   TORCH_CHECK(canUse32BitIndexMath(input) && canUse32BitIndexMath(output));
-  unsigned n = output.numel();
+  int32_t n = output.numel();
   int blocks = GET_BLOCKS(n);
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
@@ -336,10 +335,10 @@ void conv_depthwise2d_backward_out(
                   const Tensor &grad_output,
                   const Tensor &grad_input,
                   const Tensor &weight,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  int dilationW, int dilationH) {
+                  const int kW, const int kH,
+                  const int dW, const int dH,
+                  const int padW, const int padH,
+                  const int dilationW, const int dilationH) {
   // Only handle 4D Input Tensors for now
   TORCH_CHECK(input.numel() > 0 && input.dim() == 4);
   TORCH_CHECK(weight.numel() > 0 && weight.dim() == 4);
@@ -374,7 +373,7 @@ void conv_depthwise2d_backward_out(
   // One thread per grainput_a value
   TORCH_CHECK(canUse32BitIndexMath(grad_input) &&
               canUse32BitIndexMath(grad_output));
-  unsigned n = grad_input.numel();
+  int32_t n = grad_input.numel();
   int blocks = GET_BLOCKS(n);
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
@@ -450,10 +449,10 @@ void conv_depthwise2d_grad_weight_out(
                   const Tensor &input,
                   const Tensor &grad_output,
                   const Tensor &grad_weight,
-                  int kW, int kH,
-                  int dW, int dH,
-                  int padW, int padH,
-                  int dilationW, int dilationH) {
+                  const int kW, const int kH,
+                  const int dW, const int dH,
+                  const int padW, const int padH,
+                  const int dilationW, const int dilationH) {
   // Only handle 4D Input Tensors for now
   TORCH_CHECK(input.numel() > 0 && input.dim() == 4);
   TORCH_CHECK(grad_output.numel() > 0 && grad_output.dim() == 4);
@@ -499,7 +498,7 @@ void conv_depthwise2d_grad_weight_out(
     const auto input_a = input.packed_accessor32<scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
-    int smem = block.x * sizeof(acc_t);
+    int smem = ((block.x + C10_WARP_SIZE - 1) / C10_WARP_SIZE) * sizeof(acc_t);
     conv_depthwise2d_grad_weight_kernel<<<grid, block, smem, stream>>>(
         grad_output_a, input_a, grad_weight_a, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
@@ -583,10 +582,10 @@ std::tuple<Tensor&, Tensor&> conv_depthwise2d_backward_cuda_out(
     auto weight = weight_.expect_contiguous();
     conv_depthwise2d_backward_out(
         *self, *grad_output, grad_input, *weight,
-        kernel_size[0], kernel_size[1],
-        stride[0], stride[1],
-        padding[0], padding[1],
-        dilation[0], dilation[1]);
+        kernel_size[1], kernel_size[0],
+        stride[1], stride[0],
+        padding[1], padding[0],
+        dilation[1], dilation[0]);
   }
   return std::forward_as_tuple(grad_input, grad_weight);
 }
