@@ -10,9 +10,9 @@ import argparse
 import time
 import json
 import os
+import requests
 import subprocess
 from collections import defaultdict
-from tools.stats.scribe import send_to_scribe
 
 
 class ScribeUploader:
@@ -30,6 +30,7 @@ class ScribeUploader:
             elif field in self.schema['float']:
                 message['float'][field] = float(value)
             else:
+
                 raise ValueError("Field {} is not currently used, "
                                  "be intentional about adding new fields".format(field))
         return message
@@ -43,19 +44,28 @@ class ScribeUploader:
     def upload(self, messages):
         if os.environ.get('SCRIBE_INTERN'):
             return self._upload_intern(messages)
-        logs = json.dumps(
-            [
-                {
-                    "category": self.category,
-                    "message": json.dumps(message),
-                    "line_escape": False,
-                }
-                for message in messages
-            ]
+        access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
+        if not access_token:
+            raise ValueError("Can't find access token from environment variable")
+        url = "https://graph.facebook.com/scribe_logs"
+        r = requests.post(
+            url,
+            data={
+                "access_token": access_token,
+                "logs": json.dumps(
+                    [
+                        {
+                            "category": self.category,
+                            "message": json.dumps(message),
+                            "line_escape": False,
+                        }
+                        for message in messages
+                    ]
+                ),
+            },
         )
-        res = send_to_scribe(logs)
-        print(res)
-
+        print(r.text)
+        r.raise_for_status()
 
 class PytorchBenchmarkUploader(ScribeUploader):
     def __init__(self):
