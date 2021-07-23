@@ -236,7 +236,6 @@ bool guardDifferentiableGraph(Node* dnode) {
     }
   }
   if (all_inputs_seen) {
-    setRequiresGradOnDiffGraph(dnode);
     // we may have seen both true and false for requires_grad. In this case
     // we guard with true here and the other case is in the fallback. This
     // will give us trouble when we get "alternating patterns" of gradients

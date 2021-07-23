@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 from sys import maxsize
 
@@ -7,7 +9,7 @@ import warnings
 import numpy
 
 from torch.onnx.symbolic_helper import parse_args, _unimplemented, _is_tensor_list
-from torch.onnx.symbolic_opset9 import expand, unused
+from torch.onnx.symbolic_opset9 import expand, unused, mul
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -881,6 +883,17 @@ def prim_ConstantChunk(g, self, chunks, dim):
         start = end
     return res
 
+def chunk(g, self, chunks, dim):
+    # Calculate chunk size for dynamic chunk
+    dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
+    chunk_size_s = g.op("Sub", chunks, g.op("Constant", value_t=torch.tensor([1], dtype=torch.long)))
+    chunk_size = g.op("Div", g.op("Add", dim_size, chunk_size_s), chunks)
+    # Create splits vector
+    chunk_vec = [expand(g, chunk_size, chunk_size_s, None),
+                 g.op("Sub", dim_size, g.op("Mul", chunk_size, chunk_size_s))]
+    chunk_vec = g.op("Concat", *chunk_vec, axis_i=0)
+    return split(g, self, chunk_vec, dim)
+
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     from torch.onnx.symbolic_opset9 import reshape
     input = self
@@ -983,3 +996,13 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
     return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+
+
+def normal(g, loc, scale, seed):
+    # If you can sample from a given distribution with mean 0 and variance 1, then you can easily sample from a
+    # scale-location transformation of that distribution, which has mean μ and variance σ's square. If x is a sample
+    # from a mean 0 and variance 1 distribution then
+    #       σx+μ
+    # is a sample with mean μ and variance σ's square.
+    result = mul(g, scale, g.op("RandomNormalLike", loc))
+    return add(g, result, loc)

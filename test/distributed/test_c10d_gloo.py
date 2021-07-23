@@ -30,6 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_win32,
     create_device,
     verify_ddp_error_logged,
+    skip_if_rocm,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -207,6 +208,12 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     "TSAN is not fork-safe since we're forking in a multi-threaded environment",
 )
 class ProcessGroupGlooTest(MultiProcessTestCase):
+    def _create_process_group_gloo(self, store, rank, world_size, opts):
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
+        dist.barrier(group=pg)
+        return pg
+
+
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
 
@@ -231,7 +238,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             create_device(interface=LOOPBACK),
             create_device(interface=LOOPBACK),
         ]
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, opts)
 
         # Execute 2x the number of operations to ensure we use every device.
         for fut in [pg.allreduce(torch.ones(i + 1)).get_future() for i in range(4)]:
@@ -239,7 +246,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_empty_tensors(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         xs = [torch.FloatTensor([])]
         fut = pg.broadcast(xs).get_future()
@@ -250,7 +257,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
         t2 = torch.zeros([1], dtype=torch.float64)
@@ -300,7 +307,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_broadcast_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -348,7 +355,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_broadcast_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         work_handles = [
@@ -376,7 +383,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_allreduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
         t2 = torch.zeros([1], dtype=torch.float64)
@@ -396,7 +403,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allreduce_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Single input tests
         tests = simple_reduce_tests(self.rank, self.world_size)
@@ -443,7 +450,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     # This should go away as we deprecate it.
     def _test_allreduce_basics_using_work_api(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Single input tests
         tests = simple_reduce_tests(self.rank, self.world_size)
@@ -488,7 +495,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allreduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = [pg.allreduce(inputs[i]).get_future() for i in range(len(inputs))]
@@ -511,13 +518,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allreduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_allreduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
     def test_allreduce_coalesced_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros(1, dtype=torch.float32)
         t2 = torch.zeros(1, dtype=torch.float64)
@@ -542,7 +550,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(1)
     def test_allreduce_coalesced_checks_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros(1, dtype=torch.float32)
 
@@ -552,7 +560,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         test_cases = simple_coalesced_reduce_tests(self.rank, self.world_size)
         for op, inputs, outputs in test_cases:
@@ -571,7 +579,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allreduce_coalesced_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = [pg.allreduce_coalesced(input).get_future() for input in inputs]
@@ -599,7 +607,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_sparse_allreduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1])
         t2 = torch.sparse_coo_tensor([[0]], [1], size=(2,))
@@ -626,7 +634,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_sparse_allreduce_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         for num_inputs_per_rank in [1, 2]:
             tests = simple_sparse_reduce_tests(
@@ -650,7 +658,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
         t2 = torch.zeros([1], dtype=torch.float64)
@@ -725,7 +733,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_scatter_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
         input = [fn(torch.tensor([self.rank])) for _ in range(self.world_size)]
@@ -756,7 +764,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_scatter_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         outputs = [
@@ -806,7 +814,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_gather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
         t2 = torch.zeros([1], dtype=torch.float64)
@@ -885,7 +893,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_gather_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
         input = [fn(torch.tensor([self.rank]))]
@@ -918,7 +926,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = []
@@ -957,13 +965,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_allgather_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
         t2 = torch.zeros([1], dtype=torch.float64)
@@ -1006,7 +1015,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allgather_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Run with N input tensor per rank
         for n in [1, 2, 3]:
@@ -1035,7 +1044,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_allgather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = []
@@ -1065,13 +1074,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_allgather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_allgather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
     def test_allgather_coalesced_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
         dummy_input = [torch.zeros([1], dtype=torch.float32)]
         dummy_output_lists = [
             [torch.zeros([1], dtype=torch.float32)] for _ in range(self.world_size)
@@ -1107,7 +1117,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         t1 = torch.zeros([1], dtype=torch.float32)
 
@@ -1139,7 +1149,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_reduce_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
         for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
             for root in range(self.world_size):
                 opts = c10d.ReduceOptions()
@@ -1162,7 +1172,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def _test_reduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts(threads=8)
         )
         future_handles = []
@@ -1199,13 +1209,14 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_reduce_stress(inputs)
 
     @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
     def test_reduce_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_reduce_stress(inputs)
 
     def test_send_recv_all_to_all(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Preallocate tensors for input/output
         inputs = [torch.tensor([self.rank]) for _ in range(self.world_size)]
@@ -1243,7 +1254,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_barrier_implies_wait(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
+        pg = self._create_process_group_gloo(store, self.rank, self.world_size, self.opts())
 
         # Kick off allreduce operations
         size = (100, 100)

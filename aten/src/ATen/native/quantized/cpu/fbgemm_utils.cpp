@@ -375,7 +375,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
         // serialization versions.
         [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
+          ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
@@ -455,7 +455,14 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
                 }
 #endif // USE_PYTORCH_QNNPACK
                 TORCH_CHECK(false, "Unknown qengine");
-              });
+              })
+              .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
+                   at::Tensor weight;
+                   c10::optional<at::Tensor> bias;
+                   std::tie(weight, bias) = self->unpack();
+                   return bias;
+                 })
+              .def("unpack", &LinearPackedParamsBase::unpack);
   return register_linear_params;
 }
 

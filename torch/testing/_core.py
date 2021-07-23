@@ -137,8 +137,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        a = a.resolve_conj()
-        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
@@ -224,12 +222,15 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
         msg = None
         if not result:
-            msg = ("Comparing" + s + "{0} and {1} gives a "
-                   "difference of {2}, but the allowed difference "
-                   "with rtol={3} and atol={4} is "
-                   "only {5}!").format(a, b, diff,
-                                       rtol, atol, allowed_diff)
-
+            if rtol == 0 and atol == 0:
+                msg = f"{a} != {b}"
+            else:
+                msg = (
+                    f"Comparing{s}{a} and {b} gives a "
+                    f"difference of {diff}, but the allowed difference "
+                    f"with rtol={rtol} and atol={atol} is "
+                    f"only {allowed_diff}!"
+                )
         return result, msg
 
     if isinstance(a, complex) or isinstance(b, complex):
