@@ -233,6 +233,7 @@ test_libtorch() {
       LIB_DIR="$SITE_DIR"/torch/lib
       ${SUDO} ln -sf "$LIB_DIR"/libjitbackend_test.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libtorch_cpu.so "$BIN_DIR"
+      ${SUDO} ln -sf "$LIB_DIR"/libc10.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libbackend_with_compiler.so "$BIN_DIR"
       ls -l "$BIN_DIR"
       ls -l "$LIB_DIR"
