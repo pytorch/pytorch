@@ -48,10 +48,8 @@ extern "C" TORCH_API void register_embedded_interpreter_cuda(
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 extern "C" __attribute__((
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
 extern "C"
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
 #endif
 
