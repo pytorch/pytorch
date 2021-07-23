@@ -55,10 +55,8 @@ void CPUContext::CopyBytesSameDevice(
 
 namespace at {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONTEXT(DeviceType::CPU, caffe2::CPUContext);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_COPY_BYTES_FUNCTION(
     DeviceType::CPU,
     DeviceType::CPU,
