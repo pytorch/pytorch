@@ -928,6 +928,16 @@ void igammac_kernel(TensorIteratorBase& iter) {
   });
 }
 
+void iv_kernel(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "iv_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t v, scalar_t x) -> scalar_t {
+            return iv(v, x);
+        });
+  });
+}
+
 void nextafter_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
@@ -1081,6 +1091,8 @@ REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 REGISTER_DISPATCH(igamma_stub, &igamma_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_DISPATCH(iv_stub, &iv_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)

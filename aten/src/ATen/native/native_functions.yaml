@@ -9880,6 +9880,16 @@
   dispatch:
     CPU, CUDA: special_i1e_out
 
+- func: special_iv.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: special_iv_out
+
+- func: special_iv(Tensor self, Tensor other) -> Tensor
+  structured_delegate: special_iv.out
+  variants: function
+
 - func: special_logit(Tensor self, float? eps=None) -> Tensor
   python_module: special
   variants: function

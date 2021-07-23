@@ -88,6 +88,7 @@ DECLARE_DISPATCH(structured_binary_fn, lcm_stub);
 DECLARE_DISPATCH(structured_binary_fn, hypot_stub);
 DECLARE_DISPATCH(structured_binary_fn, igamma_stub);
 DECLARE_DISPATCH(structured_binary_fn, igammac_stub);
+DECLARE_DISPATCH(structured_binary_fn, iv_stub);
 DECLARE_DISPATCH(structured_binary_fn, nextafter_stub);
 DECLARE_DISPATCH(structured_binary_fn, heaviside_stub);
 DECLARE_DISPATCH(structured_binary_fn, copysign_stub);

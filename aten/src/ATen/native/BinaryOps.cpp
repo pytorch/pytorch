@@ -61,6 +61,10 @@ TORCH_META_FUNC(special_zeta) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
+TORCH_META_FUNC(special_iv) (const Tensor& self, const Tensor& other) {
+  build_borrowing_binary_float_op(maybe_get_output(), self, other);
+}
+
 TORCH_META_FUNC2(copysign, Tensor) (
   const Tensor& self, const Tensor& other
 ) {
@@ -217,6 +221,8 @@ DEFINE_DISPATCH(igamma_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(igammac_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(iv_stub);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nextafter_stub);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(heaviside_stub);
@@ -269,6 +275,10 @@ TORCH_IMPL_FUNC(special_xlog1py_out) (const Tensor& self, const Tensor& other, c
 
 TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   zeta_stub(device_type(), *this);
+}
+
+TORCH_IMPL_FUNC(special_iv_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
+  iv_stub(device_type(), *this);
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
