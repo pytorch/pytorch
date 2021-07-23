@@ -89,6 +89,8 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
+                    if self.is_neg():
+                        new_tensor = new_tensor.neg()
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
@@ -223,6 +225,13 @@ class Tensor(torch._C._TensorBase):
             in a user-specified CUDA stream context, see
             :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+        .. note::
+
+            When ``inputs`` are provided and a given input is not a leaf,
+            the current implementation will call its grad_fn (though it is not strictly needed to get this gradients).
+            It is an implementation detail on which the user should not rely.
+            See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
         Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
@@ -241,8 +250,7 @@ class Tensor(torch._C._TensorBase):
             inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
                 accumulated into ``.grad``. All other Tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors. All the provided inputs must be leaf
-                Tensors.
+                used to compute the attr::tensors.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(
@@ -559,6 +567,14 @@ class Tensor(torch._C._TensorBase):
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
         return torch.floor_divide(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rlshift__(self, other):
+        return torch.bitwise_left_shift(other, self)
+
+    @_wrap_type_error_to_not_implemented
+    def __rrshift__(self, other):
+        return torch.bitwise_right_shift(other, self)
 
     @_wrap_type_error_to_not_implemented
     def __rmatmul__(self, other):
@@ -927,14 +943,9 @@ class Tensor(torch._C._TensorBase):
         if self.is_sparse:
             coalesced_self = self.coalesce()
             row_indices = coalesced_self.indices()[0]
-            ro = [0]
-            i = 0
-            for irow in range(self.shape[0]):
-                while i < row_indices.size()[0] and row_indices[i] == irow:
-                    i += 1
-                ro.append(i)
             device = coalesced_self.values().device
-            crow_indices = torch.tensor(ro, dtype=row_indices.dtype, device=device)
+            arange = torch.arange(self.shape[0] + 1, dtype=row_indices.dtype, device=device)
+            crow_indices = torch.bucketize(arange, row_indices, out_int32=row_indices.dtype == torch.int32)
             return torch.sparse_csr_tensor(crow_indices,
                                            coalesced_self.indices()[1].contiguous(),
                                            coalesced_self.values(),
@@ -1018,7 +1029,7 @@ def _convert(ret, cls):
     if cls is Tensor:
         return ret
 
-    if isinstance(ret, Tensor):
+    if isinstance(ret, Tensor) and not isinstance(ret, cls):
         ret = ret.as_subclass(cls)
 
     if isinstance(ret, (tuple, list)):
