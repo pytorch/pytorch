@@ -141,14 +141,27 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   }
 }
 
-void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
+void EvalPeepholeONNX(
+    Block* b,
+    ParamMap& paramsDict,
+    bool isAllowedToAdjustGraphInputs) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
-  fuseConvBatchNorm(b, valsToParamsMap);
+
+  // Optimizations like fusing Conv and BatchNorm ops may adjust the graph
+  // inputs. If the graph inputs are not allowed to be adjusted, for example
+  // export_params is False, such optimizations will be skipped.
+  if (isAllowedToAdjustGraphInputs) {
+    fuseConvBatchNorm(b, valsToParamsMap);
+  }
+
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }
 
-void EvalPeepholeONNX(std::shared_ptr<Graph>& g, ParamMap& paramsDict) {
-  EvalPeepholeONNX(g->block(), paramsDict);
+void EvalPeepholeONNX(
+    std::shared_ptr<Graph>& g,
+    ParamMap& paramsDict,
+    bool isAllowedToAdjustGraphInputs) {
+  EvalPeepholeONNX(g->block(), paramsDict, isAllowedToAdjustGraphInputs);
   GRAPH_DUMP("After EvalPeepholeONNX:", g);
 }
 
