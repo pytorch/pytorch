@@ -224,9 +224,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
 
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
   AT_ASSERT(new_interpreter_impl);
-  pImpl_ = std::unique_ptr<InterpreterImpl>(
-      // NOLINTNEXTLINE(modernize-redundant-void-arg)
-      ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
+  pImpl_ = std::unique_ptr<InterpreterImpl>(((InterpreterImpl * (*)()) new_interpreter_impl)());
 }
 
 Interpreter::~Interpreter() {
@@ -235,7 +233,7 @@ Interpreter::~Interpreter() {
     pImpl_.reset();
 #ifndef FBCODE_CAFFE2
     auto deploy_flush_python_libs =
-        (void (*)(void))dlsym(handle_, "deploy_flush_python_libs");
+        (void (*)())dlsym(handle_, "deploy_flush_python_libs");
     deploy_flush_python_libs();
 #endif
     dlclose(handle_);

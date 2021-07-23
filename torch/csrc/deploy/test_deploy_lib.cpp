@@ -1,6 +1,6 @@
 #include <pybind11/pybind11.h>
-#include <stdint.h>
-#include <stdio.h>
+#include <cstdint>
+#include <cstdio>
 #include <iostream>
 
 namespace py = pybind11;
@@ -13,7 +13,7 @@ struct Foo {
   Foo() {
     ++foo_constructed;
   }
-  int v;
+  int v = -1;
 };
 
 Foo f;
