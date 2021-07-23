@@ -73,10 +73,11 @@ class OptimizerHookState(object):
     __slots__ = ['functional_optimizer']
 
     def __init__(self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs):
+        print(f"args: {functional_optim_args}")
         self.functional_optimizer = functional_optim_cls(
             [],
-            functional_optim_args,
-            functional_optim_kwargs,
+            *functional_optim_args,
+            **functional_optim_kwargs,
             allow_empty_param_list=True
         )
         if not hasattr(self.functional_optimizer, 'step_param'):
