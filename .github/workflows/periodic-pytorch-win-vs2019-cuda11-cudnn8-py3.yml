@@ -47,11 +47,8 @@ jobs:
     needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-build
-      use_proxy: "on"
       http_proxy: "$SQUID_PROXY"
       https_proxy: "$SQUID_PROXY"
-      HTTP_PROXY: "$SQUID_PROXY"
-      HTTPS_PROXY: "$SQUID_PROXY"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -132,11 +129,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
-      use_proxy: "on"
       http_proxy: "$SQUID_PROXY"
       https_proxy: "$SQUID_PROXY"
-      HTTP_PROXY: "$SQUID_PROXY"
-      HTTPS_PROXY: "$SQUID_PROXY"
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
