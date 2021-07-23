@@ -1229,7 +1229,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
             return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 
-# these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
@@ -1238,7 +1237,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
-@register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
 @register_quant_pattern(torch.nn.MaxPool3d)
@@ -1265,13 +1263,17 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.min)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('clamp')
-@register_quant_pattern('contiguous')
 @register_quant_pattern('mean')
-@register_quant_pattern('numel')
-@register_quant_pattern('permute')
 @register_quant_pattern('relu')
 @register_quant_pattern('relu_')
 class CopyNodeQuantizeHandler(QuantizeHandler):
+    """ Operators that works on both float and quantized input
+    if input is quantized, the output Tensor shares
+    the same quantization parameter with input.
+    These ops will do computation on the input Tensor, e.g. average pool, so we will
+    insert extra observer/fake_quant for the output of these operators.
+    TODO: maybe rename this to TensorValueOpQuantizeHandler
+    """
     def should_mark_output_quantized_from_input_quantized_status(
         self,
         qconfig: QConfigAny
@@ -1342,6 +1344,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # module attribute like module._QUANTIZED_INPUT_INDEXES
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
+@register_quant_pattern(torch.nn.Identity)
 @register_quant_pattern(torch.chunk)
 @register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.transpose)
@@ -1352,8 +1355,11 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.getitem)
 @register_quant_pattern('chunk')
+@register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
+@register_quant_pattern('numel')
+@register_quant_pattern('permute')
 @register_quant_pattern('repeat')
 @register_quant_pattern('repeat_interleave')
 @register_quant_pattern('reshape')
@@ -1367,8 +1373,13 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class TensorShapeOpQuantizeHandler(QuantizeHandler):
-    """ Operators that do rearrangement of Tensor values, for
-    example reshape
+    """ Operators that works on both float and quantized input
+    if input is quantized, the output Tensor shares
+    the same quantization parameter with input.
+    These ops only do rearrangement of Tensor values, for
+    example reshape, or just query the information about Tensor
+    e.g. size, and we do not insert extra observer/fake_quant
+    for the output of the operator.
     """
     def should_mark_output_quantized_from_input_quantized_status(
         self,
