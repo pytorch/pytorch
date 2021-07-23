@@ -684,6 +684,46 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
 
+    def test_custom_opsets_gelu(self):
+        def gelu(g, self):
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
+
+        from torch.onnx import register_custom_op_symbolic
+        register_custom_op_symbolic("::gelu", gelu, 1)
+
+        model = torch.nn.GELU()
+        x = torch.randn(3, 3)
+        torch.onnx.export(model, (x, ), "test.onnx",
+                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
+
+        graph = onnx.load(file_name)
+        assert graph.graph.node[0].op_type == "Gelu"
+        assert graph.opset_import[0].version == self.opset_version
+        assert graph.opset_import[1].domain == 'com.microsoft'
+        assert graph.opset_import[1].version == 1
+
+    def test_custom_opsets_inverse(self):
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def inverse(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(self.type())
+
+        from torch.onnx import register_custom_op_symbolic
+        register_custom_op_symbolic('::inverse', inverse, 1)
+
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        torch.onnx.export(model, (x, ), "test.onnx",
+                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
+
+        graph = onnx.load(file_name)
+        assert graph.graph.node[0].op_type == "Inverse"
+        assert graph.opset_import[0].version == self.opset_version
+        assert graph.opset_import[1].domain == 'com.microsoft'
+        assert graph.opset_import[1].version == 1
+
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten
         x = torch.randn(100, 128)
