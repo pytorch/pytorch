@@ -7629,11 +7629,14 @@ else:
     # For current implementation,
     # below are the valid `TensorDtype` and `ScalarType` combinations.
     def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
+        # Integral Tensor and Integral Scalar
         if (not dtype.is_floating_point or dtype.is_complex) and scalar_type == int:
             return True
-        if (dtype.is_floating_point) and scalar_type in [int, float]:
+        # Float Tensor and Integral or Float Scalar
+        elif (dtype.is_floating_point) and scalar_type in [int, float]:
             return True
-        if dtype.is_complex:
+        # Complex Tensor and any Scalar
+        elif dtype.is_complex:
             return True
         return False
 
