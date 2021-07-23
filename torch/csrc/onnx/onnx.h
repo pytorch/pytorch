@@ -15,9 +15,9 @@ enum class TrainingMode {
   TRAINING, // Training mode
 };
 
-// we pin IR version to version 6 (12/11/2019) instead of using
+// we pin IR version to version 8 (07/30/2021) instead of using
 // onnx::IR_VERSION. with this change, the test_operators.py will be more
 // stable. only bump it when it's necessary
-static const size_t IR_VERSION = 6;
+static const size_t IR_VERSION = 8;
 static const char* PRODUCER_VERSION = "1.10";
 }} // namespace torch::onnx
