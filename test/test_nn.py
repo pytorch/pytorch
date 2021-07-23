@@ -13272,7 +13272,7 @@ class TestNNDeviceType(NNTestCase):
     def test_FractionalMaxPool3d_zero_batch(self, device):
         mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
         inp = torch.ones(0, 16, 50, 32, 32).to(device)
-        self._test_module_empty_input(mod, inp)
+        self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
             inp = torch.randn(1, 0, 50, 32, 32).to(device)
