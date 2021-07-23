@@ -320,18 +320,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     from torch.onnx import utils
     return utils.export(model, args, f, export_params, verbose, training,
-<<<<<<< HEAD
                         input_names, output_names, operator_export_type, opset_version,
                         _retain_param_name, do_constant_folding, example_outputs,
                         strip_doc_string, dynamic_axes, keep_initializers_as_inputs,
                         custom_opsets, enable_onnx_checker, use_external_data_format)
-=======
-                        input_names, output_names, aten,
-                        operator_export_type, opset_version, _retain_param_name,
-                        do_constant_folding, example_outputs, strip_doc_string, dynamic_axes,
-                        keep_initializers_as_inputs, custom_opsets, enable_onnx_checker,
-                        use_external_data_format)
->>>>>>> Update the default value of argument in export().
 
 
 def export_to_pretty_string(*args, **kwargs):
