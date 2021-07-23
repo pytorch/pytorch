@@ -752,6 +752,8 @@ TEST(StaticRuntime, IndividualOps_VarCat) {
   // 3D tensors - cat dim = 2
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
   testStaticRuntime(var_cat_script, args3);
+
+  testStaticRuntime(var_cat_script, args1, args2);
 }
 
 TEST(StaticRuntime, LongModel) {
