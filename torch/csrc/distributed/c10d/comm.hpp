@@ -44,7 +44,7 @@ class TORCH_API GradBucket {
     return tensor_;
   }
 
-  // Overwrites tensors at a specific index.
+  // Overwrites the tensor at a specific index.
   void setTensor(at::Tensor& tensor) {
     tensor_ = tensor;
   }
@@ -70,7 +70,7 @@ class TORCH_API GradBucket {
   size_t index_;
   at::Tensor tensor_;
 
-  // Per-variable info in tensors_[0].
+  // Per-variable info in tensor_.
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
@@ -87,13 +87,13 @@ class TORCH_PYTHON_API CommHookInterface {
   virtual ~CommHookInterface() = default;
 
   // Passes the input grad bucket to the registered communication hook.
-  // Once the tensors in the bucket are ready, kicks off the hook asynchronously
+  // Once the tensor in the bucket are ready, kicks off the hook asynchronously
   // and returns a future that holds the communication results.
   virtual c10::intrusive_ptr<c10::ivalue::Future> runHook(
       GradBucket& bucket) = 0;
 
-  // Returns the resulting tensors once the communication hook result is
-  // ready. The resulting tensors will then be copied to the grads of
+  // Returns the resulting tensor once the communication hook result is
+  // ready. The resulting tensor will then be copied to the grads of
   // individual parameters.
   virtual at::Tensor parseHookResult(
       const c10::IValue& result) = 0;
@@ -124,7 +124,7 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 
-  virtual ~CppCommHookInterface() override = default;
+  ~CppCommHookInterface() override = default;
 
   at::Tensor parseHookResult(const c10::IValue& result) override {
     return detail::parseCppCommHookResult(result);
