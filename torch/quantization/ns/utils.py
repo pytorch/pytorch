@@ -393,7 +393,8 @@ def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
     def inner(*args, **kwargs):
         a0, a1, *a_other = args
 
-        if isinstance(a0, tuple) and isinstance(a1, tuple):
+        if (isinstance(a0, tuple) and isinstance(a1, tuple)) or \
+                (isinstance(a0, list) and isinstance(a1, list)):
             results = []
             for el0, el1 in zip(a0, a1):
                 new_args = (el0, el1, *a_other)
