@@ -6635,32 +6635,9 @@ Example::
 
 add_docstr(torch.mvlgamma,
            r"""
-mvlgamma(input, p) -> Tensor
+mvlgamma(input, p, *, out=None) -> Tensor
 
-Computes the `multivariate log-gamma function
-<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
-:math:`p` element-wise, given by
-
-.. math::
-    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
-
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
-
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
-
-Args:
-    input (Tensor): the tensor to compute the multivariate log-gamma function
-    p (int): the number of dimensions
-
-Example::
-
-    >>> a = torch.empty(2, 3).uniform_(1, 2)
-    >>> a
-    tensor([[1.6835, 1.8474, 1.1929],
-            [1.0475, 1.7162, 1.4180]])
-    >>> torch.mvlgamma(a, 2)
-    tensor([[0.3928, 0.4007, 0.7586],
-            [1.0311, 0.3901, 0.5049]])
+Alias for :func:`torch.special.multigammaln`.
 """)
 
 add_docstr(torch.movedim, r"""
