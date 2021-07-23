@@ -328,11 +328,25 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
-  return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
+  TORCH_CHECK(
+      at::can_cast(self.type(), other.scalar_type()),
+      "where: Narrowing cast from scalar type ",
+      self.type(),
+      " to ",
+      other.scalar_type());
+  Tensor self_t = at::scalar_tensor(self, at::device(other.device()).dtype(other.dtype()));
+  return at::where(condition, self_t, other);
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
-  return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
+  TORCH_CHECK(
+      at::can_cast(other.type(), self.scalar_type()),
+      "where: Narrowing cast from scalar type ",
+      other.type(),
+      " to ",
+      self.scalar_type());
+  Tensor other_t = at::scalar_tensor(other, at::device(self.device()).dtype(self.dtype()));
+  return at::where(condition, self, other_t);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
