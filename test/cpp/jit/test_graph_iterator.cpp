@@ -31,7 +31,9 @@ std::unordered_map<V, K> invert_map(std::unordered_map<K, V>& map) {
  * returns an array containing the original names in the string
  * graph.
  */
-std::vector<std::string> traverse_depth_first(std::string graph_string) {
+std::vector<std::string> traverse_depth_first(
+    std::string graph_string,
+    int max_count = 100) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
   torch::jit::parseIR(graph_string, graph.get(), vmap);
@@ -40,12 +42,14 @@ std::vector<std::string> traverse_depth_first(std::string graph_string) {
   std::vector<std::string> result;
   DepthFirstGraphNodeIterator graph_it(graph);
   Node* node = graph_it.next();
-  while (node) {
+  int count = 0;
+  while (node && count < max_count) {
     std::stringstream buffer;
     std::vector<const torch::jit::Node*> vec;
     node->print(buffer, 0, &vec, false, true, true, false);
     result.push_back(buffer.str());
     node = graph_it.next();
+    ++count;
   }
   return result;
 }
