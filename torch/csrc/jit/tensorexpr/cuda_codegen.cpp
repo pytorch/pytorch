@@ -902,7 +902,6 @@ static std::ostream& operator<<(
   return out;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
@@ -910,7 +909,6 @@ static const char* device_resource_string = R"(
 
 )";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* shared_resource_string = R"(
 template<typename T>
 __device__ T maximum(T a, T b) {
@@ -1313,7 +1311,6 @@ void CudaCodeGen::CompileToNVRTC(
 
 CudaCodeGen::~CudaCodeGen() = default;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<CudaCodeGen> cuda_codegen_reg("cuda_codegen");
 
 } // namespace tensorexpr

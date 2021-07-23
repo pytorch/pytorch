@@ -429,9 +429,7 @@ bool GroupNormGradientOp<T, Context>::RunOnDeviceWithOrderNHWC(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GroupNorm, GroupNormOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GroupNormGradient,
     GroupNormGradientOp<float, CPUContext>);
@@ -440,7 +438,6 @@ REGISTER_CPU_OPERATOR(
 // used as forward activations as they have no direct gradients computed.
 
 // Input: X, gamma, beta; Output: Y, mu, sig
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GroupNorm)
     .NumInputs(3)
     .NumOutputs({1, 3})
@@ -496,7 +493,6 @@ class GetGroupNormGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(GroupNorm, GetGroupNormGradient);
 
 } // namespace caffe2
