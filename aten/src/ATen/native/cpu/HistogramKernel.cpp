@@ -211,10 +211,8 @@ static void histogram_linear_kernel_impl(const Tensor& self, const c10::optional
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(histogram_stub, &histogram_kernel_impl);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(histogram_linear_stub, &histogram_linear_kernel_impl);
 
 }} // namespace at::native

@@ -6,7 +6,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
@@ -35,7 +34,6 @@ TEST(IRTest, Attributes) {
   ASSERT_EQ(attr2.f(one), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
@@ -95,7 +93,6 @@ TEST(IRTest, Blocks) {
       ->run(*g2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
@@ -159,7 +156,6 @@ graph(%x : Tensor,
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, OperatorMap) {
   OperatorMap<int> op_map;
   const char* literal1 =

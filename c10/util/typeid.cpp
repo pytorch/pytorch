@@ -27,7 +27,6 @@ C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
 }
 
 // see TypeMeta::addTypeMetaData
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<uint16_t> TypeMeta::nextTypeIndex(NumScalarTypes);
 
 // fixed length array of TypeMetaData instances
