@@ -3642,6 +3642,78 @@ Example::
     array([-1,  2,  3])
 """)
 
+add_docstr(torch.frombuffer,
+           r"""
+frombuffer(buffer, *, dtype, count=-1, offset=0, requires_grad=False) -> Tensor
+
+Creates a 1-dimensional :class:`Tensor` from an object that implements
+the Python buffer protocol.
+
+Skips the first :attr:`offset` bytes in the buffer, and interprets the rest of
+the raw bytes as a 1-dimensional tensor of type :attr:`dtype` with :attr:`count`
+elements.
+
+Note that either of the following must be true:
+
+1. :attr:`count` is a positive non-zero number, and the total number of bytes
+in the buffer is less than :attr:`offset` plus :attr:`count` times the size
+(in bytes) of :attr:`dtype`.
+
+2. :attr:`count` is negative, and the length (number of bytes) of the buffer
+subtracted by the :attr:`offset` is a multiple of the size (in bytes) of
+:attr:`dtype`.
+
+The returned tensor and buffer share the same memory. Modifications to
+the tensor will be reflected in the buffer and vice versa. The returned
+tensor is not resizable.
+
+.. note::
+    This function increments the reference count for the object that
+    owns the shared memory. Therefore, such memory will not be deallocated
+    before the returned tensor goes out of scope.
+
+.. warning::
+    This function's behavior is undefined when passed an object implementing
+    the buffer protocol whose data is not on the CPU. Doing so is likely to
+    cause a segmentation fault.
+
+.. warning::
+    This function does not try to infer the :attr:`dtype` (hence, it is not
+    optional). Passing a different :attr:`dtype` than its source may result
+    in unexpected behavior.
+
+Args:
+    buffer (object): a Python object that exposes the buffer interface.
+
+Keyword args:
+    dtype (:class:`torch.dtype`): the desired data type of returned tensor.
+    count (int, optional): the number of desired elements to be read.
+        If negative, all the elements (until the end of the buffer) will be
+        read. Default: -1.
+    offset (int, optional): the number of bytes to skip at the start of
+        the buffer. Default: 0.
+    {requires_grad}
+
+Example::
+
+    >>> import array
+    >>> a = array.array('i', [1, 2, 3])
+    >>> t = torch.frombuffer(a, dtype=torch.int32)
+    >>> t
+    tensor([ 1,  2,  3])
+    >>> t[0] = -1
+    >>> a
+    array([-1,  2,  3])
+
+    >>> # Interprets the signed char bytes as 32-bit integers.
+    >>> # Each 4 signed char elements will be interpreted as
+    >>> # 1 signed 32-bit integer.
+    >>> import array
+    >>> a = array.array('b', [-1, 0, 0, 0])
+    >>> torch.frombuffer(a, dtype=torch.int32)
+    tensor([255], dtype=torch.int32)
+""".format(**factory_common_args))
+
 add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
