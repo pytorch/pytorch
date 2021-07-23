@@ -4,19 +4,16 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 
 // TODO: rename flags to C10
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
     false,
     "If set, print out detailed memory usage");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_zero_fill,
     false,
     "If set, do memory zerofilling when allocating on CPU");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_cpu_allocator_do_junk_fill,
     false,
@@ -259,14 +256,12 @@ REGISTER_ALLOCATOR(DeviceType::CPU, &g_mobile_cpu_allocator);
 #else
 
 // Global default CPU Allocator
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static DefaultCPUAllocator g_cpu_alloc;
 
 at::Allocator* GetDefaultCPUAllocator() {
   return &g_cpu_alloc;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_ALLOCATOR(DeviceType::CPU, &g_cpu_alloc);
 
 #endif /* C10_Mobile */
@@ -327,9 +322,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_API at::Allocator* cpu_caching_alloc = nullptr;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_API uint8_t cpu_caching_alloc_priority = 0;
 
 void SetCPUCachingAllocator(Allocator* alloc, uint8_t priority) {

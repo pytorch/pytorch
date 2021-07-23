@@ -56,10 +56,8 @@ bool StumpFuncIndexOp<float, int64_t, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StumpFunc, StumpFuncOp<float, float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StumpFunc)
     .NumInputs(1)
     .NumOutputs(1)
@@ -77,15 +75,12 @@ Converts each input element into either high_ or low_value
 based on the given threshold.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(StumpFunc);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     StumpFuncIndex,
     StumpFuncIndexOp<float, int64_t, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StumpFuncIndex)
     .NumInputs(1)
     .NumOutputs(2)
@@ -102,7 +97,6 @@ OPERATOR_SCHEMA(StumpFuncIndex)
 Split the elements and return the indices based on the given threshold.
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(StumpFuncIndex);
 
 } // namespace caffe2
