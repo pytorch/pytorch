@@ -12,7 +12,7 @@ enum RPCErrorType {
   UNKNOWN_ERROR = 0, /* Indicates that error type could not be parsed */
   TIMEOUT = 1, /* Indicates that the RPC has timed out */
   INTENTIONAL_FAILURE = 2 /* Deliberate failure, such as those injected by
-                             FaultyProcessGroupAgent for testing */
+                             FaultyAgent for testing */
 };
 
 // The enum values are bitwise ORed with MessageType

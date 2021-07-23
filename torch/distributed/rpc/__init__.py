@@ -49,7 +49,6 @@ if is_available():
         enable_gil_profiling,
         RpcBackendOptions,
         _TensorPipeRpcBackendOptionsBase,
-        ProcessGroupRpcBackendOptions,
         RpcAgent,
         PyRRef,
         TensorPipeAgent,
@@ -123,10 +122,7 @@ if is_available():
                 "Argument rpc_backend_options must be an instance of RpcBackendOptions"
             )
 
-        # To avoid breaking users that passed a ProcessGroupRpcBackendOptions
-        # without specifying the backend as PROCESS_GROUP when that was the
-        # default, we try to detect the backend from the options when only the
-        # latter is passed.
+        # Try to detect the backend from the options
         if backend is None and rpc_backend_options is not None:
             for candidate_backend in BackendType:
                 if isinstance(
