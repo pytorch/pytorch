@@ -1365,12 +1365,12 @@ class TestCase(expecttest.TestCase):
             )
         elif isinstance(x, np.ndarray) or isinstance(y, np.ndarray):
             # torch.testing.assert_close does not allow Tensor vs. ndarray comparisons
-            def maybe_to_tensor(a: Any) -> Any:
-                try:
-                    return torch.as_tensor(a)
-                except TypeError:
-                    # This happens for example if the numpy dtype is non-numeric or not supported by torch
-                    return a
+            # def maybe_to_tensor(a: Any) -> Any:
+            #     try:
+            #         return torch.as_tensor(a)
+            #     except TypeError:
+            #         # This happens for example if the numpy dtype is non-numeric or not supported by torch
+            #         return a
 
             def maybe_to_list(a: Any) -> Any:
                 if not isinstance(a, (np.ndarray, torch.Tensor)):
@@ -1378,13 +1378,13 @@ class TestCase(expecttest.TestCase):
 
                 return a.tolist()
 
-            x = maybe_to_tensor(x)
-            y = maybe_to_tensor(y)
+            x = torch.as_tensor(x)
+            y = torch.as_tensor(y)
 
-            if not (isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)):
-                # In case we can't convert the inputs to a tensor, we fall back to comparing x and y as iterables
-                x = maybe_to_list(x)
-                y = maybe_to_list(y)
+            # if not (isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)):
+            #     # In case we can't convert the inputs to a tensor, we fall back to comparing x and y as iterables
+            #     x = maybe_to_list(x)
+            #     y = maybe_to_list(y)
 
             self.assertEqual(
                 x,
@@ -1419,15 +1419,15 @@ class TestCase(expecttest.TestCase):
                 else:
                     raise TypeError(f"Unknown types {type(x)} / {type(y)}")
 
-            try:
-                x = torch.as_tensor(x, dtype=dtype)
-                y = torch.as_tensor(y, dtype=dtype)
-            except Exception:
-                return super().assertEqual(
-                    x.item() if isinstance(x, torch.Tensor) else x,
-                    y.item() if isinstance(y, torch.Tensor) else y,
-                    msg,
-                )
+            # try:
+            x = torch.as_tensor(x, dtype=dtype)
+            y = torch.as_tensor(y, dtype=dtype)
+            # except Exception:
+            #     return super().assertEqual(
+            #         x.item() if isinstance(x, torch.Tensor) else x,
+            #         y.item() if isinstance(y, torch.Tensor) else y,
+            #         msg,
+            #     )
 
             self.assertEqual(
                 x,
