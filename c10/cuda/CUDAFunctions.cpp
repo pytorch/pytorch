@@ -139,15 +139,15 @@ void device_synchronize() {
 }
 
 void warn_or_error_on_sync(){
-    if (warning_state().get_cuda_sync_warning_level() == CUDASyncWarningLevel::ERROR) {
+    if (warning_state().get_sync_warning_level() == SyncWarningLevel::ERROR) {
        TORCH_CHECK(false, "called a synchronizing operation");
-    } else if (warning_state().get_cuda_sync_warning_level() == CUDASyncWarningLevel::WARN){
+    } else if (warning_state().get_sync_warning_level() == SyncWarningLevel::WARN){
        TORCH_WARN("called a synchronizing operation");
     }
 }
 
-CUDAWarningState& warning_state(){
-  static CUDAWarningState warning_state_;
+WarningState& warning_state(){
+  static WarningState warning_state_;
   return warning_state_;
 }
 
