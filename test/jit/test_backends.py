@@ -11,7 +11,6 @@ from torch.jit.mobile import _load_for_lite_interpreter
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    IS_IN_CI,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -75,7 +74,7 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        lib_file_path = find_library_location(IS_IN_CI, 'libjitbackend_test.so')
+        lib_file_path = find_library_location('libjitbackend_test.so')
         torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
@@ -492,7 +491,7 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        lib_file_path = find_library_location(IS_IN_CI, 'libbackend_with_compiler.so')
+        lib_file_path = find_library_location('libbackend_with_compiler.so')
         torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested

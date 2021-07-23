@@ -41,7 +41,6 @@ if sys.version_info >= (3, 7):
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    IS_IN_CI,
     IS_MACOS,
     IS_WINDOWS,
     TEST_WITH_ROCM,
@@ -116,7 +115,7 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        lib_file_path = find_library_location(IS_IN_CI, 'libtorchbind_test.so')
+        lib_file_path = find_library_location('libtorchbind_test.so')
         torch.ops.load_library(str(lib_file_path))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):

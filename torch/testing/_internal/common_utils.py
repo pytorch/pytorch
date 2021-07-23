@@ -2500,9 +2500,12 @@ def has_breakpad() -> bool:
     except RuntimeError as e:
         return False
 
-def find_library_location(condition: bool, lib_name: str) -> Path:
-    if condition:
-        torch_root = Path(torch.__file__).resolve().parent
-        return torch_root / 'lib' / lib_name
+def find_library_location(lib_name: str) -> Path:
+    # return the shared library file in the installed folder if exist, 
+    # else the file in the build folder
+    torch_root = Path(torch.__file__).resolve().parent
+    path = torch_root / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
     torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name

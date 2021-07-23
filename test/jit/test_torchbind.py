@@ -13,11 +13,9 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    IS_IN_CI,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    TEST_WITH_ROCM,
     find_library_location,
 )
 from torch.testing import FileCheck
@@ -33,7 +31,7 @@ class TestTorchbind(JitTestCase):
     def setUp(self):
         if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
-        lib_file_path = find_library_location(IS_IN_CI or TEST_WITH_ROCM, 'libtorchbind_test.so')
+        lib_file_path = find_library_location('libtorchbind_test.so')
         torch.ops.load_library(str(lib_file_path))
 
     def test_torchbind(self):
