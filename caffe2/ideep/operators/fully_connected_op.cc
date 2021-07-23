@@ -139,9 +139,7 @@ class IDEEPFullyConnectedGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_GRAD, INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(FC, IDEEPFullyConnectedOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(FCGradient, IDEEPFullyConnectedGradientOp);
 
 } // namespace

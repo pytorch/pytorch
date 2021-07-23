@@ -3854,7 +3854,7 @@ def skips_mvlgamma(skip_redundant=False):
         # outside domain values are hard error for mvlgamma op.
         SkipInfo('TestUnaryUfuncs', 'test_float_domains'),
     )
-    if not skip_redundant:
+    if skip_redundant:
         # Redundant tests
         skips = skips + (  # type: ignore[assignment]
             SkipInfo('TestGradients'),
@@ -3875,6 +3875,7 @@ class MvlGammaInfo(UnaryUfuncInfo):
         super(MvlGammaInfo, self).__init__(
             'mvlgamma',
             ref=reference_mvlgamma if TEST_SCIPY else _NOTHING,
+            aliases=('special.multigammaln',),
             variant_test_name=variant_test_name,
             domain=domain,
             decorators=(precisionOverride({torch.float16: 5e-2}),),
@@ -3882,7 +3883,6 @@ class MvlGammaInfo(UnaryUfuncInfo):
             dtypesIfCPU=all_types_and(torch.bfloat16),
             dtypesIfCUDA=all_types_and(torch.half),
             sample_inputs_func=sample_inputs_mvlgamma,
-            supports_out=False,
             safe_casts_outputs=True,
             skips=skips,
             sample_kwargs=sample_kwargs)
@@ -5578,18 +5578,22 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
     OpInfo('fmod',
+           ref=np.fmod,
            dtypes=all_types_and(torch.float16),
            sample_inputs_func=sample_inputs_fmod_remainder),
     OpInfo('fmod',
+           ref=np.fmod,
            variant_test_name='autodiffed',
            dtypes=all_types_and(torch.float16, torch.bool),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_fmod_remainder, autodiffed=True)),
     OpInfo('remainder',
+           ref=np.remainder,
            dtypesIfCPU=all_types_and(torch.float16),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_fmod_remainder),
     OpInfo('remainder',
+           ref=np.remainder,
            variant_test_name='autodiffed',
            dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bool, torch.bfloat16),

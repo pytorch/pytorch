@@ -8,7 +8,6 @@
 namespace torch {
 namespace jit {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 
 const std::string shape_compute_functions =
@@ -337,11 +336,9 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
 }
 
 std::unordered_map<const FunctionSchema*, std::shared_ptr<Graph>>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     cached_schema_to_graph;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 
 void loadModule(const CompilationUnit& module) {
