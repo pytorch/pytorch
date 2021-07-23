@@ -5734,6 +5734,16 @@ for shape in [(1,), ()]:
             with self.assertRaisesRegex(TypeError, "Output of saved tensor unpack_hook expected to be a Tensor"):
                 print(y.grad_fn._saved_self)
 
+            a = get_input()
+            y = a * a
+            with self.assertRaisesRegex(TypeError, "missing 1 required positional argument"):
+                y.grad_fn._raw_saved_self.register_hooks(lambda x, b: x, lambda x: x)
+
+            a = get_input()
+            y = a * a
+            with self.assertRaisesRegex(TypeError, "missing 1 required positional argument"):
+                y.grad_fn._raw_saved_self.register_hooks(lambda x, b: (x, b), lambda x: x)
+
             def inplace_double(x):
                 x *= 2
                 return x

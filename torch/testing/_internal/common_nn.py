@@ -2110,6 +2110,14 @@ new_module_tests = [
         desc='stride_pad',
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::AvgPool1dOptions(2)',
+        input_size=(3, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
