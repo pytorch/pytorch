@@ -25,6 +25,7 @@ concurrency:
 
 jobs:
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: []
     env:
