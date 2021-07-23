@@ -49,10 +49,8 @@ bool ChannelStatsOp<CPUContext>::ComputeChannelStatsNHWC<float>(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ChannelStats, ChannelStatsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ChannelStats)
     .NumInputs(1)
     .NumOutputs(2)
@@ -75,7 +73,6 @@ has the effect of changing the batch size over which SpatialBN is applied.
         "The output 1-dimensional tensor of size C containing the sum of "
         "elements squared per channel.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ChannelStats);
 
 } // namespace caffe2

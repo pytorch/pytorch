@@ -59,9 +59,7 @@ class IDEEPInt8PoolOp final : public IDEEPConvPoolOpBase {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8MaxPool, DNNLOWP, IDEEPInt8PoolOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8AveragePool, DNNLOWP, IDEEPInt8PoolOp);
 
 } // namespace

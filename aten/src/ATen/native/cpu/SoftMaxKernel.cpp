@@ -390,15 +390,11 @@ static void log_softmax_backward_lastdim_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     softmax_backward_lastdim_kernel,
     &softmax_backward_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     log_softmax_backward_lastdim_kernel,
     &log_softmax_backward_lastdim_kernel_impl);

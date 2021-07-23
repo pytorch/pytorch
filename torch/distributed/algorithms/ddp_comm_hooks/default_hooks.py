@@ -15,6 +15,7 @@ def _allreduce_fut(
 
     return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
+
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
@@ -60,7 +61,7 @@ def fp16_compress_hook(
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
         decompressed_tensor.copy_(fut.value()[0])
-        return [decompressed_tensor]
+        return decompressed_tensor
 
     return fut.then(decompress)
 
@@ -73,7 +74,6 @@ class OptimizerHookState(object):
     __slots__ = ['functional_optimizer']
 
     def __init__(self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs):
-        print(f"args: {functional_optim_args}")
         self.functional_optimizer = functional_optim_cls(
             [],
             *functional_optim_args,
@@ -104,7 +104,7 @@ def hook_then_optimizer(
                     model_param,
                     grad_tensor,
                 )
-            return [bucket.get_tensor()]
+            return bucket.get_tensor()
         return fut.then(optimizer_step)
 
     return hook_then_optimizer_wrapper
@@ -137,7 +137,7 @@ def fp16_compress_wrapper(
             # Decompress in place to reduce the peak memory.
             # See: https://github.com/pytorch/pytorch/issues/45968
             decompressed_tensor.copy_(fut.value()[0])
-            return [decompressed_tensor]
+            return decompressed_tensor
 
         # Decompress after hook has run.
         return fut.then(decompress)
