@@ -30,7 +30,7 @@ def _raise_obs_op_mismatch(func, prev_op):
 
 # TODO(future PR): maybe better name
 # TODO(future PR): add serialization support
-class AutoQuantizationState(object):
+class AutoQuantizationState(torch.nn.Module):
     """
     Contains state necessary to perform auto quantization on the parent
     `nn.Module` instance.
@@ -40,6 +40,7 @@ class AutoQuantizationState(object):
     op_observers : List[Tuple[ObserverBase, Callable]]
 
     def __init__(self, qconfig):
+        super().__init__()
         self.idx = 0
         self.op_observers = []
         # TODO(future PR): change this to the subset of qconfig_dict

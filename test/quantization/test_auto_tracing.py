@@ -43,6 +43,7 @@ class TestAutoTracing(QuantizationTestCase):
 
         input_fp32 = torch.randn(1, 1, 2, 2)
         model_fp32_prepared(input_fp32)
+        print(model_fp32_prepared)
         print(model_fp32_prepared._auto_quantization_state.op_observers)
 
         model_int8 = _quantize_dynamic_tracing.convert(model_fp32_prepared)

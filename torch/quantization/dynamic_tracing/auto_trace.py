@@ -37,11 +37,7 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
 
         def __torch_function__(self, func, types, args=(), kwargs=None):
             kwargs = kwargs if kwargs else {}
-            if False:
-                def func(*args, **kwargs):
-                    return args[0]
             output = super().__torch_function__(func, types, args, kwargs)
-            print('output', output, 'func', func)
 
             # TODO: is this right? Don't really understand this
             if output is NotImplemented:
@@ -100,15 +96,26 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
             torch.nn.Module.__call__ = record_module
             nonlocal first_call
             try:
-                for k, v in self.named_modules():
-                    # TODO: is this valid?
-                    if hasattr(v, 'qconfig'):
+                named_modules = list(self.named_modules())
+                for k, v in named_modules:
+                    # TODO(future PR): verify correctness of this for all
+                    # quantizeable modules
+                    is_leaf = (
+                        # allowlist everything in torch.nn except nn.Sequential
+                        (v.__module__.startswith('torch.nn') and (
+                            not isinstance(v, torch.nn.Sequential)
+                        )) or
+                        # allowlist nni modules, as they inherit from nn.Sequential
+                        v.__module__.startswith('torch.nn.intrinsic')
+                    )
+                    if hasattr(v, 'qconfig') and not is_leaf:
                         if first_call:
                             v._auto_quantization_state = AutoQuantizationState(v.qconfig)
                             modules_to_introspect.add(v)
                         else:
-                            assert hasattr(v, '_auto_quantization_state')
-                            v._auto_quantization_state.reset_to_new_call()
+                            if not isinstance(v, AutoQuantizationState):
+                                assert hasattr(v, '_auto_quantization_state')
+                                v._auto_quantization_state.reset_to_new_call()
 
                 return super().__call__(*new_input, **new_kwargs)
             finally:
