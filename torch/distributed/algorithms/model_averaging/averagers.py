@@ -96,5 +96,5 @@ class PeriodicModelAverager:
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            utils.average_parameters(self.params, self.process_group)
+            utils.average_parameters(iter(self.params), self.process_group)
         self.step += 1
