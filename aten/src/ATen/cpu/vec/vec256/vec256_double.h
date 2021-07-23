@@ -3,9 +3,9 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 #include <sleef.h>
 #endif
 
@@ -14,7 +14,8 @@ namespace vec {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
 
-#if (defined(CPU_CAPABILITY_AVX) || defined(CPU_CAPABILITY_AVX2)) && !defined(_MSC_VER)
+
+#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
 
 template <> class Vectorized<double> {
 private:
@@ -67,7 +68,7 @@ public:
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
 
-    __at_align32__ double tmp_values[size()];
+    __at_align__ double tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
@@ -100,7 +101,7 @@ public:
     return _mm256_cmp_pd(values, _mm256_set1_pd(0.0), _CMP_UNORD_Q);
   }
   Vectorized<double> map(double (*const f)(double)) const {
-    __at_align32__ double tmp[size()];
+    __at_align__ double tmp[size()];
     store(tmp);
     for (int64_t i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -175,8 +176,8 @@ public:
     return map(calc_i0e);
   }
   Vectorized<double> igamma(const Vectorized<double> &x) const {
-    __at_align32__ double tmp[size()];
-    __at_align32__ double tmp_x[size()];
+    __at_align__ double tmp[size()];
+    __at_align__ double tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {
@@ -185,8 +186,8 @@ public:
     return loadu(tmp);
   }
   Vectorized<double> igammac(const Vectorized<double> &x) const {
-    __at_align32__ double tmp[size()];
-    __at_align32__ double tmp_x[size()];
+    __at_align__ double tmp[size()];
+    __at_align__ double tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
     for (int64_t i = 0; i < size(); i++) {
