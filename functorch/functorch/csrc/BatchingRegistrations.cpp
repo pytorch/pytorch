@@ -657,6 +657,11 @@ Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef shape, IntArrayRef stride) {
+  (void)stride;
+  return reshape_batching_rule(self, shape);
+}
+
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
@@ -1361,6 +1366,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
+  m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);
