@@ -110,7 +110,7 @@ def quantization_pertensor_hook(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 
-        return [aggregated_dequantized_tensor / world_size]
+        return aggregated_dequantized_tensor / world_size
 
     return fut.then(quantize_and_allgather).then(dequantize_and_aggregate)
 
@@ -203,11 +203,11 @@ def quantization_perchannel_hook(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 
-        return [
+        return (
             torch.flatten(aggregated_dequantized_tensor).cuda(tensor.device)[
                 : tensor.size()[0]
             ]
             / world_size
-        ]
+        )
 
     return fut.then(quantize_and_allgather).then(dequantize_and_aggregate)
