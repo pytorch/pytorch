@@ -945,7 +945,7 @@ class _NnapiSerializer(object):
             in_oper.shape[1] == 1 or (in_oper.shape[2] == 1 and in_oper.shape[3] == 1))
         if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_flatten:
             raise Exception(
-                "Currently, flatten is not supported on NHWC tensors")
+                "Currently, flatten is not supported on NHWC tensors unless C=1 or H=W=1")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
