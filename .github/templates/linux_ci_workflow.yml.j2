@@ -120,7 +120,7 @@ jobs:
       RUN_FAILURES_FIRST: ${{ contains(github.event.pull_request.labels.*.name, 'ci/run-failures-first') }}
     steps:
       - name: Get value of RUN_FAILURES_FIRST, as if we are in test-mode
-        run: echo ${RUN_FAILURES_FIRST}
+        run: echo "${RUN_FAILURES_FIRST}"
 {% endblock %}
 {%- endif -%}
 {%- if not is_libtorch %}

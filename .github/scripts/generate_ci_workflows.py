@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Set
+from typing import Set, List
 
 import jinja2
 from typing_extensions import Literal
@@ -146,7 +146,7 @@ class CIWorkflow:
         print(output_file_path)
 
 
-WINDOWS_WORKFLOWS = [
+WINDOWS_WORKFLOWS: List[CIWorkflow] = [
     # CIWorkflow(
     #     arch="windows",
     #     build_environment="pytorch-win-vs2019-cpu-py3",
@@ -180,7 +180,7 @@ WINDOWS_WORKFLOWS = [
     # ),
 ]
 
-LINUX_WORKFLOWS = [
+LINUX_WORKFLOWS: List[CIWorkflow] = [
     CIWorkflow(
         arch="linux",
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
@@ -375,7 +375,7 @@ LINUX_WORKFLOWS = [
 ]
 
 
-BAZEL_WORKFLOWS = [
+BAZEL_WORKFLOWS: List[CIWorkflow] = [
     # CIWorkflow(
     #     arch="linux",
     #     build_environment="pytorch-linux-xenial-py3.6-gcc7-bazel-test",
