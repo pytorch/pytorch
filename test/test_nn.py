@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
-    ctcloss_reference, new_module_tests
+    ctcloss_reference, new_module_tests, single_batch_reference_fn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
@@ -11889,6 +11889,22 @@ add_test(NewModuleTest(
     fullname='MaxUnpool3d_net',
     check_gradgrad=False,))
 
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 2, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool2d_net_no_batch_dim',))
+
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d(2, return_indices=True),
+        nn.MaxUnpool3d(2)),
+    input_size=(1, 2, 4, 6),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool3d_net_no_batch_dim',
+    check_gradgrad=False))
 
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
