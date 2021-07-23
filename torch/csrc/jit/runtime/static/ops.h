@@ -139,6 +139,8 @@ bool isOptimizableContainerType(Node* n);
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
 
+bool hasVarArgs(Node* n);
+
 inline std::string PrintNode(const Node* node) {
   std::ostringstream ss;
   node->print(ss, 0, nullptr, false);
