@@ -1088,6 +1088,25 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_nn_activation_softmax(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        ((), (0, )),
+        ((S, ), (0, )),
+        ((S, S), (0, )),
+        ((S, S), (1, )),
+        ((S, M, S), (2, ))
+    )
+
+    def generator():
+        for shape, dim in cases:
+            yield SampleInput(make_arg(shape), args=(dim))
+            yield SampleInput(make_arg(shape), args=(dim), kwargs={'dtype': dtype})
+
+    return list(generator())
+
+
 def sample_inputs_norm_fro(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -6246,6 +6265,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.softmax',
+           aten_name="softmax",
+           supports_autograd=True,
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_nn_activation_softmax,
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
