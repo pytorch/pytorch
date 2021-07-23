@@ -177,6 +177,8 @@ class _OverlapInfo():
             parameter in that bucket, where ``rank`` is this process's own
             rank; the keys of this :class:`dict` are the bucket indices
             assigned to this rank.
+        broadcast_handles: :class:`list` of async work handles for the
+            parameter broadcasts.
     """
     def __init__(self):
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
