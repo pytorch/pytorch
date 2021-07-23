@@ -231,7 +231,8 @@ test_libtorch() {
       SITE_DIR=$(python -c "import site; print(site.getsitepackages()[0])")
       BIN_DIR="$SITE_DIR"/torch/bin
       LIB_DIR="$SITE_DIR"/torch/lib
-      ${SUDO} ln -sf "$LIB_DIR"/libjitbackend* "$BIN_DIR"
+      ${SUDO} ln -sf "$LIB_DIR"/libjitbackend_test.so "$BIN_DIR"
+      ${SUDO} ln -sf "$LIB_DIR"/libbackend_with_compiler.so "$BIN_DIR"
       ls -l "$BIN_DIR"
       ls -l "$LIB_DIR"
     else
