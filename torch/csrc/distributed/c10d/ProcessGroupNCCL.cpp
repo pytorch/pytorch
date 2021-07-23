@@ -958,7 +958,7 @@ int64_t check_gpu_tensors(const std::vector<at::Tensor>& tensors, bool same_devi
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Tensor list must be nonempty");
   }
-  if (tensors.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
+  if (!same_device && tensors.size() > static_cast<size_t>(at::cuda::getNumGPUs())) {
     TORCH_CHECK(false,
         "Tensor list mustn't be larger than the number of available GPUs");
   }

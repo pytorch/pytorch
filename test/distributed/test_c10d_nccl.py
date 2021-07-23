@@ -2164,7 +2164,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         tensors = [torch.full((60,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
         process_group.allreduce_coalesced(tensors)
         for i, t in enumerate(tensors):
-            self.assertEqual(t, i * self.world_size + self.world_size * (self.world_size + 1.) / 2.)
+            self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
