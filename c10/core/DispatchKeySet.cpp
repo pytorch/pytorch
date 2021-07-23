@@ -22,7 +22,9 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
     });
 
 bool isBackendDispatchKey(DispatchKey t) {
-  return t != DispatchKey::Undefined && backend_dispatch_keyset.has(t);
+  return t != DispatchKey::Undefined
+      // See Note [No Alias Keys in DispatchKeySet]
+      && !isAliasDispatchKey(t) && backend_dispatch_keyset.has(t);
 }
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
