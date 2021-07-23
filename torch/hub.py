@@ -121,7 +121,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
         page = 0
         while True:
             page += 1
-            url = url_prefix + '?per_page=100&page=' + str(page)
+            url = f'{url_prefix}?per_page=100&page={page}'
             with urlopen(url) as r:
                 response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
                 # Empty response means no more data to process
