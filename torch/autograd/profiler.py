@@ -1108,10 +1108,11 @@ def filter_stack_entry(entry):
     ]
     return all([not (f[0] in entry and f[1] in entry) for f in filtered_entries])
 
+MEMORY_EVENT_NAME = "[memory]"
 def filter_name(name):
     # ignoring the following utility ops
     filtered_out_names = [
-        "[memory]",
+        MEMORY_EVENT_NAME,  # used only for the top-level memory events
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
         "aten::is_leaf",
@@ -1137,7 +1138,7 @@ def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
 
     trace_start_us = result.trace_start_us()
-    mem_records = [[evt, False] for evt in result.events() if evt.name() == "[memory]"]
+    mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
     mem_records_acc = MemRecordsAcc(mem_records)
 
     def _cpu_memory_usage(mem_record):
@@ -1233,7 +1234,7 @@ def parse_kineto_results(result):
             max_evt_id += 1
             fe = FunctionEvent(
                 id=max_evt_id,
-                name="[memory]",
+                name=MEMORY_EVENT_NAME,
                 trace_name=None,  # not outputting in the trace
                 thread=mem_record[0].start_thread_id(),
                 start_us=rel_start_us,
@@ -1241,7 +1242,7 @@ def parse_kineto_results(result):
                 fwd_thread=mem_record[0].start_thread_id(),
                 input_shapes=[],
                 stack=[],
-                scope=0,  # function
+                scope=0,  # RecordScope::FUNCTION
                 cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
                 cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
                 is_async=False,
@@ -1371,7 +1372,7 @@ def parse_legacy_records(thread_records):
                     # output event as a top-level memory event
                     fe = FunctionEvent(
                         id=0,
-                        name="[memory]",
+                        name=MEMORY_EVENT_NAME,
                         trace_name=None,
                         thread=0,
                         start_us=0,
