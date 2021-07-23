@@ -317,9 +317,7 @@ DEFINE_CACHED_BUFFERS(double, 2);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchBoxCox, BatchBoxCoxOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchBoxCox)
     .NumInputs(3)
     .NumOutputs(1)
@@ -339,7 +337,6 @@ the transform of each column `x` of the input `data`:
     .Input(2, "lambda2", "tensor of size D with the same type as data")
     .Output(0, "output", "output matrix that applied box-cox transform");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_NOT_IMPLEMENTED_YET(BatchBoxCox);
 } // namespace
 } // namespace caffe2
