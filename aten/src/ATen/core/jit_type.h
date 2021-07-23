@@ -1629,26 +1629,31 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   return *result;
 }
 
-// Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned if default_to_union is false, and Any will be returned
-// if it is true. If t1 == t2, or t1 is a type refinement of t2,
-// then t2 will be returned (and vice versa).
+// Attempt to find the correct supertype of the two types `t1` and `t2`.
+// If no supertype is found, then nullopt will be returned if
+// `default_to_union` is false, and `Union[t1, t2]` will be returned
+// if it is true. If `t1 == t2`, or `t1` is a type refinement of `t2`,
+// then `t2` will be returned (and vice versa).
+//
 // Two different tensortypes will return dynamic.
-// Currently we chose not to support returning a NumberType for a float & int
-// input because of a lack of operator support for NumberType.
+//
+// Currently we chose not to support returning a NumberType for
+// two types from the set of {FloatType, IntType, ComplexType}, because
+// there is a lack of operator support for NumberType.
+//
 // If `type_hint` is an `InterfaceType`, then we can use that as a
 // potential supertype for `ClassType`s in the list. Otherwise, we have
 // no way to find and use some common interface type
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_any = false,
+    bool default_to_union = false,
     TypePtr type_hint = nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
-    bool default_to_any = false,
+    bool default_to_union = false,
     TypePtr type_hint = nullptr);
 
 namespace detail {

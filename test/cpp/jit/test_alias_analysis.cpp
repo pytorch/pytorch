@@ -708,6 +708,8 @@ TEST(ContainerAliasingTest, UnionAliasing) {
   EXPECT_TRUE(aliasDb.mayAlias(c, c));
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
   EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, c));
+  EXPECT_TRUE(aliasDb.mayContainAlias(b, c));
 }
 
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
