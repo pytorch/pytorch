@@ -315,13 +315,13 @@ TEST(TorchpyTest, SharedLibraryLoad) {
         I.global("libtest_deploy_lib", "simple_add")({5, 4})
             .toIValue()
             .toInt() == 9);
-    I.global("numpy", "array"); // force numpy to load here so it is loaded
-                                // twice before we run the tests
+    // I.global("numpy", "array"); // force numpy to load here so it is loaded
+    //                             // twice before we run the tests
   }
   for (auto& interp : manager.all_instances()) {
     auto I = interp.acquire_session();
-    auto i =
-        I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
+    // auto i =
+    //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
     I.global("libtest_deploy_lib", "raise_and_catch_exception")({true});
     try {
       I.global("libtest_deploy_lib", "raise_exception")(no_args);

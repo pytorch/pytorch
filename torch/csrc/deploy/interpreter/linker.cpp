@@ -883,7 +883,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
           break;
         case PT_GNU_EH_FRAME:
           eh_frame_hdr_ = reinterpret_cast<EH_Frame_HDR*>(seg_start);
-          assert(eh_frame_hdr_->eh_frame_ptr_enc == 0x1b);
+          DEPLOY_CHECK(eh_frame_hdr_->eh_frame_ptr_enc == 0x1b, "unsupported eh_frame_pointer_enc {}", eh_frame_hdr_->eh_frame_ptr_enc);
           eh_frame_ =
               (void*)((int64_t)&eh_frame_hdr_->eh_frame_ptr + eh_frame_hdr_->eh_frame_ptr);
           break;
