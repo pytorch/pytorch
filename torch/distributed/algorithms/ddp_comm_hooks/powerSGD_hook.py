@@ -468,7 +468,7 @@ def powerSGD_hook(
     ).get_future()
 
     def unpack_uncompressed_tensors_and_allreduce_ps(fut):
-        uncompressed_tensors_memory = fut.value()[0].div_(world_size)
+        uncompressed_tensors_memory = fut.value().div_(world_size)
         idx = 0
         for tensor in uncompressed_tensors:
             tensor.copy_(
@@ -477,13 +477,7 @@ def powerSGD_hook(
             idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
-        return [
-            dist.all_reduce(
-                state.p_memory_dict[bucket_index], group=group_to_use, async_op=True
-            )
-            .get_future()
-            .wait()[0]
-        ]
+        return dist.all_reduce(state.p_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
 
     def compute_qs(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
@@ -499,16 +493,10 @@ def powerSGD_hook(
         # For warm-start, can take one such step at a time, and alternate between them.
 
         # Allreduce Qs.
-        return [
-            dist.all_reduce(
-                state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
-            )
-            .get_future()
-            .wait()[0]
-        ]
+        return dist.all_reduce(state.q_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
 
         for p, q, tensor in zip(ps, qs, tensors_to_compress):
             torch.matmul(p, q.t(), out=tensor)
@@ -524,7 +512,7 @@ def powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [input_tensor]
+        return input_tensor
 
     return (
         allreduce_contiguous_uncompressed_tensors_fut.then(
@@ -707,16 +695,10 @@ def batched_powerSGD_hook(
         # one left multiplication and one right multiplication.
         # For warm-start, can take one such step at a time, and alternate between them.
 
-        return [
-            dist.all_reduce(
-                state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
-            )
-            .get_future()
-            .wait()[0]
-        ]
+        return dist.all_reduce(state.q_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
         torch.matmul(
             state.p_memory_dict[bucket_index],
             state.q_memory_dict[bucket_index].t(),
@@ -737,6 +719,6 @@ def batched_powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [ret]
+        return ret
 
     return allreduce_p_fut.then(compute_q).then(decompress)

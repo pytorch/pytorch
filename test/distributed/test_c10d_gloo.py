@@ -1985,7 +1985,7 @@ class DistributedDataParallelTest(
         ) -> torch.futures.Future:
             def div_by_world_size(fut):
                 # Divide the result by 2 * world_size.
-                return [t / self.world_size for t in fut.wait()]
+                return fut.wait()[0] / self.world_size
 
             # Prepare allreduced grad bucket tensors by running an async work.
             fut = process_group.allreduce([bucket.get_tensor()]).get_future()

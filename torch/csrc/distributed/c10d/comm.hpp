@@ -81,7 +81,7 @@ class TORCH_API GradBucket {
 // Base class of both `PythonCommHook` and `CppCommHook`.
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook
-// result into a tensor vector.
+// result into a tensor.
 class TORCH_PYTHON_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
@@ -95,24 +95,24 @@ class TORCH_PYTHON_API CommHookInterface {
   // Returns the resulting tensors once the communication hook result is
   // ready. The resulting tensors will then be copied to the grads of
   // individual parameters.
-  virtual std::vector<at::Tensor> parseHookResult(
+  virtual at::Tensor parseHookResult(
       const c10::IValue& result) = 0;
 };
 
 namespace detail {
 // This helper function is called both by CppCommHookInterface below and inside
 // reducer.
-inline std::vector<at::Tensor> parseCppCommHookResult(
+inline at::Tensor parseCppCommHookResult(
     const c10::IValue& result) {
   TORCH_INTERNAL_ASSERT(
       result.isTensor() || result.isTensorList(),
       "expected the hook result is either a Tensor or a TensorList");
 
   if (result.isTensor()) {
-    return {result.toTensor()};
+    return result.toTensor();
   }
 
-  return result.toTensorVector();
+  return result.toTensorVector()[0];
 }
 } // namespace detail
 
@@ -126,7 +126,7 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
 
   virtual ~CppCommHookInterface() {}
 
-  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
+  at::Tensor parseHookResult(const c10::IValue& result) override {
     return detail::parseCppCommHookResult(result);
   }
 
