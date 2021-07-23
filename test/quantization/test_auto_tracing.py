@@ -22,8 +22,9 @@ class TestAutoTracing(QuantizationTestCase):
             def forward(self, x):
                 x1 = self.conv(x)
                 x2 = self.relu(x)
-                x3 = x + x2
-                return x3
+                x3 = x1 + x2
+                x4 = x3 + x3
+                return x4
 
         model_fp32 = M()
 
@@ -44,7 +45,6 @@ class TestAutoTracing(QuantizationTestCase):
         input_fp32 = torch.randn(1, 1, 2, 2)
         model_fp32_prepared(input_fp32)
         print(model_fp32_prepared)
-        print(model_fp32_prepared._auto_quantization_state.op_observers)
 
         model_int8 = _quantize_dynamic_tracing.convert(model_fp32_prepared)
         print(model_int8)

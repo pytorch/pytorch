@@ -37,22 +37,32 @@ class AutoQuantizationState(torch.nn.Module):
     """
 
     idx : int
-    op_observers : List[Tuple[ObserverBase, Callable]]
 
     def __init__(self, qconfig):
         super().__init__()
         self.idx = 0
-        self.op_observers = []
         # TODO(future PR): change this to the subset of qconfig_dict
         # relevant to the parent module
         self.qconfig = qconfig
+        self.idx_to_observer = torch.nn.ModuleDict()
+        self.idx_to_op = {}
+
+    def extra_repr(self):
+        # idx_to_op
+        s = "(idx_to_op): {\n"
+        for k, v in self.idx_to_op.items():
+            s += f"  {k}: {v}\n"
+        s += "}"
+        return s
 
     def _insert_observer(self, op: Callable) -> None:
-        self.op_observers.insert(self.idx, (self.qconfig.activation(), op))
+        self.idx_to_observer[str(self.idx)] = self.qconfig.activation()
+        self.idx_to_op[str(self.idx)] = op
 
     def _get_next(self, prev_op: Callable) -> Tuple[ObserverBase, Callable]:
         try:
-            observer, func = self.op_observers[self.idx]
+            observer = self.idx_to_observer[str(self.idx)]
+            func = self.idx_to_op[str(self.idx)]
         except IndexError:
             _raise_obs_not_found_error(func)
         if prev_op != func:

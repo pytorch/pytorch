@@ -247,7 +247,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                     setattr(copied, name, rewrite_helper(child))
 
                 if hasattr(mod, '_auto_quantization_state') and \
-                        len(mod._auto_quantization_state.op_observers) != 0:  # type: ignore[union-attr, arg-type]
+                        len(mod._auto_quantization_state.idx_to_observer) != 0:  # type: ignore[union-attr, arg-type]
                     copied._auto_quantization_state.reset_to_new_call()  # type: ignore[union-attr]
 
                     graph = AllModuleTracer().trace(copied)
