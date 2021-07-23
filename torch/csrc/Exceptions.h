@@ -126,7 +126,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 
 // Throwing this exception means that the python error flags have been already

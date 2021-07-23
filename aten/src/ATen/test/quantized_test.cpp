@@ -13,7 +13,6 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
   Tensor r = at::ones({num_elements});
@@ -69,7 +68,6 @@ TEST(TestQTensor, QuantDequantAPIs) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, RoundingMode) {
   // We assume that quantization is defined as:
   //   qx = clamp(zero_point + round(x / scale))
@@ -90,7 +88,6 @@ TEST(TestQTensor, RoundingMode) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, Item) {
   Tensor r = at::ones({1});
   const float scale = 1;
@@ -99,7 +96,6 @@ TEST(TestQTensor, Item) {
   ASSERT_EQ(r.item().to<float>(), qr.item().to<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, EmptyQuantized) {
   float scale = 0.5;
   int zero_point = 10;
@@ -121,7 +117,6 @@ TEST(TestQTensor, EmptyQuantized) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, EmptyPerchannelQuantized) {
   int numel = 10;
   auto scales = rand({numel}).toType(kDouble);
@@ -150,7 +145,6 @@ TEST(TestQTensor, EmptyPerchannelQuantized) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantizePerChannel4d) {
   int C = 64, H = 10, W = 10;
   auto scales = rand({C}).toType(kDouble);
@@ -180,7 +174,6 @@ TEST(TestQTensor, QuantizePerChannel4d) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
   int C = 64, H = 10, W = 10;
   auto scales = rand({C}).toType(kDouble);

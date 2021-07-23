@@ -12,7 +12,6 @@ struct TestValue {
   c10::optional<int> rvalue_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
   auto ptr = torch::make_unique<TestValue>(123);
   ASSERT_FALSE(ptr->lvalue_.has_value());
@@ -20,7 +19,6 @@ TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {
   ASSERT_EQ(*ptr->rvalue_, 123);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
   int x = 5;
   auto ptr = torch::make_unique<TestValue>(x);
@@ -29,7 +27,6 @@ TEST(MakeUniqueTest, ForwardLvaluesCorrectly) {
   ASSERT_FALSE(ptr->rvalue_.has_value());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MakeUniqueTest, CanConstructUniquePtrOfArray) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   auto ptr = torch::make_unique<int[]>(3);
