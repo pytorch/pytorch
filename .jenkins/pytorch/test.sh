@@ -217,7 +217,7 @@ fi
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
-    echo $LD_LIBRARY_PATH
+    echo "$LD_LIBRARY_PATH"
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
