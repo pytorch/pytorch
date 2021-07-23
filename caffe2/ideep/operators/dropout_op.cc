@@ -88,9 +88,7 @@ class IDEEPDropoutGradientOp final : public IDEEPOperator {
   OUTPUT_TAGS(INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Dropout, IDEEPDropoutOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(DropoutGrad, IDEEPDropoutGradientOp);
 
 } // namespace

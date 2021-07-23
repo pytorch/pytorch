@@ -12,7 +12,6 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(quantized_normalize_stub);
 
 Tensor quantized_layer_norm_impl(
