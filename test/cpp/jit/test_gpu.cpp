@@ -15546,6 +15546,39 @@ TEST(NVFuserTest, FusionIssue970_CUDA) {
   testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+// Reproducer of #1016
+TEST(NVFuserTest, FusionIssue1016_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(2));
+
+  fusion.addOutput(tv2);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  tv2->split(-1, 8);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  int numel_x = 10;
+  int numel_y = 11;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({numel_x, numel_y}, options);
+  std::vector<IValue> inputs = {t0};
+  auto outputs = fe.runFusion(inputs);
+
+  auto ref = t0 + 1 + 2;
+
+  testValidate(&fusion, outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

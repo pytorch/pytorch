@@ -426,8 +426,13 @@ void IndexCompute::handle(Split* split) {
   } else {
     index_map_[in_id] = ir_builder.addExpr(
         ir_builder.mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
-    extent_map_[in_id] =
-        ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
+    // The extent of a root axis should be only updated when its
+    // allocation is partial, i.e., zero_merged_in is true. See issue
+    // #1016 and the FusionIssue1016 test.
+    if (split->in()->definition() != nullptr || zero_merged_in) {
+      extent_map_[in_id] =
+          ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
+    }
   }
 }
 
