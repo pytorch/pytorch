@@ -229,6 +229,9 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             If ``False``, :meth:`step` runs disjointly after the backward pass
             (per normal).
             (default: ``False``)
+        use_extra_stream (bool, optional): if ``True``, use a second CUDA
+            stream for the optimizer computation; if ``False``, only use the
+            single default stream (default: ``False``).
         **defaults: any trailing arguments, which are forwarded to the local
             optimizer.
 
@@ -277,6 +280,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         process_group: Optional[Any] = None,
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
+        use_extra_stream: bool = False,
         **defaults: Any,
     ):
         # Perform type and assumption checks on the input parameters
@@ -327,6 +331,14 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 )
             raise ValueError(error_msg)
         self._overlap_with_ddp = overlap_with_ddp
+        self._use_extra_stream = use_extra_stream
+        if use_extra_stream:
+            assert overlap_with_ddp, \
+                "`use_extra_stream` should only be set to `True` if " \
+                "`overlap_with_ddp=True`"
+        if use_extra_stream:
+            self._bwd_stream = torch.cuda.current_stream(self._default_device)
+            self._optim_stream = torch.cuda.Stream(self._default_device)
 
         # If `overlap_with_ddp=True`, local optimizer initialization is delayed
         # to run time after the necessary information has been collected
@@ -832,6 +844,11 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 # Since all information has been collected, perform the delayed
                 # initialization of the local optimizer and supporting state
                 self._init_zero_for_overlap()
+
+            if self._use_extra_stream:
+                # Ensure that all parameter updates are finished before the
+                # next forward pass
+                self._bwd_stream.wait_stream(self._optim_stream)
             # `step()` does not actually perform any parameter updates and is
             # only used for bookkeeping when `overlap_with_ddp=True`
             return None
