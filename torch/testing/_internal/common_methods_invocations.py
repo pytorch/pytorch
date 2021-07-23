@@ -1041,7 +1041,7 @@ def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kw
     )
 
     def generator():
-        for shape in case:
+        for shape in cases:
             yield SampleInput(make_arg(shape))
 
     return list(generator())
