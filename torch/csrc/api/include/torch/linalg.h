@@ -144,6 +144,14 @@ inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond, bool 
   return torch::linalg_pinv_out(result, input, rcond, hermitian);
 }
 
+inline std::tuple<Tensor, Tensor> qr(const Tensor& input, c10::string_view mode) {
+  return torch::linalg_qr(input, mode);
+}
+
+inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& input, c10::string_view mode) {
+  return torch::linalg_qr_out(Q, R, input, mode);
+}
+
 inline Tensor solve(const Tensor& input, const Tensor& other) {
   return torch::linalg_solve(input, other);
 }
@@ -214,7 +222,7 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
   return detail::cholesky_out(result, self);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_det is deprecated, use det instead.")
 inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
 }
@@ -294,22 +302,22 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return detail::lstsq(self, b, cond, driver);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
-/// DEPRECATED
+// C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
@@ -392,6 +400,19 @@ inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false
 
 inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
   return detail::pinv_out(result, input, rcond, hermitian);
+}
+
+/// Computes the QR decomposition
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.qr
+inline std::tuple<Tensor, Tensor> qr(const Tensor& input, c10::string_view mode="reduced") {
+  // C++17 Change the initialisation to "reduced"sv
+  //       Same for qr_out
+  return detail::qr(input, mode);
+}
+
+inline std::tuple<Tensor&, Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& input, c10::string_view mode="reduced") {
+  return detail::qr_out(Q, R, input, mode);
 }
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.

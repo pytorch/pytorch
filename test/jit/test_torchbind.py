@@ -332,7 +332,7 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     def test_torchbind_pass_wrong_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead found type \'Tensor\''):
             torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
 
     def test_torchbind_tracing_nested(self):

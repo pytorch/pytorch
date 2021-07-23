@@ -19,10 +19,192 @@
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/DistributionTemplates.h>
+#include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAMathCompat.h>
 
 namespace at {
 namespace native {
+
+// -----------------------------------
+// glu forward
+// -----------------------------------
+void glu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "glu_cuda", [&]() {
+    using acc_t = at::acc_type<scalar_t, true>;
+    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a_, scalar_t b_) -> scalar_t {
+      const acc_t a = a_;
+      const acc_t b = b_;
+      const acc_t one = acc_t(1);
+      const acc_t sigmoid = one / (one + std::exp(-b));
+      return a * sigmoid;
+    });
+  });
+}
+
+// -----------------------------------
+// glu backward
+// -----------------------------------
+
+// Byte offsets don't require multiplication by sizeof(T), so are slightly cheaper.
+// For fixed offsets, this removes all penalty from 64-bit indexing.
+template <typename T>
+__device__ T* byte_offset(T* ptr, int64_t offset) {
+  using byte_ptr_t = typename std::conditional<
+    std::is_const<T>::value, const char*, char*>::type;
+  return reinterpret_cast<T*>(
+    reinterpret_cast<byte_ptr_t>(ptr) + offset
+  );
+}
+
+template <typename scalar_t, typename OffsetCalc>
+__global__ void glu_backward_kernel(
+    int numel, scalar_t* gI, const scalar_t* I, const scalar_t* gO,
+    OffsetCalc offset_calculator,
+    int64_t gI_byte_offset, int64_t I_byte_offset) {
+  using acc_t = at::acc_type<scalar_t, true>;
+
+  const uint32_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (linear_index >= numel) {
+    return;
+  }
+  const auto offsets = offset_calculator.get(linear_index);
+
+  // We explicitly iterate over the first half of the input tensor, and
+  // gI_byte_offset and I_byte_offset are the offsets to access the
+  // corresponding index in the second half of the tensor.
+  const acc_t a = I[offsets[1]];
+  const acc_t b = *byte_offset(I + offsets[1], I_byte_offset);
+  const acc_t gO_val = gO[offsets[2]];
+
+  const auto one = acc_t(1);
+  const acc_t sigmoid = one / (one + std::exp(-b));
+
+  auto* gA = gI + offsets[0];
+  *gA = sigmoid * gO_val;
+
+  auto* gB = byte_offset(gA, gI_byte_offset);
+  *gB = (one - sigmoid) * sigmoid * gO_val * a;
+}
+
+void launch_glu_backward_kernel(const TensorIteratorBase& iter,
+                                int64_t gI_stride, int64_t I_stride) {
+  const auto N = iter.numel();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  const auto offset_calculator = make_element_offset_calculator<3>(iter);
+  constexpr int64_t block_size = 256;
+  const int64_t grid = (N + block_size - 1) / block_size;
+  const auto stream = at::cuda::getCurrentCUDAStream();
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "glu_backward_cuda", [&] {
+    auto gI = static_cast<scalar_t*>(iter.data_ptr(0));
+    auto I = static_cast<const scalar_t*>(iter.data_ptr(1));
+    auto gO = static_cast<const scalar_t*>(iter.data_ptr(2));
+    glu_backward_kernel<<<grid, block_size, 0, stream>>>(
+        N, gI, I, gO, offset_calculator,
+        gI_stride * sizeof(scalar_t), I_stride * sizeof(scalar_t));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+}
+
+Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
+                              int64_t dim, Tensor& grad_input) {
+  TORCH_CHECK(input.dim() > 0, "glu does not support 0-dimensional tensors");
+  auto wrap_dim = maybe_wrap_dim(dim, input.dim());
+  auto input_sizes = input.sizes();
+  const int64_t nIn = input_sizes[wrap_dim];
+  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
+              wrap_dim, " is size ", nIn);
+
+  resize_output(grad_input, input_sizes);
+
+  DimVector iter_shape(input_sizes);
+  const auto dim_size = nIn / 2;
+  iter_shape[wrap_dim] = dim_size;
+  TORCH_CHECK(grad_output.sizes() == IntArrayRef{iter_shape});
+
+  const auto iter = at::TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(grad_output)
+    .resize_outputs(false)
+    .declare_static_shape(iter_shape)
+    .build();
+
+  if (iter.numel() == 0) {
+    return grad_input;
+  }
+
+  const auto I_stride = input.strides()[wrap_dim] * dim_size;
+  const auto gI_stride = grad_input.strides()[wrap_dim] * dim_size;
+
+  if (iter.can_use_32bit_indexing()) {
+    launch_glu_backward_kernel(iter, gI_stride, I_stride);
+  } else {
+    for (auto sub_iter: iter.with_32bit_indexing()) {
+      launch_glu_backward_kernel(sub_iter, gI_stride, I_stride);
+    }
+  }
+  return grad_input;
+}
+
+Tensor glu_backward_cuda(const Tensor& grad_output, const Tensor& input, int64_t dim) {
+  auto grad_input = at::empty({0}, input.options());
+  return glu_backward_cuda_out(grad_output, input, dim, grad_input);
+}
+
+// -----------------------------------
+// log_sigmoid forward
+// -----------------------------------
+
+std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, Tensor& result, Tensor& buffer) {
+  // NOTE: buffer is only used by CPU dispatch, we just ignore it here
+  auto iter = TensorIteratorConfig()
+    .add_output(result)
+    .add_input(input)
+    .build();
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+                                 "log_sigmoid_forward_cuda", [&] {
+    using acc_t = acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+        [] GPU_LAMBDA (scalar_t in_) -> scalar_t {
+          const acc_t in = in_;
+          const auto max = std::max(acc_t(0), -in);
+          const auto z = std::exp(-max) + std::exp(-in - max);
+          return -(max + std::log(z));
+        });
+  });
+  return std::forward_as_tuple(result, buffer);
+}
+
+std::tuple<Tensor, Tensor> log_sigmoid_forward_cuda(const Tensor& input) {
+  auto result = at::empty_like(input);
+  auto buffer = at::empty({0}, input.options());
+  log_sigmoid_forward_out_cuda(input, result, buffer);
+  return std::forward_as_tuple(result, buffer);
+}
+
+// -----------------------------------
+// log_sigmoid backward
+// -----------------------------------
+
+void log_sigmoid_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+                                 "log_sigmoid_backward_cuda", [&] {
+    using acc_t = acc_type<scalar_t, true>;
+    gpu_kernel(iter,
+        [] GPU_LAMBDA (scalar_t in_, scalar_t grad_out_) -> scalar_t {
+          const acc_t in = in_;
+          const acc_t grad_out = grad_out_;
+          const auto max = std::max(acc_t(0), -in);
+          const auto z = std::exp(-max) + std::exp(-in - max);
+
+          auto in_negative = in < acc_t(0);
+          auto max_deriv = in_negative ? acc_t(1) : acc_t(0);
+          auto sign = in_negative ? acc_t(1) : -acc_t(1);
+          return grad_out * (max_deriv - sign * (acc_t(1) - acc_t(1) / z));
+        });
+  });
+}
 
 // -----------------------------------
 // prelu forward
@@ -728,10 +910,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_cuda) (
 
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
+REGISTER_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
 REGISTER_DISPATCH(elu_stub, &elu_kernel);
 REGISTER_DISPATCH(elu_backward_stub, &elu_backward_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);

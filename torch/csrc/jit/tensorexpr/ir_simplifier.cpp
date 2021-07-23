@@ -1849,6 +1849,7 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
         // divisor=multiplier=2, denom=t/7.
         Expr* c = evaluateOp(new Div(divisor, multiplier));
         divisor = multiplier;
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         denom = IRSimplifier::simplify(new Div(other, c));
       } else {
         return c10::nullopt;
