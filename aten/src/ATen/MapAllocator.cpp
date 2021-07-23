@@ -53,7 +53,6 @@ struct MapInfo {
   std::atomic<int> refcount;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
 const std::string unknown_eventname = "eventname not specified";

@@ -53,7 +53,6 @@ bool TryConvertingTensorRawValues(
 bool IsOperator(const std::string& op_type) {
   // pull in all the operators upon first invocation
   // Intentional leaky
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::set<std::string>* ops_ =
       new std::set<std::string>(caffe2::GetRegisteredOperators());
   return ops_->count(caffe2::OpRegistryKey(op_type, "DEFAULT"));

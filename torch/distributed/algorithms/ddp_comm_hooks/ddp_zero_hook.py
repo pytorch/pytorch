@@ -47,11 +47,11 @@ def hook_then_zero_step(
                 gradient bucket.
         """
         fut = hook(state, bucket)
-        if not zero._use_extra_stream:
+        if zero._use_extra_stream:
             fut.wait()
 
         with torch.cuda.stream(zero._optim_stream) if zero._use_extra_stream else contextlib.suppress():
-            def zero_step(_) -> List[torch.Tensor]:
+            def zero_step(fut: torch.futures.Future) -> torch.Tensor:
                 r"""
                 Performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step`
                 using the gradients in the given :class:`DistributedDataParallel`
@@ -59,7 +59,7 @@ def hook_then_zero_step(
                 """
                 # Proceed as normal until the DDP buckets have been rebuilt
                 if not ddp._has_rebuilt_buckets:
-                    return [bucket.get_tensor()]
+                    return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
 
                 bucket_index = bucket.get_index()
                 rank = zero.global_rank
@@ -81,7 +81,7 @@ def hook_then_zero_step(
                     params_per_rank[rank_to_update].extend(bucket_params)
                     params_per_bucket.append(bucket_params)
 
-                    return [bucket.get_tensor()]
+                    return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
 
                 if rank_to_update == rank:
                     assert len(zero.optim.param_groups) == 1, \
@@ -107,7 +107,7 @@ def hook_then_zero_step(
                 assert bucket_index in zero._buckets[device_index][rank_to_update]
                 dist.broadcast(zero._buckets[device_index][rank_to_update][bucket_index], src=rank_to_update, async_op=True)
 
-                return [bucket.get_tensor()]
+                return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
 
         return fut.then(zero_step)
 

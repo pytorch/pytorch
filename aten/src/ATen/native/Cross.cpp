@@ -6,7 +6,6 @@
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cross_stub);
 
 Tensor cross(const Tensor & input, const Tensor & other, const c10::optional<int64_t> dimension) {
