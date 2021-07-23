@@ -472,7 +472,7 @@ class _NnapiSerializer(object):
                 raise Exception("Flexible size is not supported for this operand.")
         return op_id, oper
 
-    def get_tensor_operand_or_constant(self, jitval, dim_value=None):
+    def get_tensor_operand_or_constant(self, jitval, dim_value=DimOrder.PRESUMED_CONTIGUOUS):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
             _, value = self.get_constant_value(jitval, "TensorType")
