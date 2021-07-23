@@ -13,7 +13,7 @@ from .quantization_patterns import (
     binary_op_supported_dtypes,
     binary_reference_op_supported_dtypes,
 )
-from .qconfig_utils import (
+from ..qconfig import (
     QConfigAny,
 )
 from .graph_module import (

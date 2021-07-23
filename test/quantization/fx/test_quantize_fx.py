@@ -1,4 +1,5 @@
 import os
+from torch.nn.modules import linear
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -1173,7 +1174,6 @@ class TestQuantizeFx(QuantizationTestCase):
                 "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
                 "module_name": [("module_conv2", module_name_qconfig)]}
             m_prep = prepare_fx(m, qconfig_dict)
-
             self.assertEqual(m_prep.linear.qconfig.activation.p.func, global_qconfig.activation.p.func)
             self.assertEqual(m_prep.linear.qconfig.weight.p.func, global_qconfig.weight.p.func)
             self.assertEqual(m_prep.conv.qconfig.activation.p.func, object_type_qconfig.activation.p.func)

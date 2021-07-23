@@ -12,7 +12,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 from .quantization_types import Pattern
-from .qconfig_utils import QConfigAny
+from ..qconfig import QConfigAny
 from .match_utils import (
     find_matches,
 )

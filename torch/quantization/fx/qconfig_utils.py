@@ -1,7 +1,7 @@
 import torch
 from collections import OrderedDict, defaultdict
 from typing import Union, Callable, Any, Dict, Tuple, Set
-from torch.quantization.qconfig import add_module_to_qconfig_obs_ctr
+from torch.quantization.qconfig import add_module_to_qconfig_obs_ctr, QConfigAny
 
 import re
 
@@ -10,10 +10,6 @@ from torch.fx.graph import (
 )
 
 from .utils import _parent_name
-
-# TODO: move this to quantization_types.py?
-QConfigAny = Union[torch.quantization.QConfig,
-                   torch.quantization.QConfigDynamic, None]
 
 
 def get_flattened_qconfig_dict(qconfig_dict):
