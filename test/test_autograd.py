@@ -5797,8 +5797,8 @@ for shape in [(1,), ()]:
 
             with warnings.catch_warnings(record=True) as w:
                 y = a * a
-                # should raise two warnings from a being saved twice assert
-                len(w) == 2
+                # should raise two warnings from a being saved twice
+                assert len(w) == 2
         finally:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
 
