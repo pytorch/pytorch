@@ -43,7 +43,6 @@ caffe2::NetDef Transform(const caffe2::NetDef& net) {
 } // namespace
 
 // N0 -> MyConv -> N1
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, unit) {
   caffe2::NetDef net;
   AddConv(&net, 0);
@@ -60,7 +59,6 @@ TEST(BackendCuttingTest, unit) {
 }
 
 // X -> CopyIn -> MyConv -> MyConv -> CopyOut -> Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, line) {
   caffe2::NetDef net;
   net.add_external_input("X");
@@ -90,7 +88,6 @@ TEST(BackendCuttingTest, line) {
 //  X0 -> CopyIn -> MyConv -|
 //                           > Concat -> CopyOut -> Y
 //  N2 -> MyConv -> MyRelu -|
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, convergedPaths) {
   caffe2::NetDef net;
   net.add_external_input("X0");
@@ -127,7 +124,6 @@ TEST(BackendCuttingTest, convergedPaths) {
 //                -> Random -> Relu -> MyConv4
 //                |                           |
 // N0 -> MyConv -> MyRelu -> MyConv2 ----------> Concat -> CopyOut -> Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendCuttingTest, skipPath) {
   caffe2::NetDef net;
   net.add_external_input("N0");
