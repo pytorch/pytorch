@@ -13,6 +13,11 @@ fp32_to_int8_fun_mapping = {
     torch.cat: torch.ops.quantized.cat,
 }
 
+module_types_supported_by_quantization = set([
+    torch.nn.intrinsic.modules.fused.ConvReLU2d,
+    torch.nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
+])
+
 def _raise_obs_not_found_error(func):
     raise RuntimeError(
         f'Encountered arithmetic operation {torch.typename(func)} but we have '
@@ -90,7 +95,17 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 kwargs.update({'scale': scale.item(), 'zero_point': zp.item()})
             func = fp32_to_int8_fun_mapping[func]
+
         return func, args, kwargs
+
+    def maybe_update_mod_args_kwargs_for_quantized_inference(
+        self,
+        mod,
+    ):
+        for module_type in module_types_supported_by_quantization:
+            if isinstance(mod, module_type):
+                self.idx += 1
+                break
 
     def after_observed_function_hook(self, func, output, first_call):
         """
@@ -102,6 +117,16 @@ class AutoQuantizationState(torch.nn.Module):
                 self._insert_observer(func)
             output = self._observe(output, func)
         return output
+
+    def after_module_hook(self, mod, output, first_call):
+        """
+        This function is called after a module call
+        """
+        for module_type in module_types_supported_by_quantization:
+            if isinstance(mod, module_type):
+                self.idx_to_observer[str(self.idx)] = None
+                self.idx_to_op[str(self.idx)] = type(mod)
+                self.idx += 1
 
     def reset_to_new_call(self):
         """

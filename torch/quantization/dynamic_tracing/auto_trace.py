@@ -9,6 +9,19 @@ from .quantization_state import (
 )
 
 
+# TODO(future PR): verify correctness of this for all
+# quantizeable modules
+def is_leaf(m: torch.nn.Module) -> bool:
+    return (
+        # allowlist everything in torch.nn except nn.Sequential
+        (m.__module__.startswith('torch.nn') and (
+            not isinstance(m, torch.nn.Sequential)
+        )) or
+        # allowlist nni modules, as they inherit from nn.Sequential
+        m.__module__.startswith('torch.nn.intrinsic')
+    )
+
+
 def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     def convert_to_interception_proxy(x):
         if isinstance(x, torch.Tensor):
@@ -19,6 +32,7 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     cur_module = None
     modules_to_introspect = set()
     first_call = True
+    module_stack : List[torch.nn.Module] = []
 
     class QuantizationInterceptionProxy(torch.Tensor):
         """
@@ -90,25 +104,23 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
                 old_module = cur_module
                 cur_module = self
                 try:
-                    return orig_module_call(self, *input, **kwargs)
+                    parent_module = module_stack[-1] if len(module_stack) else None
+                    module_stack.append(self)
+                    # print(type(self), [type(x) for x in module_stack])
+                    output = orig_module_call(self, *input, **kwargs)
+                    if parent_module is not None and hasattr(parent_module, '_auto_quantization_state'):
+                        parent_module._auto_quantization_state.after_module_hook(
+                            cur_module, output, first_call)
+                    return output
                 finally:
+                    module_stack.pop()
                     cur_module = old_module
             torch.nn.Module.__call__ = record_module
             nonlocal first_call
             try:
                 named_modules = list(self.named_modules())
                 for k, v in named_modules:
-                    # TODO(future PR): verify correctness of this for all
-                    # quantizeable modules
-                    is_leaf = (
-                        # allowlist everything in torch.nn except nn.Sequential
-                        (v.__module__.startswith('torch.nn') and (
-                            not isinstance(v, torch.nn.Sequential)
-                        )) or
-                        # allowlist nni modules, as they inherit from nn.Sequential
-                        v.__module__.startswith('torch.nn.intrinsic')
-                    )
-                    if hasattr(v, 'qconfig') and not is_leaf:
+                    if hasattr(v, 'qconfig') and not is_leaf(v):
                         if first_call:
                             v._auto_quantization_state = AutoQuantizationState(v.qconfig)
                             modules_to_introspect.add(v)
@@ -128,6 +140,8 @@ def add_auto_observation(model : torch.nn.Module) -> torch.nn.Module:
     return model
 
 
+# TODO(future PR): need ability to create N nodes from 1 node, for
+# reference patterns
 class AllModuleTracer(torch.fx.Tracer):
     def is_leaf_module(self, m, module_qualified_name) -> bool:
         return True
@@ -137,9 +151,15 @@ class AllModuleTracer(torch.fx.Tracer):
             target = torch.add
         if target == operator.mul:
             target = torch.mul
-        target, args, kwargs = \
-            self.root._auto_quantization_state.maybe_update_func_args_kwargs_for_quantized_inference(
-                target, args, kwargs, unwrap_scale_zp=True)
+        if kind == 'call_function':
+            target, args, kwargs = \
+                self.root._auto_quantization_state.maybe_update_func_args_kwargs_for_quantized_inference(
+                    target, args, kwargs, unwrap_scale_zp=True)
+        elif kind == 'call_module':
+            # TODO: handle fqn
+            module_instance = getattr(self.root, target)
+            self.root._auto_quantization_state.maybe_update_mod_args_kwargs_for_quantized_inference(
+                module_instance)
         return super().create_node(kind, target, args, kwargs, name, type_expr)
 
 
@@ -191,6 +211,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 torch.mul, [type(self), type(other)], (self, other), {})
 
     cur_module = None
+    module_stack : List[torch.nn.Module] = []
 
     assert len(module.__class__.__bases__) == 1
 
@@ -218,8 +239,16 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 old_module = cur_module
                 cur_module = self
                 try:
-                    return orig_module_call(self, *input, **kwargs)
+                    parent_module = module_stack[-1] if len(module_stack) else None
+                    module_stack.append(self)
+                    output = orig_module_call(self, *input, **kwargs)
+                    if parent_module is not None and hasattr(parent_module, '_auto_quantization_state'):
+                        first_call = False
+                        parent_module._auto_quantization_state.after_module_hook(
+                            cur_module, output, first_call)
+                    return output
                 finally:
+                    module_stack.pop()
                     cur_module = old_module
             torch.nn.Module.__call__ = record_module
 
