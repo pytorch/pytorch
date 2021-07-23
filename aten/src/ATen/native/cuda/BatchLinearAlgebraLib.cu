@@ -1249,9 +1249,6 @@ static void linalg_eigh_cusolver_syevj_batched(const Tensor& eigenvalues, const 
 }
 
 void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
-  // TODO: syevj_batched should be added here, but at least for CUDA 11.2 it contains a bug leading to incorrect results
-  // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
-
   // syevj is better than syevd for float32 dtype and matrix sizes 32x32 - 512x512
   // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
   if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
