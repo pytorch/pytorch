@@ -349,12 +349,20 @@ additional_op_db.extend([
 ])
 
 def sample_inputs_pad(self, device, dtype, requires_grad, mode='constant', value=None):
-    inp = make_tensor((2, 3, 4, 5), device=device, dtype=dtype,
-                      requires_grad=requires_grad, low=-1, high=1)
+    valid_lengths = {
+        'constant': [1,2,3,4,5],
+        'reflect': [3, 4],
+        'replicate': [3, 4, 5],
+        'circular': [3, 4, 5],
+    }
     sample_inputs = []
-    for pad in [(1, 1, 1, 1), (1, 2, 3, 0)]:
-        args = (pad, mode) if value is None else (pad, mode, value)
-        sample_inputs.append(SampleInput(inp, args=args))
+    for length in valid_lengths[mode]:
+        inp = make_tensor(list(range(2, length + 2)), device=device, dtype=dtype,
+                        requires_grad=requires_grad, low=-1, high=1)
+        num_pad_dims = (length - 2) * 2
+        for pad in [[1] * num_pad_dims, [1, 2] * (num_pad_dims // 2)]:
+            args = (pad, mode) if value is None else (pad, mode, value)
+            sample_inputs.append(SampleInput(inp, args=args))
     return sample_inputs
 
 for mode in ['constant', 'reflect', 'replicate', 'circular']:

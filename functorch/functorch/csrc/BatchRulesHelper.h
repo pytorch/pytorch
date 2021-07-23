@@ -17,6 +17,8 @@
 #include <functorch/csrc/Constants.h>
 
 namespace at { namespace functorch {
+Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
+Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
@@ -44,6 +46,14 @@ std::tuple<Tensor,optional<int64_t>> variadic_bdims_batch_rule(const Tensor& sel
   return std::make_tuple(Func(self_, std::forward<ExtraArgs>(extra_args)...), self_bdim.has_value() ? optional<int64_t>{0} : nullopt);
 }
 
+template <typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor,optional<int64_t>> existing_bdim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
+  auto self_ = reshape_dim_into(*self_bdim, 0, self);
+  auto out = Func(self_, std::forward<ExtraArgs>(extra_args)...);
+  return std::make_tuple(reshape_dim_outof(0, self.sizes()[*self_bdim], out), 0);
+}
+
+
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
@@ -54,9 +64,6 @@ Tensor& unary_inplace_batch_rule(Tensor& self, optional<int64_t>, ExtraArgs... e
   INVOKE(self, Method)(std::forward<ExtraArgs>(extra_args)...);
   return self;
 }
-
-Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
-Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
 }}
 
