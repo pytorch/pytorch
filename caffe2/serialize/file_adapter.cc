@@ -27,7 +27,7 @@ FileAdapter::FileAdapter(const std::string& file_name): file_(file_name) {
 #if defined(_MSC_VER)
   const int64_t ftell_ret = _ftelli64(file_.fp_);
 #else
-  const off64_t ftell_ret = ftello64(file_.fp_);
+  const off_t ftell_ret = ftello(file_.fp_);
 #endif
   TORCH_CHECK(ftell_ret != -1L, "ftell returned ", ftell_ret);
   size_ = ftell_ret;
@@ -47,11 +47,11 @@ size_t FileAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
   // Clamp 'n' to the smaller of 'size_ - pos' and 'n' itself. i.e. if the
   // user requested to read beyond the end of the file, we clamp to just the
   // end of the file.
-  n = std::min(size_ - pos, n);
+  n = std::min(static_cast<size_t>(size_ - pos), n);
 #if defined(_MSC_VER)
   const int fseek_ret = _fseeki64(file_.fp_, pos, SEEK_SET);
 #else
-  const int fseek_ret = fseeko64(file_.fp_, pos, SEEK_SET);
+  const int fseek_ret = fseeko(file_.fp_, pos, SEEK_SET);
 #endif
   TORCH_CHECK(
     fseek_ret == 0,
