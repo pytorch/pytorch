@@ -124,7 +124,6 @@ static void copy_kernel(TensorIterator& iter, bool non_blocking) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
 } // namespace native
