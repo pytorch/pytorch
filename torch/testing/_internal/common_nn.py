@@ -4924,7 +4924,7 @@ classification_criterion_no_batch_extra_info: Dict[str, dict] = {
 reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
-    classificaiton_test_info = dict(
+    classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args: getattr(nn, name)(reduction=reduction),
         input_fn=input_fn,
@@ -4932,8 +4932,8 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
         test_cpp_api_parity=False,
     )
     extra_info = classification_criterion_no_batch_extra_info.get(name, {})
-    classificaiton_test_info.update(extra_info)
-    criterion_tests.append(classificaiton_test_info)
+    classification_test_info.update(extra_info)
+    criterion_tests.append(classification_test_info)
 
 
 class NNTestCase(TestCase):
