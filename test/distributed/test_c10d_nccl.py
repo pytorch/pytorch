@@ -2162,7 +2162,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         device = torch.device("cuda:%d" % self.rank)
         tensors = [torch.full((60,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
-        process_group.allreduce_coalesced(tensors)
+        torch.distributed.all_reduce_coalesced(tensors, group=process_group)
         for i, t in enumerate(tensors):
             self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
 
