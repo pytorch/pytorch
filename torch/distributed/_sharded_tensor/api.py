@@ -15,7 +15,7 @@ from torch.distributed._sharding_spec import (
     ShardMetadata,
     ShardingSpec,
 )
-from torch.distributed._sharding_spec._internals import is_valid_device
+from torch.distributed._sharding_spec._utils import is_valid_device, check_tensor
 from torch.distributed.utils import _parse_remote_device
 
 # Tracking for sharded tensor objects.
@@ -322,7 +322,7 @@ class ShardedTensor(object):
         memory_format,
     ):
         # Validate the sharding spec is compatible with the tensor.
-        self._sharding_spec.check_tensor(dims)  # type: ignore[attr-defined]
+        check_tensor(self._sharding_spec.shards, dims)  # type: ignore[attr-defined]
 
         current_rank = dist.get_rank(self._process_group)
 
