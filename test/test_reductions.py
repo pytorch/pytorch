@@ -2,19 +2,23 @@ import torch
 import numpy as np
 
 import math
-from typing import Dict, List
 import random
+import warnings
+from typing import Dict, List
 from functools import partial
 from itertools import product, combinations, permutations
-import warnings
 
 from torch._six import inf, nan
+from torch.testing import floating_and_complex_types
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
-    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, precisionOverride)
+    instantiate_device_type_tests, onlyCPU, dtypes,  dtypesIfCUDA, dtypesIfCPU,
+    onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest,  ops, OpDTypes, precisionOverride)
+from torch.testing._internal.common_methods_invocations import (
+    ReductionOpInfo, reduction_ops)
+
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -53,7 +57,141 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
+
 class TestReductions(TestCase):
+
+    ###########################################################################
+    # ReductionOpInfo unit tests
+    ###########################################################################
+
+    @ops(reduction_ops)
+    def test_dim_default(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the default is to reduce all dimensions."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t)[0]
+        self.assertEqual(op(t, **kwargs).ndim, 0)
+
+    @ops(reduction_ops)
+    def test_dim_default_keepdim(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the default when keepdim=True is to reduce all dimensions to size 1."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t)[0]
+        self.assertEqual(op(t, keepdim=True, **kwargs).shape, [1, 1])
+
+    @ops(reduction_ops)
+    def test_dim_none(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=None reduces all dimensions."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=None)[0]
+        self.assertEqual(op(t, dim=None, **kwargs).ndim, 0)
+
+    @ops(reduction_ops)
+    def test_dim_none_keepdim(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=None, keepdim=True reduces all dimensions to size 1."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=None)[0]
+        self.assertEqual(op(t, dim=None, keepdim=True, **kwargs).shape, [1, 1])
+
+    @ops(reduction_ops)
+    def test_dim_single(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=i reduces dimension i."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=0)[0]
+        self.assertEqual(op(t, dim=0, **kwargs).shape, [3])
+
+    @ops(reduction_ops)
+    def test_dim_single_keepdim(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=i, keepdim=True reduces dimension i to size 1."""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=0)[0]
+        self.assertEqual(op(t, dim=0, keepdim=True, **kwargs).shape, [1, 3])
+
+    @ops(filter(lambda op: op.reduces_multiple_dims, reduction_ops))
+    def test_dim_multi(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
+        t = make_tensor((2, 3, 2), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=[0, 2])[0]
+        self.assertEqual(op(t, dim=[0, 2], **kwargs).shape, [3])
+
+    @ops(filter(lambda op: op.reduces_multiple_dims, reduction_ops))
+    def test_dim_multi_keepdim(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=[i, j, ...], keepdim=True reduces dimensions i, j, ... to size 1."""
+        t = make_tensor((2, 3, 2), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=[0, 2])[0]
+        self.assertEqual(op(t, dim=[0, 2], keepdim=True, **kwargs).shape, [1, 3, 1])
+
+    @ops(filter(lambda op: op.reduces_multiple_dims, reduction_ops))
+    def test_dim_empty(self, device, dtype, op: ReductionOpInfo):
+        """Tests that dim=() or dim=[] is a noop"""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=[])[0]
+        self.assertEqual(op(t, dim=[], **kwargs), t)
+
+    @ops(reduction_ops)
+    def test_dim_offbounds(self, device, dtype, op: ReductionOpInfo):
+        """Tests that passing an off-bounds dim throws"""
+        t = make_tensor((2, 3), device, dtype)
+        kwargs, _ = op.generate_kwargs(t, dim=2)[0]
+        with self.assertRaises(IndexError):
+            op(t, dim=2, **kwargs)
+
+    @ops(filter(lambda op: op.computes_multiple_values, reduction_ops))
+    def test_multiple_results(self, device, dtype, op: ReductionOpInfo):
+        """Tests that reductions that return more than one result prepend them
+        as a new dimension
+        """
+        pass
+
+    @ops(reduction_ops)
+    def test_non_zero_dim_of_empty_tensor(self, device, dtype, op: ReductionOpInfo):
+        """Tests that reducing a nonzero size dimension of an empty tensor is
+        allowed and returns an empty tensor with the dimensions reduced
+        """
+        pass
+
+    @ops(reduction_ops)
+    def test_empty_slice(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing over empty slices"""
+        pass
+
+    @ops(reduction_ops)
+    def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
+        """Tests that the result has the correct dtype"""
+        pass
+
+    @ops(reduction_ops, allowed_dtypes=floating_and_complex_types())
+    def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
+        """Tests that nan is propagated to the output by default"""
+        pass
+
+    @ops(reduction_ops, allowed_dtypes=floating_and_complex_types())
+    def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
+        """Tests the nan policy omit for operators that support it"""
+        pass
+
+    @ops(reduction_ops)
+    def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a scalar input"""
+        pass
+
+    @ops(reduction_ops)
+    def test_ref_random_input_small(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing many small tensors for correctness"""
+        pass
+
+    @ops(reduction_ops)
+    def test_ref_random_input_large(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing large tensors for accuracy"""
+        pass
+
+    @ops(reduction_ops)
+    def test_non_contiguous_input(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along non contiguous dimensions"""
+        pass
+
+    ###########################################################################
+    # TODO: Legacy tests - port to ReductionOpInfo
+    ###########################################################################
 
     def test_var_unbiased(self, device):
         tensor = torch.randn(100, device=device)
@@ -619,7 +757,8 @@ class TestReductions(TestCase):
             inputs = (x, x.t())
             dims = (0, 1)
             for xinp, d in product(inputs, dims):
-                self.compare_with_numpy(lambda x: get_values(torchfn(x, d, False)), lambda x: reffn(x, d, keepdims=False), xinp)
+                self.compare_with_numpy(lambda x: get_values(torchfn(x, d, False)),
+                                        lambda x: reffn(x, d, keepdims=False), xinp)
                 result = torchfn(xinp, d, False)
                 if isinstance(result, tuple):
                     v, i = result
@@ -1463,7 +1602,6 @@ class TestReductions(TestCase):
         self.assertEqual(x.argmin(dim=0).item(), 0)
         self.assertEqual(x.argmin(dim=0, keepdim=True), torch.tensor(0, dtype=torch.int64))
 
-
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*(set(torch.testing.get_all_dtypes(include_bool=False, include_complex=False)) - {torch.uint8}))
     def test_dim_reduction(self, device, dtype):
@@ -1918,7 +2056,6 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
-
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
     def test_quantile(self, device, dtype):
@@ -2066,9 +2203,9 @@ class TestReductions(TestCase):
                                     keepdim, unbiased, use_out):
         a = input.cpu().numpy() if input.dtype is not torch.bfloat16 else input.float().cpu().numpy()
         numpy_kwargs = {
-            'axis' : dim,
-            'keepdims' : keepdim,
-            'ddof' : 1 if unbiased else 0,
+            'axis': dim,
+            'keepdims': keepdim,
+            'ddof': 1 if unbiased else 0,
         }
 
         if dim is None:
@@ -2395,6 +2532,7 @@ class TestReductions(TestCase):
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
     """
+
     def _test_histogram_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
             if not torch.is_tensor(t):
@@ -2414,7 +2552,8 @@ class TestReductions(TestCase):
         else:
             (actual_hist, actual_bin_edges) = torch.histogram(t, bins, weight=weights, density=density)
 
-        (expected_hist, expected_bin_edges) = reference_histogram(self, t, bins, bin_range, weights, density, actual_hist.dtype)
+        (expected_hist, expected_bin_edges) = reference_histogram(
+            self, t, bins, bin_range, weights, density, actual_hist.dtype)
 
         """
         Works around linspace discrepancies by passing torch's constructed bin_edges to numpy.
@@ -2477,7 +2616,8 @@ class TestReductions(TestCase):
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
-            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9,
+                                  noncontiguous=not contig) if weighted else None
             self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         # Tests values of default args
@@ -2667,11 +2807,13 @@ class TestReductions(TestCase):
             self.assertEqual(np_function(np_input, axis=-1), fn(master_input, dim=-1).cpu().numpy(), msg=error_msg,
                              exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=2, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(
+                master_input, dim=2, keepdim=True), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=2, keepdims=True), fn(master_input, dim=2, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
-            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(master_input, dim=-1, keepdim=True), msg=error_msg)
+            self.assertEqual(torch.empty((2, 0, 1), device=device), fn(
+                master_input, dim=-1, keepdim=True), msg=error_msg)
             self.assertEqual(np_function(np_input, axis=-1, keepdims=True), fn(master_input, dim=-1, keepdim=True),
                              msg=error_msg, exact_dtype=False)
 
@@ -2681,13 +2823,17 @@ class TestReductions(TestCase):
 
             check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=1), msg=error_msg)
             check_func(torch.full((2, 4), return_value, device=device), fn(master_input, dim=-2), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=1, keepdim=True), msg=error_msg)
-            check_func(torch.full((2, 1, 4), return_value, device=device), fn(master_input, dim=-2, keepdim=True), msg=error_msg)
+            check_func(torch.full((2, 1, 4), return_value, device=device),
+                       fn(master_input, dim=1, keepdim=True), msg=error_msg)
+            check_func(torch.full((2, 1, 4), return_value, device=device),
+                       fn(master_input, dim=-2, keepdim=True), msg=error_msg)
 
             if name != 'logsumexp':
                 # The scipy function does not work for reduction the zero dimension
-                check_func(np.float32(np_function(np_input, axis=1)), fn(master_input, dim=1).cpu().numpy(), msg=error_msg)
-                check_func(np.float32(np_function(np_input, axis=-2)), fn(master_input, dim=-2).cpu().numpy(), msg=error_msg)
+                check_func(np.float32(np_function(np_input, axis=1)), fn(
+                    master_input, dim=1).cpu().numpy(), msg=error_msg)
+                check_func(np.float32(np_function(np_input, axis=-2)),
+                           fn(master_input, dim=-2).cpu().numpy(), msg=error_msg)
                 check_func(np.float32(np_function(np_input, axis=1, keepdims=True)),
                            fn(master_input, dim=1, keepdim=True).cpu().numpy(),
                            msg=error_msg)
@@ -2730,6 +2876,7 @@ class TestReductions(TestCase):
             self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
+
 
 instantiate_device_type_tests(TestReductions, globals())
 

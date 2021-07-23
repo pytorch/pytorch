@@ -762,8 +762,12 @@ class ops(_TestParametrizer):
                 #   however.
                 try:
                     active_decorators = []
+
                     if op.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
                         active_decorators.append(skipIf(True, "Skipped!"))
+
+                    if op.should_fail(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
+                        active_decorators.append(expectedFailure(device_cls.device_type))
 
                     if op.decorators is not None:
                         for decorator in op.decorators:
