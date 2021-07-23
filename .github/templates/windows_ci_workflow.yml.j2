@@ -65,8 +65,8 @@ jobs:
     needs: [!{{ ciflow_config.root_job_name }}]
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
-      http_proxy: "{{ env.SQUID_PROXY }}"
-      https_proxy: "{{ env.SQUID_PROXY }}"
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -156,8 +156,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
-      http_proxy: "{{ env.SQUID_PROXY }}"
-      https_proxy: "{{ env.SQUID_PROXY }}"
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
