@@ -36,13 +36,10 @@ bool SoftplusGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Softplus, SoftplusOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SoftplusGradient, SoftplusGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Softplus)
     .NumInputs(1)
     .NumOutputs(1)
@@ -105,7 +102,6 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SoftplusGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -121,7 +117,6 @@ class GetSoftplusGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Softplus, GetSoftplusGradient);
 
 } // namespace caffe2

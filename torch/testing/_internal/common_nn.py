@@ -2110,6 +2110,14 @@ new_module_tests = [
         desc='stride_pad',
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::AvgPool1dOptions(2)',
+        input_size=(3, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
@@ -2215,6 +2223,14 @@ new_module_tests = [
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
+        input_size=(3, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
         input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2252,6 +2268,14 @@ new_module_tests = [
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
         input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
     ),
     dict(
         module_name='ReplicationPad1d',
@@ -2301,6 +2325,14 @@ new_module_tests = [
         constructor_args=((1, 2), 2.),
         cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
         input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
     ),
     dict(
         module_name='ConstantPad1d',
