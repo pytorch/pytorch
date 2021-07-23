@@ -182,7 +182,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), autowrap_functions: Tuple[Callable] = (),
+    def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ), autowrap_functions: Tuple[Callable, ...] = (),
                  enable_cpatching: bool = False) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
@@ -197,7 +197,7 @@ class Tracer(TracerBase):
                 Python modules whose functions should be wrapped automatically
                 without needing to use fx.wrap().
 
-            autowrap_function (Tuple[Callable]): defaults to `()`,
+            autowrap_function (Tuple[Callable, ...]): defaults to `()`,
                 Python functions that should be wrapped automatically without
                 needing to use fx.wrap().
 
