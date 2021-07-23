@@ -38,7 +38,7 @@ def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
     This can be useful when there is a need to create classes with the same
-    constructor arguments, but different instances. Can be used in conjuction with
+    constructor arguments, but different instances. Can be used in conjunction with
     _callable_args
 
     Example::
