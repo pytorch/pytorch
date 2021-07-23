@@ -9478,43 +9478,46 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
 
-    # def test_invalid_onnx_proto_checker(self):
-    #     op_source = """
-    #     #include <torch/script.h>
+    def test_onnx_checker_invalid_graph(self):
+        op_source = """
+        #include <torch/script.h>
 
-    #     torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
-    #       return self + other;
-    #     }
+        torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
+          return self + other;
+        }
 
-    #     static auto registry =
-    #       torch::RegisterOperators("custom_namespace::custom_add", &custom_add);
-    #     """
+        static auto registry =
+          torch::RegisterOperators("custom_namespace::custom_add", &custom_add);
+        """
 
-    #     torch.utils.cpp_extension.load_inline(
-    #         name="custom_add",
-    #         cpp_sources=op_source,
-    #         is_python_module=False,
-    #         verbose=True,
-    #     )
+        torch.utils.cpp_extension.load_inline(
+            name="custom_add",
+            cpp_sources=op_source,
+            is_python_module=False,
+            verbose=True,
+        )
 
-    #     class InvalidONNXModel(torch.nn.Module):
-    #         def forward(self, a, b):
-    #             return torch.ops.custom_namespace.custom_add(a, b)
+        class InvalidONNXModel(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.custom_namespace.custom_add(a, b)
 
-    #     def symbolic_custom_add(g, self, other):
-    #         other_constant = g.op("Constant", value_t)
-    #         # return g.op("Add", self, other, test_i=1)
-    #         return g.op("Add", output_i=0)
+        def symbolic_custom_add(g, self, other):
+            return g.op("Add", self, other, invalid_attr_i=1)
 
-    #     from torch.onnx import register_custom_op_symbolic
-    #     register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
+        from torch.onnx import register_custom_op_symbolic
+        register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
 
-    #     x = torch.randn(2, 3, 4, requires_grad=False)
-    #     # y = torch.randn(2, 3, 4, requires_grad=False)
-    #     y = torch.randint(2, (2, 3, 4))
+        x = torch.randn(2, 3, 4, requires_grad=False)
+        y = torch.randn(2, 3, 4, requires_grad=False)
 
-    #     model = InvalidONNXModel()
-    #     self.run_test(model, (x, y))
+        test_model = InvalidONNXModel()
+        f = io.BytesIO()
+
+        try:
+            torch.onnx.export(test_model, (x, y), f)
+            assert False, "Invalid graph was not detected by ONNX checker."
+        except Exception:
+            assert len(f.getvalue()) > 0, "ONNX graph was not generated."
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
