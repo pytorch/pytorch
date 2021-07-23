@@ -47,15 +47,12 @@ at::Tensor PythonCommHook::parseHookResult(const c10::IValue& result) {
   if (result.isPyObject()) {
     py::gil_scoped_acquire ag;
     py::object obj = torch::jit::toPyObject(result);
-    /*
-    auto value = torch::jit::toIValue(
-        obj, c10::ListType::create(c10::TensorType::get()));
-    */
     auto value = torch::jit::toIValue(obj, c10::TensorType::get());
     return value.toTensor();
   }
 
-  // Only if the hook is an `allreduce_hook`.
+  // Only if the hook is an `allreduce_hook`, as the vanilla allreduce returns a
+  // tensor vector.
   return result.toTensorVector()[0];
 }
 

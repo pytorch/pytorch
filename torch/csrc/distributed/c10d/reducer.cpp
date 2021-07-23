@@ -1469,7 +1469,6 @@ void Reducer::finalize_backward() {
       // following the same logic in `initialize_buckets`.
       populate_bucket_views_out(replica, future_result[i]);
     }
-    replica.contents.copy_(future_result);
 
     // Unset allreduce division factor, as it may change in next backwards pass
     // when running with DDP join mode.

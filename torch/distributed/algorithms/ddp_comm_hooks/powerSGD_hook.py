@@ -477,7 +477,13 @@ def powerSGD_hook(
             idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
-        return dist.all_reduce(state.p_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
+        return (
+            dist.all_reduce(
+                state.p_memory_dict[bucket_index], group=group_to_use, async_op=True
+            )
+            .get_future()
+            .wait()[0]
+        )
 
     def compute_qs(fut):
         state.p_memory_dict[bucket_index] = fut.value()[0]
@@ -493,7 +499,13 @@ def powerSGD_hook(
         # For warm-start, can take one such step at a time, and alternate between them.
 
         # Allreduce Qs.
-        return dist.all_reduce(state.q_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
+        return (
+            dist.all_reduce(
+                state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
+            )
+            .get_future()
+            .wait()[0]
+        )
 
     def decompress(fut):
         state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
@@ -695,7 +707,13 @@ def batched_powerSGD_hook(
         # one left multiplication and one right multiplication.
         # For warm-start, can take one such step at a time, and alternate between them.
 
-        return dist.all_reduce(state.q_memory_dict[bucket_index], group=group_to_use, async_op=True).get_future().wait()[0]
+        return (
+            dist.all_reduce(
+                state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
+            )
+            .get_future()
+            .wait()[0]
+        )
 
     def decompress(fut):
         state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
