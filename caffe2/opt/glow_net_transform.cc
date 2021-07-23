@@ -28,6 +28,13 @@ C10_DEFINE_bool(
     "Merge all the fp32 input tensors into one, convert it to fp16 and split it back");
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DEFINE_bool(
+    verify_only_single_subnet,
+    false,
+    "Check that only one subnet is created during Onnxifi."
+)
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int32(
     onnxifi_min_ops,
     1,
@@ -134,7 +141,8 @@ void onnxifi(
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs,
     const c10::optional<std::string> &blacklist_ops,
     const c10::optional<size_t> &min_ops,
-    const std::unordered_set<std::string> &blocklist_blobs) {
+    const std::unordered_set<std::string> &blocklist_blobs,
+    const c10::optional<bool> &verify_only_single_subnet) {
   // Split SparseLengthsSumSparse so that we can lower the SparseLengthsSum part
   splitSparseLengthsSumSparse(net, *ws);
 
@@ -162,6 +170,7 @@ void onnxifi(
   opts.load_model_by_blob = load_model_by_blob;
   opts.enforce_fp32_inputs_into_fp16 = FLAGS_enforce_fp32_inputs_into_fp16;
   opts.merge_fp32_inputs_into_fp16 = FLAGS_merge_fp32_inputs_into_fp16;
+  opts.verify_only_single_subnet = verify_only_single_subnet.value_or(FLAGS_verify_only_single_subnet);
   opts.predictor_net_ssa_rewritten = predictor_net_ssa_rewritten;
   opts.timeout = FLAGS_onnxifi_timeout_ms;
   opts.shape_hints_per_bs = shape_hints_per_bs;

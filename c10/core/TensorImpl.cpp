@@ -31,9 +31,28 @@ static void noop_decref_fn(const PyInterpreter*, PyObject*) {
   // no-op
 }
 
+static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static void noop_dispatch_fn(
+    const PyInterpreter*,
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
+  detach_fn_ = &noop_detach_fn;
+  dispatch_fn_ = &noop_dispatch_fn;
 }
 
 } // namespace impl
@@ -95,6 +114,23 @@ TensorImpl::TensorImpl(
           data_type,
           storage.device()) {}
 
+// [Note: Python key removal]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// In most constructors for TensorImpl, you will see Python key is removed from
+// the passed in DispatchKeySet.  Why?
+//
+// INVARIANT: Python dispatch key is set iff PyObject for the Tensor has a
+// nontrivial __torch_dispatch__ implementation.
+//
+// When a fresh TensorImpl is created, there is *no* PyObject (this only gets
+// initialized lazily at the first point in time the Tensor passes into Python).
+// So we would violate the invariant.
+//
+// In practice, what will happen shortly afterwards is that the TensorImpl
+// will get its PyObject initialized by Tensor._make_subclass; at this point
+// the Python dispatch key will be set and all is well.  The point is to delay
+// the dispatch key setting until that point.
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 TensorImpl::TensorImpl(
     ImplType type,
@@ -108,7 +144,8 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set) {
+      key_set_(key_set.remove(
+          DispatchKey::Python)) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
   if (!is_inference()) {
@@ -152,6 +189,9 @@ TensorImpl::TensorImpl(
   DispatchKey k = key_set.highestPriorityBackendTypeId();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
+
+  key_set =
+      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -409,8 +449,7 @@ at::DataPtr PlacementDeleteContext::makeDataPtr(
       device};
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-AutogradMetaInterface::~AutogradMetaInterface() {}
+AutogradMetaInterface::~AutogradMetaInterface() = default;
 
 // Setting requires_grad to true on inference tensor outside InferenceMode
 // is forbidden.  Ideally it would also be illegal inside InferenceMode.
@@ -459,6 +498,17 @@ c10::AutogradMetaInterface* TensorImpl::autograd_meta() const {
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
+  if (key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    if (r) {
+      r->set_version_counter(version_counter);
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+    // otherwise just copy the TensorImpl and not the PyObject.  Since
+    // the interpreter is dead no one can call us out on it
+  }
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_,
@@ -477,6 +527,17 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
+  if (key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    if (r) {
+      r->set_version_counter(std::move(version_counter));
+      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+      return r;
+    }
+    // otherwise just copy the TensorImpl and not the PyObject.  Since
+    // the interpreter is dead no one can call us out on it
+  }
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_,
@@ -501,7 +562,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_;
+  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =

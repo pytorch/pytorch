@@ -256,6 +256,10 @@ Tensor class reference
     Tensor.bitwise_or_
     Tensor.bitwise_xor
     Tensor.bitwise_xor_
+    Tensor.bitwise_left_shift
+    Tensor.bitwise_left_shift_
+    Tensor.bitwise_right_shift
+    Tensor.bitwise_right_shift_
     Tensor.bmm
     Tensor.bool
     Tensor.byte
@@ -279,13 +283,16 @@ Tensor class reference
     Tensor.conj_physical
     Tensor.conj_physical_
     Tensor.resolve_conj
+    Tensor.resolve_neg
     Tensor.copysign
     Tensor.copysign_
     Tensor.cos
     Tensor.cos_
     Tensor.cosh
     Tensor.cosh_
+    Tensor.corrcoef
     Tensor.count_nonzero
+    Tensor.cov
     Tensor.acosh
     Tensor.acosh_
     Tensor.arccosh

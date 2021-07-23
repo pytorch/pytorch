@@ -155,6 +155,7 @@ Non-linear Activations (weighted sum, nonlinearity)
     nn.Tanh
     nn.Tanhshrink
     nn.Threshold
+    nn.GLU
 
 Non-linear Activations (other)
 ------------------------------
@@ -189,6 +190,9 @@ Normalization Layers
     nn.InstanceNorm1d
     nn.InstanceNorm2d
     nn.InstanceNorm3d
+    nn.LazyInstanceNorm1d
+    nn.LazyInstanceNorm2d
+    nn.LazyInstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
 
@@ -247,6 +251,7 @@ Dropout Layers
     nn.Dropout2d
     nn.Dropout3d
     nn.AlphaDropout
+    nn.FeatureAlphaDropout
 
 Sparse Layers
 -------------

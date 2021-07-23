@@ -3,6 +3,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -39,7 +41,7 @@ void mse_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void xlogy_kernel_cuda(TensorIterator& iter) {
+void xlogy_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "xlogy_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
       if (at::_isnan(y)){
@@ -67,11 +69,20 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
+void zeta_kernel_cuda(TensorIteratorBase& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t q) -> scalar_t {
+      return zeta<scalar_t, /*is_cuda=*/true>(x, q);
+    });
+  });
+}
+
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(huber_stub, &huber_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
 REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel_cuda);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_kernel_cuda);
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel_cuda);
 
 // DO NOT ADD ANY NEW KERNELS HERE
 // CUDA compilation times grow quickly.  It's perfectly acceptable to have a file per kernel.

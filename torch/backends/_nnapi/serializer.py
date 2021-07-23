@@ -1,7 +1,9 @@
+import sys
 import enum
 import struct
 import array
 import logging
+import functools
 from typing import (
     Tuple,
     NamedTuple,
@@ -369,6 +371,8 @@ class _NnapiSerializer(object):
         zero_point = 0
         if dtype == "float32":
             op_type = NNAPI_OperandCode.TENSOR_FLOAT32
+        elif dtype == "int32":
+            op_type = NNAPI_OperandCode.TENSOR_INT32
         elif dtype == "quint8":
             op_type = NNAPI_OperandCode.TENSOR_QUANT8_ASYMM
             scale = tensor.q_scale()
@@ -585,10 +589,13 @@ class _NnapiSerializer(object):
 
         return self.get_conv_pool_args_2d_common(kernel_size, strides, paddings, dilations, group_num)
 
-    def get_conv_pool_args_2d_from_jit(self, kernel_size, stride, padding, dilation, group=None):
+    def get_conv_pool_args_2d_from_jit(self, kernel_size, stride, padding, dilation=None, group=None):
         strides = self.get_size_arg(stride)
         paddings = self.get_size_arg(padding)
-        dilations = self.get_size_arg(dilation)
+        if dilation is None:
+            dilations = [1, 1]
+        else:
+            dilations = self.get_size_arg(dilation)
         if group is not None:
             _, group_num = self.get_constant_value(group, "IntType")
         else:
@@ -734,8 +741,16 @@ class _NnapiSerializer(object):
             self.add_tuple_construct(node),
         "aten::unsqueeze": lambda self, node:
             self.add_unsqueeze(node),
+        "aten::to": lambda self, node:
+            self.add_to(node),
+        "aten::detach": lambda self, node:
+            self._identity(node),
         "aten::reshape": lambda self, node:
             self.add_reshape(node),
+        "aten::flatten": lambda self, node:
+            self.add_flatten(node),
+        "aten::slice": lambda self, node:
+            self.add_slice(node),
         "aten::size": lambda self, node:
             self.add_size(node),
         "aten::cat": lambda self, node:
@@ -752,12 +767,18 @@ class _NnapiSerializer(object):
             self.add_add_sub_op(node, NNAPI_OperationCode.SUB, NNAPI_FuseCode.FUSED_NONE),
         "aten::mul": lambda self, node:
             self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.MUL, NNAPI_FuseCode.FUSED_NONE),
+        "aten::div": lambda self, node:
+            self.add_pointwise_simple_binary_broadcast_op(node, NNAPI_OperationCode.DIV, NNAPI_FuseCode.FUSED_NONE),
         "aten::relu": lambda self, node:
             self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.RELU),
         "aten::sigmoid": lambda self, node:
             self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.LOGISTIC),
+        "aten::softmax": lambda self, node:
+            self.add_softmax(node),
         "aten::hardtanh": lambda self, node:
             self.add_hardtanh(node),
+        "aten::avg_pool2d": lambda self, node:
+            self.add_avg_pool2d(node),
         "aten::max_pool2d": lambda self, node:
             self.add_pool2d_node(node, NNAPI_OperationCode.MAX_POOL_2D),
         "aten::adaptive_avg_pool2d": lambda self, node:
@@ -774,6 +795,8 @@ class _NnapiSerializer(object):
             self.add_conv_underscore(node),
         "aten::conv2d": lambda self, node:
             self.add_conv2d(node),
+        "aten::log_softmax": lambda self, node:
+            self.add_log_softmax(node),
         "quantized::linear": lambda self, node:
             self.add_qlinear(node),
         "quantized::conv2d": lambda self, node:
@@ -791,6 +814,11 @@ class _NnapiSerializer(object):
         if not adder:
             raise Exception("Unsupported node kind (%r) in node %r" % (node.kind(), node))
         adder(self, node)
+
+    def _identity(self, node):
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        jitval = node.outputsAt(0)
+        self.jitval_operand_map[jitval] = in_id
 
     def add_getattr(self, node):
         assert node.inputsSize() == 1
@@ -827,6 +855,7 @@ class _NnapiSerializer(object):
                 tensors.append(inp)
             else:
                 tensors = None
+
         if const_vals is not None:
             # NOTE: Now that TorchScript supports list constants,
             # this code path might not be used anymore.
@@ -870,6 +899,10 @@ class _NnapiSerializer(object):
 
         self.add_operation(NNAPI_OperationCode.EXPAND_DIMS, inputs, outputs)
 
+    def add_to(self, node):
+        # Handle to("cpu") / to("gpu") case
+        self._identity(node)
+
     def add_reshape(self, node):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
@@ -898,6 +931,120 @@ class _NnapiSerializer(object):
 
         self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
 
+    def add_flatten(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+
+        start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
+        end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
+
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+            raise Exception(
+                "Currently, reshape is not supported on NHWC tensors")
+
+        if start_dim < 0:
+            start_dim += len(in_oper.shape)
+        if end_dim < 0:
+            end_dim += len(in_oper.shape)
+
+        out_shape = (
+            in_oper.shape[: start_dim] +
+            (functools.reduce(
+                lambda x, y: x * y, in_oper.shape[start_dim: end_dim + 1]),) +
+            in_oper.shape[end_dim + 1:]
+        )
+
+        if any(dim == 0 for dim in in_oper.shape[start_dim: end_dim + 1]):
+            raise Exception("Flattening flexible dims is not supported yet")
+        non_flattened_dims = in_oper.shape[: start_dim] + in_oper.shape[end_dim + 1:]
+        if non_flattened_dims.count(0) > 1:
+            raise Exception("Only 1 dim can be flexible")
+
+        out_oper = in_oper._replace(shape=out_shape)
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+
+        for idx, dim in enumerate(out_shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, in_oper.shape.index(0))
+
+        inputs_1 = tuple(
+            dim if dim != 0 else -1
+            for dim in out_shape
+        )
+        inputs = [None] * 2
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector(inputs_1)
+
+        outputs = [None] * 1
+        outputs[0] = out_id
+
+        self.add_operation(NNAPI_OperationCode.RESHAPE, inputs, outputs)
+
+    def add_slice(self, node):
+        assert node.inputsSize() == 5
+        assert node.outputsSize() == 1
+
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        _, dim_value = self.get_constant_value(node.inputsAt(1))
+        _, start_value = self.get_constant_value(node.inputsAt(2))
+        _, stop_value = self.get_constant_value(node.inputsAt(3))
+        _, step_value = self.get_constant_value(node.inputsAt(4))
+
+        if start_value is None:
+            start_value = 0
+        if stop_value is None:
+            stop_value = sys.maxsize
+
+        if start_value < 0:
+            start_value += in_oper.shape[dim_value]
+        elif start_value == sys.maxsize:
+            start_value = 0
+
+        if start_value == 0 and stop_value == sys.maxsize:
+            self._identity(node)
+            return
+
+        if in_oper.shape[dim_value] == 0:
+            raise Exception("Unable to slice with flexible shape")
+
+        if stop_value < 0:
+            stop_value += in_oper.shape[dim_value]
+        elif stop_value == sys.maxsize:
+            stop_value = in_oper.shape[dim_value]
+
+        if start_value >= stop_value:
+            raise Exception("Slice start value should be less than stop value")
+
+        out_len = (stop_value - start_value) // step_value
+        out_shape = tuple(out_len if i == dim_value else dim for i, dim in enumerate(in_oper.shape))
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper._replace(shape=out_shape))
+
+        # flex inputs
+        end_mask = 0
+        for idx, dim in enumerate(out_shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, idx)
+                end_mask |= (1 << idx)
+
+        inputs = [None] * 7
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_int_vector(
+            [start_value if i == dim_value else 0 for i in range(len(in_oper.shape))])
+        inputs[2] = self.add_immediate_int_vector(
+            [stop_value if i == dim_value else dim for i, dim in enumerate(in_oper.shape)])
+        inputs[3] = self.add_immediate_int_vector(
+            [step_value if i == dim_value else 1 for i in range(len(in_oper.shape))])
+        inputs[4] = self.add_immediate_int_scalar(0)  # begin mask
+        inputs[5] = self.add_immediate_int_scalar(end_mask)
+        inputs[6] = self.add_immediate_int_scalar(0)  # shrink axis mas
+
+        outputs = [None] * 1
+        outputs[0] = out_id
+
+        self.add_operation(NNAPI_OperationCode.STRIDED_SLICE, inputs, outputs)
+
     def add_size(self, node):
         assert node.inputsSize() == 2
         assert node.outputsSize() == 1
@@ -920,7 +1067,7 @@ class _NnapiSerializer(object):
         out_oper = None
         out_dim_size = 0
         for inp in tensors:
-            in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(inp)
+            in_id, in_oper = self.get_tensor_operand_by_jitval(inp)
             if out_oper is None:
                 out_shape = change_element(in_oper.shape, dim, -1)
                 out_oper = in_oper._replace(shape=out_shape)
@@ -941,10 +1088,19 @@ class _NnapiSerializer(object):
         else:
             nnapi_dim = dim
 
+        out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
+        for idx, d in enumerate(out_oper.shape):
+            if d == 0:
+                if idx == dim:
+                    shape = " + ".join(flex_name(ip_id, dim) for ip_id in in_ids)
+                    self.compute_operand_shape(out_id, idx, shape)
+                else:
+                    self.forward_operand_shape(out_id, idx, in_ids[0], idx)
+
         inputs = in_ids + [self.add_immediate_int_scalar(nnapi_dim)]
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), out_oper)
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.CONCATENATION, inputs, outputs)
 
@@ -1052,13 +1208,18 @@ class _NnapiSerializer(object):
         assert node.inputsSize() == 1
         assert node.outputsSize() == 1
 
-        in_id, in_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+
+        for idx, dim in enumerate(in_oper.shape):
+            if dim == 0:
+                self.forward_operand_shape(out_id, idx, in_id, idx)
 
         inputs = [None] * 1
         inputs[0] = in_id
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), in_oper)
+        outputs[0] = out_id
 
         self.add_operation(opcode, inputs, outputs)
 
@@ -1125,6 +1286,27 @@ class _NnapiSerializer(object):
         _, zero_point = self.get_constant_value(node.inputsAt(3), "IntType")
 
         self._do_add_binary(node, opcode, fuse_code, qparams=(scale, zero_point))
+
+    def add_softmax(self, node):
+        assert node.inputsSize() == 3
+        in_id, in_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
+
+        _, softmax_dim = self.get_constant_value(node.inputsAt(1), "IntType")
+
+        out_id = self.add_tensor_operand(node.outputsAt(0), in_oper)
+        for dim, size in enumerate(in_oper.shape):
+            if size == 0:
+                self.forward_operand_shape(out_id, dim, in_id, dim)
+
+        inputs = [None] * 3
+        inputs[0] = in_id
+        inputs[1] = self.add_immediate_float_scalar(1.0)  # positive scaling factor of exponent, beta
+        inputs[2] = self.add_immediate_int_scalar(softmax_dim)
+
+        outputs = [None] * 1
+        outputs[0] = out_id
+
+        self.add_operation(NNAPI_OperationCode.SOFTMAX, inputs, outputs)
 
     def add_hardtanh(self, node):
         assert node.inputsSize() == 3
@@ -1221,6 +1403,44 @@ class _NnapiSerializer(object):
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), image_oper._replace(shape=out_shape))
 
         self.add_operation(opcode, inputs, outputs)
+
+    def add_avg_pool2d(self, node):
+        assert node.inputsSize() == 7
+        assert node.outputsSize() == 1
+        image, kernel, stride, padding, ceil_mode, count_include_pad, divisor_override = node.inputs()
+
+        _, count_include_pad_value = self.get_constant_value(count_include_pad)
+        _, divisor_override_value = self.get_constant_value(divisor_override)
+        if not count_include_pad_value or divisor_override_value:
+            raise Exception("NNAPI doesn't support count_include_pad=False or divisor_override")
+
+        args = self.get_conv_pool_args_2d_from_jit(self.get_size_arg(kernel), stride, padding)
+
+        image_id, image_oper = self.get_tensor_operand_by_jitval(image)
+        assert len(image_oper.shape) == 4
+
+        out_shape = get_conv_pool_shape(image_oper.shape, args, image_oper.shape[1], False)
+        use_nchw = image_oper.use_nchw()
+
+        inputs = [None] * 11
+        inputs[0] = image_id
+        inputs[1] = self.add_immediate_int_scalar(args.pad_l)
+        inputs[2] = self.add_immediate_int_scalar(args.pad_r)
+        inputs[3] = self.add_immediate_int_scalar(args.pad_t)
+        inputs[4] = self.add_immediate_int_scalar(args.pad_b)
+        inputs[5] = self.add_immediate_int_scalar(args.stride_w)
+        inputs[6] = self.add_immediate_int_scalar(args.stride_h)
+        inputs[7] = self.add_immediate_int_scalar(args.kernel_w)
+        inputs[8] = self.add_immediate_int_scalar(args.kernel_h)
+        inputs[9] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
+        inputs[10] = self.add_immediate_bool_scalar(use_nchw)
+
+        outputs = [None] * 1
+        out_id = self.add_tensor_operand(node.outputsAt(0), image_oper._replace(shape=out_shape))
+        self._handle_conv_pool_flexible_input(out_id, image, args, False)
+        outputs[0] = out_id
+
+        self.add_operation(NNAPI_OperationCode.AVERAGE_POOL_2D, inputs, outputs)
 
     def add_adaptive_avg_pool2d(self, node):
         assert node.inputsSize() == 2
@@ -1350,7 +1570,7 @@ class _NnapiSerializer(object):
         self.add_addmm_or_linear(node, False, jit_input, jit_weight, jit_bias)
 
     def add_addmm_or_linear(self, node, transpose_weight, jit_input, jit_weight, jit_bias):
-        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
+        input_id, input_oper = self.get_tensor_operand_by_jitval(jit_input)
         bias_id, bias_oper = self.get_tensor_operand_for_weight(jit_bias)
 
         assert len(input_oper.shape) == 2
@@ -1367,6 +1587,10 @@ class _NnapiSerializer(object):
         weight_oper = self.operands[weight_id]
 
         out_shape = (input_oper.shape[0], weight_oper.shape[0])
+        out_id = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+
+        if input_oper.shape[0] == 0:
+            self.forward_operand_shape(out_id, 0, input_id, 0)
 
         inputs = [None] * 4
         inputs[0] = input_id
@@ -1375,7 +1599,7 @@ class _NnapiSerializer(object):
         inputs[3] = self.add_immediate_int_scalar(NNAPI_FuseCode.FUSED_NONE)
 
         outputs = [None] * 1
-        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+        outputs[0] = out_id
 
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
@@ -1450,10 +1674,11 @@ class _NnapiSerializer(object):
 
         self.add_operation(NNAPI_OperationCode.FULLY_CONNECTED, inputs, outputs)
 
-    def get_optional_bias(self, jit_bias, weight_tensor):
+    def get_optional_bias(self, jit_bias, weight_tensor, transpose=False):
         ctype, value = self.get_constant_value(jit_bias)
         if ctype.kind() == "NoneType":
-            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[0], dtype=weight_tensor.dtype)
+            bias_idx = 1 if transpose else 0
+            nnapi_bias_tensor = torch.zeros(weight_tensor.size()[bias_idx], dtype=weight_tensor.dtype)
             bias_id = self.add_tensor_operand_for_weight(nnapi_bias_tensor)
             bias_oper = self.operands[bias_id]
             return bias_id, bias_oper
@@ -1511,10 +1736,10 @@ class _NnapiSerializer(object):
             _,
         ) = node.inputs()
 
-        # XXX check jit_transpose
 
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
-        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor)
+        _, transpose = self.get_constant_value(jit_transpose)
+        bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor, transpose)
         args = self.get_conv_pool_args_2d_from_jit(
             weight_tensor.shape[2:4], jit_stride, jit_pad, jit_dilation, jit_groups)
 
@@ -1526,9 +1751,34 @@ class _NnapiSerializer(object):
             weight_tensor,
             bias_id,
             args,
-            False,  # transpose
+            transpose,
             NNAPI_FuseCode.FUSED_NONE,
         )
+
+    def add_log_softmax(self, node):
+        assert node.inputsSize() == 3
+        assert node.outputsSize() == 1
+
+        (
+            jit_input,
+            jit_dim,
+            jit_half_to_float
+        ) = node.inputs()
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
+        _, dim = self.get_constant_value(jit_dim, "IntType")
+
+        out_shape = input_oper.shape
+
+        inputs = [None] * 3
+        inputs[0] = input_id
+        # specifying 1 as the scaling factor for the exponent, beta
+        inputs[1] = self.add_immediate_float_scalar(1)
+        inputs[2] = self.add_immediate_int_scalar(dim)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+        self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
+
 
     def add_qconv2d(self, node, fuse_code):
         assert node.inputsSize() == 4
@@ -1608,7 +1858,10 @@ class _NnapiSerializer(object):
         if args.group == 1:
             # Full convolution
             depthwise = False
-            weight_permutation = (0, 2, 3, 1)
+            if transpose:
+                weight_permutation = (1, 2, 3, 0)
+            else:
+                weight_permutation = (0, 2, 3, 1)
         elif args.group == in_c:
             # Depthwise convolution
             depthwise = True
@@ -1650,8 +1903,7 @@ class _NnapiSerializer(object):
             assert out_c == in_c
         else:
             # Full convolution
-            kern_nf, kern_h, kern_w, kern_d = weight_oper.shape
-            out_c = kern_nf
+            out_c, kern_h, kern_w, kern_d = weight_oper.shape
             assert kern_d == in_c
 
         assert out_c == bias_oper.shape[0]
@@ -1703,9 +1955,10 @@ class _NnapiSerializer(object):
         image_id, image_oper = self.get_tensor_operand_by_jitval(jit_image)
         batch, in_ch, in_h, in_w = image_oper.shape
 
-        if batch == 0 or in_ch == 0:
-            raise Exception("Only H & W can be flexible")
-
+        if batch == 0:
+            self.forward_operand_shape(out_id, 0, image_id, 0)
+        if in_ch == 0:
+            raise Exception("Input channels can't be flexible")
         # H & W
         if transpose:
             if in_h == 0:
