@@ -96,11 +96,8 @@ vector<TensorShape> TensorInferenceForSplit(
 }
 } // namespace.
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SplitByLengths, SplitByLengthsOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
@@ -170,7 +167,6 @@ output_2: [0 5 7 4]
 )DOC")
     .InheritOnnxSchema();
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SplitByLengths)
     .NumInputs(2)
     .NumOutputs(1, INT_MAX)
@@ -411,9 +407,7 @@ vector<TensorShape> TensorInferenceForConcat(
       CreateTensorShape(split_shape, TensorProto::INT32)};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -559,16 +553,12 @@ split_info: [1 1]
     .InheritOnnxSchema();
 
 // Backward compatibility names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DepthConcat, ConcatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthSplit)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
     .SetDoc("Backward compatible operator name for Split.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DepthConcat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
@@ -593,11 +583,8 @@ class GetSplitGradient : public GradientMakerBase {
         vector<string>{GI(0), "_" + GI(0) + "_dims"});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Split, GetSplitGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthSplit, GetSplitGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SplitByLengths, GetSplitGradient);
 
 class GetConcatGradient : public GradientMakerBase {
@@ -614,8 +601,6 @@ class GetConcatGradient : public GradientMakerBase {
     return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Concat, GetConcatGradient);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
 } // namespace caffe2

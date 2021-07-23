@@ -688,7 +688,6 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
 
 }// anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(batch_norm_cpu_stub, &batch_norm_cpu_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_collect_stats_stub, &batch_norm_cpu_collect_stats_kernel);
 REGISTER_DISPATCH(batch_norm_cpu_backward_stub, &batch_norm_cpu_backward_kernel);

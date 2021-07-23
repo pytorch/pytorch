@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <ATen/cpu/vec/vec256/vsx/vec256_double_vsx.h>
 #include <ATen/cpu/vec/vec256/vsx/vec256_float_vsx.h>
