@@ -2,8 +2,8 @@
 
 set -ex
 
-# This function installs protobuf 2.6
-install_protobuf_26() {
+# This function installs protobuf 3.17
+install_protobuf_317() {
   pb_dir="/usr/temp_pb_install_dir"
   mkdir -p $pb_dir
 
@@ -12,8 +12,8 @@ install_protobuf_26() {
   #   g++: error: ./../lib64/crti.o: No such file or directory
   ln -s /usr/lib64 "$pb_dir/lib64"
 
-  curl -LO "https://github.com/google/protobuf/releases/download/v2.6.1/protobuf-2.6.1.tar.gz"
-  tar -xvz -C "$pb_dir" --strip-components 1 -f protobuf-2.6.1.tar.gz
+  curl -LO "https://github.com/protocolbuffers/protobuf/releases/download/v3.17.3/protobuf-all-3.17.3.tar.gz"
+  tar -xvz -C "$pb_dir" --strip-components 1 -f protobuf-all-3.17.3.tar.gz
   pushd "$pb_dir" && ./configure && make && make check && sudo make install && sudo ldconfig
   popd
   rm -rf $pb_dir
