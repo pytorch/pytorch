@@ -20,6 +20,8 @@ supported:
   - empty.memory_format
   - empty_strided
   - expand
+  - leaky_relu
+  - leaky_relu_backward
   - mm
   - mul.Tensor
   - mul.Scalar

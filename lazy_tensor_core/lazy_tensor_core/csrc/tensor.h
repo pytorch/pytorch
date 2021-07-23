@@ -677,7 +677,8 @@ class LazyTensor {
   static LazyTensor leaky_relu(const LazyTensor& input, double negative_slope);
   static LazyTensor leaky_relu_backward(const LazyTensor& grad_output,
                                         const LazyTensor& input,
-                                        double negative_slope);
+                                        double negative_slope,
+                                        bool self_is_result);
   static LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,
                          const LazyTensor& weight);
   static LazyTensor lerp(const LazyTensor& input, const LazyTensor& end,

@@ -17,6 +17,8 @@
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/generic_slice.h"
 #include "lazy_tensor_core/csrc/ops/index_select.h"
+#include "lazy_tensor_core/csrc/ops/leaky_relu.h"
+#include "lazy_tensor_core/csrc/ops/leaky_relu_backward.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -103,6 +105,10 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::mm: {
         return InferMm(node);
       }
+      case at::aten::leaky_relu_backward: {
+        const ir::Output& input = node->operand(1);
+        return input.shape();
+      }
       case at::aten::native_batch_norm: {
         return InferBatchNorm(node);
       }
@@ -117,6 +123,7 @@ class TSNodeLowering : public NodeLowering {
                                                   permute->dims());
       }
       // activation and unary op do not change shape
+      case at::aten::leaky_relu:
       case at::aten::pow:
       case at::aten::relu:
       case at::aten::relu_: {
@@ -248,6 +255,14 @@ class TSNodeLowering : public NodeLowering {
     if (node->op().op == at::aten::index_select) {
       return LowerIndexSelect(ir::NodeCast<ir::ops::IndexSelect>(
           node, ir::OpKind(at::aten::index_select)));
+    }
+    if (node->op().op == at::aten::leaky_relu) {
+      return LowerLeakyRelu(ir::NodeCast<ir::ops::LeakyRelu>(
+          node, ir::OpKind(at::aten::leaky_relu)));
+    }
+    if (node->op().op == at::aten::leaky_relu_backward) {
+      return LowerLeakyReluBackward(ir::NodeCast<ir::ops::LeakyReluBackward>(
+          node, ir::OpKind(at::aten::leaky_relu_backward)));
     }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
@@ -635,6 +650,22 @@ class TSNodeLowering : public NodeLowering {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dim());
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerLeakyRelu(const ir::ops::LeakyRelu* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.push_back(node->negative_slope());
+    return LowerBuiltin(node, arguments);
+  }
+
+  TSOpVector LowerLeakyReluBackward(const ir::ops::LeakyReluBackward* node) {
+    std::vector<torch::jit::NamedValue> arguments;
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
+    arguments.emplace_back(loctx()->GetOutputOp(node->operand(1)));
+    arguments.push_back(node->negative_slope());
+    arguments.push_back(node->self_is_result());
     return LowerBuiltin(node, arguments);
   }
 

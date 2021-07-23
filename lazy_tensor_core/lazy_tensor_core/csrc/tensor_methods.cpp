@@ -1494,9 +1494,10 @@ LazyTensor LazyTensor::leaky_relu(const LazyTensor& input,
 
 LazyTensor LazyTensor::leaky_relu_backward(const LazyTensor& grad_output,
                                            const LazyTensor& input,
-                                           double negative_slope) {
+                                           double negative_slope,
+                                           bool self_is_result) {
   return grad_output.CreateFrom(ir::MakeNode<ir::ops::LeakyReluBackward>(
-      grad_output.GetIrValue(), input.GetIrValue(), negative_slope));
+      grad_output.GetIrValue(), input.GetIrValue(), negative_slope, self_is_result));
 }
 
 LazyTensor LazyTensor::lerp(const LazyTensor& input, const LazyTensor& end,
