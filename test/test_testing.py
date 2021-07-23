@@ -630,9 +630,19 @@ if __name__ == '__main__':
         self.assertEqual(self.logger.get_content(), '')
         self.logger.print('Foo Bar')
         self.assertEqual(self.logger.get_content(), 'Foo Bar\n')
-        with self.assertRaisesRegex(ValueError, 'Foo Bar') as exc:
+        # normal case: exception with a message
+        with self.assertRaises(ValueError) as ctx:
             with self.logger:
                 raise ValueError('Hello')
+        exc_message = str(ctx.exception)
+        self.assertIn('Hello', exc_message)
+        self.assertIn('Foo Bar', exc_message)
+        # special case: exception without a message
+        with self.assertRaises(ValueError) as ctx:
+            with self.logger:
+                raise ValueError()
+        exc_message = str(ctx.exception)
+        self.assertIn('Foo Bar', exc_message)
 
     @onlyCPU
     def test_logger_reporting(self, device):

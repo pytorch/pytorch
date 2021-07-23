@@ -2527,7 +2527,7 @@ class TestLogger:
         if not content:
             return
         content = content.rstrip('\n')
-        old_msg = evalue.args[0]
+        old_msg = str(evalue)
         lines = []
         lines.append(old_msg)
         lines.append('~~~~~~~~ TestLogger ~~~~~~~~')
