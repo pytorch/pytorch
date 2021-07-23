@@ -8,6 +8,13 @@ from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 
+# Functional optimizers require passing a list of gradients to their `step()`
+# method, and ZeRO requires a functional optimizer to overlap with DDP
+# Passing a `None` instead of an actual gradient indicates to the optimizer
+# to not update the corresponding parameter
+_PARAM_NO_UPDATE = None
+
+
 def hook_then_zero_step(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
@@ -56,10 +63,14 @@ def hook_then_zero_step(
                 Performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step`
                 using the gradients in the given :class:`DistributedDataParallel`
                 gradient bucket.
+
+                Returns:
+                    A :class:`torch.Tensor` representing the contents of the
+                    gradient bucket.
                 """
                 # Proceed as normal until the DDP buckets have been rebuilt
                 if not ddp._has_rebuilt_buckets:
-                    return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
+                    return bucket.get_tensor()
 
                 bucket_index = bucket.get_index()
                 rank = zero.global_rank
@@ -81,7 +92,7 @@ def hook_then_zero_step(
                     params_per_rank[rank_to_update].extend(bucket_params)
                     params_per_bucket.append(bucket_params)
 
-                    return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
+                    return bucket.get_tensor()
 
                 if rank_to_update == rank:
                     assert len(zero.optim.param_groups) == 1, \
@@ -92,7 +103,7 @@ def hook_then_zero_step(
                     # corresponding parameter should not be updated
                     num_local_optim_params = len(zero.optim.param_groups[0]["params"])
                     gradients: List[Optional[torch.Tensor]] = \
-                        [None for _ in range(num_local_optim_params)]
+                        [_PARAM_NO_UPDATE for _ in range(num_local_optim_params)]
                     assert bucket_index in overlap_info.offsets, \
                         f"Bucket index {bucket_index} was not assigned to rank " \
                         f"{rank}"
@@ -113,7 +124,7 @@ def hook_then_zero_step(
                     )
                 )
 
-                return fut.wait()[0] if zero._use_extra_stream else bucket.get_tensor()
+                return bucket.get_tensor()
 
         return fut.then(zero_step)
 
