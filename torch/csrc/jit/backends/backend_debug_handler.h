@@ -132,6 +132,7 @@ class TORCH_API BackendDebugInfoRecorder {
   NodeToDebugHandle generate_debug_handles(const std::shared_ptr<Graph>& graph);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::atomic<DebugHandleType> unique_debug_handle_;
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };

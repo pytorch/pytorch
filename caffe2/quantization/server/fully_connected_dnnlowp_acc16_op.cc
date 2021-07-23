@@ -4,7 +4,9 @@
 
 #include "fbgemm_pack_op.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_copy_to_32bit_frequency);
 
 namespace caffe2 {
@@ -275,11 +277,13 @@ bool FullyConnectedDNNLowPAcc16Op::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FC,
     DNNLOWP_ACC16,
     FullyConnectedDNNLowPAcc16Op);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FC,
     DNNLOWP_ACC16,

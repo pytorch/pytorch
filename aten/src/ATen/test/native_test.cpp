@@ -251,6 +251,7 @@ void test(TensorOptions T, TensorOptions AccT) {
   TestWhere(T, t);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestNative, NativeTestCPU) {
   manual_seed(123);
 
@@ -258,6 +259,7 @@ TEST(TestNative, NativeTestCPU) {
        at::device(kCPU).dtype(kDouble));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestNative, NativeTestGPU) {
   manual_seed(123);
 

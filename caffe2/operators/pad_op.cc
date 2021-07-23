@@ -422,11 +422,14 @@ std::vector<TensorShape> PadImageOp<float, CPUContext>::PadTensorInference(
   return ConvPoolOpBase::TensorInferenceForPool(def, in);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PadImage, PadImageOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     PadImageGradient,
     PadImageGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PadImage)
     .NumInputs(1)
     .NumOutputs(1)
@@ -451,6 +454,7 @@ values and stride sizes defined by the ConvPoolOpBase operator.
         "the tensor. Dimensions will vary based on various pad and stride "
         "sizes.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(PadImageGradient).NumInputs(1).NumOutputs(1);
 
 class GetPadImageGradient : public GradientMakerBase {
@@ -460,6 +464,7 @@ class GetPadImageGradient : public GradientMakerBase {
         "PadImageGradient", "", vector<string>{GO(0)}, vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PadImage, GetPadImageGradient);
 
 } // namespace caffe2

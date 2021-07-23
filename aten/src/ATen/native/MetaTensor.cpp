@@ -21,6 +21,7 @@ struct MetaAllocator final : public at::Allocator {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static MetaAllocator g_meta_alloc;
 
 at::Allocator* GetMetaAllocator() {

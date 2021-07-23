@@ -4,6 +4,7 @@
 #include "caffe2/operators/utility_ops.h"
 #include <gtest/gtest.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_string(caffe_test_root);
 
 namespace caffe2 {
@@ -23,6 +24,7 @@ static void AddConstInput(
   return;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(UtilityOpTest, testReshapeWithScalar) {
   Workspace ws;
   OperatorDef def;

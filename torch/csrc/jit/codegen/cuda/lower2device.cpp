@@ -18,6 +18,7 @@ namespace fuser {
 namespace cuda {
 
 // TODO(kir): revisit this
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local GpuLower* active_gpu_lower = nullptr;
 
 void GpuLower::replaceSymbolicSizes() {

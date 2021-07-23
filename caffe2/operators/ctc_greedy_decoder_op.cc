@@ -66,7 +66,9 @@ bool CTCGreedyDecoderOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CTCGreedyDecoder, CTCGreedyDecoderOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CTCGreedyDecoder)
     .NumInputs(1, 2)
     .NumOutputs(2)
@@ -95,6 +97,7 @@ OPERATOR_SCHEMA(CTCGreedyDecoder)
         "Values vector, size (total_decoded_outputs). "
         "The vector stores the decoded classes")
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CTCGreedyDecoder);
 
 } // namespace caffe2

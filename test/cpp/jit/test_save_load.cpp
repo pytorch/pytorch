@@ -13,6 +13,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializationTest, ExtraFilesHookPreference) {
   // Tests that an extra file written explicitly has precedence over
   //   extra files written by a hook
@@ -44,6 +45,7 @@ TEST(SerializationTest, ExtraFilesHookPreference) {
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializationTest, ExtraFileHooksNoSecret) {
   // no secrets
   std::stringstream ss;
@@ -64,6 +66,7 @@ TEST(SerializationTest, ExtraFileHooksNoSecret) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializationTest, ExtraFileHooksWithSecret) {
   std::stringstream ss;
   {
@@ -87,6 +90,7 @@ TEST(SerializationTest, ExtraFileHooksWithSecret) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializationTest, TypeTags) {
   auto list = c10::List<c10::List<int64_t>>();
   list.push_back(c10::List<int64_t>({1, 2, 3}));
@@ -121,6 +125,7 @@ TEST(SerializationTest, TypeTags) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializationTest, TestJitStream_CUDA) {
   torch::jit::Module model;
   std::vector<torch::jit::IValue> inputs;

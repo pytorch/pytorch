@@ -152,10 +152,12 @@ void transformer_encoder_layer_test_helper(bool is_cuda) {
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerEncoderLayer) {
   transformer_encoder_layer_test_helper(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerEncoderLayer_CUDA) {
   transformer_encoder_layer_test_helper(true);
 }
@@ -309,10 +311,12 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoderLayer){
   transformer_decoder_layer_test_helper(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoderLayer_CUDA){
     transformer_decoder_layer_test_helper(true);
 }
@@ -404,10 +408,12 @@ void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoderLayer_gelu) {
   transformer_decoder_layer_test_helper_gelu(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoderLayer_gelu_CUDA) {
   transformer_decoder_layer_test_helper_gelu(true);
 }
@@ -521,14 +527,17 @@ void transformer_encoder_test_helper(bool is_cuda) {
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerEncoder) {
   transformer_encoder_test_helper(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerEncoder_CUDA) {
   transformer_encoder_test_helper(true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, PrettyPrintTransformerEncoderLayer) {
   ASSERT_EQ(
       c10::str(TransformerEncoderLayer(4, 2)),
@@ -546,6 +555,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerEncoderLayer) {
       ")");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, PrettyPrintTransformerEncoder) {
   LayerNorm norm = LayerNorm(LayerNormOptions({4}));
   TransformerEncoderOptions options(
@@ -584,6 +594,7 @@ TEST_F(TransformerTest, PrettyPrintTransformerEncoder) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
   ASSERT_EQ(
       c10::str(TransformerDecoderLayer(4, 2)),
@@ -1020,15 +1031,18 @@ void transformer_decoder_test_helper(bool is_cuda) {
 
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoder) {
   transformer_decoder_test_helper(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerDecoder_CUDA) {
   transformer_decoder_test_helper(true);
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, PrettyPrintTransformerDecoder) {
   LayerNorm norm = LayerNorm(LayerNormOptions({4}));
   TransformerDecoderOptions options(
@@ -1159,14 +1173,17 @@ void transformer_test_helper(bool is_cuda) {
     ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, Transformer) {
   transformer_test_helper(false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, Transformer_CUDA) {
   transformer_test_helper(true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TransformerTest, TransformerArgsCorrectness) {
   Transformer model(TransformerOptions()
     .d_model(4)

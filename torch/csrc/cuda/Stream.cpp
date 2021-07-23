@@ -10,6 +10,7 @@
 #include <structmember.h>
 #include <cuda_runtime_api.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THCPStreamClass = nullptr;
 
 static PyObject * THCPStream_pynew(
@@ -140,6 +141,7 @@ static PyMethodDef THCPStream_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THCPStreamType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._CudaStreamBase",            /* tp_name */

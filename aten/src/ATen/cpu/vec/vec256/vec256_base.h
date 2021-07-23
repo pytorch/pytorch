@@ -20,7 +20,7 @@
 #include <type_traits>
 #include <bitset>
 
-#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
 #include <c10/util/C++17.h>
@@ -32,28 +32,13 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 
-// These macros helped us unify vec_base.h
-#ifdef CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(64)))
+#define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
-#define __at_align__ __declspec(align(64))
+#define __at_align32__ __declspec(align(32))
 #else
-#define __at_align__
+#define __at_align32__
 #endif
-#define VECTOR_WIDTH 64
-#define int_vector __m512i
-#else // CPU_CAPABILITY_AVX512
-#if defined(__GNUC__)
-#define __at_align__ __attribute__((aligned(32)))
-#elif defined(_WIN32)
-#define __at_align__ __declspec(align(32))
-#else
-#define __at_align__
-#endif
-#define VECTOR_WIDTH 32
-#define int_vector __m256i
-#endif // CPU_CAPABILITY_AVX512
 
 namespace at {
 namespace vec {
@@ -85,11 +70,11 @@ using int_same_size_t = typename int_of_size<sizeof(T)>::type;
 
 // NOTE: If you specialize on a type, you must define all operations!
 
-// emulates Vectorized types
+// emulates vectorized types
 template <class T>
 struct Vectorized {
 private:
-  __at_align__ T values[VECTOR_WIDTH / sizeof(T)];
+  __at_align32__ T values[32 / sizeof(T)];
 public:
   using value_type = T;
   using size_type = int;
@@ -126,7 +111,7 @@ public:
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
   static constexpr size_type size() {
-    return VECTOR_WIDTH / sizeof(T);
+    return 32 / sizeof(T);
   }
   Vectorized() : values{0} {}
   Vectorized(T val) {
@@ -149,60 +134,60 @@ public:
   template <int64_t mask_>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
     int64_t mask = mask_;
-    Vectorized vector;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (mask & 0x01) {
-        vector[i] = b[i];
+        vec[i] = b[i];
       } else {
-        vector[i] = a[i];
+        vec[i] = a[i];
       }
       mask = mask >> 1;
     }
-    return vector;
+    return vec;
   }
   static Vectorized<T> blendv(const Vectorized<T>& a, const Vectorized<T>& b,
                           const Vectorized<T>& mask) {
-    Vectorized vector;
+    Vectorized vec;
     int_same_size_t<T> buffer[size()];
     mask.store(buffer);
     for (int64_t i = 0; i < size(); i++) {
       if (buffer[i] & 0x01)
        {
-        vector[i] = b[i];
+        vec[i] = b[i];
       } else {
-        vector[i] = a[i];
+        vec[i] = a[i];
       }
     }
-    return vector;
+    return vec;
   }
   template<typename step_t>  // step sometimes requires a higher precision type (e.g., T=int, step_t=double)
   static Vectorized<T> arange(T base = static_cast<T>(0), step_t step = static_cast<step_t>(1)) {
-    Vectorized vector;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
-      vector.values[i] = base + i * step;
+      vec.values[i] = base + i * step;
     }
-    return vector;
+    return vec;
   }
   static Vectorized<T> set(const Vectorized<T>& a, const Vectorized<T>& b, int64_t count = size()) {
-    Vectorized vector;
+    Vectorized vec;
     for (int64_t i = 0; i < size(); i++) {
       if (i < count) {
-        vector[i] = b[i];
+        vec[i] = b[i];
       } else {
-        vector[i] = a[i];
+        vec[i] = a[i];
       }
     }
-    return vector;
+    return vec;
   }
   static Vectorized<T> loadu(const void* ptr) {
-    Vectorized vector;
-    std::memcpy(vector.values, ptr, VECTOR_WIDTH);
-    return vector;
+    Vectorized vec;
+    std::memcpy(vec.values, ptr, 32);
+    return vec;
   }
   static Vectorized<T> loadu(const void* ptr, int64_t count) {
-    Vectorized vector;
-    std::memcpy(vector.values, ptr, count * sizeof(T));
-    return vector;
+    Vectorized vec;
+    std::memcpy(vec.values, ptr, count * sizeof(T));
+    return vec;
   }
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
@@ -218,15 +203,15 @@ public:
     return mask;
   }
   Vectorized<T> isnan() const {
-    Vectorized<T> vector;
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (_isnan(values[i])) {
-        std::memset(static_cast<void*>(vector.values + i), 0xFF, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
       } else {
-        std::memset(static_cast<void*>(vector.values + i), 0, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
       }
     }
-    return vector;
+    return vec;
   }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
@@ -503,15 +488,15 @@ private:
   template <typename Op>
   inline Vectorized<T> binary_pred(const Vectorized<T>& other, Op op) const {
     // All bits are set to 1 if the pred is true, otherwise 0.
-    Vectorized<T> vector;
+    Vectorized<T> vec;
     for (int64_t i = 0; i != size(); i++) {
       if (op(values[i], other.values[i])) {
-        std::memset(static_cast<void*>(vector.values + i), 0xFF, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0xFF, sizeof(T));
       } else {
-        std::memset(static_cast<void*>(vector.values + i), 0, sizeof(T));
+        std::memset(static_cast<void*>(vec.values + i), 0, sizeof(T));
       }
     }
-    return vector;
+    return vec;
   }
 
 public:
@@ -526,11 +511,11 @@ private:
   template <typename Op>
   inline Vectorized<T> binary_pred_bool(const Vectorized<T>& other, Op op) const {
     // 1 if the pred is true, otherwise 0.
-    Vectorized<T> vector;
+    Vectorized<T> vec;
     for (int i = 0; i != size(); ++ i) {
-      vector[i] = bool(op(values[i], other.values[i]));
+      vec[i] = bool(op(values[i], other.values[i]));
     }
-    return vector;
+    return vec;
   }
 
 public:
@@ -683,62 +668,41 @@ Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_
 
 struct Vectorizedi;
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#ifdef CPU_CAPABILITY_AVX2
+
 template <class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
-  int_vector buffer;
-#if defined(CPU_CAPABILITY_AVX2)
-  int_vector a_buffer = _mm256_load_si256(reinterpret_cast<const int_vector*>((const T*)a));
-  int_vector b_buffer = _mm256_load_si256(reinterpret_cast<const int_vector*>((const T*)b));
-#elif defined(CPU_CAPABILITY_AVX512)
-  int_vector a_buffer = _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)a));
-  int_vector b_buffer = _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)b));
-#endif
+  __m256i buffer;
+  __m256i a_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)a));
+  __m256i b_buffer = _mm256_loadu_si256(reinterpret_cast<const __m256i*>((const T*)b));
   buffer = op(a_buffer, b_buffer);
-  __at_align__ T results[Vectorized<T>::size()];
-
-#if defined(CPU_CAPABILITY_AVX2)
-  _mm256_store_si256(reinterpret_cast<int_vector*>(results), buffer);
-#elif defined(CPU_CAPABILITY_AVX512)
-  _mm512_store_si512(reinterpret_cast<int_vector*>(results), buffer);
-#endif
+  __at_align32__ T results[Vectorized<T>::size()];
+  _mm256_storeu_si256(reinterpret_cast<__m256i*>(results), buffer);
   return Vectorized<T>::loadu(results);
 }
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_and_si512 or _mm256_and_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_and_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_and_si512(a, b); });
-#endif
+  // We enclose _mm256_and_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_and_si256(a, b); });
 }
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_or_si512 or _mm256_or_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_or_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_or_si512(a, b); });
-#endif
+  // We enclose _mm256_or_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_or_si256(a, b); });
 }
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
-  // We enclose _mm512_xor_si512 or _mm256_xor_si256 with lambda because it is always_inline
-#if defined(CPU_CAPABILITY_AVX2)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm256_xor_si256(a, b); });
-#elif defined(CPU_CAPABILITY_AVX512)
-  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) { return _mm512_xor_si512(a, b); });
-#endif
+  // We enclose _mm256_xor_si256 with lambda because it is always_inline
+  return bitwise_binary_op(a, b, [](__m256i a, __m256i b) { return _mm256_xor_si256(a, b); });
 }
 
 #else
 
 template<class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(const Vectorized<T> &a, const Vectorized<T> &b, Op op) {
-  static constexpr uint32_t element_no = VECTOR_WIDTH / sizeof(intmax_t);
-  __at_align__ intmax_t buffer[element_no];
+  static constexpr uint32_t element_no = 32 / sizeof(intmax_t);
+  __at_align32__ intmax_t buffer[element_no];
   const intmax_t *a_ptr = reinterpret_cast<const intmax_t*>((const T*) a);
   const intmax_t *b_ptr = reinterpret_cast<const intmax_t*>((const T*) b);
   for (uint32_t i = 0U; i < element_no; ++ i) {
@@ -760,12 +724,12 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
   return bitwise_binary_op(a, b, std::bit_xor<intmax_t>());
 }
 
-#endif // defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#endif
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
   Vectorized<T> ones;  // All bits are 1
-  memset((T*) ones, 0xFF, VECTOR_WIDTH);
+  memset((T*) ones, 0xFF, 32);
   return a ^ ones;
 }
 
@@ -838,9 +802,7 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
 }
 
 // Cast a given vector to another type without changing the bits representation.
-// So a Vectorized<double> of 512 bits containing all ones can be cast to a
-// Vectorized<int64_t> of 512 bits containing all ones (i.e., eight negative 1s).
-// A Vec<double> of 256 bits containing all ones can be cast to a
+// So a Vec<double> of 256 bits containing all ones can be cast to a
 // Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
 namespace {
   // There is a struct here because we don't have static_if and I can't
@@ -878,16 +840,10 @@ inline Vectorized<int_same_size_t<T>> convert_to_int_of_same_size(const Vectoriz
   return Vectorized<int_same_size_t<T>>::loadu(static_cast<void*>(buffer));
 }
 
-// Example inputs for AVX512:
-// a   Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7}
-// b   Vectorized<float>   = {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
-// returns:
-//           Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15}
-//           Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15}
-// Example inputs for AVX2: a           Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
-//               b                      Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
-//       returns:                       Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
-//                                      Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
+// E.g., inputs: a           Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
+//               b           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
+//       returns:            Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
+//                           Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 template <typename T>
 inline std::enable_if_t<Vectorized<T>::size() % 2 == 0, std::pair<Vectorized<T>, Vectorized<T>>>
 deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
@@ -910,14 +866,8 @@ deinterleave2(const Vectorized<T>& a, const Vectorized<T>& b) {
 }
 
 // inverse operation of deinterleave2
-// Example inputs for AVX512:
-//  a       Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15}
-//  b       Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15}
-// returns, for AVX512:
-//          Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7}
-//          Vectorized<float>   = {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
-// Example inputs for AVX2 : a           Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
-//                   b                   Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
+// E.g., inputs: a           Vectorized<float>   = {a0, a1, a2, a3, a4, a5, a6, a7}
+//               b           Vectorized<float>   = {b0, b1, b2, b3, b4, b5, b6, b7}
 //       returns:            Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3}
 //                           Vectorized<float>   = {a4, b4, a5, b5, a6, b6, a7, b7}
 template <typename T>

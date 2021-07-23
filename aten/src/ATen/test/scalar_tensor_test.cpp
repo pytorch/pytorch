@@ -283,11 +283,13 @@ void test(DeprecatedTypeProperties &T) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalarTensor, TestScalarTensorCPU) {
   manual_seed(123);
   test(CPU(kFloat));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestScalarTensor, TestScalarTensorCUDA) {
   manual_seed(123);
 

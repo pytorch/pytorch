@@ -285,6 +285,7 @@ template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
     int64_t* dB,
     CPUContext* context) const;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     MulGradient,
     BinaryElementwiseGradientOp<
@@ -308,6 +309,7 @@ class GetMulGradient final : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Mul, GetMulGradient);
 
 } // namespace caffe2

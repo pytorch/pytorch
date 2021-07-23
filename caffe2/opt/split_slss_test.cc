@@ -84,6 +84,7 @@ void check(
 }
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(splitSparseLengthsSumSparse, sweep) {
   std::vector<bool> has_weights = {true, false};
   std::vector<bool> fallbacks = {true, false};

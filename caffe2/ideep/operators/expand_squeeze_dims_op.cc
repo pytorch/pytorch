@@ -127,7 +127,9 @@ class IDEEPSqueezeOp final : public IDEEPOperator {
 };
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ExpandDims, IDEEPExpandDimsOp);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Squeeze, IDEEPSqueezeOp);
 
 } // namespace

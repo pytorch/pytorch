@@ -4,6 +4,7 @@
 
 #include "nomnigraph/Graph/Graph.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Tarjans, Simple) {
   TestClass t1;
   TestClass t2;
@@ -16,6 +17,7 @@ TEST(Tarjans, Simple) {
   EXPECT_EQ(sccs.size(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Tarjans, WithEdgeStorage) {
   TestClass t1;
   TestClass t2;
@@ -28,18 +30,21 @@ TEST(Tarjans, WithEdgeStorage) {
   EXPECT_EQ(sccs.size(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Tarjans, DAG) {
   auto graph = createGraph();
   auto sccs = nom::algorithm::tarjans(&graph);
   EXPECT_EQ(sccs.size(), 9);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Tarjans, Cycle) {
   auto graph = createGraphWithCycle();
   auto sccs = nom::algorithm::tarjans(&graph);
   EXPECT_EQ(sccs.size(), 8);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Tarjans, Random) {
   nom::Graph<TestClass> g;
   std::vector<nom::Graph<TestClass>::NodeRef> nodes;

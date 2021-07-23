@@ -232,6 +232,7 @@ static PyMethodDef THPFInfo_methods[] = {
     {nullptr} /* Sentinel */
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPFInfoType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch.finfo", /* tp_name */
     sizeof(THPFInfo),                                /* tp_basicsize */
@@ -285,6 +286,7 @@ static PyMethodDef THPIInfo_methods[] = {
     {nullptr} /* Sentinel */
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPIInfoType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch.iinfo", /* tp_name */
     sizeof(THPIInfo), /* tp_basicsize */

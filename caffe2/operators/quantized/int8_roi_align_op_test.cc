@@ -3,6 +3,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8RoIAlign, RoIAlign) {
   const int N = 2;
   const int C = 3;

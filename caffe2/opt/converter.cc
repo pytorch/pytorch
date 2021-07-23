@@ -57,6 +57,7 @@ int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(ConverterRegistry, Converter);
 
 std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
@@ -177,20 +178,26 @@ class ConvTransposeConverter : public Converter {
   virtual ~ConvTransposeConverter() {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Conv, ConvConverter);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(ConvTranspose, ConvTransposeConverter);
 
 TRIVIAL_CONVERTER(Relu);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Relu, ReluConverter);
 
 TRIVIAL_CONVERTER(Sum);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Sum, SumConverter);
 
 TRIVIAL_CONVERTER(BatchNormalization);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(SpatialBN, BatchNormalizationConverter);
 
 TRIVIAL_CONVERTER(Flatten);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Flatten, FlattenConverter);
 
 class ClipConverter : public Converter {
@@ -217,6 +224,7 @@ class ClipConverter : public Converter {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ClipConverter() override {}
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Clip, ClipConverter);
 
 class AveragePoolConverter : public Converter {
@@ -233,6 +241,7 @@ class AveragePoolConverter : public Converter {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AveragePoolConverter() override {}
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
 
 class MaxPoolConverter : public Converter {
@@ -249,6 +258,7 @@ class MaxPoolConverter : public Converter {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~MaxPoolConverter() override {}
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
 
 class ConcatConverter : public Converter {
@@ -276,6 +286,7 @@ class ConcatConverter : public Converter {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ConcatConverter() override {}
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(Concat, ConcatConverter);
 
 class FCConverter : public Converter {
@@ -304,6 +315,7 @@ class FCConverter : public Converter {
   // NOLINTNEXTLINE(modernize-use-equals-default)
   ~FCConverter() override {}
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CONVERTER(FC, FCConverter);
 
 } // namespace

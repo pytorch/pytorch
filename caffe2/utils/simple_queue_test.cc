@@ -5,6 +5,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unique_ptr<SimpleQueue<int> > gQueue;
 
 static void ConsumerFunction(int thread_idx) {
@@ -24,6 +25,7 @@ static void ProducerFunction(int thread_idx, int start, int count) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleQueueTest, SingleProducerSingleConsumer) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());
@@ -35,6 +37,7 @@ TEST(SimpleQueueTest, SingleProducerSingleConsumer) {
   consumer.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleQueueTest, SingleProducerDoubleConsumer) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());
@@ -49,6 +52,7 @@ TEST(SimpleQueueTest, SingleProducerDoubleConsumer) {
 }
 
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleQueueTest, DoubleProducerDoubleConsumer) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());
@@ -63,6 +67,7 @@ TEST(SimpleQueueTest, DoubleProducerDoubleConsumer) {
   consumer1.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SimpleQueueDeathTest, CannotAddAfterQueueFinished) {
   // NOLINTNEXTLINE(modernize-make-unique)
   gQueue.reset(new SimpleQueue<int>());

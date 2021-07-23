@@ -7,7 +7,8 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
-#include <c10/cuda/CUDAFunctions.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 
 /*
@@ -127,7 +128,7 @@ class C10_CUDA_API CUDAStream {
 
   void synchronize() const {
     DeviceGuard guard{stream_.device()};
-    c10::cuda::stream_synchronize(stream());
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream()));
   }
 
   int priority() const {

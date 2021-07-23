@@ -16,6 +16,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TextFileReaderUtilsTest, TokenizeTest) {
   TokenizedString tokenized;
   std::string ch =

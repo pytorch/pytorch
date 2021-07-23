@@ -2,8 +2,10 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Transpose)
     .NumInputs(1)
     .NumOutputs(1)
@@ -117,6 +119,7 @@ class GetTransposeGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Transpose, GetTransposeGradient);
 
 } // namespace caffe2

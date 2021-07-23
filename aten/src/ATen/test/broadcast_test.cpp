@@ -164,6 +164,7 @@ void TestExplicitDimWithMismatchedSizes(DeprecatedTypeProperties& T) {
   ASSERT_ANY_THROW(a.addmm(b, c));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BroadcastTest, Broadcast) {
   manual_seed(123);
   DeprecatedTypeProperties& T = CPU(kFloat);

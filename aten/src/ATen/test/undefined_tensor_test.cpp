@@ -6,6 +6,7 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestUndefined, UndefinedTest) {
   manual_seed(123);
 

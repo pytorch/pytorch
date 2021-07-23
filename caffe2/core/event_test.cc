@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EventCPUTest, EventBasics) {
   DeviceOption device_option;
   device_option.set_device_type(PROTO_CPU);
@@ -22,6 +23,7 @@ TEST(EventCPUTest, EventBasics) {
   event.Wait(CPU, &context);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EventCPUTest, EventErrors) {
   DeviceOption device_option;
   device_option.set_device_type(PROTO_CPU);

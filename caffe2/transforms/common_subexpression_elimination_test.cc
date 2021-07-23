@@ -19,6 +19,7 @@ using transform::Graph;
  *                    \-->(Relu)
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonSubexpressionEliminationTest, TestSimple) {
   NetDef netdef;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -74,6 +75,7 @@ TEST(CommonSubexpressionEliminationTest, TestSimple) {
  *                 \-->(Relu)
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonSubexpressionEliminationTest, TestFromExternal) {
   NetDef netdef;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

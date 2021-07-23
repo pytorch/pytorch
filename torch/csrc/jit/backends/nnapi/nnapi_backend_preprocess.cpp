@@ -61,5 +61,6 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "nnapi";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg =
     torch::jit::backend_preprocess_register(backend_name, preprocess);

@@ -27,6 +27,7 @@ bool TanhGradientFunctor<CPUContext>::Forward<float>(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     TanhGradient,
     BinaryElementwiseOp<
@@ -49,6 +50,7 @@ class GetTanhGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Tanh, GetTanhGradient);
 
 } // namespace caffe2

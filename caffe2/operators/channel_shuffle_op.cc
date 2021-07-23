@@ -134,16 +134,20 @@ bool ChannelShuffleGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     ChannelShuffleGradient,
     ChannelShuffleGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ChannelShuffle)
     .IdenticalTypeAndShape()
     .NumInputs(1)
     .NumOutputs(1)
     .InheritOnnxSchema();
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)
@@ -164,6 +168,7 @@ class GetChannelShuffleGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ChannelShuffle, GetChannelShuffleGradient);
 
 } // namespace caffe2

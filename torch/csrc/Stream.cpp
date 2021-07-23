@@ -5,6 +5,7 @@
 
 #include <structmember.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject *THPStreamClass = nullptr;
 
 static PyObject* THPStream_pynew(
@@ -64,6 +65,7 @@ static PyMethodDef THPStream_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPStreamType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Stream",                        /* tp_name */

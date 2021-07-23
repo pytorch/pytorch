@@ -82,5 +82,6 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(stateful_conv1d)->Apply(GenerateSizes);
 BENCHMARK_MAIN();

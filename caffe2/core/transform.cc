@@ -10,6 +10,7 @@ namespace caffe2 {
 
 using transform::Graph;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TransformRegistry, Transform);
 
 std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {

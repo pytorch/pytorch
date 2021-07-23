@@ -99,9 +99,12 @@ void RMSNormGradientOp<CPUContext>::GammaBetaBackward(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RMSNorm, RMSNormOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RMSNormGradient, RMSNormGradientOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RMSNorm)
     .NumInputs(3)
     .NumOutputs(2)
@@ -149,6 +152,7 @@ OPERATOR_SCHEMA(RMSNorm)
         "rrms",
         "Reciprocal of root mean square for each feature vector");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RMSNormGradient).NumInputs(4).NumOutputs(3);
 
 namespace {
@@ -166,6 +170,7 @@ class GetRMSNormGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RMSNorm, GetRMSNormGradient);
 
 } // namespace caffe2

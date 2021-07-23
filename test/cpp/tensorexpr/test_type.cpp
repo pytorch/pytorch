@@ -8,6 +8,7 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, Test01) {
   KernelScope kernel_scope;
   {
@@ -43,6 +44,7 @@ TEST(Type, Test01) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, BitCasting) {
   {
     KernelScope kernel_scope;
@@ -156,6 +158,7 @@ TEST(Type, BitCasting) {
   }*/
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Type, Propagation) {
   // Same types:
   {

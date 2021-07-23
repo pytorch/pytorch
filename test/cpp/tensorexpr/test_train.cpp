@@ -48,6 +48,7 @@ struct T {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Train, TrainBasic) {
   {
     VGraph graph;

@@ -139,7 +139,9 @@ namespace {
     return grad_input;
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
 } // at::native

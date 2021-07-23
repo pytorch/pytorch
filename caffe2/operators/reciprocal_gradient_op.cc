@@ -27,6 +27,7 @@ bool ReciprocalGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReciprocalGradient,
     BinaryElementwiseOp<
@@ -49,6 +50,7 @@ class GetReciprocalGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Reciprocal, GetReciprocalGradient);
 
 } // namespace caffe2

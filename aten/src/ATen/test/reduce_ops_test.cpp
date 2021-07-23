@@ -5,6 +5,7 @@
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ReduceOpsTest, MaxValuesAndMinValues) {
   const int W = 10;
   const int H = 10;

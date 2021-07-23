@@ -8,7 +8,6 @@
 using namespace ::testing;
 using namespace caffe2;
 
-// TODO(T96218435): Enable the following tests in OSS.
 TEST(IMethodTest, CallMethod) {
   auto script_model = torch::jit::load(getenv("SIMPLE_JIT"));
   auto script_method = script_model.get_method("forward");
@@ -31,21 +30,15 @@ TEST(IMethodTest, CallMethod) {
 }
 
 TEST(IMethodTest, GetArgumentNames) {
-  auto scriptModel = torch::jit::load(getenv("SIMPLE_JIT"));
-  auto scriptMethod = scriptModel.get_method("forward");
-
-  auto& scriptNames = scriptMethod.getArgumentNames();
-  EXPECT_EQ(scriptNames.size(), 2);
-  EXPECT_STREQ(scriptNames[0].c_str(), "self");
-  EXPECT_STREQ(scriptNames[1].c_str(), "input");
+  auto script_model = torch::jit::load(getenv("SIMPLE_JIT"));
+  auto script_method = script_model.get_method("forward");
 
   torch::deploy::InterpreterManager manager(3);
-  torch::deploy::Package package = manager.load_package(getenv("SIMPLE"));
-  auto pyModel = package.load_pickle("model", "model.pkl");
-  torch::deploy::PythonMethodWrapper pyMethod(pyModel, "forward");
+  torch::deploy::Package p = manager.load_package(getenv("SIMPLE"));
+  auto py_model = p.load_pickle("model", "model.pkl");
+  torch::deploy::PythonMethodWrapper py_method(py_model, "forward");
 
-  auto& pyNames = pyMethod.getArgumentNames();
-  EXPECT_EQ(pyNames.size(), 2);
-  EXPECT_STREQ(pyNames[0].c_str(), "input");
-  EXPECT_STREQ(pyNames[1].c_str(), "kwargs");
+  // TODO(whc) implement and test these
+  EXPECT_THROW(script_method.getArgumentNames(), std::runtime_error);
+  EXPECT_THROW(py_method.getArgumentNames(), std::runtime_error);
 }

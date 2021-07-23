@@ -37,12 +37,14 @@ bool EluGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Elu,
     UnaryElementwiseWithArgsOp<
         TensorTypes<float>,
         CPUContext,
         EluFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     EluGradient,
     BinaryElementwiseWithArgsOp<
@@ -51,6 +53,7 @@ REGISTER_CPU_GRADIENT_OPERATOR(
         EluGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Elu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -117,6 +120,7 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY, output: dX
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(EluGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -141,6 +145,7 @@ class GetEluGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Elu, GetEluGradient);
 
 } // namespace caffe2

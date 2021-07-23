@@ -15,6 +15,7 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qavg_pool3d_nhwc_stub);
 
 namespace {

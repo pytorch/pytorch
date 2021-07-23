@@ -35,7 +35,6 @@ jobs:
       - name: noop
         run: echo running ciflow_should_run
   calculate-docker-image:
-    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:

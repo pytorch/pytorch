@@ -1,5 +1,6 @@
 #include <ATen/cpu/FlushDenormal.h>
-#include <ATen/cpu/vec/intrinsics.h>
+
+#include <ATen/cpu/vec/vec256/intrinsics.h>
 #include <cpuinfo.h>
 
 namespace at { namespace cpu {

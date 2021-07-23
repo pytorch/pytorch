@@ -180,6 +180,7 @@ class IDEEPAdamOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Adam, IDEEPAdamOp<float>);
 
 } // namespace

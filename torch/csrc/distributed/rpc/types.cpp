@@ -7,6 +7,7 @@ namespace rpc {
 // Thread local flag to enforce rref JIT pickling to be allowed only
 // in the scope of an rpc call. For other scopes like when model is
 // saved by calling torch.save(), rref is not allowed to be pickled directly.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local bool allowJitRRefPickle = false;
 
 bool getAllowJitRRefPickle() {

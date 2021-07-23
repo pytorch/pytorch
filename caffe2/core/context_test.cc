@@ -6,6 +6,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocAlignment) {
   for (int i = 1; i < 10; ++i) {
     auto data = CPUContext::New(i);
@@ -14,6 +15,7 @@ TEST(CPUContextTest, TestAllocAlignment) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CPUContextTest, TestAllocDealloc) {
   auto data_ptr = CPUContext::New(10 * sizeof(float));
   float* data = static_cast<float*>(data_ptr.get());

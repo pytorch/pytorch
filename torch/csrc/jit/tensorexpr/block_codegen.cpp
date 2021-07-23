@@ -367,6 +367,7 @@ void BlockCodeGen::call_raw(const std::vector<void*>& args) {
 }
 
 BlockCodeGen::~BlockCodeGen() = default;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<BlockCodeGen> block_codegen_reg("block_codegen");
 
 } // namespace tensorexpr

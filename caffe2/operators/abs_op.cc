@@ -25,9 +25,11 @@ bool AbsGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Abs,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, AbsFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AbsGradient,
     BinaryElementwiseOp<
@@ -35,6 +37,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         AbsGradientFunctor<CPUContext>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Abs)
     .NumInputs(1)
     .NumOutputs(1)
@@ -87,6 +90,7 @@ Y: [0.3005476  1.551666   1.3591481  0.39191285 0.21866608]
         "*(type: Tensor`<float>`)* Absolute value of input element-wise.")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AbsGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -107,6 +111,7 @@ class GetAbsGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Abs, GetAbsGradient);
 
 } // namespace caffe2

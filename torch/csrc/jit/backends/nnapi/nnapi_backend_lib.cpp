@@ -40,6 +40,7 @@ class NnapiBackend : public PyTorchBackendInterface {
 
 namespace {
 constexpr auto backend_name = "nnapi";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls = torch::jit::backend<NnapiBackend>(backend_name);
 } // namespace
 

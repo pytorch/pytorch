@@ -360,18 +360,21 @@ void test(DeprecatedTypeProperties& type) {
   TestIntArrayRefExpansion(type);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCPU) {
   manual_seed(123);
 
   test(CPU(kFloat));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestHalfCPU) {
   manual_seed(234);
 
   test(CPU(kHalf));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, BasicTestCUDA) {
   manual_seed(123);
 
@@ -380,6 +383,7 @@ TEST(BasicTest, BasicTestCUDA) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BasicTest, FactoryMethodsTest) {
   // Test default values
   at::Tensor tensor0 = at::empty({4});
