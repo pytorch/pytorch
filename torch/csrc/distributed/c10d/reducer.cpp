@@ -38,7 +38,7 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY( // NOLINT
     TimerRegistry,
     c10::DeviceType,
     Timer,
@@ -1467,7 +1467,7 @@ void Reducer::finalize_backward() {
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.
-      populate_bucket_views_out(replica, future_result[i]);
+      populate_bucket_views_out(replica, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass

@@ -84,7 +84,7 @@ class TORCH_API GradBucket {
 // result into a tensor.
 class TORCH_PYTHON_API CommHookInterface {
  public:
-  virtual ~CommHookInterface() {}
+  virtual ~CommHookInterface() = default;
 
   // Passes the input grad bucket to the registered communication hook.
   // Once the tensors in the bucket are ready, kicks off the hook asynchronously
@@ -124,7 +124,7 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 
-  virtual ~CppCommHookInterface() {}
+  virtual ~CppCommHookInterface() override = default;
 
   at::Tensor parseHookResult(const c10::IValue& result) override {
     return detail::parseCppCommHookResult(result);
