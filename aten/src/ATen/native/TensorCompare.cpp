@@ -22,6 +22,17 @@ static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
       "Unsupported input type encountered for isin(): ", type);
 }
 
+TORCH_META_FUNC(clamp) (
+const Tensor& self,
+const OptionalScalarRef min,
+const OptionalScalarRef max) {
+  if (!min && !max) {
+    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+  }
+
+  build_unary_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
   const Tensor& elements, const Tensor& test_elements, bool assume_unique, bool invert
 ) {
@@ -547,18 +558,19 @@ std::tuple<Tensor&, Tensor&> min_out(
   return result;
 }
 
-Tensor& clamp_out(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
+TORCH_IMPL_FUNC(clamp_out)
+(
+ const Tensor& self,
+ const OptionalScalarRef min,
+ const OptionalScalarRef max,
+ const Tensor& result) {
   if (min && max) {
-    auto iter = TensorIterator::unary_op(result, self);
-    clamp_scalar_stub(iter.device_type(), iter, *min, *max);
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
   } else if (max) {
-    at::clamp_max_outf(self, *max, result);
+    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
   } else if (min) {
-    at::clamp_min_outf(self, *min, result);
-  } else {
-    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
   }
-  return result;
 }
 
 Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
