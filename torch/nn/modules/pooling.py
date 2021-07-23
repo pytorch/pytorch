@@ -502,8 +502,8 @@ class AvgPool1d(_AvgPoolNd):
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in}`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +
