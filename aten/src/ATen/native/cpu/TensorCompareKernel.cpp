@@ -344,7 +344,7 @@ static void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-static void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min_, Scalar max_) {
+static void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const auto max = max_.to<scalar_t>();
@@ -414,19 +414,12 @@ static void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min_) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_impl);

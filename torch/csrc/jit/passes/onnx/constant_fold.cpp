@@ -29,7 +29,6 @@ enum OnnxType : int {
   ONNX_UINT32,
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
