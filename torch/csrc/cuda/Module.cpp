@@ -446,8 +446,8 @@ PyObject * THCPModule_cudaSetSyncWarningLevel(PyObject * _unused, PyObject * arg
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_warn_on_synchronization");
   int64_t level = THPUtils_unpackLong(arg);
-  c10::cuda::SyncWarningLevel l = (level == 0) ? c10::cuda::SyncWarningLevel::DISABLED :
-  (level == 1) ? c10::cuda::SyncWarningLevel::WARN : c10::cuda::SyncWarningLevel::ERROR;
+  c10::cuda::SyncWarningLevel l = (level == 0) ? c10::cuda::SyncWarningLevel::L_DISABLED :
+  (level == 1) ? c10::cuda::SyncWarningLevel::L_WARN : c10::cuda::SyncWarningLevel::L_ERROR;
   c10::cuda::warning_state().set_sync_warning_level(l);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

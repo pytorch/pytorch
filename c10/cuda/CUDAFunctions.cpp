@@ -139,9 +139,9 @@ void device_synchronize() {
 }
 
 void warn_or_error_on_sync(){
-    if (warning_state().get_sync_warning_level() == SyncWarningLevel::ERROR) {
+    if (warning_state().get_sync_warning_level() == SyncWarningLevel::L_ERROR) {
        TORCH_CHECK(false, "called a synchronizing operation");
-    } else if (warning_state().get_sync_warning_level() == SyncWarningLevel::WARN){
+    } else if (warning_state().get_sync_warning_level() == SyncWarningLevel::L_WARN){
        TORCH_WARN("called a synchronizing operation");
     }
 }
