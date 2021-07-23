@@ -1969,7 +1969,6 @@ works_list = [
     'nn.functional.hardtanh',
     'nn.functional.leaky_relu',
     'nn.functional.relu6',
-    'nn.functional.softmax',
     'permute',
     'pow',
     'reciprocal',
