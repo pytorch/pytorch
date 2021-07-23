@@ -166,17 +166,17 @@ void fractional_max_pool3d_out_cuda_template(
     int64_t poolSizeW = pool_size[2];
 
     int64_t ndims = input.ndimension();
+    TORCH_CHECK(
+                ndims == 4 || ndims == 5,
+                "fractional_max_pool3d_out_cuda_template(): ",
+                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ",
+                ndims);
     for (int64_t i = 1; i < ndims; ++i) {
       TORCH_CHECK(input.size(i) > 0,
         "fractional_max_pool3d_out_cuda_template(): ",
         "Expected input to have non-zero dimensions for non-batch dimensions, but got",
         input.sizes(), " with dimension ", i, " being empty.");
     }
-    TORCH_CHECK(
-      ndims == 4 || ndims == 5,
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ",
-      ndims);
 
     if (ndims == 5) {
       numBatch = input.size(0);
