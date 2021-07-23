@@ -4,6 +4,8 @@
 name: Windows CI (periodic-pytorch-win-vs2019-cuda11-cudnn8-py3)
 
 on:
+  pull_request:
+    types: [unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -29,13 +31,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled'))
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
         working-directory: pytorch-${{ github.run_id }}
-    needs: []
+    needs: [ciflow_should_run]
     env:
       JOB_BASE_NAME: periodic-pytorch-win-vs2019-cuda11-cudnn8-py3-build
     steps:
@@ -93,7 +101,7 @@ jobs:
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: []
+    needs: [ciflow_should_run]
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
@@ -118,7 +126,7 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
-    needs: [build, generate-test-matrix, ]
+    needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -199,7 +207,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, ]
+    needs: [generate-test-matrix, test, ciflow_should_run]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
