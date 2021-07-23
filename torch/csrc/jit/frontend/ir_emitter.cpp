@@ -3912,7 +3912,8 @@ struct to_ir {
                 type_hint->expect<DictType>()->getValueType();
             for (size_t i = 0; i < types.size(); ++i) {
               TORCH_CHECK(
-                  types[i]->isSubtypeOf(value_type_hint) || types[i] == NumberType::get(),
+                  types[i]->isSubtypeOf(value_type_hint) ||
+                      types[i] == NumberType::get(),
                   "Type "
                   "hint for dict was ",
                   type_hint->repr_str(),
