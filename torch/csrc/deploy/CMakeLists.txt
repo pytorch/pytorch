@@ -39,7 +39,7 @@ target_include_directories(test_deploy PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(test_deploy PUBLIC gtest dl torch_deploy)
 
 add_library(test_deploy_lib SHARED test_deploy_lib.cpp)
-target_include_directories(test_deploy_lib PRIVATE BEFORE interpreter/cpython/include/python3.8)
+target_include_directories(test_deploy_lib BEFORE PRIVATE ${PYTHON_INC_DIR})
 
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)

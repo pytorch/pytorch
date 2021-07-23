@@ -279,7 +279,7 @@ struct EH_Frame_HDR {
 // with the module_id and offset.
 extern "C" void* __tls_get_addr(void*);
 
-extern "C" int __cxa_thread_atexit_impl(
+extern "C" int __cxa_thread_atexit(
     void (*dtor)(void*),
     void* obj,
     void* dso_symbol);
@@ -1211,7 +1211,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     void* start = pthread_getspecific(tls_key_);
     if (!start) {
       auto tls_mem = new TLSMemory(shared_from_this(), tls_mem_size_);
-      __cxa_thread_atexit_impl(delete_TLSMemory, tls_mem, &__dso_handle);
+      __cxa_thread_atexit(delete_TLSMemory, tls_mem, &__dso_handle);
       start = tls_mem->mem_;
       memcpy(start, tls_initalization_image_, tls_file_size_);
       memset(

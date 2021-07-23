@@ -5,7 +5,7 @@ SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 
 # Build cpython
 SET(PYTHON_INSTALL_DIR "${INTERPRETER_DIR}/cpython")
-SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8")
+SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8" PARENT_SCOPE)
 SET(PYTHON_LIB "${PYTHON_INSTALL_DIR}/lib/libpython3.8.a")
 SET(PYTHON_BIN "${PYTHON_INSTALL_DIR}/bin/python3")
 ExternalProject_Add(
