@@ -29,7 +29,6 @@ import torch.testing._internal.common_utils as common
 from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -42,11 +41,15 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     TestCase,
     run_tests,
     retry_on_connect_failures,
     TEST_WITH_TSAN,
 )
+
+if not IS_WINDOWS:
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
 
 
 class RendezvousEnvTest(TestCase):
