@@ -15,7 +15,7 @@ import tempfile
 import time
 import unittest
 from itertools import product
-from typing import Dict, List
+from typing import Dict, List, Union, Callable
 from unittest import mock
 from unittest.mock import patch
 
@@ -24,6 +24,7 @@ import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing import ProcessFailure, start_processes
 from torch.distributed.elastic.multiprocessing.api import (
     MultiprocessContext,
+    SignalException,
     RunProcsResult,
     Std,
     _validate_full_rank,
@@ -173,6 +174,52 @@ def redirects_all() -> List[Std]:
     ]
 
 
+def bin(name: str):
+    dir = os.path.dirname(__file__)
+    return os.path.join(dir, "bin", name)
+
+
+def wait_fn(wait_time: int = 300) -> None:
+    time.sleep(wait_time)
+    print("Finished waiting")
+
+
+def start_processes_zombie_test(
+    idx: int,
+    entrypoint: Union[str, Callable],
+    mp_queue: mp.Queue,
+    log_dir: str,
+    nproc: int = 2,
+) -> None:
+    """
+    Starts processes
+    """
+
+    args = {}
+    envs = {}
+    for idx in range(nproc):
+        args[idx] = ()
+        envs[idx] = {}
+
+    pc = start_processes(
+        name="zombie_test",
+        entrypoint=entrypoint,
+        args=args,
+        envs=envs,
+        log_dir=log_dir,
+        redirects=Std.NONE,
+    )
+    my_pid = os.getpid()
+    mp_queue.put(my_pid)
+    for child_pid in pc.pids().values():
+        mp_queue.put(child_pid)
+
+    try:
+        pc.wait(period=1, timeout=300)
+    except SignalException as e:
+        pc.close(e.sigval)
+
+
 @unittest.skipIf(
     TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS,
     "tests incompatible with tsan or asan",
@@ -294,6 +341,19 @@ class StartProcessesTest(unittest.TestCase):
         self.assertTrue(pc._stderr_tail.stopped())
         self.assertTrue(pc._stdout_tail.stopped())
 
+    def test_subprocess_context_close(self):
+        pc = start_processes(
+            name="sleep",
+            entrypoint=bin("zombie_test.py"),
+            args={0: (1,)},
+            envs={0: {}},
+            log_dir=self.log_dir(),
+        )
+
+        pids = pc.pids()
+        pc.close()
+        self.assert_pids_noexist(pids)
+
     def test_function_with_tensor(self):
         for start_method in self._start_methods:
             pc = start_processes(
@@ -395,15 +455,11 @@ class StartProcessesTest(unittest.TestCase):
     # start_processes as binary tests
     ########################################
 
-    def bin(self, name: str):
-        dir = os.path.dirname(__file__)
-        return os.path.join(dir, "bin", name)
-
     def test_binary_exit(self):
         FAIL = 138
         pc = start_processes(
             name="echo",
-            entrypoint=self.bin("echo1.py"),
+            entrypoint=bin("echo1.py"),
             args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
             envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
             log_dir=self.log_dir(),
@@ -429,7 +485,7 @@ class StartProcessesTest(unittest.TestCase):
     def test_binary_raises(self):
         pc = start_processes(
             name="echo",
-            entrypoint=self.bin("echo2.py"),
+            entrypoint=bin("echo2.py"),
             args={0: ("--raises", "true", "foo"), 1: ("bar",)},
             envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
             log_dir=self.log_dir(),
@@ -463,7 +519,7 @@ class StartProcessesTest(unittest.TestCase):
     @unittest.skipIf(
         NO_MULTIPROCESSING_SPAWN,
         "Disabled for environments that \
-                     don't support multiprocessing with spawn start method",
+                    don't support multiprocessing with spawn start method",
     )
     def test_multiprocessing_context_poll_raises_exception(self):
         mp_context = MultiprocessContext(
@@ -540,7 +596,7 @@ class StartProcessesListTest(StartProcessesTest):
             with self.subTest(redirs=redirs):
                 pc = start_processes(
                     name="echo",
-                    entrypoint=self.bin("echo1.py"),
+                    entrypoint=bin("echo1.py"),
                     args={0: ("hello",), 1: ("hello",)},
                     envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                     log_dir=self.log_dir(),
@@ -572,7 +628,7 @@ class StartProcessesListTest(StartProcessesTest):
     def test_binary_redirect_and_tee(self):
         pc = start_processes(
             name="trainer",
-            entrypoint=self.bin("echo1.py"),
+            entrypoint=bin("echo1.py"),
             args={0: ("hello",), 1: ("world",)},
             envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
             log_dir=self.log_dir(),
@@ -631,7 +687,7 @@ class StartProcessesNotCITest(StartProcessesTest):
     def test_binary_signal(self):
         pc = start_processes(
             name="echo",
-            entrypoint=self.bin("echo3.py"),
+            entrypoint=bin("echo3.py"),
             args={0: ("--segfault", "true", "foo"), 1: ("bar",)},
             envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
             log_dir=self.log_dir(),
@@ -754,6 +810,43 @@ class StartProcessesNotCITest(StartProcessesTest):
                 self.assertFalse(results.stdouts[1])
                 self.assertTrue(pc._stderr_tail.stopped())
                 self.assertTrue(pc._stdout_tail.stopped())
+
+    def test_no_zombie_process_binary(self):
+        signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
+        for s in signals:
+            self._test_zombie_workflow(bin("zombie_test.py"), s)
+
+    def test_no_zombie_process_function(self):
+        signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]
+        for s in signals:
+            self._test_zombie_workflow(wait_fn, s)
+
+    def _test_zombie_workflow(
+        self, entrypoint: Union[str, Callable], signal_to_send: signal.Signals
+    ) -> None:
+        mp_queue = mp.get_context("spawn").Queue()
+        child_nproc = 2
+        ctx = mp.spawn(
+            start_processes_zombie_test,
+            nprocs=1,
+            args=(entrypoint, mp_queue, self.log_dir(), child_nproc),
+            join=False,
+        )
+        total_processes = child_nproc + 1
+        pids = []
+        for _ in range(total_processes):
+            pids.append(mp_queue.get(timeout=120))
+        parent_pid = pids[0]
+        child_pids = pids[1:]
+
+        os.kill(parent_pid, signal.SIGTERM)
+        # Wait to give time for signal handlers to finish work
+        time.sleep(5)
+        for child_pid in child_pids:
+            # Killing parent should kill all children, we expect that each call to
+            # os.kill would raise OSError
+            with self.assertRaises(OSError):
+                os.kill(child_pid, 0)
 
 
 if __name__ == "__main__":
