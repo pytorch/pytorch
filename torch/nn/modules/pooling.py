@@ -129,8 +129,8 @@ class MaxPool2d(_MaxPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
@@ -502,8 +502,8 @@ class AvgPool1d(_AvgPoolNd):
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in}`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +

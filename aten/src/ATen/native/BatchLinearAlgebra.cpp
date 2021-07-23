@@ -1462,7 +1462,6 @@ Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cholesky_inverse_stub);
 
 Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
@@ -1576,7 +1575,6 @@ std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool comput
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(triangular_solve_stub);
 
 /*
@@ -1686,7 +1684,6 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out(const Tensor& self, const Tens
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(geqrf_stub);
 
 static void geqrf_out_helper(const Tensor& input, const Tensor& QR, const Tensor& tau) {
@@ -1950,7 +1947,6 @@ std::tuple<Tensor&,Tensor&> qr_out(const Tensor& self, bool some, Tensor& Q, Ten
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(orgqr_stub);
 
 /*
@@ -2088,7 +2084,6 @@ Tensor orgqr(const Tensor& input, const Tensor& tau) {
   return at::linalg_householder_product(input, tau);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(ormqr_stub);
 
 void ormqr_out_helper(const Tensor& input, const Tensor& tau, const Tensor& other, const Tensor& result, bool left, bool transpose) {
@@ -2233,7 +2228,6 @@ Tensor ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool l
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linalg_eigh_stub);
 
 /*
@@ -2591,7 +2585,6 @@ static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, con
   return complex_vectors;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linalg_eig_stub);
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
@@ -2877,7 +2870,6 @@ Tensor linalg_eigvals(const Tensor& input) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(eig_stub);
 
 std::tuple<Tensor&, Tensor&> eig_out(const Tensor& self, bool eigenvectors, Tensor& e, Tensor& v) {

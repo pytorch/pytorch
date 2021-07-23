@@ -242,7 +242,6 @@ void createTensorFromList(Stack* stack) {
   push(stack, std::move(tensor));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
