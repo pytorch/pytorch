@@ -18,10 +18,8 @@ void ReplaceNaNOp<CPUContext>::ReplaceNaN(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReplaceNaN, ReplaceNaNOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReplaceNaN)
     .NumInputs(1)
     .NumOutputs(1)
@@ -34,7 +32,6 @@ Replace the NaN (not a number) element in the input tensor with argument `value`
     .Input(0, "input", "Input tensor")
     .Input(1, "output", "Output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReplaceNaN);
 
 } // namespace caffe2

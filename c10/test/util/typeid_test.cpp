@@ -15,7 +15,6 @@ CAFFE_KNOWN_TYPE(TypeMetaTestBar);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::ItemSize<int>(), sizeof(int));
   EXPECT_EQ(TypeMeta::ItemSize<float>(), sizeof(float));
@@ -28,7 +27,6 @@ TEST(TypeMetaTest, TypeMetaStatic) {
   EXPECT_EQ(TypeMeta::Id<TypeMetaTestFoo>(), TypeMeta::Id<TypeMetaTestFoo>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
   EXPECT_EQ("nullptr (uninitialized)", null_meta.name());
@@ -38,7 +36,6 @@ TEST(TypeMetaTest, Names) {
   EXPECT_TRUE(c10::string_view::npos != string_meta.name().find("string"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, TypeMeta) {
   TypeMeta int_meta = TypeMeta::Make<int>();
   TypeMeta float_meta = TypeMeta::Make<float>();
@@ -95,7 +92,6 @@ CAFFE_KNOWN_TYPE(ClassNoAssignment);
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, CtorDtorAndCopy) {
   TypeMeta fundamental_meta = TypeMeta::Make<int>();
   EXPECT_EQ(fundamental_meta.placementNew(), nullptr);
@@ -125,7 +121,6 @@ TEST(TypeMetaTest, CtorDtorAndCopy) {
 #endif
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeMetaTest, Float16IsNotUint16) {
   EXPECT_NE(TypeMeta::Id<uint16_t>(), TypeMeta::Id<at::Half>());
 }

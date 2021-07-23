@@ -835,7 +835,6 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {

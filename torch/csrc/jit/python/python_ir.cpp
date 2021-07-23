@@ -22,10 +22,8 @@ namespace torch {
 namespace jit {
 
 // Controls whether graph source ranges are printed by default
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool global_print_source_ranges = true;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
