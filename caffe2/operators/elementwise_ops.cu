@@ -10,7 +10,7 @@
 
 #ifdef __HIPCC__
 #include <hip/hip_version.h>
-#if HIP_VERSION < 210
+#if TORCH_HIP_VERSION < 210
 // rocblas doesn't fully support fp16 yet
 #define ROCBLAS_FP16 0
 #endif
@@ -119,7 +119,7 @@ void device_reduce<at::Half>(
     int N,
     Tensor* buffer,
     CUDAContext* context) {
-#if HIP_VERSION >= 210
+#if TORCH_HIP_VERSION >= 210
   auto buffer_size = 1;
 
   if (buffer->numel() != buffer_size) {
@@ -140,7 +140,7 @@ void device_reduce<at::Half>(
       reinterpret_cast<const rocblas_half*>(buffer->data<at::Half>()),
       0,
       reinterpret_cast<rocblas_half*>(out)));
-#elif HIP_VERSION < 210
+#elif TORCH_HIP_VERSION < 210
    CAFFE_THROW("HIP rocblas doesn't fully support fp16 device_reduce yet.");
 #else
   auto buffer_size = 1;
