@@ -290,6 +290,39 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
   }
 }
 
+static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
+const Tensor& value){
+  if (!(value.numel() ==1 && value.device().is_cpu())){
+    return std::make_tuple(false,Tensor());
+  }
+  int64_t num_ind = 0;
+  Tensor mask;
+  auto self_device = self.device();
+  for (const c10::optional<Tensor> i: indices) {
+    if (!i.has_value() || !(*i).defined()){
+      num_ind++;
+    } else {
+      Tensor index = std::move(*i);
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()){
+        return std::make_tuple(false, Tensor());
+      } else {
+        mask = index;
+        for (int64_t j = 0; j < index.dim(); j++) {
+          int64_t srcIdx = num_ind + j;
+          TORCH_CHECK_INDEX(index.size(j) == self.size(srcIdx), "The shape of the mask ", index.sizes(), " at index ", j,
+  " does not match the shape of the indexed tensor ", self.sizes(), " at index ", srcIdx);
+        }
+        num_ind += mask.ndimension();
+      }
+    }
+  }
+  for (int64_t i = num_ind; i< self.ndimension(); i++){
+    mask = mask.unsqueeze(-1);
+  }
+  return std::make_tuple(true, mask);
+}
+
 static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
@@ -470,6 +503,16 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       "Please clone() the tensor before performing this operation. "
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
+  if (!accumulate) {
+    auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
+    if (std::get<0>(masked_fill_dispatch)) {
+      return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
+    }
+  }
+  auto value_ = value;
+  if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
+    value_ = value.to(self.device());
+  }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
@@ -477,16 +520,15 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       at::assert_no_overlap(self, *index);
     }
   }
-
   if (self.device().type() == DeviceType::CUDA && (accumulate || globalContext().deterministicAlgorithms())) {
-      TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ",
-      value.device(), " for value tensor");
-      index_put_with_sort_stub(self.device().type(), self, indices, value, accumulate, unsafe);
+      TORCH_CHECK(value_.device() == self.device(), "expected device ", self.device(), " but got device ",
+      value_.device(), " for value tensor");
+      index_put_with_sort_stub(self.device().type(), self, indices, value_, accumulate, unsafe);
       return self;
   }
 
   auto info = make_info(self, indices);
-  auto iter = make_index_put_iterator(info, value);
+  auto iter = make_index_put_iterator(info, value_);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
   return self;
 }

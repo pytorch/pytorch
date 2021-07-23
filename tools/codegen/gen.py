@@ -449,10 +449,30 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
             parent_class = "at::impl::MetaBase"
         precomputed = "" if not g.structured else g.out.precomputed
 
+        if precomputed:
+            precomputed_arg_types = [arg.lstrip().split(" ")[0].strip() for arg in precomputed.split(",")]
+            precomputed_arg_names = [arg.lstrip().split(" ")[1].strip() for arg in precomputed.split(",")]
+            precomputed_arg_names_private = [arg + "_" for arg in precomputed_arg_names]
+            init_list = ", ".join([f"{pub}({pri})" for (pri, pub) in zip(precomputed_arg_names_private, precomputed_arg_names)])
+            init_list = f": {init_list}"
+            precomputed_args_private = ", ".join(f"{typ} {name}" for (typ, name) in zip(precomputed_arg_types, precomputed_arg_names_private))
+            precompute_decl = f"precompute_out precompute({args_str});"
+
+            args_str += f", precompute_out precompute"
+        else:
+            precomputed_args = ""
+            precomputed_args_private = ""
+            init_list = ""
+            precompute_decl = ""
         return f"""\
 struct TORCH_API structured_{name} : public {parent_class} {{
+    struct TORCH_API precompute_out {{
+        precompute_out({precomputed_args_private if precomputed_args_private is not None else ""}) {init_list} {{}}
+        {precomputed.replace(",", ";") if precomputed is not None else ""};
+
+    }};
     void meta({args_str});
-    {precomputed.replace(",", ";") if precomputed is not None else ""};
+    {precompute_decl}
 }};
 """
 

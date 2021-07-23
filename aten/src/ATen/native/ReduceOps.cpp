@@ -76,14 +76,36 @@ void check_allany_for_meta(
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
-TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  dim_ = maybe_wrap_dim(dim, self.dim());
-  check_allany_for_meta(*this, "all", self, dim_, keepdim);
+TORCH_PRECOMPUTE_FUNC2(all, dim)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim) {
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  structured_all_dim::precompute_out res(dim_);
+  return res;
+ }
+
+TORCH_META_FUNC2(all, dim)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ structured_all_dim::precompute_out precompute) {
+  check_allany_for_meta(*this, "all", self, precompute.dim, keepdim);
 }
 
-TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  dim_ = maybe_wrap_dim(dim, self.dim());
-  check_allany_for_meta(*this, "any", self, dim_, keepdim);
+TORCH_PRECOMPUTE_FUNC2(any, dim)
+(const Tensor& self, int64_t dim, bool keepdim) {
+  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
+  structured_any_dim::precompute_out res(dim_);
+  return res;
+}
+
+TORCH_META_FUNC2(any, dim)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ structured_any_dim::precompute_out precompute) {
+  check_allany_for_meta(*this, "any", self, precompute.dim, keepdim);
 }
 
 void check_argmax_argmin(
@@ -1265,10 +1287,10 @@ Tensor all(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(all_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim_, keepdim);
+(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result, at::meta::structured_all_dim::precompute_out precompute) {
+  auto iter = get_allany_iter(self, result, precompute.dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 1, precompute.dim, keepdim)) {
     _all(mut_result, iter);
   }
 }
@@ -1297,10 +1319,14 @@ Tensor any(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(any_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim_, keepdim);
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ const Tensor& result,
+ at::meta::structured_any_dim::precompute_out precompute) {
+  auto iter = get_allany_iter(self, result, precompute.dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 0, precompute.dim, keepdim)) {
     _any(mut_result, iter);
   }
 }

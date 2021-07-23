@@ -8,72 +8,101 @@ namespace at {
 namespace meta{
 using namespace native;
 
-TORCH_META_FUNC(avg_pool2d) (
-  const Tensor& input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override
-) {
+TORCH_PRECOMPUTE_FUNC(avg_pool2d)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override) {
+  int kH_ = safe_downcast<int, int64_t>(kernel_size[0]);
+  int kW_ = kernel_size.size() == 1 ? kH_
+                                : safe_downcast<int, int64_t>(kernel_size[1]);
+  int dH_ = stride.empty() ? kH_ : safe_downcast<int, int64_t>(stride[0]);
+  int dW_ = stride.empty()     ? kW_
+      : stride.size() == 1 ? dH_
+                           : safe_downcast<int, int64_t>(stride[1]);
+  int padH_ = safe_downcast<int, int64_t>(padding[0]);
+  int padW_ = padding.size() == 1 ? padH_ : safe_downcast<int, int64_t>(padding[1]);
+
+  int64_t nbatch_ = input.ndimension() == 4 ? input.size(-4) : 1;
+  int64_t nInputPlane_ = input.size(-3);
+  int64_t inputHeight_ = input.size(-2);
+  int64_t inputWidth_ = input.size(-1);
+
+  int64_t outputHeight_ = pooling_output_shape<int64_t>(
+      inputHeight_, kH_, padH_, dH_, 1, ceil_mode);
+  int64_t outputWidth_ =
+      pooling_output_shape<int64_t>(inputWidth_, kW_, padW_, dW_, 1, ceil_mode);
+
+  structured_avg_pool2d::precompute_out res(kH_, kW_, dH_, dW_, padH_, padW_, nbatch_, nInputPlane_, inputHeight_, inputWidth_, outputWidth_, outputHeight_);
+  return res;
+}
+
+TORCH_META_FUNC(avg_pool2d)
+(const Tensor& input,
+ IntArrayRef kernel_size,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override,
+ structured_avg_pool2d::precompute_out precompute) {
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  kH_ = safe_downcast<int, int64_t>(kernel_size[0]);
-  kW_ = kernel_size.size() == 1 ? kH_ : safe_downcast<int, int64_t>(kernel_size[1]);
+  precompute.kH = safe_downcast<int, int64_t>(kernel_size[0]);
+  precompute.kW = kernel_size.size() == 1 ? precompute.kH : safe_downcast<int, int64_t>(kernel_size[1]);
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  dH_ = stride.empty() ? kH_ : safe_downcast<int, int64_t>(stride[0]);
-  dW_ = stride.empty() ? kW_ :
-                 stride.size() == 1 ? dH_ : safe_downcast<int, int64_t>(stride[1]);
+  precompute.dH = stride.empty() ? precompute.kH : safe_downcast<int, int64_t>(stride[0]);
+  precompute.dW = stride.empty() ? precompute.kW :
+                 stride.size() == 1 ? precompute.dH : safe_downcast<int, int64_t>(stride[1]);
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  padH_ = safe_downcast<int, int64_t>(padding[0]);
-  padW_ = padding.size() == 1 ? padH_ : safe_downcast<int, int64_t>(padding[1]);
+  precompute.padH = safe_downcast<int, int64_t>(padding[0]);
+  precompute.padW = padding.size() == 1 ? precompute.padH : safe_downcast<int, int64_t>(padding[1]);
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
 
-  /* sizes */
-  nbatch_ = input.ndimension() == 4 ? input.size(-4) : 1;
-  nInputPlane_ = input.size(-3);
-  inputHeight_ = input.size(-2);
-  inputWidth_ = input.size(-1);
-
-  outputHeight_ = pooling_output_shape<int64_t>(
-      inputHeight_, kH_, padH_, dH_, 1, ceil_mode);
-  outputWidth_ =
-      pooling_output_shape<int64_t>(inputWidth_, kW_, padW_, dW_, 1, ceil_mode);
-
   auto memory_format = input.suggest_memory_format();
   pool2d_shape_check(
       input,
-      kH_,
-      kW_,
-      dH_,
-      dW_,
-      padH_,
-      padW_,
+      precompute.kH,
+      precompute.kW,
+      precompute.dH,
+      precompute.dW,
+      precompute.padH,
+      precompute.padW,
       1,
       1,
-      nInputPlane_,
-      inputHeight_,
-      inputWidth_,
-      outputHeight_,
-      outputWidth_,
+      precompute.nInputPlane,
+      precompute.inputHeight,
+      precompute.inputWidth,
+      precompute.outputHeight,
+      precompute.outputWidth,
       memory_format);
 
   /* resize output */
   if (input.ndimension() == 3) {
-    set_output(0, {nInputPlane_, outputHeight_, outputWidth_}, input.options());
+    set_output(
+        0,
+        {precompute.nInputPlane,
+         precompute.outputHeight,
+         precompute.outputWidth},
+        input.options());
   }
   else {
     set_output(
         0,
-        {nbatch_, nInputPlane_, outputHeight_, outputWidth_},
+        {precompute.nbatch,
+         precompute.nInputPlane,
+         precompute.outputHeight,
+         precompute.outputWidth},
         input.options().memory_format(memory_format));
   }
 }
@@ -142,22 +171,21 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cpu) (
   bool ceil_mode,
   bool count_include_pad,
   c10::optional<int64_t> divisor_override,
-  const Tensor &output
+  const Tensor &output,
+  at::meta::structured_avg_pool2d::precompute_out precompute
 ) {
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW :
-                 stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
-
   avg_pool2d_kernel(
-      kCPU, output, input,
-      kW, kH, dW, dH, padW, padH,
-      count_include_pad, divisor_override);
+      kCPU,
+      output,
+      input,
+      precompute.kW,
+      precompute.kH,
+      precompute.dW,
+      precompute.dH,
+      precompute.padW,
+      precompute.padH,
+      count_include_pad,
+      divisor_override);
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_backward_out_cpu) (

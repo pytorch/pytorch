@@ -118,6 +118,9 @@ class C10_CUDA_API CUDAStream {
       return true;
     } else if (err != cudaErrorNotReady) {
       C10_CUDA_CHECK(err);
+    } else {
+      // ignore and clear the error if not ready
+      cudaGetLastError();
     }
 
     return false;

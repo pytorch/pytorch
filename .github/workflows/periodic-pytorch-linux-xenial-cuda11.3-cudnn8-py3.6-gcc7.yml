@@ -26,6 +26,7 @@ concurrency:
 jobs:
   calculate-docker-image:
     runs-on: linux.2xlarge
+    needs: []
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -98,7 +99,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, ]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
@@ -196,6 +197,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: []
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_JIT_LEGACY_TEST: ''
@@ -221,10 +223,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -365,9 +364,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, ]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

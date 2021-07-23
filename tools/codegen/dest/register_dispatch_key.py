@@ -553,7 +553,12 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     method=False
                 )
             )
-            sig_body.append(f"op.meta({meta_exprs});")
+            if self.g.out.precomputed:
+                sig_body.append(f"auto precompute = op.precompute({meta_exprs});")
+                sig_body.append(f"op.meta({meta_exprs}, precompute);")
+            else:
+                sig_body.append(f"op.meta({meta_exprs});")
+
 
             # After running meta, op.outputs_ is guaranteed to be valid;
             # add it to the context
@@ -603,7 +608,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                         method=False
                     )
                 )
-                sig_body.append(f"op.impl({impl_exprs});")
+                if self.g.out.precomputed:
+                    sig_body.append(f"op.impl({impl_exprs}, precompute);")
+                else:
+                    sig_body.append(f"op.impl({impl_exprs});")
+
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead
