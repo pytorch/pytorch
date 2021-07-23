@@ -21,12 +21,14 @@ class TORCH_API GradBucket {
       const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
-      const std::vector<c10::IntArrayRef>& sizes_vec)
+      const std::vector<c10::IntArrayRef>& sizes_vec,
+      const std::vector<at::Tensor>& model_params_for_bucket)
       : index_(index),
         tensor_(tensor),
         offsets_(offsets),
         lengths_(lengths),
-        sizes_vec_(sizes_vec) {}
+        sizes_vec_(sizes_vec),
+        model_params_for_bucket_(model_params_for_bucket) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -51,6 +53,14 @@ class TORCH_API GradBucket {
   // parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
 
+  // Returns model parameters belonging to this bucket. They are returned in the
+  // same order as gradient tensors via getPerParameterTensors(). For example,
+  // getModelParamsForBucket[i] will have its gradient stored in
+  // getPerParameterTensors[i]
+  const std::vector<at::Tensor> getModelParamsForBucket() const {
+    return model_params_for_bucket_;
+  }
+
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
   bool isTheLastBucketToAllreduce() const {
     return index_ == 0;
@@ -64,6 +74,8 @@ class TORCH_API GradBucket {
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+  // Model parameters for this bucket.
+  const std::vector<at::Tensor> model_params_for_bucket_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
