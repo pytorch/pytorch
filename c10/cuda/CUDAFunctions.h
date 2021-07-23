@@ -35,6 +35,33 @@ C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
 
+C10_CUDA_API void warn_or_error_on_sync();
+
+enum class CUDASyncWarningLevel {
+  DISABLED = 0,
+  WARN,
+  ERROR,
+};
+
+class CUDAWarningState {
+  public:
+
+    C10_CUDA_API void set_cuda_sync_warning_level(CUDASyncWarningLevel l) {
+      sync_warning_level = l;
+    }
+
+    CUDASyncWarningLevel get_cuda_sync_warning_level(){
+      return sync_warning_level;
+    }
+
+  private:
+    CUDASyncWarningLevel sync_warning_level=CUDASyncWarningLevel::DISABLED;
+
+};
+
+//Make it CUDAWarningState class static member function to inline?
+C10_CUDA_API CUDAWarningState& warning_state();
+
 // the subsequent functions are defined in the header because for performance
 // reasons we want them to be inline
 C10_CUDA_API void __inline__ memcpy_and_sync(
@@ -43,6 +70,10 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
+  //here's uninlined call to warning_state that will be made even in the fast case
+  if (C10_UNLIKELY(warning_state().get_cuda_sync_warning_level() != CUDASyncWarningLevel::DISABLED)){
+     warn_or_error_on_sync();
+  }
 #if defined(HIP_VERSION) && (HIP_VERSION >= 301)
   C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
@@ -52,6 +83,9 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
 }
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
+  if (C10_UNLIKELY(warning_state().get_cuda_sync_warning_level() != CUDASyncWarningLevel::DISABLED)){
+     warn_or_error_on_sync();
+  }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 

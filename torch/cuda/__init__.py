@@ -492,6 +492,10 @@ def current_blas_handle():
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
+def set_warn_on_synchronization(warn_level: int) -> None:
+    _lazy_init()
+    torch._C._cuda_set_sync_warning_level(warn_level)
+
 
 from .memory import *  # noqa: F403
 

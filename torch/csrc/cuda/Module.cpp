@@ -1,3 +1,4 @@
+#include "Exceptions.h"
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -442,6 +443,17 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaSetSyncWarningLevel(PyObject * _unused, PyObject * arg){
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_warn_on_synchronization");
+  int64_t level = THPUtils_unpackLong(arg);
+  c10::cuda::CUDASyncWarningLevel l = (level == 0) ? c10::cuda::CUDASyncWarningLevel::DISABLED :
+  (level == 1) ? c10::cuda::CUDASyncWarningLevel::WARN : c10::cuda::CUDASyncWarningLevel::ERROR;
+  c10::cuda::warning_state().set_cuda_sync_warning_level(l);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -578,6 +590,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
+  {"_cuda_set_sync_warning_level", THCPModule_cudaSetSyncWarningLevel, METH_O, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
