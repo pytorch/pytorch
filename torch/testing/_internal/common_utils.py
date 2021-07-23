@@ -1342,7 +1342,10 @@ class TestCase(expecttest.TestCase):
                     equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False,
                     exact_is_coalesced=False) -> None:
 
-        if isinstance(x, (torch.Tensor, np.ndarray, Number, bool, np.bool_)) and isinstance(y, (torch.Tensor, np.ndarray, Number, bool, np.bool_)):
+        if (
+            isinstance(x, (torch.Tensor, np.ndarray, Number, bool, np.bool_))
+            and isinstance(y, (torch.Tensor, np.ndarray, Number, bool, np.bool_))
+        ):
             if isinstance(x, (torch.Tensor, np.ndarray)) and isinstance(y, (torch.Tensor, np.ndarray)):
                 def is_tensor_like(a: Union[torch.Tensor, np.ndarray]) -> bool:
                     if isinstance(a, torch.Tensor):
@@ -1380,7 +1383,7 @@ class TestCase(expecttest.TestCase):
                     elif isinstance(a, complex):
                         return a, torch.complex128
                     elif isinstance(a, np.ndarray):
-                        return a.item(), numpy_to_torch_dtype_dict[a.dtype]
+                        return a.item(), numpy_to_torch_dtype_dict[a.dtype]  # type: ignore[index]
                     else:  # isinstance(a, torch.Tensor)
                         return a.item(), a.dtype
 
