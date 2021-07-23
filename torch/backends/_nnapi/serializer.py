@@ -568,13 +568,6 @@ class _NnapiSerializer(object):
         if orders == (DimOrder.CHANNELS_LAST, DimOrder.PRESUMED_CONTIGUOUS):
             return (in0_id, in0_oper) + self.transpose_to_nhwc(in1_id, in1_oper)
 
-        # Constants can be transposed to NHWC.
-        # TODO: Do this outside of the model execution.
-        if orders == (DimOrder.UNKNOWN_CONSTANT, DimOrder.CHANNELS_LAST):
-            return self.transpose_to_nhwc(in0_id, in0_oper) + (in1_id, in1_oper)
-        if orders == (DimOrder.CHANNELS_LAST, DimOrder.UNKNOWN_CONSTANT):
-            return (in0_id, in0_oper) + self.transpose_to_nhwc(in1_id, in1_oper)
-
         raise Exception(
             "Automatic transpose not supported for dim_orders: %r, %r" %
             (in0_oper.dim_order, in1_oper.dim_order))
