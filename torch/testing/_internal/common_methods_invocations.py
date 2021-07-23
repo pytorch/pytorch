@@ -148,13 +148,13 @@ class SampleInput(object):
 
         return self._repr_helper(formatter)
 
-    def log(self):
+    def log(self, testlogger):
         """
-        Print the name of the SampleInput to stdout. This is supposed to be called
-        by tests, to make it possible to know which SampleInput was in use in
-        case of a test failure
+        Log the name the SampleInput to the given testlogger. This is supposed to
+        be called by tests, to make it possible to know which SampleInput was
+        in use in case of a test failure
         """
-        print(f'[SampleInput] {self.name}')
+        testlogger.print(f'[SampleInput] {self.name}')
 
     # Returns the NumPy version of the sample input object in the form of a tuple: (input, args, kwargs)
     def numpy(self):
