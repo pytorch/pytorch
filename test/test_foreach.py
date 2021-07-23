@@ -334,7 +334,7 @@ class TestForeach(TestCase):
 
     def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
-        samples = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
+        samples = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath)
         inputs = [sample.input for sample in samples],
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
         if opinfo.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
