@@ -132,6 +132,8 @@ class _DDPSink(Function):
     @staticmethod
     def forward(ctx, reducer, *inputs):
         ctx.reducer = reducer
+        cand_ret = tuple(i.clone() for i in inputs)
+        return cand_ret
         return inputs
 
     @staticmethod

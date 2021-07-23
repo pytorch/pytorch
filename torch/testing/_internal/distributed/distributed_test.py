@@ -6075,17 +6075,25 @@ class DistributedTest:
                     self.net2 = nn.Linear(10, 5)
 
                 def forward(self, x):
-                    return self.net2(x)
+                    r = self.net2(x)
+                    print(f"r grad fn {r.grad_fn}")
+                    return r.sum()
 
             torch.cuda.set_device(self.rank)
             model = ToyModel().to(torch.cuda.current_device())
             ddp_model = torch.nn.parallel.DistributedDataParallel(
                 model, device_ids=[self.rank], find_unused_parameters=True
             )
+            ddp_model._set_static_graph()
             inp = torch.randn(20, 10, device=self.rank)
             for i in range(6):
-                out = ddp_model(inp)
-                loss = out.sum()
+                loss = ddp_model(inp)
+                print(f"grad_fn: {loss.grad_fn}")
+                loss /= 10
+                # out = ddp_model(inp)
+                # loss = out.sum()
+                # loss /= 10
+                # loss = loss / 10
                 loss.backward()
 
         @require_backend({"gloo", "nccl"})
