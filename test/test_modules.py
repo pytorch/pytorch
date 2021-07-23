@@ -6,6 +6,8 @@ from torch.testing._internal.common_utils import TestCase, run_tests, freeze_rng
 class TestModule(TestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+    precision = 1e-5
+    rel_tol = 1e-5
 
     @modules(module_db)
     def test_forward(self, device, dtype, module_info):
