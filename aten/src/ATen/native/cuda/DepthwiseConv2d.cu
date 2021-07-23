@@ -498,7 +498,8 @@ void conv_depthwise2d_grad_weight_out(
     const auto input_a = input.packed_accessor32<scalar_t, 4>();
     const auto grad_weight_a = grad_weight.packed_accessor32<scalar_t, 4>();
     using acc_t = at::acc_type<scalar_t, true>;
-    int smem = ((block.x + C10_WARP_SIZE - 1) / C10_WARP_SIZE) * sizeof(acc_t);
+    TORCH_INTERNAL_ASSERT(block.x % C10_WARP_SIZE == 0);
+    int smem = (block.x  / C10_WARP_SIZE) * sizeof(acc_t);
     conv_depthwise2d_grad_weight_kernel<<<grid, block, smem, stream>>>(
         grad_output_a, input_a, grad_weight_a, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
         width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
