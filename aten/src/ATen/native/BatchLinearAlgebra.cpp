@@ -3029,11 +3029,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     singleCheckErrors(infos[0], "svd_cpu");
   }
 
-  if (!compute_uv) {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
-  }
-
   if (compute_uv) {
     // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
     // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.

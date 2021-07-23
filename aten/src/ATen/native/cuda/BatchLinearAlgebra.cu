@@ -2705,11 +2705,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
   S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
   VT_working_copy = same_stride_to(VT_working_copy, self.options());
 
-  if (!compute_uv) {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
-  }
-
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
   if (compute_uv) {

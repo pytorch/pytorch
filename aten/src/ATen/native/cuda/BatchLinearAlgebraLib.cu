@@ -520,11 +520,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 
   // A device-host sync will be performed.
   batchCheckErrors(infos, "svd_cuda");
-
-  if (!compute_uv) {
-    VT_working_copy.zero_();
-    U_working_copy.zero_();
-  }
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
