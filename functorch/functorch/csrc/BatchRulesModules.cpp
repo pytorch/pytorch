@@ -210,5 +210,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
   OP_DECOMPOSE(dropout);
+  VMAP_SUPPORT("constant_pad_nd", SINGLE_ARG(basic_unary_batch_rule<decltype(&at::constant_pad_nd), &at::constant_pad_nd, IntArrayRef, const Scalar&>));
 }
 }}
