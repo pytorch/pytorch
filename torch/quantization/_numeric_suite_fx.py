@@ -130,14 +130,9 @@ def _extract_weights_one_model(
     results: NSResultsType,
 ) -> None:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_one_model")
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
-
     for node, ref_name in nodes_and_names_to_instrument:
         res_type = NSSingleResultValuesType.WEIGHT.value
-        extracted_weight = \
-            extract_weight_from_node(node, model, type_a_related_to_b)
+        extracted_weight = extract_weight_from_node(node, model)
         if extracted_weight:
             if ref_name not in results:
                 results[ref_name] = {res_type: {}}
