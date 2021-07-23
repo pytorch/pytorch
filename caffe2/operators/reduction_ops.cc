@@ -2,32 +2,23 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumElementsInt, SumElementsIntOp<int, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SumSqrElements, SumSqrElementsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SumElementsGradient,
     SumElementsGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RowwiseMax, MaxReductionOp<float, CPUContext, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     RowwiseMaxGradient,
     MaxReductionGradientOp<float, CPUContext, true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ColwiseMaxGradient,
     MaxReductionGradientOp<float, CPUContext, false>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ColwiseMax, MaxReductionOp<float, CPUContext, false>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumElements)
     .NumInputs(1)
     .NumOutputs(1)
@@ -90,7 +81,6 @@ Y (avg_op): 4.111111
     .Input(0, "X", "(*Tensor`<float>`*): blob pointing to an instance of a counter")
     .Output(0, "sum", "(*Tensor`<float>`*): Scalar tensor containing the sum (or average)");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumElementsInt)
     .NumInputs(1)
     .NumOutputs(1)
@@ -98,10 +88,8 @@ OPERATOR_SCHEMA(SumElementsInt)
     .SetDoc("Sums the integer elements of the input tensor.")
     .Input(0, "X", "Tensor to sum up")
     .Output(0, "sum", "Scalar sum");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SumElementsInt);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumSqrElements)
     .NumInputs(1)
     .NumOutputs(1)
@@ -111,7 +99,6 @@ OPERATOR_SCHEMA(SumSqrElements)
     .Input(0, "X", "Tensor to sum up")
     .Output(0, "sum", "Scalar sum of squares");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SumElementsGradient).NumInputs(2).NumOutputs(1);
 
 class GetSumElementsGradient : public GradientMakerBase {
@@ -124,10 +111,8 @@ class GetSumElementsGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SumElements, GetSumElementsGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowwiseMax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -201,7 +186,6 @@ Y:
         "Y",
         "The output tensor of shape $B x M$, where each row represents the row-wise maximums for that element of the input batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowwiseMaxGradient).NumInputs(3).NumOutputs(1);
 class GetRowwiseMaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -213,13 +197,10 @@ class GetRowwiseMaxGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RowwiseMax, GetRowwiseMaxGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ColwiseMaxGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ColwiseMax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -298,7 +279,6 @@ Y:
         "Y",
         "The output tensor of shape $B x N$, where each row represents the column-wise maximums for that element of the input batch.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ColumnMaxGradient).NumInputs(3).NumOutputs(1);
 class GetColwiseMaxGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -310,7 +290,6 @@ class GetColwiseMaxGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ColwiseMax, GetColwiseMaxGradient);
 
 template <typename T, class Context>

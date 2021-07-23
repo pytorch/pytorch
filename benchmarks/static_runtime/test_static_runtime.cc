@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -12,7 +14,7 @@ using namespace torch::jit;
 using c10::IValue;
 
 C10_DECLARE_bool(
-    static_runtime_enable_fast_math);
+  static_runtime_enable_fast_math);
 
 namespace {
 static at::Tensor getTensor(const at::IValue& ival) {
@@ -107,15 +109,88 @@ void compareResults(const IValue& expect, const IValue& actual, const bool use_a
   }
 }
 
-// Given a model/function in jit script, run the model/function
+// Test scripts passed to testStaticRuntme can either be IR or JIT.
+// The logic for running the script and producing a corresponding StaticModule
+// is a bit different for each case. This logic is encapsulated within concrete
+// implementations of this class, and testStaticRuntime is only aware of this
+// interface.
+class StaticRuntimeTestContext {
+ public:
+  virtual ~StaticRuntimeTestContext() = default;
+
+  virtual IValue getExpected(const std::vector<IValue>& args) = 0;
+  virtual torch::jit::StaticModule makeStaticModule(
+      StaticModuleOptions opt) const = 0;
+};
+
+class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
+ public:
+  explicit ModuleStaticRuntimeTestContext(const std::string& source_jit)
+      : module_("module") {
+    module_.define(source_jit);
+  }
+
+  IValue getExpected(const std::vector<IValue>& args) override {
+    return module_.forward(args);
+  }
+
+  torch::jit::StaticModule makeStaticModule(
+      StaticModuleOptions opt) const override {
+    return torch::jit::StaticModule(module_, opt);
+  }
+
+ private:
+  Module module_;
+};
+
+class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
+ public:
+  explicit GraphStaticRuntimeContext(const std::string& source_ir) {
+    graph_ = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(source_ir, graph_.get(), vmap);
+
+    graph_exec_ = GraphExecutor(graph_, "");
+  }
+
+  IValue getExpected(const std::vector<IValue>& args) override {
+    Stack stack(args);
+    graph_exec_.run(stack);
+
+    if (stack.size() == 1) {
+      return stack[0];
+    }
+    return c10::ivalue::Tuple::create(stack);
+  }
+
+  torch::jit::StaticModule makeStaticModule(
+      StaticModuleOptions opt) const override {
+    return torch::jit::StaticModule(graph_, opt);
+  }
+
+ private:
+  std::shared_ptr<Graph> graph_;
+  GraphExecutor graph_exec_;
+};
+
+std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
+    const std::string& source) {
+  try {
+    return std::make_unique<ModuleStaticRuntimeTestContext>(source);
+    // Could not parse as TorchScript, assume it's IR
+  } catch (const std::runtime_error&) {
+    return std::make_unique<GraphStaticRuntimeContext>(source);
+  }
+}
+
+// Given a model/function in jit or IR script, run the model/function
 // with the jit interpreter and static runtime, and compare the results
 void testStaticRuntime(
-    const std::string& jit_script,
+    const std::string& source,
     const std::vector<IValue>& args,
     const std::vector<IValue>& args2 = {},
     const bool use_allclose = false) {
-  script::Module module("module");
-  module.define(jit_script);
+  auto test_context = makeTestContext(source);
 
   std::vector<IValue> args_tensors, args_copy;
   for (const auto& ival : args) {
@@ -126,11 +201,11 @@ void testStaticRuntime(
     }
   }
 
-  auto expect = module.forward(args);
+  auto expect = test_context->getExpected(args);
 
   for (bool enable_out_variant : {true, false}) {
-    torch::jit::StaticModule smodule(
-        module, {true, enable_out_variant, enable_out_variant});
+    auto smodule = test_context->makeStaticModule(
+        {true, enable_out_variant, enable_out_variant});
     auto actual = smodule(args, {});
     smodule.runtime().check_for_memory_leak();
     // first run
@@ -139,13 +214,13 @@ void testStaticRuntime(
     // args2 is used to check for dynamic shapes
     // it also exercises the memory planner
     if (!args2.empty()) {
-      expect = module.forward(args2);
+      expect = test_context->getExpected(args2);
       actual = smodule(args2, {});
       smodule.runtime().check_for_memory_leak();
       // second run
       compareResults(expect, actual, use_allclose);
 
-      expect = module.forward(args);
+      expect = test_context->getExpected(args);
       actual = smodule(args, {});
       smodule.runtime().check_for_memory_leak();
       // third run
@@ -958,4 +1033,34 @@ TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArg
 
   pnode.Output(0) = a;
   EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+}
+
+TEST(StaticRuntime, IndividualOps_isinstance) {
+  auto a = at::randn({2, 2});
+  auto b = at::randn({2, 2, 2});
+
+  std::vector<at::IValue> args{a};
+  std::vector<at::IValue> args2{b};
+
+  testStaticRuntime(isinstance_int_script, args);
+  testStaticRuntime(isinstance_int_script, args, args2);
+
+  testStaticRuntime(isinstance_tensor_script, args);
+  testStaticRuntime(isinstance_tensor_script, args, args2);
+
+  testStaticRuntime(isinstance_many_types_script, args);
+  testStaticRuntime(isinstance_many_types_script, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_TypeCheck) {
+  auto a = at::zeros({2, 2}, at::kFloat);
+  a.to(at::kCPU);
+  auto b = at::ones({3, 3}, at::kFloat);
+  auto c = at::ones({2, 2, 2}, at::kFloat);
+
+  std::vector<IValue> args_correct = {a, b};
+  std::vector<IValue> args_incorrect = {a, c};
+
+  testStaticRuntime(typecheck_ir, args_correct);
+  testStaticRuntime(typecheck_ir, args_correct, args_incorrect);
 }
