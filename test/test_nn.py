@@ -17926,6 +17926,62 @@ class TestFunctionalPickle(TestCase):
         # Make sure it does not throw an exception
         s = pickle.dumps(F.softsign)
 
+class TestStateDictHooks(TestCase):
+
+    def test_load_state_dict_pre_hook(self):
+
+        m = nn.Linear(10, 10)
+        m_state_dict = m.state_dict()
+
+        m_load = nn.Linear(10, 10)
+
+        def hook_without_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            self.assertEqual(m_state_dict, state_dict)
+            pass
+
+        def hook_with_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, module):
+            self.assertEqual(m_state_dict, state_dict)
+            self.assertTrue(m_load is module)
+            pass
+
+        m_load._register_load_state_dict_pre_hook(hook_without_module)
+        m_load._register_load_state_dict_pre_hook(hook_with_module)
+
+        m_load.load_state_dict(m_state_dict)
+
+        # Test with module instance method as hook
+        class MyModule(nn.Module):
+            def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                pass
+
+            def my_pre_load_hook_with_module(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+                module
+            ):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                assert self is module
+                pass
+
+        m = MyModule()
+        state_dict = m.state_dict()
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook)
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook_with_module)
+        m.load_state_dict(state_dict)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

@@ -11,6 +11,8 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
+from inspect import signature
+
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
@@ -1312,7 +1314,13 @@ class Module:
                 :meth:`~torch.nn.Module.load_state_dict`
         """
         for hook in self._load_state_dict_pre_hooks.values():
-            hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+            n_params = len(signature(hook).parameters)
+            if n_params == 8:
+                # Pass in module instance as well.
+                hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, self)
+            else:
+                # For BC purposes keep previous signature.
+                hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
