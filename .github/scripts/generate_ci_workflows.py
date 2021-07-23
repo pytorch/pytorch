@@ -118,8 +118,9 @@ class CIWorkflow:
             self.ciflow_config.reset_root_job()
 
         # The following code allows for scheduled jobs to be debuggable by
-        # adding the label 'ciflow/scheduled' and assigning + unassigning pytorchbot.
-        if self.is_scheduled:
+        # adding the label 'ciflow/scheduled' and assigning + unassigning pytorchbot,
+        # ONLY if the workflow itself _hasn't_ specified its own ciflow_config.
+        if self.is_scheduled and not self.ciflow_config.enabled:
             self.on_pull_request = True
             self.ciflow_config = CIFlowConfig(
                 enabled=True,
