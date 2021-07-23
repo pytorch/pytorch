@@ -295,7 +295,6 @@ TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
       mc_reload_method_qns.begin()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
   m.define(R"(
