@@ -90,6 +90,7 @@ struct SymbolicShapeAnalyzer {
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
       if (auto tt = type->castRaw<TensorType>()) {
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
 
         // for testing, we don't insert complete tensor shapes and rely on our
@@ -231,9 +232,9 @@ struct SymbolicShapeAnalyzer {
     for (size_t i = 0; i < symbolic_set.size(); ++i) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
-      for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
-          dominating_value = symbolic_set[j];
+      for (const auto& sym_set : symbolic_set) {
+        if (dominating_value->node()->isDominatedBy(sym_set->node())) {
+          dominating_value = sym_set;
         }
       }
       if (dominating_value != v) {

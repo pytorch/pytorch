@@ -6,7 +6,8 @@
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <ATen/MapAllocator.h>
-#include <random>
+#include <atomic>
+#include <string>
 
 static PyObject * THPStorage_(sharedDecref)(PyObject *_self, PyObject *noargs)
 {
@@ -40,24 +41,11 @@ static PyObject * THPStorage_(sharedIncref)(PyObject *_self, PyObject *noargs)
 }
 
 #ifndef THC_GENERIC_FILE
-// TODO: move this somewhere - we only need one version
-static std::string THPStorage_(__newHandle)() {
-  static std::random_device rd;
-  std::string handle = "/torch_";
-#ifdef _MSC_VER
-  handle += std::to_string(GetCurrentProcessId());
-#else
-  handle += std::to_string(getpid());
-#endif
-  handle += "_";
-  handle += std::to_string(rd());
-  return handle;
-}
 
 static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
-  std::string handle = THPStorage_(__newHandle)();
+  std::string handle = at::NewProcessWideShmHandle();
   return THWStorage_(newWithDataAndAllocator)(
       THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size * sizeof(scalar_t)), size, /* allocator */ nullptr);
 }
@@ -142,7 +130,7 @@ static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
               at::ALLOCATOR_MAPPED_EXCLUSIVE |
               at::ALLOCATOR_MAPPED_KEEPFD |
               at::ALLOCATOR_MAPPED_UNLINK;
-  std::string handle = THPStorage_(__newHandle)();
+  std::string handle = at::NewProcessWideShmHandle();
   auto sptr = at::MapAllocator::makeDataPtr(handle.c_str(), flags, size * sizeof(scalar_t), nullptr);
   return THWStorage_(newWithDataAndAllocator)(std::move(sptr), size, /* allocator */ nullptr);
 }
@@ -251,10 +239,12 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t base_size;
     void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
     ptrdiff_t offset_bytes = (char*)storage->data<scalar_t>() - (char*)base_ptr;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcMemHandle_t handle;
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
 
@@ -270,7 +260,7 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
     _ref_counter_offset = THPUtils_packInt64(sent_data->offset());
 
-
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcEventHandle_t ipc_event_handle;
 
 #ifndef __HIP_PLATFORM_HCC__
@@ -346,11 +336,15 @@ static PyObject * THPStorage_(releaseIPCCounter)(PyObject *_unused, PyObject *ar
 }
 
 static std::string THPStorage_(bytesAsHandleString)(PyObject *handle) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   char* buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t handle_size;
   if (PyBytes_AsStringAndSize(handle, &buffer, &handle_size) == -1) {
+    // NOLINTNEXTLINE(bugprone-string-constructor)
     return nullptr;
   }
+  // NOLINTNEXTLINE(bugprone-string-constructor)
   THPUtils_assert(
       handle_size == CUDA_IPC_HANDLE_SIZE, "incorrect handle size");
   return std::string(buffer, handle_size);
@@ -394,6 +388,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
         THPStorage_(bytesAsHandleString)(_event_handle);
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaEvent_t event;
     cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     AT_CUDA_CHECK(
@@ -408,6 +403,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
   // Offset the basePtr to reconstruct the real storage
   // devPtr = basePtr + storage_offset
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* devPtr = basePtr.get();
   devPtr = (char*)devPtr + storage_offset_bytes;
 
@@ -430,7 +426,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 
         // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
         // Callback and release counter inside of it (need to check performance impact)
-        cudaStreamSynchronize(c10::cuda::getCurrentCUDAStream(device));
+        at::cuda::stream_synchronize(c10::cuda::getCurrentCUDAStream(device));
 
         // We don't want to break existing code, so resource deletion is best
         // effort basis. Exception expected if producer process terminated

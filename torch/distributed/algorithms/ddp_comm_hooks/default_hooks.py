@@ -15,6 +15,7 @@ def _allreduce_fut(
 
     return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
+
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
@@ -60,7 +61,7 @@ def fp16_compress_hook(
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
         decompressed_tensor.copy_(fut.value()[0])
-        return [decompressed_tensor]
+        return decompressed_tensor
 
     return fut.then(decompress)
 
@@ -93,7 +94,7 @@ def fp16_compress_wrapper(
             # Decompress in place to reduce the peak memory.
             # See: https://github.com/pytorch/pytorch/issues/45968
             decompressed_tensor.copy_(fut.value()[0])
-            return [decompressed_tensor]
+            return decompressed_tensor
 
         # Decompress after hook has run.
         return fut.then(decompress)
