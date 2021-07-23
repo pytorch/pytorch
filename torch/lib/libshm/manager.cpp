@@ -103,8 +103,7 @@ int main(int argc, char *argv[]) {
 
     std::string tempfile = tempdir->name + "/manager.sock";
 
-    // NOLINTNEXTLINE(modernize-make-unique)
-    srv_socket.reset(new ManagerServerSocket(tempfile));
+    srv_socket = std::make_unique<ManagerServerSocket>(tempfile);
     register_fd(srv_socket->socket_fd);
     print_init_message(tempfile.c_str());
     DEBUG("opened socket %s", tempfile.c_str());
