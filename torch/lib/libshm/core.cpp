@@ -7,9 +7,7 @@
 #include <libshm/socket.h>
 #include <libshm/libshm.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, ClientSocket> managers;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::string manager_executable_path;
 
 AllocInfo get_alloc_info(const char* filename) {

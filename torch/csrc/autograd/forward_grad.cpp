@@ -6,9 +6,7 @@ namespace {
     // See discussion in forward_grad.h for why these are global variables and not
     // thread local
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::mutex all_forward_levels_mutex_;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::vector<std::shared_ptr<ForwardADLevel>> all_forward_levels_;
 
     const static at::Tensor singleton_undefined_tensor;

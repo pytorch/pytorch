@@ -153,14 +153,12 @@ using MaybeOwnedTypes = ::testing::Types<
 
 TYPED_TEST_CASE(MaybeOwnedTest, MaybeOwnedTypes);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, SimpleDereferencingString) {
   assertBorrow(this->borrowed, this->borrowFrom);
   assertOwn(this->owned, this->ownCopy);
   assertOwn(this->owned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, DefaultCtor) {
   c10::MaybeOwned<TypeParam> borrowed, owned;
   // Don't leave the fixture versions around messing up reference counts.
@@ -173,7 +171,6 @@ TYPED_TEST(MaybeOwnedTest, DefaultCtor) {
   assertOwn(owned, this->ownCopy);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
 
   auto copiedBorrowed(this->borrowed);
@@ -189,7 +186,6 @@ TYPED_TEST(MaybeOwnedTest, CopyConstructor) {
   assertOwn(copiedOwned2, this->ownCopy2, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveDereferencing) {
   // Need a different value.
   this->owned = c10::MaybeOwned<TypeParam>::owned(c10::in_place, getSampleValue2<TypeParam>());
@@ -204,7 +200,6 @@ TYPED_TEST(MaybeOwnedTest, MoveDereferencing) {
   EXPECT_TRUE(equal(*this->owned, TypeParam()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
   auto movedBorrowed(std::move(this->borrowed));
   auto movedOwned(std::move(this->owned));
@@ -215,7 +210,6 @@ TYPED_TEST(MaybeOwnedTest, MoveConstructor) {
   assertOwn(movedOwned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
   auto copiedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
   auto copiedOwned = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
@@ -233,7 +227,6 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoOwned) {
   assertOwn(copiedOwned2, this->ownCopy2, 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
   auto otherBorrowFrom = getSampleValue2<TypeParam>();
   auto otherOwnCopy = getSampleValue2<TypeParam>();
@@ -255,7 +248,6 @@ TYPED_TEST(MaybeOwnedTest, CopyAssignmentIntoBorrowed) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 
   auto movedBorrowed = c10::MaybeOwned<TypeParam>::owned(c10::in_place);
@@ -272,7 +264,6 @@ TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoOwned) {
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
   auto y = getSampleValue2<TypeParam>();
   auto movedBorrowed = c10::MaybeOwned<TypeParam>::borrowed(y);
@@ -288,7 +279,6 @@ TYPED_TEST(MaybeOwnedTest, MoveAssignmentIntoBorrowed) {
   assertOwn(movedOwned2, this->ownCopy2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(MaybeOwnedTest, SelfAssignment) {
   this->borrowed = this->borrowed;
   this->owned = this->owned;
