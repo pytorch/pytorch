@@ -462,6 +462,15 @@ if IS_WINDOWS:
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
 
+
+def numpy_to_torch_dtype(np_dtype: np.dtype) -> torch.dtype:
+    try:
+        return numpy_to_torch_dtype_dict[np_dtype]
+    except KeyError:
+        np_dtype = getattr(np, np_dtype.name)
+        return numpy_to_torch_dtype_dict[np_dtype]
+
+
 ALL_TENSORTYPES = [torch.float,
                    torch.double,
                    torch.half]
@@ -1360,7 +1369,11 @@ class TestCase(expecttest.TestCase):
                     if isinstance(a, torch.Tensor):
                         return True
 
-                    return a.dtype in numpy_to_torch_dtype_dict.keys()
+                    try:
+                        numpy_to_torch_dtype(a.dtype)
+                        return True
+                    except KeyError:
+                        return False
 
                 if not (is_tensor_like(x) and is_tensor_like(y)):
                     return self.assertEqual(
@@ -1392,13 +1405,16 @@ class TestCase(expecttest.TestCase):
                     elif isinstance(a, complex):
                         return a, torch.complex128
                     elif isinstance(a, np.ndarray):
-                        return a.item(), numpy_to_torch_dtype_dict[a.dtype]  # type: ignore[index]
+                        return a.item(), numpy_to_torch_dtype(a.dtype)
                     else:  # isinstance(a, torch.Tensor)
                         return a.item(), a.dtype
 
                 x, precision_dtype_x = to_scalar_and_precision_dtype(x)
                 y, precision_dtype_y = to_scalar_and_precision_dtype(y)
                 precision_dtypes = (precision_dtype_x, precision_dtype_y)
+
+                # For BC reasons we do not check the (d)type of scalars
+                exact_dtype = False
 
             # In order to honor the @toleranceOverride and @precisionOverride decorators, we need to resolve the
             # tolerances before we call assert_close
