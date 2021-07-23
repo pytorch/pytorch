@@ -217,6 +217,7 @@ fi
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing libtorch"
+    echo $LD_LIBRARY_PATH
 
     # Start background download
     python tools/download_mnist.py --quiet -d test/cpp/api/mnist &
@@ -233,6 +234,7 @@ test_libtorch() {
       LIB_DIR="$SITE_DIR"/torch/lib
       ${SUDO} ln -sf "$LIB_DIR"/libjitbackend_test.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libtorch_cpu.so "$BIN_DIR"
+      ${SUDO} ln -sf "$LIB_DIR"/libtorch.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libc10.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libbackend_with_compiler.so "$BIN_DIR"
       ls -l "$BIN_DIR"
