@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
@@ -95,6 +96,11 @@ import operator
 import unittest
 import io
 from typing import Callable
+
+TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
+
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -1135,40 +1141,46 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
     def test_qconfig_precedence(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-                self.linear = nn.Linear(1, 1)
-                self.conv = nn.Conv2d(1, 1, 1)
-                self.module_conv1 = nn.Conv2d(1, 1, 1)
-                self.module_conv2 = nn.Conv2d(1, 1, 1)
+        for device in get_supported_device_types():
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super(M, self).__init__()
+                    self.linear = nn.Linear(1, 1)
+                    self.conv = nn.Conv2d(1, 1, 1)
+                    self.module_conv1 = nn.Conv2d(1, 1, 1)
+                    self.module_conv2 = nn.Conv2d(1, 1, 1)
 
-            def forward(self, x):
-                # global
-                x = self.linear(x)
-                # global + object_type --> object_type
-                x = self.conv(x)
-                # global + object_type + module_name_regex --> module_name_regex
-                x = self.module_conv1(x)
-                # global + object_type + module_name_regex + module_name --> module_name
-                x = self.module_conv2(x)
-                return x
+                def forward(self, x):
+                    # global
+                    x = self.linear(x)
+                    # global + object_type --> object_type
+                    x = self.conv(x)
+                    # global + object_type + module_name_regex --> module_name_regex
+                    x = self.module_conv1(x)
+                    # global + object_type + module_name_regex + module_name --> module_name
+                    x = self.module_conv2(x)
+                    return x
 
-        m = M().eval()
-        global_qconfig = default_qconfig
-        object_type_qconfig = default_dynamic_qconfig
-        module_name_regex_qconfig = float16_dynamic_qconfig
-        module_name_qconfig = default_qat_qconfig
-        qconfig_dict = {
-            "": global_qconfig,
-            "object_type": [(nn.Conv2d, object_type_qconfig)],
-            "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
-            "module_name": [("module_conv2", module_name_qconfig)]}
-        m = prepare_fx(m, qconfig_dict)
-        self.assertEqual(m.linear.qconfig, global_qconfig)
-        self.assertEqual(m.conv.qconfig, object_type_qconfig)
-        self.assertEqual(m.module_conv1.qconfig, module_name_regex_qconfig)
-        self.assertEqual(m.module_conv2.qconfig, module_name_qconfig)
+            m = M().to(device).eval()
+
+            global_qconfig = default_qconfig
+            object_type_qconfig = default_dynamic_qconfig
+            module_name_regex_qconfig = float16_dynamic_qconfig
+            module_name_qconfig = default_qat_qconfig
+            qconfig_dict = {
+                "": global_qconfig,
+                "object_type": [(nn.Conv2d, object_type_qconfig)],
+                "module_name_regex": [("module_conv*", module_name_regex_qconfig)],
+                "module_name": [("module_conv2", module_name_qconfig)]}
+            m_prep = prepare_fx(m, qconfig_dict)
+            self.assertEqual(m_prep.linear.qconfig.activation.p.func, global_qconfig.activation.p.func)
+            self.assertEqual(m_prep.linear.qconfig.weight.p.func, global_qconfig.weight.p.func)
+            self.assertEqual(m_prep.conv.qconfig.activation.p.func, object_type_qconfig.activation.p.func)
+            self.assertEqual(m_prep.conv.qconfig.weight.p.func, object_type_qconfig.weight.p.func)
+            self.assertEqual(m_prep.module_conv1.qconfig.activation.p.func, module_name_regex_qconfig.activation.p.func)
+            self.assertEqual(m_prep.module_conv1.qconfig.weight.p.func, module_name_regex_qconfig.weight.p.func)
+            self.assertEqual(m_prep.module_conv2.qconfig.activation.p.func, module_name_qconfig.activation.p.func)
+            self.assertEqual(m_prep.module_conv2.qconfig.weight.p.func, module_name_qconfig.weight.p.func)
 
     def test_qconfig_module_name_object_type_order(self):
         class M1(torch.nn.Module):
@@ -4486,6 +4498,89 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
 
 class TestQuantizeFxModels(QuantizationTestCase):
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
+    def test_static_gpu_convert_basic(self):
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.relu1 = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.relu1(self.conv1(x))
+                y = self.linear1(x.view(-1))
+                return y
+
+        input = torch.randn((5, 1, 6, 6)).to('cuda')
+        model = Net().to('cuda').eval()
+        qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+        model_prepared = prepare_fx(model, qconfig_dict)
+        model_prepared(input)
+        model_quantized = convert_fx(model_prepared, is_reference=True)
+        out = model_quantized(input)
+        self.assertEqual(out.device.type, 'cuda')
+
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
+    def test_switch_device_prepare_convert(self):
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.relu1 = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.relu1(self.conv1(x))
+                y = self.linear1(x.view(-1))
+                return y
+
+        for device in ['cuda', 'cpu']:
+            device_after = 'cuda' if device == 'cpu' else 'cpu'
+            input = torch.randn((5, 1, 6, 6)).to(device)
+            model = Net().to(device).eval()
+            qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+            model_prepared = prepare_fx(model, qconfig_dict)
+            model_prepared(input)
+            model_prepared.to(device_after)
+            model_quantized = convert_fx(model_prepared, is_reference=True)
+            out = model_quantized(input.to(device_after))
+            self.assertEqual(out.device.type, device_after)
+
+    @skipIfNoFBGEMM
+    @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
+    def test_prepare_serialize_switch_device_convert(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 6, 5)
+                self.linear1 = nn.Linear(120, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                y = self.linear1(x.view(-1))
+                return y
+
+        for device in ['cuda', 'cpu']:
+            for device_after in ['cuda', 'cpu']:
+                input = torch.randn((5, 1, 6, 6)).to(device)
+                model = Net().to(device).eval()
+                qconfig_dict = {"": torch.quantization.get_default_qconfig('fbgemm')}
+                model_prepared_first = prepare_fx(model, qconfig_dict)
+                model_prepared_second = prepare_fx(model, qconfig_dict)
+                model_prepared_first(input)
+                state_dict = model_prepared_first.state_dict()
+                del model_prepared_first
+                model_prepared_second.load_state_dict(state_dict)
+                model_prepared_second.to(device_after)
+                model_quantized = convert_fx(model_prepared_second, is_reference=True)
+                out = model_quantized(input.to(device_after))
+                self.assertEqual(out.device.type, device_after)
+
     def _test_model_impl(
             self, mode, name, model, eager_quantizable_model,
             check_with_eager=True,
@@ -4847,3 +4942,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             out_ref = converted(inp)
 
             torch.testing.assert_allclose(out, out_ref)
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_quantization.py TESTNAME\n\n"
+                       "instead.")
