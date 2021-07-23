@@ -1030,6 +1030,22 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
+def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        (()),
+        ((S, )),
+        ((S, S)),
+        ((S, M, S))
+    )
+
+    def generator():
+        for shape in case:
+            yield SampleInput(make_arg(shape))
+
+    return list(generator())
+
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -6246,6 +6262,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    OpInfo('nn.functional.relu',
+           aten_name="relu",
+           supports_autograd=True,
+           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_nn_activation_relu,
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
