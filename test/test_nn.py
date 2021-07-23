@@ -15950,8 +15950,8 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.float)
-    def test_maxpool_indicies_no_batch_dim(self, device, dtype):
-        """Check that indicies with no batch dim is consistent with a single batch."""
+    def test_maxpool_indices_no_batch_dim(self, device, dtype):
+        """Check that indices with no batch dim is consistent with a single batch."""
         max_pool_cases = [
             (nn.AdaptiveMaxPool1d(3, return_indices=True),
              torch.randn(3, 5, device=device, dtype=dtype)),

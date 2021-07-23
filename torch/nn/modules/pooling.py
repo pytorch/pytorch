@@ -1004,10 +1004,11 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size of the image of the form :math:`H_{out}` x :math:`W_{out}`.
-                     Can be a tuple :math:`(H_{out}, W_{out})` or a single H for a square image H x H.
-                     :math:`H_{out}` and :math:`W_{out}` can be either a ``int``, or ``None`` which means
-                     the size will be the same as that of the input.
+        output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
+                     Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
+                     square image :math:`H_{out} \times H_{out}`. :math:`H_{out}` and :math:`W_{out}`
+                     can be either a ``int``, or ``None`` which means the size will be the same as that
+                     of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
 
@@ -1047,7 +1048,8 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
     Args:
         output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
                      Can be a tuple :math:`(D_{out}, H_{out}, W_{out})` or a single
-                     D for a cube D x D x D. :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
+                     :math:`D_{out}` for a cube :math:`D_{out} \times D_{out} \times D_{out}`.
+                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
                      ``int``, or ``None`` which means the size will be the same as that of the input.
 
         return_indices: if ``True``, will return the indices along with the outputs.
