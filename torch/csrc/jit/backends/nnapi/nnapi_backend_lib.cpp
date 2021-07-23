@@ -10,8 +10,7 @@ namespace jit {
 class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  explicit NnapiBackend() {}
+  explicit NnapiBackend() = default;
   // NOLINTNEXTLINE(modernize-use-override)
   virtual ~NnapiBackend() = default;
 
@@ -41,7 +40,6 @@ class NnapiBackend : public PyTorchBackendInterface {
 
 namespace {
 constexpr auto backend_name = "nnapi";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls = torch::jit::backend<NnapiBackend>(backend_name);
 } // namespace
 

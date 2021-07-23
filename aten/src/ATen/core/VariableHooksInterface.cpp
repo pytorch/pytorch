@@ -3,7 +3,6 @@
 namespace at { namespace impl {
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 VariableHooksInterface* hooks = nullptr;
 }
 

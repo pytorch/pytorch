@@ -215,7 +215,7 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
     b /= w;
     t = a * b / A[i];
     s = s + t;
-    t = ::abs(t / s);
+    t = ::fabs(t / s);
     if (t < MACHEP) {
       return static_cast<scalar_t>(s);
     }
