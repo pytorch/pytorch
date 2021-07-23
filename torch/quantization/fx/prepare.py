@@ -13,11 +13,11 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
+from ..qconfig import QConfigAny
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     get_flattened_qconfig_dict,
-    QConfigAny,
 )
 
 from .quantization_patterns import (
