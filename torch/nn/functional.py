@@ -4088,7 +4088,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0) -> Tensor:
+def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4153,7 +4153,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
     if mode == "constant":
         return _VF.constant_pad_nd(input, pad, value)
     else:
-        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        assert value == 0.0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if input.dim() == 3:
             assert len(pad) == 2, "3D tensors expect 2 values for padding"
             if mode == "reflect":
