@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (dtypesIfCPU, expectedFailure, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (expectedFailure, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -476,8 +476,7 @@ class OpInfo(object):
                  # modifying tests and a pointer to the op's sample inputs function
                  # this function lets the OpInfo generate valid inputs
                  skips=tuple(),  # information about which tests to skip
-                 # The tests for which this operator is failing
-                fails: Sequence[FailureInfo] = tuple(), # information about which tests are failing
+                 fails: Sequence[FailureInfo] = tuple(),  # information about which tests are failing
                  decorators=None,  # decorators to apply to generated tests
                  sample_inputs_func=None,  # function to generate sample inputs
 
@@ -877,7 +876,7 @@ class ReductionOpInfo(OpInfo):
         # that category (e.g. torch.int indicates any integral dtype), whereas
         # passing them as the value indicates the default value for that
         # category. Dtypes with precision override default dtype rules.
-        result_dtype: Union[torch.dtype, dict[torch.dtype, torch.dtype]] = {},
+        result_dtype: Optional[Union[torch.dtype, dict[torch.dtype, torch.dtype]]] = None,
 
         # Whether the operator can reduce multiple dimensions.
         reduces_multiple_dims: bool = True,
@@ -897,10 +896,10 @@ class ReductionOpInfo(OpInfo):
         # Operators are expected to work with all dtypes unless documented
         # otherwise. It is often easier and clearer to specify the dtypes
         # an operator does not support.
-        unsupported_dtypes: _dispatch_dtypes = [],
-        unsupported_dtypes_cpu: _dispatch_dtypes = [],
-        unsupported_dtypes_cuda: _dispatch_dtypes = [],
-        unsupported_dtypes_rocm: _dispatch_dtypes = [],
+        unsupported_dtypes: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_cpu: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_cuda: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_rocm: _dispatch_dtypes = tuple(),
 
         # Options from the OpInfo base class
         **kwargs,
