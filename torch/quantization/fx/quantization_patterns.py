@@ -1302,7 +1302,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         else:
             return quantized_graph.node_copy(node, load_arg(quantized=None))
 
-
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
