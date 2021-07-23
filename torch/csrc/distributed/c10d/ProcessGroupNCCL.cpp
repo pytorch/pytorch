@@ -1103,7 +1103,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   auto& ncclComms = getNCCLComm(key, devices, opType);
 
   // Used many times below, so we stash the unordered_map lookup
-  const auto& ncclStreams = ncclStreams_[key];
+  auto& ncclStreams = ncclStreams_[key];
 
   // First let NCCL streams wait for input tensors allocation streams
   syncStreams(devices, ncclEvents_[key], ncclStreams);
@@ -1373,7 +1373,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
       "allreduce_coalesced", // colName
       total_numel, // inSize
       total_numel, // outSize
-      tensor.scalar_type(), // dType
+      tensors[0].scalar_type(), // dType
       // I'm not sure what in,outSplitSizes mean here.
       std::vector<int64_t>(), // inSplitSizes
       std::vector<int64_t>()); // outSplitSizes
