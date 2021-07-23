@@ -667,20 +667,20 @@ NvrtcFunction nvrtcCompile(
   args.push_back("-hip-pch");
 #endif
 #else
-  const std::string compute = std::string("--gpu-architecture=") +
-#if CUDA_VERSION >= 11010
-      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
-      // which gives better backwards compatibility to work on older driver,
-      // (since older driver doesn't necessrily recognize PTX emitted by new
-      // toolkit);
-      // Meanwhile, for forward compatibility (future device with
-      // `unsupported_arch==True`), since SASS are not necessarily compatible,
-      // we fallback to PTX instead.
-      (compile_to_sass ? "sm_" : "compute_") +
-#else
-      "compute_" +
+#if CUDA_VERSION < 11010
+  // compile to sass is not allowed prior to CUDA 11.1
+  compile_to_sass = false;
 #endif
-      std::to_string(major) + std::to_string(minor);
+  // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+  // which gives better backwards compatibility to work on older driver,
+  // (since older driver doesn't necessrily recognize PTX emitted by new
+  // toolkit);
+  // Meanwhile, for forward compatibility (future device with
+  // `unsupported_arch==True`), since SASS are not necessarily compatible,
+  // we fallback to PTX instead.
+  const std::string compute = std::string("--gpu-architecture=") +
+      (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
+      std::to_string(minor);
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
@@ -712,14 +712,54 @@ NvrtcFunction nvrtcCompile(
   args.push_back("-DNDEBUG");
 #endif
 
+  const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
+  std::string jit_opt_level = "-O";
+
+  std::vector<CUjit_option> options;
+  std::vector<void*> option_vals;
+  std::vector<char> info_log;
+  unsigned int log_size = 8196;
+
   if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
     // show register usage in compilation log
-    args.push_back("--ptxas-options");
-    args.push_back("--verbose");
+    if (compile_to_sass) {
+      args.push_back("--ptxas-options");
+      args.push_back("--verbose");
+    } else {
+      options.push_back(CU_JIT_LOG_VERBOSE);
+      option_vals.push_back((void*)1);
+      info_log.reserve(log_size);
+
+      options.push_back(CU_JIT_INFO_LOG_BUFFER);
+      option_vals.push_back((void*)info_log.data());
+
+      options.push_back(CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES);
+      option_vals.push_back((void*)(long)log_size);
+    }
+  }
+
+  if (ptxas_opt_level) {
+    int val = atoi(ptxas_opt_level);
+    if (val <= 4 && val >= 0) {
+      if (compile_to_sass) {
+        jit_opt_level += std::to_string(val);
+        args.push_back("--ptxas-options");
+        args.push_back(jit_opt_level.c_str());
+      } else {
+        options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+        option_vals.push_back((void*)val);
+      }
+    } else {
+      TORCH_WARN_ONCE(
+          "acceptable range for PYTORCH_NVFUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
+          val,
+          ", ignoring the option");
+    }
   }
 
   // keeping the string outside the loop for lifetime
   std::string max_register_usage = "--maxrregcount=";
+  uint32_t max_register = 0;
   if (opt_block_size.has_value() && opt_block_size.value() > 0) {
     int num_partition = 0;
     int reg_allocation_granularity = 0;
@@ -740,30 +780,15 @@ NvrtcFunction nvrtcCompile(
     // clamp down to register allocation granularity at warp level
     int effective_max_reg_per_warp = max_reg_per_warp /
         reg_allocation_granularity * reg_allocation_granularity;
-    int max_register =
-        std::min(effective_max_reg_per_warp / warp_size, max_regs_per_thread);
+    max_register = static_cast<uint32_t>(
+        std::min(effective_max_reg_per_warp / warp_size, max_regs_per_thread));
 
-    max_register_usage += std::to_string(max_register);
-    args.push_back(max_register_usage.c_str());
-  }
-
-  const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
-  uint32_t jit_opt_level = 0;
-
-  std::vector<CUjit_option> options;
-  std::vector<void*> option_vals;
-
-  if (ptxas_opt_level) {
-    int val = atoi(ptxas_opt_level);
-    if (val <= 4 && val >= 0) {
-      jit_opt_level = static_cast<uint32_t>(val);
-      options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-      option_vals.emplace_back(&jit_opt_level);
+    if (compile_to_sass) {
+      max_register_usage += std::to_string(max_register);
+      args.push_back(max_register_usage.c_str());
     } else {
-      TORCH_WARN_ONCE(
-          "acceptable range for PYTORCH_NVFUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
-          jit_opt_level,
-          ", ignoring the option");
+      options.push_back(CU_JIT_MAX_REGISTERS);
+      option_vals.push_back((void*)max_register);
     }
   }
 
@@ -859,7 +884,11 @@ NvrtcFunction nvrtcCompile(
       CUlinkState linkState;
 
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkCreate(
-          0, nullptr, nullptr, &linkState));
+          // 0, nullptr, nullptr, &linkState));
+          options.size(),
+          options.data(),
+          option_vals.data(),
+          &linkState));
 
       AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLinkAddData(
           linkState,
@@ -867,9 +896,13 @@ NvrtcFunction nvrtcCompile(
           ptx.data(),
           ptx_size,
           "compiling PTX",
-          options.size(),
-          options.data(),
-          option_vals.data()));
+          0,
+          nullptr,
+          nullptr));
+
+      if (isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+        std::cout << info_log.data() << std::endl;
+      }
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t cubinSize;
@@ -890,8 +923,14 @@ NvrtcFunction nvrtcCompile(
         myCubinFile.close();
       }
       // load compiled cubin
-      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-          &(compiled_kernel_.module), cubin));
+      // AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
+      //     &(compiled_kernel_.module), cubin));
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
+          &(compiled_kernel_.module),
+          cubin,
+          options.size(),
+          options.data(),
+          option_vals.data()));
     }
   } else {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadPTX");
@@ -903,6 +942,11 @@ NvrtcFunction nvrtcCompile(
         options.size(),
         options.data(),
         option_vals.data()));
+
+    if (!compile_to_sass &&
+        isDebugDumpEnabled(DebugDumpOption::PrintPtxasLog)) {
+      std::cout << info_log.data() << std::endl;
+    }
   }
 #else
   // load ptx directly
