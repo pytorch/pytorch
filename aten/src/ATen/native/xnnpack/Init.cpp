@@ -8,7 +8,6 @@ namespace xnnpack {
 namespace internal {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool is_initialized_ = false;
 
 bool initialize() {
