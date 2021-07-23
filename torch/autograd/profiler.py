@@ -1,6 +1,6 @@
 from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MemRecordsAcc, _filter_name,
-    _filter_stack_entry, _rewrite_name
+    EventList, FunctionEvent, MemRecordsAcc, MEMORY_EVENT_NAME,
+    _filter_name, _filter_stack_entry, _rewrite_name
 )
 
 from torch.autograd import (
@@ -262,7 +262,7 @@ class profile(object):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
         trace_start_us = result.trace_start_us()
-        mem_records = [[evt, False] for evt in result.events() if evt.name() == "[memory]"]
+        mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
         mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
@@ -358,7 +358,7 @@ class profile(object):
                 max_evt_id += 1
                 fe = FunctionEvent(
                     id=max_evt_id,
-                    name="[memory]",
+                    name=MEMORY_EVENT_NAME,
                     trace_name=None,  # not outputting in the trace
                     thread=mem_record[0].start_thread_id(),
                     start_us=rel_start_us,
@@ -366,7 +366,7 @@ class profile(object):
                     fwd_thread=mem_record[0].start_thread_id(),
                     input_shapes=[],
                     stack=[],
-                    scope=0,  # function
+                    scope=0,  # RecordScope::FUNCTION
                     cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
                     cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
                     is_async=False,

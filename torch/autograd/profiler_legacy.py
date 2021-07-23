@@ -1,8 +1,8 @@
 import torch
 import torch.cuda
 from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, _filter_name,
-    _filter_stack_entry, _rewrite_name
+    EventList, FunctionEvent, MEMORY_EVENT_NAME,
+    _filter_name, _filter_stack_entry, _rewrite_name
 )
 
 from torch.autograd import (
@@ -255,7 +255,7 @@ class profile(object):
                         # output event as a top-level memory event
                         fe = FunctionEvent(
                             id=0,
-                            name="[memory]",
+                            name=MEMORY_EVENT_NAME,
                             trace_name=None,
                             thread=0,
                             start_us=0,
