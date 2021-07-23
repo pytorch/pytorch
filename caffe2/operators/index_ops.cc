@@ -136,25 +136,16 @@ class IndexSizeOp : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IntIndexCreate, IndexCreateOp<int32_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LongIndexCreate, IndexCreateOp<int64_t>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(StringIndexCreate, IndexCreateOp<std::string>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexGet, IndexGetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexLoad, IndexLoadOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexStore, IndexStoreOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexFreeze, IndexFreezeOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(IndexSize, IndexSizeOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IntIndexCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -166,7 +157,6 @@ from 1 to max_elements. Zero is reserved for unknown keys.
     .Output(0, "handler", "Pointer to an Index instance.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LongIndexCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -178,7 +168,6 @@ from 1 to max_elements. Zero is reserved for unknown keys.
     .Output(0, "handler", "Pointer to an Index instance.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(StringIndexCreate)
     .NumInputs(0)
     .NumOutputs(1)
@@ -190,7 +179,6 @@ from 1 to max_elements. Zero is reserved for unknown keys.
     .Output(0, "handle", "Pointer to an Index instance.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexGet)
     .NumInputs(2)
     .NumOutputs(1)
@@ -205,7 +193,6 @@ If an insert is necessary but max_elements has been reached, fail.
     .Output(0, "indices", "Indices for each of the keys.")
     .ScalarType(TensorProto::INT64);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexFreeze)
     .NumInputs(1)
     .NumOutputs(1)
@@ -218,7 +205,6 @@ Should not be called concurrently with IndexGet.
     .EnforceInplace({{0, 0}})
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexLoad)
     .NumInputs(2)
     .NumOutputs(1)
@@ -237,7 +223,6 @@ consecutive indexes starting at 1. Fails if tensor contains repeated elements.
         "entry corresponds to the default 0 index entry.")
     .ScalarType(TensorProto_DataType_UNDEFINED);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexStore)
     .NumInputs(1)
     .NumOutputs(1)
@@ -248,7 +233,6 @@ for unknowns, the first element of the output tensor will be element of index 1.
     .Input(0, "handle", "Pointer to an Index instance.")
     .Output(0, "items", "1-D tensor with elements starting with index 1.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(IndexSize)
     .NumInputs(1)
     .NumOutputs(1)
@@ -258,21 +242,13 @@ Returns the number of entries currently present in the index.
     .Input(0, "handle", "Pointer to an Index instance.")
     .Output(0, "items", "Scalar int64 tensor with number of entries.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(IndexGetOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(IntIndexCreate);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LongIndexCreate);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(StringIndexCreate);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IndexFreeze);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IndexLoad);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IndexStore);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(IndexSize);
 
 class IndexSerializer : public BlobSerializerBase {
@@ -372,11 +348,9 @@ class IndexDeserializer : public BlobDeserializerBase {
 
 CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::IndexBase>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_SERIALIZER(
     (TypeMeta::Id<std::unique_ptr<caffe2::IndexBase>>()),
     IndexSerializer);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_DESERIALIZER(
     std::unique_ptr<caffe2::IndexBase>,
     IndexDeserializer);
