@@ -164,18 +164,13 @@ C10_DEFINE_TLS_static(std::shared_ptr<ReadyQueue>, tls_local_ready_queue);
 //
 // Internally, backward() runs ops (including leaf nodes) on side threads.
 // And streams are thread local. So GraphTask achieves the above semantics by
-//  1. remembering the current and default streams on all active CUDA devices
+//  1. remembering the current streams on all active CUDA devices
 //     in the user-facing thread (aka, the thread that called execute() to
 //     launch the GraphTask)
 //  2. remembering the "leaf streams" (streams each backward leaf node ran on)
 //  3. during exec_post_processing, for each leaf stream, sync the remembered
-//     current and default streams (on the leaf stream's device) with that
+//     current streams (on the leaf stream's device) with that
 //     leaf stream.
-//
-// Syncing default streams (as well as current streams) with leaf streams is
-// done for temporary BC, and is more conservative than the usage guidance
-// (https://pytorch.org/docs/stable/notes/cuda.html) requires.
-// TODO: change 1, 2, 3 to sync only current streams with leaf streams.
 
 int NodeTask::getReentrantDepth() const {
   std::shared_ptr<GraphTask> graph_task = base_.lock();
@@ -582,6 +577,12 @@ void GraphTask::exec_post_processing() {
     //  2. The callback's results can safely be used on (user-facing) caller_current_streams
     //     after backward().
     c10::MultiStreamGuard g(caller_current_streams_filtered);
+
+    // Set the ThreadLocalState before calling the function.
+    // NB: The ThreadLocalStateGuard doesn't set the grad_mode because GraphTask
+    // always saves ThreadLocalState without grad_mode.
+    at::ThreadLocalStateGuard tls_guard(this->thread_locals_);
+
     // WARNING: Don't use a range-for loop here because more callbacks may be
     // added in between callback calls, so iterators may become invalidated.
     // NOLINTNEXTLINE(modernize-loop-convert)
@@ -589,18 +590,6 @@ void GraphTask::exec_post_processing() {
       cb_lock.unlock();
       final_callbacks_[i]();
       cb_lock.lock();
-    }
-  }
-
-  // For temporary BC, syncs default streams with caller_current_streams so callback results are also
-  // usable on user-facing default streams after backward()
-  for (const auto& caller_current_stream : caller_current_streams_filtered) {
-    const auto caller_default_stream = *caller_default_streams_[caller_current_stream.device_index()];
-
-    if (caller_current_stream != caller_default_stream) {
-      auto event = c10::Event{c10::DeviceType::CUDA};
-      event.record(caller_current_stream);
-      caller_default_stream.wait(event);
     }
   }
 }
@@ -959,7 +948,7 @@ auto Engine::compute_dependencies(Node* root, GraphTask& task, uint64_t min_topo
   }
 
   if (will_use_cuda) {
-    // Collects current and default streams for devices where this process has a context,
+    // Collects current streams for devices where this process has a context,
     // so GraphTask::exec_post_processing can sync them with leaf_streams.
     task.stash_current_streams();
   }
@@ -1217,8 +1206,7 @@ auto Engine::start_device_threads() -> void {
   // types), and pre-allocate the device_ready_queues_ to ensure safe reading on it.
   device_ready_queues_ = std::vector<std::shared_ptr<ReadyQueue>>(num_devices);
   for (auto& queue : device_ready_queues_)    {
-    // NOLINTNEXTLINE(modernize-make-shared)
-    queue.reset(new ReadyQueue());
+    queue = std::make_shared<ReadyQueue>();
   }
 
   thread_pool_shared_ = std::make_shared<ThreadPoolShared>();
@@ -1254,13 +1242,12 @@ void Engine::add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task) {
   thread_pool_shared_->work_.notify_one();
 }
 
-// Remembers current and default streams on all devices where a context has been created.
+// Remembers current streams on all devices where a context has been created.
 // Only called if Engine::execute detects at least one node runs on a cuda stream.
 void GraphTask::stash_current_streams() {
   const auto guard = c10::impl::VirtualGuardImpl{c10::DeviceType::CUDA};
   auto num_gpus = guard.deviceCount();
   caller_current_streams_.resize(num_gpus);
-  caller_default_streams_.resize(num_gpus);
   if (num_gpus > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_gpus;  idx++) {
 #ifdef __HIP_PLATFORM_HCC__
@@ -1272,10 +1259,8 @@ void GraphTask::stash_current_streams() {
       if (at::detail::getCUDAHooks().hasPrimaryContext(idx)) {
 #endif
         caller_current_streams_[idx] = guard.getStream({c10::DeviceType::CUDA, idx});
-        caller_default_streams_[idx] = guard.getDefaultStream({c10::DeviceType::CUDA, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;
-        caller_default_streams_[idx] = c10::nullopt;
       }
     }
   }

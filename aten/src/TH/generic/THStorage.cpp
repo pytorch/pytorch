@@ -2,6 +2,9 @@
 #define TH_GENERIC_FILE "TH/generic/THStorage.cpp"
 #else
 
+#include <ATen/MapAllocator.h>
+#include <c10/core/CPUAllocator.h>
+
 #include <new>
 
 scalar_t* THStorage_(data)(const THStorage *self)
@@ -32,7 +35,7 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 #else
                            size * sizeof(scalar_t),
 #endif
-                           getTHDefaultAllocator(),
+                           c10::GetDefaultCPUAllocator(),
                            true)
                            .release();
   return storage;
@@ -62,7 +65,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       c10::make_intrusive<at::StorageImpl>(
           c10::StorageImpl::use_byte_size_t(),
           size * sizeof(scalar_t),
-          THMapAllocator::makeDataPtr(
+          at::MapAllocator::makeDataPtr(
               filename, flags, size * sizeof(scalar_t), &actual_size),
           /* allocator */ nullptr,
           false)
@@ -123,16 +126,16 @@ void THStorage_(fill)(THStorage *storage, scalar_t value)
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, scalar_t value)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = self->nbytes() / type_meta.itemsize();
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = self->nbytes() / type_meta.itemsize();
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
