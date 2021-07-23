@@ -15,6 +15,7 @@ try:
 except ImportError:
     pass
 
+
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 _REFINEMENT_RULES: Dict[Target, Callable] = {}
 

@@ -103,7 +103,7 @@ class AnnotationsTest(unittest.TestCase):
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
 
-
+@skipIfNoUnification
 class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_add_with_broadcast(self):
@@ -931,8 +931,6 @@ class TypeCheckerTest(unittest.TestCase):
         infer_symbolic_types(symbolic_traced)
         r = Refine(symbolic_traced)
         r.refine()
-
-        infer_symbolic_types(symbolic_traced)
 
         expected_ph_types = [TensorType((1, 2)),
                              TensorType((Var(1), 2)),
