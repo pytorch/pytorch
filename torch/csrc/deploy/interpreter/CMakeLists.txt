@@ -101,7 +101,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 endif()
 
 target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
-target_include_directories(torch_deployinterpreter PUBLIC ${PYTHON_INC_DIR})
+target_include_directories(torch_deployinterpreter BEFORE PUBLIC ${PYTHON_INC_DIR})
 
 target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
 target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
