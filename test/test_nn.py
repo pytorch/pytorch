@@ -4596,7 +4596,8 @@ class TestNN(NNTestCase):
                     m.weight = w_new
                     torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
                 else:
-                    with self.assertRaisesRegex(NotImplementedError, "assign to the matrix exponential or the Cayley parametrization"):
+                    msg =  "assign to the matrix exponential or the Cayley parametrization"
+                    with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
                 # Intializing with a non-orthogonal matrix works
@@ -4612,7 +4613,8 @@ class TestNN(NNTestCase):
                         Q = Q.transpose(-2, -1)
                     torch.testing.assert_allclose(Q, m.weight, atol=1e-5, rtol=0.)
                 else:
-                    with self.assertRaisesRegex(NotImplementedError, "assign to the matrix exponential or the Cayley parametrization"):
+                    msg =  "assign to the matrix exponential or the Cayley parametrization"
+                    with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
                 opt = torch.optim.SGD(m.parameters(), lr=0.1)
