@@ -232,6 +232,7 @@ test_libtorch() {
       BIN_DIR="$SITE_DIR"/torch/bin
       LIB_DIR="$SITE_DIR"/torch/lib
       ${SUDO} ln -sf "$LIB_DIR"/libjitbackend_test.so "$BIN_DIR"
+      ${SUDO} ln -sf "$LIB_DIR"/libtorch_cpu.so "$BIN_DIR"
       ${SUDO} ln -sf "$LIB_DIR"/libbackend_with_compiler.so "$BIN_DIR"
       ls -l "$BIN_DIR"
       ls -l "$LIB_DIR"
@@ -470,8 +471,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_python_shard1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
-  install_torchvision
-  test_python_shard2
+  # install_torchvision
+  # test_python_shard2
   test_libtorch
   test_custom_script_ops
   test_custom_backend
@@ -481,11 +482,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 else
-  install_torchvision
-  install_monkeytype
-  test_python
-  test_aten
-  test_vec256
+  # install_torchvision
+  # install_monkeytype
+  # test_python
+  # test_aten
+  # test_vec256
   test_libtorch
   test_custom_script_ops
   test_custom_backend
