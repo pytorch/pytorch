@@ -1,3 +1,4 @@
+#include <array>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -24,9 +25,8 @@ AllocInfo get_alloc_info(const char* filename) {
 }
 
 void start_manager() {
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  int pipe_ends[2];
-  SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends));
+  std::array<int, 2> pipe_ends;
+  SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends.data()));
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   pid_t pid;
@@ -46,17 +46,16 @@ void start_manager() {
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[1]));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  ssize_t bytes_read;
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays)
-  char buffer[1000];
+  constexpr auto MAX_BUFFER_SIZE = 1000;
+  std::array<char, MAX_BUFFER_SIZE> buffer;
   std::string handle;
-  for (;;) {
-    SYSCHECK_ERR_RETURN_NEG1(bytes_read = read(pipe_ends[0], buffer, sizeof(buffer)));
-    handle.append(buffer, bytes_read);
-    if (bytes_read == 0 || handle[handle.length() - 1] == '\n') {
+  while(handle.empty() || handle.back() != '\n') {
+    const auto bytes_read = read(pipe_ends[0], buffer.data(), buffer.size());
+    SYSCHECK_ERR_RETURN_NEG1(bytes_read);
+    if (bytes_read == 0) {
       break;
     }
+    handle.append(buffer.data(), bytes_read);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
   if (handle.length() == 0) {

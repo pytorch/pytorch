@@ -16,7 +16,7 @@ void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto alpha = value.to<accscalar_t>();
     gpu_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b, scalar_t c) -> scalar_t {
-      return a + alpha * b * c;
+      return a + alpha * (static_cast<accscalar_t>(b) * static_cast<accscalar_t>(c));
     });
   });
 }

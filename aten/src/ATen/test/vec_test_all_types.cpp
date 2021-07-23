@@ -1071,13 +1071,17 @@ namespace {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
+        float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28,
+                       9.5488e-28,10.5488e-28,11.5488e-28,12.5488e-28,13.5488e-28,14.5488e-28,15.5488e-28,16.5488e-28};
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0 };
+        float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0,aa[8],0,aa[10],0,aa[12],0,aa[14],0 };
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0 };
+        float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0,aa[9],0,aa[11],0,aa[13],0,aa[15],0 };
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-        float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28 };
+        float exp4[] = { 1.5488e-28, -2.5488e-28,3.5488e-28,-4.5488e-28,
+                         5.5488e-28,-6.5488e-28,7.5488e-28,-8.5488e-28,
+                         9.5488e-28,-10.5488e-28,11.5488e-28,-12.5488e-28,
+                         13.5488e-28,-14.5488e-28,15.5488e-28,-16.5488e-28 };
         auto a = vcomplex::loadu(aa);
         auto actual1 = a.real();
         auto actual3 = a.imag();
@@ -1304,6 +1308,7 @@ namespace {
             },
             test_case);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     TYPED_TEST(FunctionalTests, Map) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -1339,15 +1344,16 @@ namespace {
         at::vec::map3<VT>([](vec x1, vec x2, vec x3) { return x1 + x2 + x3; }, y, x1, x2, x3, N);
         for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i]; }
         cmp(y, ref_y);
-        // test map3: y = x1 + x2 + x3 + x4
+        // test map4: y = x1 + x2 + x3 + x4
         at::vec::map4<VT>([](vec x1, vec x2, vec x3, vec x4) { return x1 + x2 + x3 + x4; }, y, x1, x2, x3, x4, N);
         for (int64_t i = 0; i < N; i++) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
     }
-    TYPED_TEST(FunctionalBF16Tests, Reduce) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+      TYPED_TEST(FunctionalBF16Tests, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
-      // Vectorized<BFloat16>::value_type returns uint16_t on AVX2
+      // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
       using VT = c10::BFloat16;
       using RT = float; // reference
       constexpr auto R = 2LL; // residual
@@ -1394,7 +1400,6 @@ namespace {
         auto y2 = at::vec::map_reduce_all<VT>([](auto x) { return x - x.exp(); }, sum, x_b1, len);
         ASSERT_TRUE(cmp(y1, y2)) << "Failure Details:\nTest Seed to reproduce: " << seed
             << "\nmap_reduce_all, Length: " << len << "; fp32: " << y1 << "; bf16: " << RT(y2);
-
       }
       // Map2ReduceAll
       for (int64_t len = 1; len <= N; len++) {

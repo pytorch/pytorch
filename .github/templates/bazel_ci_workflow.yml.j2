@@ -9,8 +9,7 @@ name: Bazel Linux CI (!{{ build_environment }})
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: !{{ test_runner_type }}
-    needs:
-      - calculate-docker-image
+    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -148,8 +147,7 @@ name: Bazel Linux CI (!{{ build_environment }})
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - build-and-test
+    needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     steps:
       - name: Checkout PyTorch
