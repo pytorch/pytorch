@@ -1,11 +1,13 @@
 #include <ATen/MapAllocator.h>
 
 #include <atomic>
+#include <string>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
@@ -14,16 +16,35 @@
 #endif
 
 #if defined(HAVE_MMAP)
-#include <sys/types.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#endif
+
+#if !defined(_MSC_VER) || defined(HAVE_MMAP)
+#include <sys/types.h>
 #include <unistd.h>
+#elif defined(_MSC_VER)
+#include <c10/util/win32-headers.h>
 #endif
 
 namespace at {
 
 static constexpr int64_t map_alloc_alignment = 64;
+
+TORCH_API std::string NewProcessWideShmHandle()
+{
+  static std::atomic<uint64_t> counter;
+  std::string handle = "/torch_";
+#ifdef _MSC_VER
+  handle += c10::guts::to_string(GetCurrentProcessId());
+#else
+  handle += c10::guts::to_string(getpid());
+#endif
+  handle += "_";
+  handle += c10::guts::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+  return handle;
+}
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
@@ -32,7 +53,6 @@ struct MapInfo {
   std::atomic<int> refcount;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
 const std::string unknown_eventname = "eventname not specified";

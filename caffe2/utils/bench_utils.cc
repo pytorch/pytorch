@@ -10,7 +10,6 @@
 namespace caffe2 {
 
 uint32_t wipe_cache() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static uint32_t* wipe_buffer = nullptr;
   static size_t wipe_size = 0;
 

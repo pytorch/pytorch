@@ -5,13 +5,11 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Negative,
     UnaryElementwiseOp<NumericTypes, CPUContext, NegativeFunctor<CPUContext>>);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Negative)
     .NumInputs(1)
     .NumOutputs(1)
@@ -78,7 +76,6 @@ class GetNegativeGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Negative, GetNegativeGradient);
 
 } // namespace caffe2

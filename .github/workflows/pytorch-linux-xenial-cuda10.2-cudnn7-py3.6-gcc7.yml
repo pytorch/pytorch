@@ -5,6 +5,8 @@ name: Linux CI (pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+    types: [unassigned]
   push:
     branches:
       - master
@@ -26,8 +28,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/slow'))
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -43,6 +53,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -97,7 +110,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-build
@@ -111,6 +124,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -145,6 +161,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
+          AWS_DEFAULT_REGION: us-east-1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -152,11 +169,10 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -192,6 +208,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_JIT_LEGACY_TEST: 1
@@ -217,10 +234,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -241,6 +255,9 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -350,6 +367,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
+
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -357,10 +375,8 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
-    runs-on: ubuntu-18.04
+    needs: [generate-test-matrix, test, ciflow_should_run]
+    runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
@@ -379,17 +395,14 @@ jobs:
         run: |
           # Should preserve paths so reports should still be in test/test-reports
           unzip -o 'test-reports-*.zip'
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
       - name: Install dependencies
         # boto3 version copied from .circleci/docker/common/install_conda.sh
         run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+          pip3 install -r requirements.txt
+          pip3 install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python3 tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -397,9 +410,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -407,5 +418,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
-          python tools/stats/print_test_stats.py --upload-to-s3 --compare-with-s3 test
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

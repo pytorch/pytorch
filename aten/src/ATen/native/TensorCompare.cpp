@@ -115,6 +115,12 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
       close.__ior__((self != self).__iand__(other != other));
   }
 
+  // In case of zero tolerances the closeness inequality degenerates to an equality check.
+  // In this case, the short-circuit prevents false positives as detailed in the paragraph below.
+  if (rtol == 0 && atol == 0){
+      return close;
+  }
+
   // Note [closeness error computation]
   // atol and rtol are provided as doubles, so the computation
   // rtol * other will produce a float or complex tensor.
@@ -127,14 +133,16 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // by the default scalar type then this may cause an incorrect result.
 
   // Computes allowed and actual error
-  Tensor cast_other;
+  Tensor cast_self, cast_other;
+  cast_self = self.scalar_type() == at::kBool ? self.to(at::get_default_dtype()) : self;
   if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     cast_other = other.to(at::get_default_dtype());
   } else {
     cast_other = other;
   }
+
   Tensor allowed_error = atol + (rtol * cast_other).abs();
-  Tensor actual_error = (self - cast_other).abs();
+  Tensor actual_error = (cast_self - cast_other).abs();
 
   // Computes finite closeness
   close.__ior__(at::isfinite(actual_error).__iand__(actual_error <= allowed_error));
