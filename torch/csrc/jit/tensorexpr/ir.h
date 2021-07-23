@@ -134,6 +134,7 @@ class BinaryOpNode : public ExprNode<Op> {
     return ExprHandle(new Op(lhs.node(), rhs.node()));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   BinaryOpNode(
       const Expr* lhs_v,
       const Expr* rhs_v,
@@ -312,6 +313,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
@@ -569,6 +571,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         compare_op_(cmp_op),
         bias_(bias) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
@@ -643,6 +646,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   static ExprHandle make(
       IntrinsicsOp op_type,
       const std::vector<ExprHandle>& params) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const Expr*> params_nodes(params.size());
     for (size_t i = 0; i < params.size(); i++) {
       params_nodes[i] = params[i].node();
@@ -732,6 +736,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_({}),
@@ -741,6 +746,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const Expr* v1)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
         params_({v1}),
@@ -750,6 +756,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const Expr* v1, const Expr* v2)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
         params_({v1, v2}),
@@ -759,6 +766,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const std::vector<const Expr*>& params)
       : ExprNodeBase(IntrinsicsDtype(op_type, params)),
         params_(params),

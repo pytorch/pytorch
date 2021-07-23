@@ -61,6 +61,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::NestedTensor:
       return "NestedTensor";
 
+    case DispatchKey::Python:
+      return "Python";
+
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
     case DispatchKey::PrivateUse2:
@@ -68,6 +71,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::PrivateUse3:
       return "PrivateUse3";
 
+    case DispatchKey::Negative:
+      return "Negative";
     case DispatchKey::Conjugate:
       return "Conjugate";
     case DispatchKey::Meta:
@@ -80,6 +85,8 @@ const char* toString(DispatchKey t) {
       return "Autograd";
     case DispatchKey::AutogradCPU:
       return "AutogradCPU";
+    case DispatchKey::AutogradXPU:
+      return "AutogradXPU";
     case DispatchKey::AutogradCUDA:
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:

@@ -309,7 +309,7 @@ class _ObserverBase(ObserverBase):
         else:
             scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
             scale = torch.max(scale, self.eps)
-            zero_point = quant_min - torch.round(min_val_neg / scale)
+            zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
 
         # For scalar values, cast them to Tensors of size 1 to keep the shape
@@ -328,6 +328,10 @@ class _ObserverBase(ObserverBase):
                 )
 
         return scale, zero_point
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
 class MinMaxObserver(_ObserverBase):
@@ -455,6 +459,11 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_val = torch.tensor(float("inf"))
+        self.max_val = torch.tensor(float("-inf"))
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -701,6 +710,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
             unexpected_keys,
             error_msgs,
         )
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_vals = torch.tensor([])
+        self.max_vals = torch.tensor([])
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
