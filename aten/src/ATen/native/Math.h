@@ -2517,7 +2517,8 @@ C10_HOST_DEVICE static inline int CF1_ik(T v, T x, T *fv)
     unsigned long k;
     tolerance = 2 * MACHEP;
     tiny = 1 / sqrt(std::numeric_limits<T>::max());
-    C = f = tiny;		/* b0 = 0, replace with tiny */
+    /* b0 = 0, replace with tiny */
+    C = f = tiny;
     D = 0;
     for (k = 1; k < MAXITER; k++) {
       a = 1;
