@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec.h>
+#include <ATen/cpu/vec/vec256/vec256.h>
 
 namespace at { namespace vec {
 

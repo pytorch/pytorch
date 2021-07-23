@@ -128,11 +128,14 @@ bool FlexibleTopKGradientOp<T, Context>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(FlexibleTopK, FlexibleTopKOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FlexibleTopKGradient,
     FlexibleTopKGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FlexibleTopK)
     .NumInputs(2)
     .NumOutputs(2)
@@ -167,6 +170,7 @@ first.
         "Tensor of shape [ \\sum_i K[i, 1] ] containing the indices "
         "into the flatten input");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FlexibleTopKGradient).NumInputs(4).NumOutputs(1);
 
 class GetFlexibleTopKGradient : public GradientMakerBase {
@@ -180,6 +184,7 @@ class GetFlexibleTopKGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(FlexibleTopK, GetFlexibleTopKGradient);
 
 } // namespace caffe2

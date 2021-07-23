@@ -48,12 +48,14 @@ OpSchema::Cost CostInferenceForReluN(
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReluN,
     UnaryElementwiseWithArgsOp<
         TensorTypes<float>,
         CPUContext,
         ReluNFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReluNGradient,
     BinaryElementwiseWithArgsOp<
@@ -62,6 +64,7 @@ REGISTER_CPU_OPERATOR(
         ReluNGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReluN)
     .NumInputs(1)
     .NumOutputs(1)
@@ -78,6 +81,7 @@ is applied to the tensor elementwise.
     .Output(0, "Y", "1D input tensor");
 
 // Input: Y, dY, output: dX
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReluNGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -103,6 +107,7 @@ class GetReluNGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReluN, GetReluNGradient);
 
 } // namespace caffe2

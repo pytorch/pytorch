@@ -9,6 +9,7 @@ namespace {
 
 using transform::Graph;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ConvToNNPackTest, TestSimple) {
   NetDef netdef;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

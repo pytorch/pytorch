@@ -9,6 +9,7 @@
 #include <sstream>
 
 using namespace at;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
@@ -20,6 +21,7 @@ TEST(TestDlconvertor, TestDlconvertor) {
   ASSERT_TRUE(a.equal(b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestDlconvertor, TestDlconvertorNoStrides) {
   manual_seed(123);
 

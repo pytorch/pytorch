@@ -2,8 +2,10 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ONNXWhile, ONNXWhileOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ONNXWhile)
     .NumInputs(2, INT_MAX)
     .NumOutputs(0, INT_MAX)

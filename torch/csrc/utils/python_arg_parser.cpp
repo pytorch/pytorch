@@ -18,6 +18,7 @@
 
 namespace torch {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::string, ParameterType> type_map = {
   {"Tensor", ParameterType::TENSOR},
   {"Scalar", ParameterType::SCALAR},

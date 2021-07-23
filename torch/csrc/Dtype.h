@@ -13,6 +13,7 @@ struct TORCH_API THPDtype {
   char name[DTYPE_NAME_LEN + 1];
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API extern PyTypeObject THPDtypeType;
 
 inline bool THPDtype_Check(PyObject *obj) {

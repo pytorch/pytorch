@@ -36,6 +36,7 @@ struct InlinerGuard {
   bool oldState_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlinerTest, Basic) {
   // disable automatic inlining so we can test it manually
   InlinerGuard guard(/*shouldInline=*/false);

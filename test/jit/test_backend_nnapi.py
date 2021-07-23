@@ -6,7 +6,10 @@ import torch
 import torch._C
 from pathlib import Path
 from test_nnapi import TestNNAPI
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN
+)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -27,9 +30,8 @@ without the delegate API.
 # First skip is needed for IS_WINDOWS or IS_MACOS to skip the tests.
 # Second skip is because ASAN is currently causing an error.
 # It is still unclear how to resolve this. T95764916
-torch_root = Path(__file__).resolve().parent.parent.parent
-lib_path = torch_root / 'build' / 'lib' / 'libnnapi_backend.so'
-@unittest.skipIf(not os.path.exists(lib_path),
+@unittest.skipIf(not os.path.exists(Path(__file__).resolve().parent.parent.parent
+                 / 'build' / 'lib' / 'libnnapi_backend.so'),
                  "Skipping the test as libnnapi_backend.so was not found")
 @unittest.skipIf(TEST_WITH_ASAN, "Unresolved bug with ASAN")
 class TestNnapiBackend(TestNNAPI):
@@ -45,7 +47,9 @@ class TestNnapiBackend(TestNNAPI):
         torch.set_default_dtype(torch.float32)
 
         # Load nnapi delegate library
-        torch.ops.load_library(str(lib_path))
+        torch_root = Path(__file__).resolve().parent.parent.parent
+        p = torch_root / 'build' / 'lib' / 'libnnapi_backend.so'
+        torch.ops.load_library(str(p))
 
         # Disable execution tests, only test lowering modules
         # TODO: Re-enable execution tests after the Nnapi delegate is complete

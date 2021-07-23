@@ -40,6 +40,7 @@ using namespace torch::autograd;
 using namespace torch::jit;
 using at::Tensor;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPFunctionClass = nullptr;
 
 #define THPFunction_assert(condition, ...)                                     \
@@ -886,6 +887,7 @@ static struct PyMethodDef THPFunction_methods[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._FunctionBase",                    /* tp_name */

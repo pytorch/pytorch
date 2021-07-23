@@ -9,6 +9,7 @@ namespace torch {
 namespace jit {
 using namespace testing;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphRewriterTest, FilterMatch) {
   auto graph = std::make_shared<Graph>();
 
@@ -81,6 +82,7 @@ graph(%a, %b):
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphRewriterTest, FilterNoMatch) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -122,6 +124,7 @@ graph(%a, %b):
   FileCheck().check("c::ccc")->check_not("d::ddd")->run(*graph);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SubgraphRewriterTest, MultiOutput) {
   {
     auto graph = std::make_shared<Graph>();

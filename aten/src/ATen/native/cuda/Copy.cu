@@ -224,7 +224,12 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     void* ptr = (dst_device == kCPU ? dst : src);
     AT_CUDA_CHECK(THCCachingHostAllocator_recordEvent(ptr, stream));
   } else {
-    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
+#if HIP_VERSION >= 301
+    AT_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#else
+    AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
+    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+#endif
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {

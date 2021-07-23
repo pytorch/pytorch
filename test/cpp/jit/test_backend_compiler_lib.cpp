@@ -127,6 +127,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
 
 namespace {
 constexpr auto backend_name = "backend_with_compiler_demo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls = torch::jit::backend<BackendWithCompiler>(backend_name);
 } // namespace
 

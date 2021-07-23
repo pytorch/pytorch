@@ -37,7 +37,9 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple = "torch/csrc/deploy/example/generated/simple";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
 const char* path(const char* envname, const char* path) {
@@ -45,6 +47,7 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, LoadLibrary) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.load_package(
@@ -53,16 +56,19 @@ TEST(TorchpyTest, LoadLibrary) {
   model({});
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ResNet) {
   compare_torchpy_jit(
       path("RESNET", "torch/csrc/deploy/example/generated/resnet"),
       path("RESNET_JIT", "torch/csrc/deploy/example/generated/resnet_jit"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, Movable) {
   torch::deploy::InterpreterManager m(1);
   torch::deploy::ReplicatedObj obj;
@@ -75,6 +81,7 @@ TEST(TorchpyTest, Movable) {
   obj.acquire_session();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, MultiSerialSimpleModel) {
   torch::deploy::InterpreterManager manager(3);
   torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
@@ -112,6 +119,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
   torch::deploy::InterpreterManager manager(nthreads);
@@ -149,6 +157,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
@@ -164,6 +173,7 @@ TEST(TorchpyTest, ThrowsSafely) {
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
   torch::deploy::InterpreterManager m(1);
 
@@ -173,6 +183,7 @@ TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
   auto I1 = p.acquire_session();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
   torch::deploy::InterpreterManager m(1);
 
@@ -184,6 +195,7 @@ TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
   auto I1 = p1.acquire_session();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, TensorSharingNotAllowed) {
   size_t nthreads = 2;
   torch::deploy::InterpreterManager m(nthreads);
@@ -197,6 +209,7 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, TaggingRace) {
   // At time of writing, this takes about 7s to run on DEBUG=1.  I think
   // this is OK, but feel free to fiddle with the knobs here to reduce the
@@ -225,6 +238,7 @@ TEST(TorchpyTest, TaggingRace) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, DisarmHook) {
   at::Tensor t = torch::empty(2);
   {
@@ -238,6 +252,7 @@ TEST(TorchpyTest, DisarmHook) {
   ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
   m.register_module_source("foomodule", "def add1(x): return x + 1\n");

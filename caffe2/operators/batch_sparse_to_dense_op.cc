@@ -64,10 +64,12 @@ void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchSparseToDense,
     BatchSparseToDenseOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchSparseToDense)
     .NumInputs(3, 4)
     .NumOutputs(1)
@@ -151,10 +153,12 @@ after running this operator.
         "Optional, missing values are filled with this value."
         "default_value = 0 when not set");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BatchDenseToSparse,
     BatchDenseToSparseOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchDenseToSparse)
     .NumInputs(3)
     .NumOutputs(1)
@@ -225,7 +229,9 @@ class GetBatchDenseToSparseGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchSparseToDense, GetBatchSparseToDenseGradient);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchDenseToSparse, GetBatchDenseToSparseGradient);
 
 } // namespace

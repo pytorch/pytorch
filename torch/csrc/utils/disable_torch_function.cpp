@@ -4,7 +4,9 @@
 #include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local bool enable_torch_function = true;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   PyObject* disabled_torch_function = nullptr;
 
   bool torch_function_enabled() {
@@ -52,6 +54,7 @@ static PyMethodDef DisableTorchFunction_methods[] = { // NOLINT
   {nullptr, nullptr, 0, nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject DisableTorchFunctionType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C.DisableTorchFunction",             /* tp_name */

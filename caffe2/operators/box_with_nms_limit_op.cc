@@ -251,8 +251,10 @@ const auto& tscores = Input(0);
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BoxWithNMSLimit, BoxWithNMSLimitOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BoxWithNMSLimit)
     .NumInputs(2, 3)
     .NumOutputs(3, 6)
@@ -305,6 +307,7 @@ returned boxes.
         "keeps_size",
         "Optional number of filtered indices per class, size (num_classes)");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(BoxWithNMSLimit);
 
 } // namespace

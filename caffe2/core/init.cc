@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <mutex>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_version,
     false,

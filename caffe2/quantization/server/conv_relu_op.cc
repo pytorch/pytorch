@@ -66,6 +66,7 @@ bool ConvReluOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ConvRelu)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -73,6 +74,7 @@ OPERATOR_SCHEMA(ConvRelu)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv));
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ConvRelu, ConvReluOp<float, CPUContext>);
 
 } // namespace caffe2

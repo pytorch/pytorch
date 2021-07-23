@@ -55,6 +55,7 @@ struct PyTensorType {
 static_assert(std::is_standard_layout<PyTensorType>::value, "PyTensorType must be standard layout");
 
 // This is always an instance of VariableType
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTensorType* default_tensor_type;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType*>& tensor_types);
@@ -150,6 +151,7 @@ static struct PyGetSetDef metaclass_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTypeObject metaclass = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.tensortype",                          /* tp_name */
@@ -166,6 +168,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyTypeObject tensor_type_prototype = {
   PyVarObject_HEAD_INIT(&metaclass, 0)
   nullptr,                                     /* tp_name */
@@ -274,6 +277,7 @@ static THPObjectPtr get_tensor_dict() {
 // an use-after-free error. This happens for example if we embed CPython and
 // call Py_Finalize inside an atexit() function which was registered before
 // importing torch.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyTensorType*> tensor_types;
 
 void set_default_tensor_type(PyTensorType* type) {

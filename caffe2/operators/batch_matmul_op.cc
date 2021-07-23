@@ -4,6 +4,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchMatMul, BatchMatMulOp<CPUContext>);
 
 vector<TensorShape> TensorInferenceForBatchMatMul(
@@ -123,6 +124,7 @@ OpSchema::Cost CostInferenceForBatchMatMul(
   return c;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchMatMul)
     .NumInputs(2)
     .NumOutputs(1)
@@ -255,6 +257,7 @@ class GetBatchMatMulGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchMatMul, GetBatchMatMulGradient);
 
 } // namespace caffe2

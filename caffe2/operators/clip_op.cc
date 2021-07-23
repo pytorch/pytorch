@@ -33,9 +33,12 @@ bool ClipGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Clip, ClipOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(ClipGradient, ClipGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Clip)
     .NumInputs(1)
     .NumOutputs(1)
@@ -114,6 +117,7 @@ Y: [[45. 20. 59. 60. 48.]
         "*(Tensor`<float>`)* Output tensor clipped within range [`min`, `max`].")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(ClipGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -128,5 +132,6 @@ class GetClipGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Clip, GetClipGradient);
 }  // namespace caffe2

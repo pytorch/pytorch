@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GatherFused8BitRowwise)
     .NumInputs(2)
     .NumOutputs(1)
@@ -34,6 +35,7 @@ DATA needs to have rank 2 and INDICES needs to have rank 1.
       return out;
     });
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GatherFused8BitRowwise,
     GatherFused8BitRowwiseOp<CPUContext>);

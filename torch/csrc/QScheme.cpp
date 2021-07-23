@@ -39,6 +39,7 @@ PyObject *THPQScheme_repr(THPQScheme *self)
   return THPUtils_packString("torch." + name);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPQSchemeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.qscheme",                             /* tp_name */

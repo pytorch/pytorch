@@ -7,6 +7,7 @@
 namespace torch {
 namespace autograd {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool AnomalyMode::_enabled = false;
 
 namespace {

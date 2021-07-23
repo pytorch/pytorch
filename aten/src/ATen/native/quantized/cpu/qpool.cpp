@@ -17,6 +17,7 @@
 namespace at {
 namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 
 namespace {

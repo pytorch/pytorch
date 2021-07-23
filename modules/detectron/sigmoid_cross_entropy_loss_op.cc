@@ -18,13 +18,16 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SigmoidCrossEntropyLoss,
     SigmoidCrossEntropyLossOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SigmoidCrossEntropyLossGradient,
     SigmoidCrossEntropyLossGradientOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SigmoidCrossEntropyLoss)
     .NumInputs(2)
     .NumOutputs(1)
@@ -60,6 +63,7 @@ and gradient computation.
         "loss",
         "Scalar loss.");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SigmoidCrossEntropyLossGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -91,6 +95,7 @@ class GetSigmoidCrossEntropyLossGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SigmoidCrossEntropyLoss, GetSigmoidCrossEntropyLossGradient);
 
 } // namespace caffe2

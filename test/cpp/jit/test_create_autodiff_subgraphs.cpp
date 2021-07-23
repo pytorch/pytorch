@@ -7,6 +7,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CreateAutodiffSubgraphsTest, Basic) {
   auto graph = build_lstm();
   CreateAutodiffSubgraphs(graph, /*threshold=*/2);

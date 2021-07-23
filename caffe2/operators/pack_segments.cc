@@ -185,9 +185,12 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PackSegments, PackSegmentsOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(UnpackSegments, UnpackSegmentsOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PackSegments)
     .NumInputs(2)
     .NumOutputs(1, 2)
@@ -218,6 +221,7 @@ OPERATOR_SCHEMA(PackSegments)
     .Arg(
         "return_presence_mask",
         "bool whether to return presence mask, false by default");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(UnpackSegments)
     .NumInputs(2)
     .NumOutputs(1)
@@ -240,6 +244,7 @@ class GetPackSegmentsGradient : public GradientMakerBase {
         vector<string>{GI(1)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PackSegments, GetPackSegmentsGradient);
 
 class GetUnpackSegmentsGradient : public GradientMakerBase {
@@ -249,6 +254,7 @@ class GetUnpackSegmentsGradient : public GradientMakerBase {
         "PackSegments", "", vector<string>{I(0), GO(0)}, vector<string>{GI(1)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(UnpackSegments, GetUnpackSegmentsGradient);
 } // namespace caffe2
 

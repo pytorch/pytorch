@@ -102,12 +102,16 @@ void MaxReduceDimsGradientOp<float, CPUContext, false>::Compute(
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceFrontMax, MaxReduceDimsOp<float, CPUContext, true>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceFrontMaxGradient,
     MaxReduceDimsGradientOp<float, CPUContext, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceBackMax, MaxReduceDimsOp<float, CPUContext, false>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     ReduceBackMaxGradient,
     MaxReduceDimsGradientOp<float, CPUContext, false>);
@@ -124,6 +128,7 @@ class GetReduceFrontMaxGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceFrontMax, GetReduceFrontMaxGradient);
 
 class GetReduceBackMaxGradient : public GradientMakerBase {
@@ -138,8 +143,10 @@ class GetReduceBackMaxGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReduceBackMax, GetReduceBackMaxGradient);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontMax)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -210,8 +217,10 @@ Y: [9. 8. 9.]
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
     });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceFrontMaxGradient).NumInputs(3, 4).NumOutputs(1);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackMax)
     .NumInputs(1, 2)
     .NumOutputs(1)
@@ -283,6 +292,7 @@ Y: [[9. 9.]]
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
     });
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceBackMaxGradient).NumInputs(3, 4).NumOutputs(1);
 
 #undef REDUCTION_OP_SHAPE_INFERENCE

@@ -6,7 +6,9 @@
 namespace c10 {
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local AllocationPlanner* allocation_planner{nullptr};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local CPUProfilingAllocator* profiling_allocator{nullptr};
 
 struct MemBlock {

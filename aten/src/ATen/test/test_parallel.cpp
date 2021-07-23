@@ -23,6 +23,7 @@ struct NumThreadsGuard {
 
 using namespace at;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, TestParallel) {
   manual_seed(123);
   NumThreadsGuard guard(1);
@@ -38,6 +39,7 @@ TEST(TestParallel, TestParallel) {
   ASSERT_TRUE(a.sum(0).equal(as));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, NestedParallel) {
   Tensor a = ones({1024, 1024});
   auto expected = a.sum();
@@ -49,6 +51,7 @@ TEST(TestParallel, NestedParallel) {
   });
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, NestedParallelThreadId) {
   // check that thread id within a nested parallel block is accurate
   at::parallel_for(0, 10, 1, [&](int64_t begin, int64_t end) {
@@ -72,6 +75,7 @@ TEST(TestParallel, NestedParallelThreadId) {
   });
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, Exceptions) {
   // parallel case
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -90,6 +94,7 @@ TEST(TestParallel, Exceptions) {
     std::runtime_error);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestParallel, IntraOpLaunchFuture) {
   int v1 = 0;
   int v2 = 0;

@@ -73,7 +73,9 @@ bool GeluGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Gelu, GeluOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GeluGradient, GeluGradientOp<CPUContext>);
 
 namespace {
@@ -89,6 +91,7 @@ OpSchema::Cost CostInferenceForGelu(
 } // namespace
 
 // Input: X, output: Y
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Gelu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -105,6 +108,7 @@ is applied to the tensor elementwise.
     .Input(0, "X", "1D input tensor")
     .Output(0, "Y", "1D input tensor");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GeluGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -125,6 +129,7 @@ class GetGeluGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Gelu, GetGeluGradient);
 
 } // namespace caffe2

@@ -200,6 +200,7 @@ void write_step_buffers(
         count_substr_occurrences(warnings.str(), "old serialization"), 1);   \
   }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -216,6 +217,7 @@ TEST(SerializeTest, KeysFunc) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
@@ -231,6 +233,7 @@ TEST(SerializeTest, TryReadFunc) {
   ASSERT_EQ(ivalue.toInt(), 1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Basic) {
   torch::manual_seed(0);
 
@@ -242,6 +245,7 @@ TEST(SerializeTest, Basic) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicToFile) {
   torch::manual_seed(0);
 
@@ -258,6 +262,7 @@ TEST(SerializeTest, BasicToFile) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicViaFunc) {
   torch::manual_seed(0);
 
@@ -289,6 +294,7 @@ TEST(SerializeTest, BasicViaFunc) {
   ASSERT_TRUE(x.allclose(z));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Resized) {
   torch::manual_seed(0);
 
@@ -301,6 +307,7 @@ TEST(SerializeTest, Resized) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Sliced) {
   torch::manual_seed(0);
 
@@ -313,6 +320,7 @@ TEST(SerializeTest, Sliced) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, NonContiguous) {
   torch::manual_seed(0);
 
@@ -325,6 +333,7 @@ TEST(SerializeTest, NonContiguous) {
   ASSERT_TRUE(x.allclose(y));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, ErrorOnMissingKey) {
   struct B : torch::nn::Module {
     B(const std::string& name_c) {
@@ -358,6 +367,7 @@ TEST(SerializeTest, ErrorOnMissingKey) {
       torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR) {
   // We better be able to save and load an XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
@@ -401,6 +411,7 @@ TEST(SerializeTest, XOR) {
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
@@ -470,6 +481,7 @@ TEST(SerializeTest, Optim) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adagrad) {
   test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
 
@@ -510,6 +522,7 @@ TEST(SerializeTest, Optim_Adagrad) {
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_SGD) {
   test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
 
@@ -552,6 +565,7 @@ TEST(SerializeTest, Optim_SGD) {
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adam) {
   test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
 
@@ -602,6 +616,7 @@ TEST(SerializeTest, Optim_Adam) {
   is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_AdamW) {
   test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas(std::make_tuple(0.999, 0.1)));
 
@@ -652,6 +667,7 @@ TEST(SerializeTest, Optim_AdamW) {
   is_optimizer_state_equal<AdamWParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_RMSprop) {
   auto options = RMSpropOptions(0.1).momentum(0.9).centered(true);
   test_serialize_optimizer<RMSprop, RMSpropOptions, RMSpropParamState>(options);
@@ -715,6 +731,7 @@ TEST(SerializeTest, Optim_RMSprop) {
   is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_LBFGS) {
   test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
   // bc compatibility check
@@ -776,6 +793,7 @@ TEST(SerializeTest, Optim_LBFGS) {
   is_optimizer_state_equal<LBFGSParamState>(optim1.state(), optim1_2.state());
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR_CUDA) {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
@@ -837,6 +855,7 @@ TEST(SerializeTest, XOR_CUDA) {
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     SerializeTest,
     CanSerializeModulesWithIntermediateModulesWithoutParametersOrBuffers) {
@@ -868,6 +887,7 @@ TEST(
   ASSERT_EQ(output, 5);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, VectorOfTensors) {
   torch::manual_seed(0);
 
@@ -888,6 +908,7 @@ TEST(SerializeTest, VectorOfTensors) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, IValue) {
   c10::IValue ivalue(1);
   auto tempfile = c10::make_tempfile();
@@ -906,6 +927,7 @@ TEST(SerializeTest, IValue) {
 
 // NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we expect those submodules to be skipped when the `Module` is being serialized.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
   struct A : torch::nn::Module {
     A() {
@@ -929,6 +951,7 @@ TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
 // NOTE: If a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we don't check the existence of those submodules in the `InputArchive` when
 // deserializing.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   struct B : torch::nn::Module {
     B() {

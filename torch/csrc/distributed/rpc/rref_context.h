@@ -237,6 +237,7 @@ class TORCH_API RRefContext {
   // If there is any leak on any RRef, this method will throw an error.
   void checkRRefLeaks(bool ignoreRRefLeak);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::atomic<local_id_t> nextLocalId_;
 
   const std::shared_ptr<RpcAgent> agent_;
@@ -304,6 +305,7 @@ class TORCH_API RRefContext {
 
   // Thread local states to keep UserRRefs deserialized from user function
   // arguments.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local std::vector<std::shared_ptr<PendingUserState>> userTable_;
   // A flag indicating whether subsequently created UserRRefs should be added to
   // the thread_local userTable_. The flag is set to true before serializing
@@ -328,6 +330,7 @@ class TORCH_API RRefContext {
   // without confirmation is OK, because the creator would either call to_here
   // or forward the UserRRef, and both would then require confirmations from the
   // owner.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static thread_local bool recording_;
 };
 

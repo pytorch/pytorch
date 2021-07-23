@@ -24,12 +24,14 @@ bool AtanGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Atan,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         AtanFunctor<CPUContext>>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     AtanGradient,
     BinaryElementwiseOp<
@@ -37,6 +39,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         AtanGradientFunctor<CPUContext>>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Atan)
     .NumInputs(1)
     .NumOutputs(1)
@@ -50,6 +53,7 @@ Calculates the arctangent of the given input tensor, element-wise.
         "output",
         "The arctangent of the input tensor computed element-wise");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(AtanGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -70,6 +74,7 @@ class GetAtanGradient : public GradientMakerBase {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Atan, GetAtanGradient);
 
 } // namespace caffe2

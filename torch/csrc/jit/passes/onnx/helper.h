@@ -49,13 +49,5 @@ Node* createONNXUnsqueeze(
     int axis,
     int opset_version);
 
-bool isValidToTransformToONNXConcatNode(Node* lc_node);
-
-Node* transformToONNXConcatNode(
-    Graph* graph,
-    Node* lc_node,
-    bool need_new_input,
-    int opset_version);
-
 } // namespace jit
 } // namespace torch

@@ -1,4 +1,1 @@
-*.bat text eol=crlf
-.circleci/config.yml linguist-generated=true
-.github/workflows/periodic-pytorch-*.yml linguist-generated=true
-.github/workflows/pytorch-*.yml linguist-generated=true
+*.bat	text eol=crlf

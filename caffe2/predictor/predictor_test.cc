@@ -10,6 +10,7 @@ namespace caffe2 {
 
 namespace {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* predictSpec = R"DOC(
         name: "predict"
         type: "dag"
@@ -26,6 +27,7 @@ const char* predictSpec = R"DOC(
         }
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* initSpec = R"DOC(
         name: "init"
         type: "dag"
@@ -57,6 +59,7 @@ const char* initSpec = R"DOC(
 
 )DOC";
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* metaSpec = R"DOC(
   blobs {
     key: "INPUTS_BLOB_TYPE"
@@ -176,6 +179,7 @@ class PredictorTest : public testing::Test {
   std::unique_ptr<Predictor> p_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PredictorTest, SimpleBatchSized) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
   Predictor::TensorList input;
@@ -190,6 +194,7 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   EXPECT_NEAR(output.front().data<float>()[4], 4.9556, 1E-4);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
   Predictor::TensorMap input;

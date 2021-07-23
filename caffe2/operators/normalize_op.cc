@@ -32,7 +32,9 @@ void NormalizeGradientOp<T, Context>::DoNormalize(
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Normalize, NormalizeOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Normalize)
     .NumInputs(1)
     .NumOutputs(1)
@@ -42,9 +44,11 @@ Given a matrix, apply L2-normalization along the specified dimension.
 )DOC")
     .IdenticalTypeAndShape();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     NormalizeGradient,
     NormalizeGradientOp<float, CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(NormalizeGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -61,6 +65,7 @@ class GetNormalizeGradient final : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Normalize, GetNormalizeGradient);
 
 } // namespace caffe2

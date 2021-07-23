@@ -209,6 +209,7 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   return result;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(flip_stub);
 
 }} // namespace at::native

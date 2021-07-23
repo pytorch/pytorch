@@ -5,6 +5,7 @@
 using c10::LeftRight;
 using std::vector;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<int> obj;
 
@@ -18,6 +19,7 @@ TEST(LeftRightTest, givenInt_whenWritingAndReading_thenChangesArePresent) {
   EXPECT_EQ(5, read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
   LeftRight<vector<int>> obj;
 
@@ -30,6 +32,7 @@ TEST(LeftRightTest, givenVector_whenWritingAndReading_thenChangesArePresent) {
   EXPECT_EQ((vector<int>{5, 6}), read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
   LeftRight<vector<int>> obj;
 
@@ -38,6 +41,7 @@ TEST(LeftRightTest, givenVector_whenWritingReturnsValue_thenValueIsReturned) {
   EXPECT_EQ(5, a);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, readsCanBeConcurrent) {
   LeftRight<int> obj;
   std::atomic<int> num_running_readers{0};
@@ -64,6 +68,7 @@ TEST(LeftRightTest, readsCanBeConcurrent) {
   reader2.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
   LeftRight<int> obj;
   std::atomic<bool> reader_running{false};
@@ -91,6 +96,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_readThenWrite) {
   writer.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
   LeftRight<int> obj;
   std::atomic<bool> writer_running{false};
@@ -118,6 +124,7 @@ TEST(LeftRightTest, writesCanBeConcurrentWithReads_writeThenRead) {
   reader.join();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, writesCannotBeConcurrentWithWrites) {
   LeftRight<int> obj;
   std::atomic<bool> first_writer_started{false};
@@ -150,6 +157,7 @@ namespace {
 class MyException : public std::exception {};
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, whenReadThrowsException_thenThrowsThrough) {
   LeftRight<int> obj;
 
@@ -157,6 +165,7 @@ TEST(LeftRightTest, whenReadThrowsException_thenThrowsThrough) {
   EXPECT_THROW(obj.read([](const int&) { throw MyException(); }), MyException);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
   LeftRight<int> obj;
 
@@ -164,6 +173,7 @@ TEST(LeftRightTest, whenWriteThrowsException_thenThrowsThrough) {
   EXPECT_THROW(obj.write([](int&) { throw MyException(); }), MyException);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     LeftRightTest,
     givenInt_whenWriteThrowsExceptionOnFirstCall_thenResetsToOldState) {
@@ -191,6 +201,7 @@ TEST(
 
 // note: each write is executed twice, on the foreground and background copy.
 // We need to test a thrown exception in either call is handled correctly.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     LeftRightTest,
     givenInt_whenWriteThrowsExceptionOnSecondCall_thenKeepsNewState) {
@@ -222,6 +233,7 @@ TEST(
   EXPECT_EQ(6, read);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LeftRightTest, givenVector_whenWriteThrowsException_thenResetsToOldState) {
   LeftRight<vector<int>> obj;
 

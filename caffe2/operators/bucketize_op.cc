@@ -28,8 +28,10 @@ bool BucketizeOp<CPUContext>::RunOnDevice() {
 
   return true;
 };
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Bucketize, BucketizeOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Bucketize)
     .NumInputs(1)
     .NumOutputs(1)
@@ -66,6 +68,7 @@ output = [[1, 2], [2, 1], [1, 2]]
     })
     .Arg("boundaries", "bucketization boundaries");
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BucketizeOp);
 } // namespace caffe2
 

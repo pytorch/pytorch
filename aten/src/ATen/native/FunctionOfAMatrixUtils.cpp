@@ -2,6 +2,7 @@
 
 namespace at { namespace native {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_compute_linear_combination_stub);
 
 // If `coefficients` is a [m, n] Tensor and

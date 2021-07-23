@@ -13,6 +13,7 @@ from collections import namedtuple
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
+import cimodel.data.simple.bazel_definitions
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
 import cimodel.data.simple.ge_config_tests
@@ -135,6 +136,7 @@ def gen_build_workflows_tree():
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
+        cimodel.data.simple.bazel_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
@@ -152,10 +154,7 @@ def gen_build_workflows_tree():
         binary_build_definitions.get_nightly_uploads,
     ]
 
-    slow_gradcheck_jobs = [
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.docker_definitions.get_workflow_jobs,
-    ]
+    slow_gradcheck_jobs = pytorch_build_definitions.get_workflow_jobs(only_slow_gradcheck=True)
 
     return {
         "workflows": {
@@ -173,7 +172,7 @@ def gen_build_workflows_tree():
             },
             "slow_gradcheck_build": {
                 "when": r"<< pipeline.parameters.run_slow_gradcheck_build >>",
-                "jobs": [f(only_slow_gradcheck=True) for f in slow_gradcheck_jobs],
+                "jobs": slow_gradcheck_jobs,
             },
         }
     }

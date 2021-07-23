@@ -36,9 +36,6 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("shard_test", [X(True)]),
                     ("slow_gradcheck", [
-                        # If you update this slow gradcheck, you should
-                        # also update docker_definitions.py to make sure
-                        # the docker image match the config used here
                         (True, [
                             ('shard_test', [XImportant(True)]),
                         ]),

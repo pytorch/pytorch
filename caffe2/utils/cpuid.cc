@@ -7,9 +7,13 @@ const CpuId& GetCpuId() {
   return cpuid_singleton;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1c_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1d_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7b_ = 0;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7c_ = 0;
 
 CpuId::CpuId() {

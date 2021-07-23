@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType) {
   RegisterOperators reg({
       Operator(
@@ -50,6 +51,7 @@ TEST(SchemaMatchingTest, VarType) {
       err.find("previously matched to type") != std::string::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType2) {
   RegisterOperators reg({
       Operator(

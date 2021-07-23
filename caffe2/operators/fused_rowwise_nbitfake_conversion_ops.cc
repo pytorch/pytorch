@@ -130,12 +130,14 @@ void param_search_greedy(
 }
 } // namespace internal
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused4BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         4,
         float,
         internal::convertfp32fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused4BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -155,14 +157,17 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused4BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfToFused4BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         4,
         at::Half,
         internal::convertfp16fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfToFused4BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -182,8 +187,10 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfToFused4BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FloatToFused4BitFakeRowwiseQuantized,
     GREEDY,
@@ -193,6 +200,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp32fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     HalfToFused4BitFakeRowwiseQuantized,
     GREEDY,
@@ -202,12 +210,14 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp16fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFused2BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         2,
         float,
         internal::convertfp32fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFused2BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -227,14 +237,17 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float32 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFused2BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HalfToFused2BitFakeRowwiseQuantized,
     FloatToFusedNBitFakeRowwiseQuantizedOp<
         2,
         at::Half,
         internal::convertfp16fp32>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HalfToFused2BitFakeRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -254,8 +267,10 @@ scale and biases in half float.
 )DOC")
     .Input(0, "input", "Float16 input data")
     .Output(0, "output", "Fused scale, bias and quantized data");
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(HalfToFused2BitFakeRowwiseQuantized);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     FloatToFused2BitFakeRowwiseQuantized,
     GREEDY,
@@ -265,6 +280,7 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
         internal::convertfp32fp32,
         true /* GREEDY */>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     HalfToFused2BitFakeRowwiseQuantized,
     GREEDY,

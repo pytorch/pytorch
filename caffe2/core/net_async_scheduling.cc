@@ -305,6 +305,7 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
     Wait();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
 } // namespace caffe2

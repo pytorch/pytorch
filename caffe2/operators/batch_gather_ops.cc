@@ -2,9 +2,12 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchGather, BatchGatherOp<CPUContext>);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchGatherGradient, BatchGatherGradientOp<CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchGather)
     .NumInputs(2)
     .NumOutputs(1)
@@ -46,6 +49,7 @@ Example:
     .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).")
     .InheritOnnxSchema();
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchGatherGradient).NumInputs(3).NumOutputs(1);
 
 class GetBatchGatherGradient : public GradientMakerBase {
@@ -60,6 +64,7 @@ class GetBatchGatherGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BatchGather, GetBatchGatherGradient);
 
 } // namespace caffe2

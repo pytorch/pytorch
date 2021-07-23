@@ -3,6 +3,7 @@
 #include "caffe2/core/flags.h"
 #include "caffe2/core/workspace.h"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_force_shared_col_buffer,
     false,

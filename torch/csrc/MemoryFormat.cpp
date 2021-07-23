@@ -27,6 +27,7 @@ PyObject *THPMemoryFormat_repr(THPMemoryFormat *self)
   return THPUtils_packString(self->name);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPMemoryFormatType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.memory_format",                       /* tp_name */

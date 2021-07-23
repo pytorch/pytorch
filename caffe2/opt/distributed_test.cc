@@ -34,6 +34,7 @@ caffe2::NetDef fakeNet() {
 // Common usage
 using namespace nom::repr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, DeclareExport) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
@@ -74,6 +75,7 @@ TEST(Converter, DeclareExport) {
   EXPECT_EQ(count, 2);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptions) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
@@ -93,6 +95,7 @@ TEST(Distributed, InsertDeviceOptions) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Distributed, InsertDeviceOptionsFailureCase) {
   auto net = fakeNet();
   caffe2::injectDataEdgeIndicators(&net);
@@ -109,6 +112,7 @@ TEST(Distributed, InsertDeviceOptionsFailureCase) {
       std::exception);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, InjectDataEdgeIndicators) {
   auto net = fakeNet();
 
@@ -145,6 +149,7 @@ TEST(Converter, InjectDataEdgeIndicators) {
 }
 
 // Main usage
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModule) {
   auto net = fakeNet();
   caffe2::DeviceOption d;
@@ -162,6 +167,7 @@ TEST(Converter, OverloadedConvertToNNModule) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Converter, OverloadedConvertToNNModuleFailure) {
   auto net = fakeNet();
   caffe2::DeviceOption d;

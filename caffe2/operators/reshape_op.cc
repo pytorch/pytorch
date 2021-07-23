@@ -3,8 +3,10 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Reshape, ReshapeOp<float, CPUContext>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Reshape)
     .NumInputs(1, 2)
     .NumOutputs(2)
@@ -196,6 +198,7 @@ class GetReshapeGradient : public GradientMakerBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Reshape, GetReshapeGradient);
 
 } // namespace caffe2

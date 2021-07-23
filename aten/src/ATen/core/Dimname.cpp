@@ -4,6 +4,7 @@
 
 namespace at {
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static Symbol kWildcard = Symbol::dimname("*");
 
 std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {

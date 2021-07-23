@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DataFiller, FillNetInputTest) {
   using namespace caffe2::testing;
   using namespace caffe2::emulator;

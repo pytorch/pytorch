@@ -32,6 +32,7 @@ void TestScalarVs1Dim1Size(DeprecatedTypeProperties& T) {
   ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestWrapdim, TestWrapdim) {
   manual_seed(123);
   DeprecatedTypeProperties& T = CPU(kFloat);

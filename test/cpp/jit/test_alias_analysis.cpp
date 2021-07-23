@@ -157,6 +157,7 @@ class TopologicalMoveTest : public ::testing::Test {
   std::unordered_map<std::string, Node*> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, SplitsDeps) {
   // Check that we are removing `this`'s deps properly when we need to split
   // `this` and deps (see code for what the hell that means)
@@ -165,40 +166,47 @@ TEST_F(TopologicalMoveTest, SplitsDeps) {
 }
 
 // Move after
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardSimple) {
   // Simple move backward
   EXPECT_TRUE(moveAfterTopologicallyValid("c", "a"));
   checkPostCondition("c", "a", true);
 }
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardInvalid) {
   // simple invalid move backward
   EXPECT_FALSE(moveAfterTopologicallyValid("d", "a"));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterNoOp) {
   // doesn't actually move anything
   EXPECT_TRUE(moveAfterTopologicallyValid("f", "e"));
   checkPostCondition("f", "e", true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardMultipleDeps) {
   // move backward with multiple dependencies
   EXPECT_TRUE(moveAfterTopologicallyValid("e", "c"));
   checkPostCondition("e", "c", true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBackwardNonZeroWorkingSet) {
   // Move backward with non-zero working set
   EXPECT_TRUE(moveAfterTopologicallyValid("k", "f"));
   checkPostCondition("k", "f", true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterForwardSimple) {
   // Simple move forward
   EXPECT_TRUE(moveAfterTopologicallyValid("c", "d"));
   checkPostCondition("c", "d", true);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterForwardNonZeroWorkingSet) {
   // Move forward with non-zero working set
   EXPECT_TRUE(moveAfterTopologicallyValid("f", "l"));
@@ -206,30 +214,35 @@ TEST_F(TopologicalMoveTest, MoveAfterForwardNonZeroWorkingSet) {
 }
 
 // Move before
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeForwardSimple) {
   // Simple move forward
   EXPECT_TRUE(moveBeforeTopologicallyValid("b", "d"));
   checkPostCondition("b", "d", false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeBackwardSimple) {
   // Simple move backward
   EXPECT_TRUE(moveBeforeTopologicallyValid("c", "a"));
   checkPostCondition("c", "a", false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeNoOp) {
   // doesn't actually move anything
   EXPECT_TRUE(moveBeforeTopologicallyValid("a", "b"));
   checkPostCondition("a", "b", false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeForwardWithDeps) {
   // move forward with deps
   EXPECT_TRUE(moveBeforeTopologicallyValid("f", "m"));
   checkPostCondition("f", "m", false);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveBeforeBackwardWithDeps) {
   // move backward with deps
   EXPECT_TRUE(moveBeforeTopologicallyValid("l", "f"));
@@ -237,6 +250,7 @@ TEST_F(TopologicalMoveTest, MoveBeforeBackwardWithDeps) {
 }
 
 // check that dependencies in blocks are recognized
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, DepsDisallowMove) {
   EXPECT_FALSE(moveAfterTopologicallyValid("l", "m"));
   EXPECT_FALSE(moveBeforeTopologicallyValid("m", "l"));
@@ -248,6 +262,7 @@ TEST_F(TopologicalMoveTest, DepsDisallowMove) {
 // equivalent. Here, the dependency ordering is n -> o -> p.  So we can't
 // move `n` after `o`, but we can move `n` before `p` (which pushes `o` after
 // `p`)
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TopologicalMoveTest, MoveAfterBeforeWithDeps) {
   EXPECT_FALSE(moveAfterTopologicallyValid("n", "o"));
   EXPECT_TRUE(moveBeforeTopologicallyValid("o", "p"));
@@ -310,6 +325,7 @@ inline void expectThrows(Functor&& functor, const char* expectMessageContains) {
 
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
   auto graph = std::make_shared<Graph>();
   auto a = graph->addInput();
@@ -339,6 +355,7 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves) {
   graph->lint();
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
   auto graph = std::make_shared<Graph>();
   auto a = graph->addInput();
@@ -359,6 +376,7 @@ TEST(AliasAnalysisTest, AliasingMutationBlocksMoves2) {
       usesB->node(), mutatesAliasOfB->node()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, SideEffectsBlockMoves) {
   // Test moves across side effectful nodes
   auto graph = std::make_shared<Graph>();
@@ -395,6 +413,7 @@ TEST(AliasAnalysisTest, SideEffectsBlockMoves) {
   EXPECT_FALSE(aliasDb2.moveBeforeTopologicallyValid(print1, print2));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
   // Test moves across inner blocks
 
@@ -427,6 +446,7 @@ TEST(AliasAnalysisTest, MovingAcrossInnerBlocks) {
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(c->node(), if_));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, NoneHasNoWriters) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -445,6 +465,7 @@ TEST(AliasAnalysisTest, NoneHasNoWriters) {
   EXPECT_FALSE(aliasDb.hasWriters(vmap["opt"]->node()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -481,6 +502,7 @@ TEST(AliasAnalysisTest, SafeToChangeAliasingRelationship) {
   EXPECT_TRUE(aliasDb.safeToChangeAliasingRelationship(vmap["d"], vmap["c"]));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, Basic) {
   RegisterOperators reg({Operator(
       "prim::creates_alias(Tensor(a) x) -> Tensor(a)",
@@ -516,6 +538,7 @@ TEST(WriteTrackingTest, Basic) {
       writingNode, std::unordered_set<const Value*>{aAlias}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, IsMutable) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -531,6 +554,7 @@ TEST(WriteTrackingTest, IsMutable) {
   EXPECT_TRUE(aliasDb.isMutable(relu));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, IsImmutable) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -546,6 +570,7 @@ TEST(WriteTrackingTest, IsImmutable) {
   EXPECT_FALSE(aliasDb.isMutable(mul));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WriteTrackingTest, HasWriters) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -564,6 +589,7 @@ TEST(WriteTrackingTest, HasWriters) {
   EXPECT_TRUE(aliasDb.isMutable(add));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MayContainAlias) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -634,6 +660,7 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
   EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -660,6 +687,7 @@ TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
   // Test input aliasing
   auto graph = std::make_shared<Graph>();
@@ -682,6 +710,7 @@ TEST(ContainerAliasingTest, InputsCanAliasOutputs) {
 }
 
 // Test tuple that doesn't come from construct
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, NestedTupleConstruct) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -714,6 +743,7 @@ graph(%x : int,
 }
 
 // test nested types
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, NestedTypes) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -741,6 +771,7 @@ graph():
 }
 
 // simple example
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Simple) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -771,6 +802,7 @@ graph():
   EXPECT_FALSE(aliasDb.mayContainAlias(second_st, tup_st));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Lists) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -798,6 +830,7 @@ TEST(ContainerAliasingTest, Lists) {
   EXPECT_TRUE(aliasDb.mayContainAlias(c, d));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Lists2) {
   // Test list container aliasing
   auto graph = std::make_shared<Graph>();
@@ -838,6 +871,7 @@ graph():
   EXPECT_FALSE(aliasDb.mayAlias(z, fresh));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, Conservative) {
   // test "conservative" analysis writes to the inside of a container.
   auto ops = torch::RegisterOperators(
@@ -865,6 +899,7 @@ graph():
   EXPECT_TRUE(aliasDb.writesToAlias(conservativeOp, ValueSet{tensor}));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MovesAcrossContainedWrites) {
   auto ops = torch::RegisterOperators().op(
       "uses::list",
@@ -904,6 +939,7 @@ graph():
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(listUse, internalWrite));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ContainerAliasingTest, MovesAcrossContainedWritesNested) {
   // The same as above, but with a nested list
   auto ops = torch::RegisterOperators().op(
@@ -945,6 +981,7 @@ graph():
   EXPECT_FALSE(aliasDb.moveBeforeTopologicallyValid(listUse, internalWrite));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, Basic) {
   RegisterOperators reg(
       {Operator(
@@ -1001,6 +1038,7 @@ TEST(WildcardsTest, Basic) {
 }
 
 // test that wildcards are correctly divided by type
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, TypeIsolation) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -1037,6 +1075,7 @@ TEST(WildcardsTest, TypeIsolation) {
 // test invariant container aliasing
 // the containers of different type cannot alias each other,
 // however they may contain elements which alias each other
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(WildcardsTest, InvariantContainerAliasing) {
   {
     auto graph = std::make_shared<Graph>();
@@ -1089,6 +1128,7 @@ TEST(WildcardsTest, InvariantContainerAliasing) {
   }
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand1",
@@ -1106,6 +1146,7 @@ TEST(AliasRegistrationTest, ConservativeWithInferredSchema) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand2(Tensor arg1) -> Tensor",
@@ -1123,6 +1164,7 @@ TEST(AliasRegistrationTest, ConservativeWithSpecifiedSchema) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand3(Tensor(a) arg1) -> Tensor(b)",
@@ -1144,6 +1186,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError) {
       "Tried to register operator foo::rand3(Tensor(a) arg1) -> (Tensor(b)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand4(Tensor(a) arg1) -> Tensor(a)",
@@ -1164,6 +1207,7 @@ TEST(AliasRegistrationTest, ConservativeWithAliasingAnnotationsShouldError2) {
       "Tried to register operator foo::rand4(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
   expectThrows<c10::Error>(
       [] {
@@ -1178,6 +1222,7 @@ TEST(AliasRegistrationTest, FromSchemaWithInferredSchemaShouldError) {
       "Tried to register operator foo::rand5(Tensor _0) -> (Tensor _0) with AliasAnalysisKind::FROM_SCHEMA, but the schema is inferred");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaInferredPure) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand6(Tensor arg1) -> Tensor",
@@ -1196,6 +1241,7 @@ TEST(AliasRegistrationTest, FromSchemaInferredPure) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaAliased) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand7(Tensor(a) arg1) -> Tensor(a)",
@@ -1212,6 +1258,7 @@ TEST(AliasRegistrationTest, FromSchemaAliased) {
   EXPECT_TRUE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, FromSchemaPure) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand8(Tensor(a) arg1) -> Tensor(b)",
@@ -1227,6 +1274,7 @@ TEST(AliasRegistrationTest, FromSchemaPure) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureNoSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand9",
@@ -1244,6 +1292,7 @@ TEST(AliasRegistrationTest, PureNoSchema) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureWithSchema) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand10(Tensor arg1) -> Tensor",
@@ -1261,6 +1310,7 @@ TEST(AliasRegistrationTest, PureWithSchema) {
   EXPECT_FALSE(aliasDb.mayAlias(a, b));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand11(Tensor(a) arg1) -> Tensor(a)",
@@ -1279,6 +1329,7 @@ TEST(AliasRegistrationTest, PureWithAnnotationsShouldError) {
       "Tried to register operator foo::rand11(Tensor(a) arg1) -> (Tensor(a)) with aliasing information in the schema but without AliasAnalysisKind::FROM_SCHEMA");
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -1305,6 +1356,7 @@ TEST(AliasRegistrationTest, AliasMoveAtenListOp) {
       vmap["y"]->node(), vmap["9"]->node()));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(AliasRegistrationTest, PureWithAnnotationsShouldError2) {
   auto registry = torch::RegisterOperators().op(
       "foo::rand12(Tensor(a) arg1) -> Tensor(b)",
