@@ -28,7 +28,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -249,9 +248,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_parallel_cpu_enabled = false;
 
 bool texprParallelCPUEnabled() {
@@ -1306,7 +1303,6 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,

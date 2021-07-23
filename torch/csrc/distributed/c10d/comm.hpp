@@ -21,12 +21,14 @@ class TORCH_API GradBucket {
       const at::Tensor& tensor,
       const std::vector<size_t>& offsets,
       const std::vector<size_t>& lengths,
-      const std::vector<c10::IntArrayRef>& sizes_vec)
+      const std::vector<c10::IntArrayRef>& sizes_vec,
+      const std::vector<at::Tensor>& model_params_for_bucket)
       : index_(index),
         tensor_(tensor),
         offsets_(offsets),
         lengths_(lengths),
-        sizes_vec_(sizes_vec) {}
+        sizes_vec_(sizes_vec),
+        model_params_for_bucket_(model_params_for_bucket) {}
 
   // Returns the index of the bucket, which is unique across all the buckets.
   size_t getIndex() const {
@@ -42,7 +44,7 @@ class TORCH_API GradBucket {
     return tensor_;
   }
 
-  // Overwrites tensors at a specific index.
+  // Overwrites the tensor at a specific index.
   void setTensor(at::Tensor& tensor) {
     tensor_ = tensor;
   }
@@ -50,6 +52,14 @@ class TORCH_API GradBucket {
   // Each tensor in the list that getPerParameterTensors corresponds to a
   // parameter.
   std::vector<at::Tensor> getPerParameterTensors() const;
+
+  // Returns model parameters belonging to this bucket. They are returned in the
+  // same order as gradient tensors via getPerParameterTensors(). For example,
+  // getModelParamsForBucket[i] will have its gradient stored in
+  // getPerParameterTensors[i]
+  const std::vector<at::Tensor> getModelParamsForBucket() const {
+    return model_params_for_bucket_;
+  }
 
   // Returns whther this bucket is the last bucket to allreduce in an iteration.
   bool isTheLastBucketToAllreduce() const {
@@ -60,47 +70,49 @@ class TORCH_API GradBucket {
   size_t index_;
   at::Tensor tensor_;
 
-  // Per-variable info in tensors_[0].
+  // Per-variable info in tensor_.
   std::vector<size_t> offsets_;
   std::vector<size_t> lengths_;
   std::vector<c10::IntArrayRef> sizes_vec_;
+  // Model parameters for this bucket.
+  const std::vector<at::Tensor> model_params_for_bucket_;
 };
 
 // Base class of both `PythonCommHook` and `CppCommHook`.
 // Requires implementing 1) `runHook` method that communicates gradients
 // asynchronously, and 2) `parseHookResult` method that converts the hook
-// result into a tensor vector.
+// result into a tensor.
 class TORCH_PYTHON_API CommHookInterface {
  public:
-  virtual ~CommHookInterface() {}
+  virtual ~CommHookInterface() = default;
 
   // Passes the input grad bucket to the registered communication hook.
-  // Once the tensors in the bucket are ready, kicks off the hook asynchronously
+  // Once the tensor in the bucket are ready, kicks off the hook asynchronously
   // and returns a future that holds the communication results.
   virtual c10::intrusive_ptr<c10::ivalue::Future> runHook(
       GradBucket& bucket) = 0;
 
-  // Returns the resulting tensors once the communication hook result is
-  // ready. The resulting tensors will then be copied to the grads of
+  // Returns the resulting tensor once the communication hook result is
+  // ready. The resulting tensor will then be copied to the grads of
   // individual parameters.
-  virtual std::vector<at::Tensor> parseHookResult(
+  virtual at::Tensor parseHookResult(
       const c10::IValue& result) = 0;
 };
 
 namespace detail {
 // This helper function is called both by CppCommHookInterface below and inside
 // reducer.
-inline std::vector<at::Tensor> parseCppCommHookResult(
+inline at::Tensor parseCppCommHookResult(
     const c10::IValue& result) {
   TORCH_INTERNAL_ASSERT(
       result.isTensor() || result.isTensorList(),
       "expected the hook result is either a Tensor or a TensorList");
 
   if (result.isTensor()) {
-    return {result.toTensor()};
+    return result.toTensor();
   }
 
-  return result.toTensorVector();
+  return result.toTensorVector()[0];
 }
 } // namespace detail
 
@@ -112,9 +124,9 @@ class TORCH_PYTHON_API CppCommHookInterface : public CommHookInterface {
  public:
   explicit CppCommHookInterface(T& state) : state_(state) {}
 
-  virtual ~CppCommHookInterface() {}
+  ~CppCommHookInterface() override = default;
 
-  std::vector<at::Tensor> parseHookResult(const c10::IValue& result) override {
+  at::Tensor parseHookResult(const c10::IValue& result) override {
     return detail::parseCppCommHookResult(result);
   }
 

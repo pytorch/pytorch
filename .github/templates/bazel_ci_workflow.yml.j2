@@ -9,8 +9,7 @@ name: Bazel Linux CI (!{{ build_environment }})
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: !{{ test_runner_type }}
-    needs:
-      - calculate-docker-image
+    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build-and-test
@@ -148,8 +147,7 @@ name: Bazel Linux CI (!{{ build_environment }})
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - build-and-test
+    needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     steps:
       - name: Checkout PyTorch
@@ -181,9 +179,6 @@ name: Bazel Linux CI (!{{ build_environment }})
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-test

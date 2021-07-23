@@ -547,7 +547,6 @@ void addNomnigraphMethods(pybind11::module& m) {
           py::return_value_policy::reference);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);
 
 } // namespace python

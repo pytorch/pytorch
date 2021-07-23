@@ -438,6 +438,11 @@ const auto full_like_script = R"JIT(
       return (b.clone())
 )JIT";
 
+const auto linear_script = R"JIT(
+  def forward(self, inp: Tensor, weights: Tensor, bias: Optional[Tensor]) -> Tensor:
+      return torch.linear(inp, weights, bias).clone()
+)JIT";
+
 // dict of tuple of list
 const auto nested_output_script_0 = R"JIT(
   def forward(self, a, b):
@@ -507,3 +512,30 @@ const auto if_script = R"JIT(
     h = {"e": e, "f": f}
     return [g, h]
 )JIT";
+
+const auto var_cat_script = R"JIT(
+  def forward(self, inp1: Tensor, inp2: Tensor, dim: int):
+   return torch.cat([inp1, inp2], dim).clone()
+)JIT";
+
+const auto isinstance_int_script = R"JIT(
+  def forward(self, a: Any):
+      return isinstance(a, int)
+)JIT";
+
+const auto isinstance_tensor_script = R"JIT(
+  def forward(self, a: Any):
+      return isinstance(a, torch.Tensor)
+)JIT";
+
+const auto isinstance_many_types_script = R"JIT(
+  def forward(self, a: Any):
+      return isinstance(a, (bool, int))
+)JIT";
+
+const auto typecheck_ir = R"IR(
+graph(%a.1 : Tensor,
+      %b.1 : Tensor):
+  %t0 : Float(2, 2, strides=[2, 1], device=cpu), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck[types=[Float(2, 2, strides=[2, 1], device=cpu), Float(3, 3, strides=[3, 1])]](%a.1, %b.1)
+  return (%t0, %t1, %type_matched)
+)IR";

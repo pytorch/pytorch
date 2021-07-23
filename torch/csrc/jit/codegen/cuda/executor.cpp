@@ -9,7 +9,6 @@
 
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
@@ -23,7 +22,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int FusionExecutor::fusion_id_counter_ = 0;
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
@@ -529,7 +527,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         stream,
         kernel_arguments.getBuffer(),
         nullptr));
-    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::stream_synchronize(stream);
   }
 
   return alloced_outputs;

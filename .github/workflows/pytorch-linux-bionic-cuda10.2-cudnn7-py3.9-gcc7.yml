@@ -27,7 +27,9 @@ concurrency:
 
 jobs:
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: []
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -100,7 +102,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, ]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-build
@@ -198,6 +200,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: []
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_JIT_LEGACY_TEST: ''
@@ -223,10 +226,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -359,6 +359,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
+
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -366,9 +367,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, ]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
@@ -403,9 +402,6 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7-test
