@@ -10,8 +10,6 @@
 namespace torch {
 namespace jit {
 
-using AliasTypeSet = std::vector<TypePtr>;
-
 /**
  * Alias analysis pass.
  *
@@ -43,6 +41,7 @@ class AliasDb {
       std::shared_ptr<Graph> graphi,
       bool isFrozen = false);
   TORCH_API ~AliasDb();
+
 
   // There are limitations to what effects the alias analysis can track. Two
   // kinds of nodes may have untracked effects:
@@ -231,8 +230,6 @@ class AliasDb {
       const TypePtr& type) const;
   bool functionalNonEscapingListUse(const Use& use) const;
 
-  bool isContainerType(const TypePtr& type) const;
-
   std::shared_ptr<Graph> graph_;
 
   // If the Module is frozen then consider attributes as freshly created
@@ -248,11 +245,14 @@ class AliasDb {
   ska::flat_hash_map<const Value*, Element*> elementMap_;
   // All wildcard elements (one for each unique mutable type).
   std::unordered_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
-  std::vector<Element*> getWildcard(const TypePtr& type) const;
+  Element* getWildcard(const TypePtr& type) const;
   c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
       const AliasTypeSet& mut_types);
+  void pointUnionTypeElementToAllContainedTypes(
+        Element* container_elem,
+        const AliasTypeSet& mut_types);
 
   std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
