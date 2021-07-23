@@ -258,9 +258,9 @@ if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_definitions("/DNOMINMAX")
 
   set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
   set(CMAKE_EXE_LINKER_FLAGS
-      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will
