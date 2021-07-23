@@ -3835,7 +3835,7 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
-        def test_ddp_hook_with_optimizer_parity(self):
+        def _test_ddp_hook_with_optimizer_parity(self, grad_as_bucket_view, static_graph):
             rank = self.rank
             torch.cuda.set_device(rank)
             torch.manual_seed(rank)
@@ -3853,7 +3853,11 @@ class DistributedTest:
                     ddp_model_with_optimizer_hook = torch.nn.parallel.DistributedDataParallel(
                         copy.deepcopy(model).cuda(),
                         device_ids=[self.rank],
+                        gradient_as_bucket_view=grad_as_bucket_view
                     )
+                    if static_graph:
+                        ddp_model_with_optimizer_hook._set_static_graph()
+
                     # Register hook that runs allreduce + functional SGD step.
                     allreduce_hook = default.allreduce_hook
                     opt_hook_state = default.OptimizerHookState(
@@ -3869,7 +3873,11 @@ class DistributedTest:
                     ddp_model_with_no_hook = torch.nn.parallel.DistributedDataParallel(
                         copy.deepcopy(model).cuda(),
                         device_ids=[self.rank],
+                        gradient_as_bucket_view=grad_as_bucket_view
                     )
+                    if static_graph:
+                        ddp_model_with_no_hook._set_static_graph()
+
                     sgd_no_hook = torch.optim.SGD(
                         ddp_model_with_no_hook.parameters(),
                         lr=sgd_lr
@@ -3920,6 +3928,21 @@ class DistributedTest:
                         list(ddp_model_with_optimizer_hook.parameters())
                     )
                     dist.barrier()
+
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_with_optimizer_parity(self):
+            for grad_as_bucket_view, static_graph in itertools.product(
+                [True, False],
+                [True, False]
+            ):
+                self._test_ddp_hook_with_optimizer_parity(
+                    grad_as_bucket_view=grad_as_bucket_view,
+                    static_graph=static_graph
+                )
 
         def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
