@@ -20,16 +20,13 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GroupSpatialSoftmax,
     GroupSpatialSoftmaxOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GroupSpatialSoftmaxGradient,
     GroupSpatialSoftmaxGradientOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GroupSpatialSoftmax)
     .NumInputs(1)
     .NumOutputs(1)
@@ -60,7 +57,6 @@ See: https://arxiv.org/abs/1708.02002 for details.
         "C = num_anchors * num_classes, and softmax was applied to each of the "
         "num_anchors groups; within a group the num_classes values sum to 1.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GroupSpatialSoftmaxGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -82,7 +78,6 @@ class GetGroupSpatialSoftmaxGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(GroupSpatialSoftmax, GetGroupSpatialSoftmaxGradient);
 
 } // namespace caffe2
