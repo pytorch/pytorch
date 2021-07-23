@@ -38,7 +38,7 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY(
+C10_DEFINE_TYPED_REGISTRY( // NOLINT
     TimerRegistry,
     c10::DeviceType,
     Timer,
