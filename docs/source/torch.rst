@@ -534,6 +534,7 @@ BLAS and LAPACK Operations
     addmm
     addmv
     addr
+    attn
     baddbmm
     bmm
     chain_matmul

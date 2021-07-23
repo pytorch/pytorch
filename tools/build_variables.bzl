@@ -963,6 +963,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/AdaptiveMaxPooling2d.cpp",
     "aten/src/ATen/native/AdaptiveMaxPooling3d.cpp",
     "aten/src/ATen/native/AffineGridGenerator.cpp",
+    "aten/src/ATen/native/Attention.cpp",
     "aten/src/ATen/native/AveragePool2d.cpp",
     "aten/src/ATen/native/AveragePool3d.cpp",
     "aten/src/ATen/native/BatchLinearAlgebra.cpp",

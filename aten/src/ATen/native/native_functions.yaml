@@ -270,6 +270,8 @@
   dispatch:
     CPU, CUDA: angle_out
 
+- func: attn(Tensor q, Tensor k, Tensor v) -> (Tensor, Tensor)
+
 - func: view_as_real(Tensor(a) self) -> Tensor(a)
   variants: function
   dispatch:

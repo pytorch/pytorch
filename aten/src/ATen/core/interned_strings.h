@@ -197,6 +197,7 @@ namespace c10 {
   _(aten, atanh_)                    \
   _(aten, arctanh)                   \
   _(aten, arctanh_)                  \
+  _(aten, attn)                      \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \

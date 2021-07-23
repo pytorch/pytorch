@@ -329,6 +329,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.atleast_1d: lambda *tensors: -1,
         torch.atleast_2d: lambda *tensors: -1,
         torch.atleast_3d: lambda *tensors: -1,
+        torch.attn: lambda q, k, v: -1,
         torch.avg_pool1d: lambda input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True: -1,
         torch.baddbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
         torch.batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled: -1,
