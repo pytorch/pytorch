@@ -29,9 +29,7 @@ bool EnsureClippedOp<float, CPUContext>::DoRunWithType() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(EnsureClipped, EnsureClippedOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(EnsureClipped)
     .NumInputs(1, 3)
     .NumOutputs(1)
@@ -45,6 +43,5 @@ Given a tensor, apply clip after gradient is applied; when the param is sparse a
 indicated by valid indices and grad, in-place is required
 )DOC");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(EnsureClipped);
 } // namespace caffe2

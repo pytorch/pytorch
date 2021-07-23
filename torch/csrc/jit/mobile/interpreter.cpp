@@ -23,7 +23,6 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local int64_t exception_pc_{-1};
 void createObject(Stack& stack, const at::ClassTypePtr& type) {
   auto userObj = c10::ivalue::Object::create(
