@@ -56,6 +56,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 MASTER_BRANCH = 'master'
+ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
@@ -120,6 +121,10 @@ def _read_url(url):
 
 def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
     # Use urlopen to avoid depending on local git.
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    token = os.environ.get(ENV_GITHUB_TOKEN)
+    if token is not None:
+        headers['Authorization'] = f'token {token}'
     for url_prefix in (
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
@@ -127,7 +132,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
         while True:
             page += 1
             url = f'{url_prefix}?per_page=100&page={page}'
-            response = json.loads(_read_url(url))
+            response = json.loads(_read_url(Request(url, headers=headers)))
             # Empty response means no more data to process
             if not response:
                 break
