@@ -4,7 +4,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DeformConvGradient).NumInputs(4, 4).NumOutputs(2, 4);
 
 namespace {
@@ -53,7 +52,6 @@ class GetDeformConvGradient : public GradientMakerBase {
     }
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(DeformConv, GetDeformConvGradient);
 
 } // namespace
