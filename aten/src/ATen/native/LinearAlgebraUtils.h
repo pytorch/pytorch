@@ -409,6 +409,15 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
       ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));
 
+  // U and VT might not get filled in this case
+  if (!some && compute_uv && input.numel() == 0) {
+    U_empty.zero_();
+    VT_empty.zero_();
+    // make U and VT an identity matrix, because they should be orthogonal
+    U_empty.diagonal(0, -2, -1).fill_(1);
+    VT_empty.diagonal(0, -2, -1).fill_(1);
+  }
+
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
   ScalarType dtype = toValueType(input.scalar_type());
