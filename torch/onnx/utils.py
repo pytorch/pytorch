@@ -75,7 +75,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            opset_version=None, _retain_param_name=True, do_constant_folding=True,
            example_outputs=None, strip_doc_string=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=False):
+           enable_onnx_checker=None, use_external_data_format=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
