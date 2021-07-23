@@ -90,6 +90,9 @@ def build_constructor_arg_db():
         torch.nn.LazyConvTranspose1d: ((5, 2), {}),
         torch.nn.LazyConvTranspose2d: ((5, 2), {}),
         torch.nn.LazyConvTranspose3d: ((5, 2), {}),
+        torch.nn.LazyInstanceNorm1d: ((), {}),
+        torch.nn.LazyInstanceNorm2d: ((), {}),
+        torch.nn.LazyInstanceNorm3d: ((), {}),
         torch.nn.LazyLinear: ((5,), {}),
         torch.nn.LeakyReLU: ((), {}),
         torch.nn.Linear: ((10, 5), {}),
@@ -387,6 +390,9 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.LazyConvTranspose2d,
         torch.nn.LazyConvTranspose3d,
         torch.nn.LazyConvTranspose3d,
+        torch.nn.LazyInstanceNorm1d,
+        torch.nn.LazyInstanceNorm2d,
+        torch.nn.LazyInstanceNorm3d,
         torch.nn.LazyLinear,
     }
     # these modules requires FBGEMM backend to instantiate
