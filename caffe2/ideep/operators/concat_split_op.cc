@@ -170,9 +170,7 @@ class IDEEPSplitOp final : public IDEEPOperator {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Concat, IDEEPConcatOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Split, IDEEPSplitOp);
 
 } // namespace
