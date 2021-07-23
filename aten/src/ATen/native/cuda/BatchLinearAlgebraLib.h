@@ -22,7 +22,7 @@
 #endif
 
 // cusolverDn<T>syevjBatched may have numerical issue before cuda 11.3.1 release,
-// (which is cusolver version 11102 in the header), so we only use cusolver potrf batched
+// (which is cusolver version 11102 in the header), so we only use cusolver syevj batched
 // if cuda version is >= 11.3.1
 // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-793626268 and https://github.com/cupy/cupy/issues/4847
 #if CUSOLVER_VERSION >= 11102
