@@ -67,7 +67,7 @@ class TSBackendImpl : public BackendImplInterface {
     auto ts_computation = static_cast<
         const torch_lazy_tensors::compiler::ts_backend::GenericComputationTS*>(
         computation);
-    return ts_computation->executor()->graph()->toString();
+    return ts_computation->graph()->toString();
   }
 };
 
