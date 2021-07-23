@@ -9515,8 +9515,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         try:
             torch.onnx.export(test_model, (x, y), f)
-            assert False, "Invalid graph was not detected by ONNX checker."
-        except Exception:
+            raise Exception("Invalid graph was not detected by ONNX checker.")
+        except RuntimeError:
             assert len(f.getvalue()) > 0, "ONNX graph was not generated."
 
 
