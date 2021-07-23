@@ -218,3 +218,6 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values):
         loop_out = pytree.tree_map(lambda v: torch.ones(3, *v.shape, device=v.device) + v, loop_out)
         batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(3), *batched_args, **kwarg_values)
         yield (loop_out, batched_out)
+
+def opinfo_in_dict(opinfo, d):
+    return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
