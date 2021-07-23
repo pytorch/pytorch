@@ -136,7 +136,7 @@ class ShardedTensor(object):
         if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = list(size)
+        dims = list(*size) if len(size) == 1 else list(size)
         self._sharding_spec = sharding_spec
         self._process_group = (
             process_group
