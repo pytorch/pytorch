@@ -152,15 +152,15 @@ struct TORCH_API UnionType : public Type {
 // internal code! The only reason we have this struct is that we can't
 // bind `UnionType` to more than one PyObject, but we still need to
 // expose both `OptionalType` and `UnionType` to our users
-struct OptionalType;
-using OptionalTypePtr = std::shared_ptr<OptionalType>;
-struct TORCH_API OptionalType : public UnionType {
-  static OptionalTypePtr create(std::vector<TypePtr> types);
+struct Pybind11_OptionalType;
+using Pybind11_OptionalTypePtr = std::shared_ptr<Pybind11_OptionalType>;
+struct TORCH_API Pybind11_OptionalType : public UnionType {
+  static Pybind11_OptionalTypePtr create(std::vector<TypePtr> types);
 
   static UnionTypePtr legacy_OptionalOfTensor();
 
  protected:
-  explicit OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
+  explicit Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
 };
 
 template <typename T>
@@ -1586,13 +1586,18 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   return *result;
 }
 
-// Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned if default_to_union is false, and Any will be returned
-// if it is true. If t1 == t2, or t1 is a type refinement of t2,
-// then t2 will be returned (and vice versa).
+// Attempt to find the correct supertype of the two types `t1` and `t2`.
+// If no supertype is found, then nullopt will be returned if
+// `default_to_union` is false, and `Union[t1, t2]` will be returned
+// if it is true. If `t1 == t2`, or `t1` is a type refinement of `t2`,
+// then `t2` will be returned (and vice versa).
+//
 // Two different tensortypes will return dynamic.
-// Currently we chose not to support returning a NumberType for a float & int
-// input because of a lack of operator support for NumberType.
+//
+// Currently we chose not to support returning a NumberType for
+// two types from the set of {FloatType, IntType, ComplexType}, because
+// there is a lack of operator support for NumberType.
+//
 // If `type_hint` is an `InterfaceType`, then we can use that as a
 // potential supertype for `ClassType`s in the list. Otherwise, we have
 // no way to find and use some common interface type

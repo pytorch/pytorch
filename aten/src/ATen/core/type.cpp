@@ -974,12 +974,12 @@ TypePtr UnionType::createOptionalOf(TypePtr type) {
   return UnionType::create({type, NoneType::get()});
 }
 
-OptionalTypePtr OptionalType::create(std::vector<TypePtr> types) {
-  auto opt_type = new OptionalType(std::move(types));
-  return OptionalTypePtr(std::move(opt_type));
+Pybind11_OptionalTypePtr Pybind11_OptionalType::create(std::vector<TypePtr> types) {
+  auto opt_type = new Pybind11_OptionalType(std::move(types));
+  return Pybind11_OptionalTypePtr(std::move(opt_type));
 }
 
-UnionTypePtr OptionalType::legacy_OptionalOfTensor() {
+UnionTypePtr Pybind11_OptionalType::legacy_OptionalOfTensor() {
   static auto value = UnionType::createOptionalOf(TensorType::get())->expect<UnionType>();
   return value;
 }

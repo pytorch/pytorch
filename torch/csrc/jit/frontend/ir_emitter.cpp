@@ -1766,17 +1766,22 @@ struct to_ir {
         }
       }
 
+      // Try to unify the types. If we found a type annotation earlier
+      // in the environment, and if that type annotation is some form
+      // of union, then we need to tell `unifyTypes` not to throw an
+      // error if the branched return types we found are heterogenous
       bool default_to_union = full_type &&
           (full_type->kind() == UnionType::Kind ||
            full_type->kind() == NumberType::Kind);
       auto unified = unifyTypes(
           tv->type(), fv->type(), /*default_to_union=*/default_to_union);
 
-      // attempt to unify the types. we allow variables to be set to different
-      // types in each branch as long as that variable is not already in scope,
-      // or if that variable does not get used later. here, we save the error
-      // so that the error message will be more informative in the case that is
-      // used later. When a is accessed in (a + 1), the error will get printed
+      // We allow variables to be set to different types in each branch
+      // as long as that variable is not already in scope or if that
+      // variable does not get used later. Here, we save the error so
+      // that the error message will be more informative in the case
+      // that is used later. When `a` is accessed in `(a + 1)`, the
+      // error will get printed:
       // if cond:
       //    a = 1
       // else:
@@ -1873,11 +1878,7 @@ struct to_ir {
       }
 
       auto get_smaller_type = [&](TypePtr t1, TypePtr t2) -> TypePtr {
-        if (!t1 && !t2) {
-          return nullptr;
-        } else if (!t1 || !t2) {
-          return t1 ? t1 : t2;
-        } else if (t1->isSubtypeOf(t2)) {
+        if (t1->isSubtypeOf(t2)) {
           return t1;
         } else if (t2->isSubtypeOf(t1)) {
           return t2;
@@ -1897,7 +1898,8 @@ struct to_ir {
           found_refinement = lhs_type;
         } else if (*maybe_smaller_type == *rhs_type) {
           // We want the narrowest possible type
-          found_refinement = get_smaller_type(found_refinement, rhs_type);
+          found_refinement = found_refinement ? *(unifyTypes(found_refinement, rhs_type)) : rhs_type;
+
         }
       }
 

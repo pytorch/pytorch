@@ -89,7 +89,6 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
           : c10::ivalue::Tuple::create(std::move(values));
     }
-    case TypeKind::OptionalType:
     case TypeKind::UnionType: {
       auto actual_type = toTypeInferredIValue(obj);
       auto actual_type_ptr = actual_type.type();
@@ -122,7 +121,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       try {
         auto script_list = py::cast<ScriptList>(obj);
         return script_list.list_;
-      } catch (py::cast_error& e) {
+      } catch (...) {
       }
 
       // If not (i.e. it is a regular Python list), make a new
