@@ -301,7 +301,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             * VALUE (int): opset version
 
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
-            the opset version is set to 1.
+            the opset version is set to 1. Only custom opset domain name and version should be
+            indicated through this argument.
 
         enable_onnx_checker (bool, default True): If True the onnx model checker will be run
             to ensure the exported model is a valid ONNX model.
