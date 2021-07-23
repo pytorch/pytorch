@@ -1,6 +1,6 @@
 #pragma once
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__))
-/* Clang-compatible compiler, targeting x86/x86-64 */
+#if defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
+/* GCC or clang-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
 #elif defined(__clang__) && (defined(__ARM_NEON__) || defined(__aarch64__))
 /* Clang-compatible compiler, targeting arm neon */
@@ -14,9 +14,6 @@
 #define _mm256_extract_epi16(X, Y) (_mm_extract_epi16(_mm256_extractf128_si256(X, Y >> 3), Y % 8))
 #define _mm256_extract_epi8(X, Y) (_mm_extract_epi8(_mm256_extractf128_si256(X, Y >> 4), Y % 16))
 #endif
-#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
-/* GCC-compatible compiler, targeting x86/x86-64 */
-#include <x86intrin.h>
 #elif defined(__GNUC__) && (defined(__ARM_NEON__) || defined(__aarch64__))
 /* GCC-compatible compiler, targeting ARM with NEON */
 #include <arm_neon.h>
