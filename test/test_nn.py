@@ -13277,7 +13277,6 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.randn(1, 0, 50, device=device)
-            mod = torch.nn.MaxPool1d(3, stride=2).to(device)
             mod(inp)
 
         inp = torch.randn(0, 16, 50, 32, device=device)
@@ -13286,7 +13285,6 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.randn(1, 0, 50, 32, device=device)
-            mod = torch.nn.MaxPool2d(3, stride=2).to(device)
             mod(inp)
 
         inp = torch.ones(0, 16, 50, 44, 31, device=device)
@@ -13295,7 +13293,32 @@ class TestNNDeviceType(NNTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "Expected"):
             inp = torch.ones(1, 0, 50, 44, 31, device=device)
-            mod = torch.nn.MaxPool3d(3, stride=2).to(device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_AdaptiveMaxPool_zero_batch_dim(self, device):
+        inp = torch.randn(0, 16, 50, device=device)
+        mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, device=device)
+            mod(inp)
+
+        inp = torch.randn(0, 16, 50, 32, device=device)
+        mod = torch.nn.AdaptiveMaxPool2d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+        inp = torch.ones(0, 16, 50, 44, 31, device=device)
+        mod = torch.nn.AdaptiveMaxPool3d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.ones(1, 0, 50, 44, 31, device=device)
             mod(inp)
 
     @onlyCUDA
