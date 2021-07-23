@@ -332,13 +332,12 @@ TORCH_IMPL_FUNC(special_zeta_out) (const Tensor& self, const Tensor& other, cons
   zeta_stub(device_type(), *this);
 }
 
-<<<<<<< HEAD
 TORCH_IMPL_FUNC(special_iv_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
   iv_stub(device_type(), *this);
-=======
+}
+
 TORCH_IMPL_FUNC(tanh_backward_out) (const Tensor& grad_output, const Tensor& output, const Tensor& result) {
   tanh_backward_stub(device_type(), *this);
->>>>>>> 53222c59f017ea16e4e0f59cf6aecc8202a0c76f
 }
 
 #define CREATE_BINARY_TORCH_IMPL_FUNC(func_out, func_stub)                                                    \
