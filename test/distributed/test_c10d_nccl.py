@@ -1694,11 +1694,11 @@ class DistributedDataParallelTest(
 
             def mult(fut):
                 # Multiply the result by 10.
-                return [10 * t for t in fut.value()]
+                return 10 * fut.value()[0]
 
             def div(fut):
                 # Divide the result by 2.
-                return [0.5 * t for t in fut.value()]
+                return 0.5 * fut.value()
 
             return fut.then(mult).then(div)
 
