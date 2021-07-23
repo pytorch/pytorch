@@ -26,9 +26,7 @@ using torch::autograd::ReadyQueue;
 using torch::autograd::validate_outputs;
 using torch::autograd::variable_list;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumBackwardPasses = "num_current_backward_passes";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 
 // This hook does 3 things:
@@ -144,7 +142,6 @@ DistEngine::~DistEngine() {
 
 DistEngine& DistEngine::getInstance() {
   // Leaky singleton to avoid module destructor race.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static DistEngine* engine = new DistEngine();
   return *engine;
 }

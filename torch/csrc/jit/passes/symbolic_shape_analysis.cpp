@@ -36,7 +36,6 @@ pointwise ops)
 - Supporting returning partially evaluated shape compute graph
 */
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool symbolic_shape_analysis_test_mode = false;
 
 namespace torch {
@@ -53,9 +52,7 @@ bool symbolicShapeAnalysisTestModeEnabled() {
 }
 
 // TODO: better registration mechanism
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, std::shared_ptr<Graph>> operator_functions;
 
 c10::optional<size_t> normIndex(int64_t index, size_t len) {

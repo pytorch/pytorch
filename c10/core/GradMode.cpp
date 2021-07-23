@@ -4,7 +4,6 @@
 
 namespace c10 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool GradMode_enabled = true;
 
 bool GradMode::is_enabled() {

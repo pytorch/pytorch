@@ -2,9 +2,7 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Storm, StormOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Storm)
     .NumInputs(5)
     .NumOutputs(3)
@@ -41,9 +39,7 @@ for new_moment by using the gradient from the current iteration.
         "beta",
         "denominator in adaptive learning rate, w in the original paper.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseStorm, SparseStormOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseStorm)
     .NumInputs(6)
     .NumOutputs(3)
@@ -70,8 +66,6 @@ as in the dense case.
         "beta",
         "denominator in adaptive learning rate, w in the original paper.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Storm);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseStorm);
 } // namespace caffe2

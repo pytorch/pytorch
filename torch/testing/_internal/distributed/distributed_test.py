@@ -4142,11 +4142,11 @@ class DistributedTest:
 
                 def mult(fut):
                     # Multiply the result by 2.
-                    return [2 * t for t in fut.wait()]
+                    return 2 * fut.wait()[0]
 
                 def div(fut):
                     # Divide the result by 2 * world_size.
-                    return [t / (2 * world_size) for t in fut.wait()]
+                    return fut.wait() / (2 * world_size)
 
                 return fut.then(mult).then(div)
 
