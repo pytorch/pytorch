@@ -24,11 +24,9 @@ bool SinGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Sin,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, SinFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SinGradient,
     BinaryElementwiseOp<
@@ -36,7 +34,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         SinGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Sin)
     .NumInputs(1)
     .NumOutputs(1)
@@ -90,7 +87,6 @@ Y: [0.74903965 0.17938434 0.5313141  0.04957259 0.60336035]
     "Y",
     "*(type: Tensor`<float>`)* Output tensor calculated as the sine of the input tensor, element-wise.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SinGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 
 namespace {
@@ -108,7 +104,6 @@ class GetSinGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Sin, GetSinGradient);
 
 } // namespace caffe2
