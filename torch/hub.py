@@ -118,18 +118,19 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
     for url_prefix in (
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
-        page = 1
+        page = 0
         while True:
+            page += 1
             url = url_prefix + '?per_page=100&page=' + str(page)
             with urlopen(url) as r:
                 response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
+                # Empty response means no more data to process
                 if not response:
-                    continue
+                    break
                 for br in response:
                     if br['name'] == branch or br['commit']['sha'].startswith(branch):
                         return
 
-        page += 1
     raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
