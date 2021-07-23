@@ -6,7 +6,8 @@ from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
                                      tensorT, scalarT, intArrayRefT, dimnameListT,
-                                     optionalTensorRefT)
+                                     optionalTensorRefT, optionalScalarRefT)
+
 from tools.codegen.api import cpp
 
 from typing import Union, List
@@ -35,9 +36,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         if t.elem == BaseType(BaseTy.Tensor):
             return NamedCType(binds, BaseCType(optionalTensorRefT))
         elif t.elem == BaseType(BaseTy.Scalar):
-            raise AssertionError(
-                "optional scalar not supported by structured yet"
-            )
+            return NamedCType(binds, BaseCType(optionalScalarRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
