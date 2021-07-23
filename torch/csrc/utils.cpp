@@ -219,7 +219,6 @@ void THPPointer<THPGenerator>::free() {
 
 template class THPPointer<THPGenerator>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatBroadcastWarn = false;
 
 void setBackCompatBroadcastWarn(bool warn) {
@@ -230,7 +229,6 @@ bool getBackCompatBroadcastWarn() {
   return backCompatBroadcastWarn;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatKeepdimWarn = false;
 
 void setBackCompatKeepdimWarn(bool warn) {
@@ -283,16 +281,12 @@ namespace torch { namespace gdb {
 // so we need to wrap the Tensor into a Python object first.
 char *tensor_repr(at::Tensor tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  PyObject *pytensor = NULL;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  PyObject *repr = NULL;
+  PyObject *pytensor = nullptr;
+  PyObject *repr = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Py_ssize_t bufsize;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  const char *buf = NULL;
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  char *result = NULL;
+  const char *buf = nullptr;
+  char *result = nullptr;
 
   pytensor = THPVariable_Wrap(at::Tensor(tensor));
   if (!pytensor)
@@ -329,8 +323,7 @@ error:
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(result);
   PyGILState_Release(gil);
-  // NOLINTNEXTLINE(modernize-use-nullptr)
-  return NULL;
+  return nullptr;
 }
 
 }} // namespace torch::gdb

@@ -225,6 +225,11 @@ class TestNumPyInterop(TestCase):
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
+    def test_from_list_of_ndarray_warning(self, device):
+        warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        with self.assertWarnsOnceRegex(UserWarning, warning_msg):
+            torch.tensor([np.array([0]), np.array([1])], device=device)
+
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
         dtypes = [

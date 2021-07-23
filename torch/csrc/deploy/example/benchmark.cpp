@@ -1,14 +1,3 @@
-#include <pthread.h>
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <iostream>
-#include <sstream>
-#include <thread>
-#include <vector>
-
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <torch/deploy.h>
 
 #include <ATen/ATen.h>
@@ -17,9 +6,18 @@
 
 #include <torch/script.h>
 
+#include <pthread.h>
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <iostream>
+#include <sstream>
+#include <thread>
+#include <vector>
+
 typedef void (*function_type)(const char*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool cuda = false;
 
 constexpr auto latency_p = {
@@ -96,7 +94,6 @@ struct RunPython {
 
 static torch::IValue to_device(const torch::IValue& v, torch::Device to);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<torch::IValue> to_device_vec(
     at::ArrayRef<torch::IValue> vs,
     torch::Device to) {

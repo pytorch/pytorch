@@ -42,12 +42,10 @@ bool SummarizeOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Summarize, SummarizeOp<float, CPUContext>);
 
 // Input: X; output: if set, a summarized Tensor of shape 4, with the values
 // being min, max, mean and std respectively.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Summarize)
     .NumInputs(1)
     .NumOutputs(0, 1)
@@ -68,6 +66,5 @@ greater than 0, the values are written to a log file in the root folder.
         "1-D tensor (Tensor) of size 4 containing min, "
         "max, mean and standard deviation");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Summarize);
 } // namespace caffe2

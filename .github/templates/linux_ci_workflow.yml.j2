@@ -9,7 +9,15 @@ on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
 {%- endif %}
+
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -36,8 +44,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: !{{ ciflow_config.root_job_condition }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+{%- endif %}
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -110,7 +128,7 @@ jobs:
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
@@ -161,6 +179,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
+          AWS_DEFAULT_REGION: us-east-1
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -176,6 +195,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
@@ -198,6 +218,7 @@ jobs:
           if-no-files-found: error
           path:
             artifacts.zip
+      {%- endif %}
       - name: Clean up docker images
         if: always()
         run: |
@@ -209,6 +230,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
@@ -234,10 +256,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -371,6 +390,7 @@ jobs:
           docker system prune -af
 {% endblock %}
 {%- endif -%}
+{%- if not is_libtorch %}
 {% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -379,10 +399,8 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
-    runs-on: ubuntu-18.04
+    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+    runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
@@ -401,17 +419,14 @@ jobs:
         run: |
           # Should preserve paths so reports should still be in test/test-reports
           unzip -o 'test-reports-*.zip'
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
       - name: Install dependencies
         # boto3 version copied from .circleci/docker/common/install_conda.sh
         run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+          pip3 install -r requirements.txt
+          pip3 install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python3 tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -419,9 +434,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -429,15 +442,14 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endblock %}
+{%- endif -%}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
-      - build
+    needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:

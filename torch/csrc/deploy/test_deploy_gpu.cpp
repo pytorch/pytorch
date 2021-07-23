@@ -13,9 +13,7 @@ int main(int argc, char* argv[]) {
   return rc;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple = "torch/csrc/deploy/example/generated/simple";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* simple_jit = "torch/csrc/deploy/example/generated/simple_jit";
 
 const char* path(const char* envname, const char* path) {
@@ -23,7 +21,6 @@ const char* path(const char* envname, const char* path) {
   return e ? e : path;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TorchDeployGPUTest, SimpleModel) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
