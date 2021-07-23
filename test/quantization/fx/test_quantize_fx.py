@@ -2533,7 +2533,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.checkGraphModeFxOp(
             m1, data, QuantType.QAT,
             prepare_expected_node_occurrence={
-                ns.call_module(torch.quantization.FakeQuantize): 2,
+                ns.call_module(torch.quantization.FakeQuantize): 1,
             },
             expected_node_occurrence={
                 ns.call_function(torch.quantize_per_tensor): 1,
@@ -2808,12 +2808,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 QuantType.DYNAMIC: {},
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.STATIC: {
-                    ns.call_module(torch.quantization.HistogramObserver): 2 + int(not has_relu),
+                    ns.call_module(torch.quantization.HistogramObserver): 2,
                     ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3 if has_relu else 4,
+                    ns.call_module(torch.quantization.FakeQuantize): 3,
                 },
             }
             model = FuncLinear(use_bias, has_relu, f_relu)
@@ -2925,7 +2925,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # when has_relu is False
             prepare_node_occurrence = {
                 # activation, weight, bias and output
-                ns.call_module(torch.quantization.PlaceholderObserver): 3 + int(use_bias) + int(not has_relu)
+                ns.call_module(torch.quantization.PlaceholderObserver): 3 + int(use_bias),
             }
             convert_node_occurrence = {
                 # we don't support static fp16 ops, so the linear function
@@ -3041,12 +3041,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 QuantType.DYNAMIC: {},
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.STATIC: {
-                    ns.call_module(torch.quantization.HistogramObserver): 2 + int(not has_relu),
+                    ns.call_module(torch.quantization.HistogramObserver): 2,
                     ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
                 },
                 # There should be 3 observers: after input, weight and activation.
                 QuantType.QAT: {
-                    ns.call_module(torch.quantization.FakeQuantize): 3 if has_relu else 4,
+                    ns.call_module(torch.quantization.FakeQuantize): 3,
                 },
             }
             data_dims = [2, 3] + [4] * dim
@@ -3068,7 +3068,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 model, data, quant_type, qconv_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
                 expected_node_occurrence=convert_node_occurrence)
-
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):

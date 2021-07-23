@@ -53,6 +53,7 @@ jobs:
         run: echo running !{{ ciflow_config.root_job_name }}
 {%- endif %}
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
     env:
