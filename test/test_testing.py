@@ -2,11 +2,11 @@ import collections
 import doctest
 import functools
 import itertools
+import math
 import os
 import re
 import unittest
 from typing import Any, Callable, Iterator, List, Tuple
-import math
 
 import torch
 
