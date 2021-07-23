@@ -2973,6 +2973,7 @@ class TestLinalg(TestCase):
             run_test((*batch, m, n))
 
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
+    @skipCUDAIfRocm
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_svd_memory_allocation(self, device, dtype):
