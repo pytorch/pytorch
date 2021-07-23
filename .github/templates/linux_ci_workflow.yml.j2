@@ -9,7 +9,15 @@ on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
 {%- endif %}
+
 {%- if is_scheduled %}
   schedule:
     - cron: !{{ is_scheduled }}
@@ -36,8 +44,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+{%- if ciflow_config.enabled %}
+  !{{ ciflow_config.root_job_name }}:
+    runs-on: ubuntu-18.04
+    if: !{{ ciflow_config.root_job_condition }}
+    steps:
+      - name: noop
+        run: echo running !{{ ciflow_config.root_job_name }}
+{%- endif %}
   calculate-docker-image:
     runs-on: linux.2xlarge
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -110,7 +127,7 @@ jobs:
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
@@ -177,6 +194,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      {%- if not is_libtorch %}
       - name: Archive artifacts into zip
         run: |
           zip -r artifacts.zip dist/ build/ .pytorch-test-times.json
@@ -199,6 +217,7 @@ jobs:
           if-no-files-found: error
           path:
             artifacts.zip
+      {%- endif %}
       - name: Clean up docker images
         if: always()
         run: |
@@ -210,6 +229,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: [!{{ ciflow_config.root_job_name }}]
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
@@ -235,11 +255,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    if: !{{ not build_only }}
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -373,6 +389,7 @@ jobs:
           docker system prune -af
 {% endblock %}
 {%- endif -%}
+{%- if not is_libtorch %}
 {% block render_test_results +%}
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -381,9 +398,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
@@ -428,13 +443,12 @@ jobs:
         run: |
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endblock %}
+{%- endif -%}
   {%- if enable_doc_jobs %}
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs:
-      - calculate-docker-image
-      - build
+    needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
     steps:
