@@ -39,7 +39,6 @@ std::ostream& operator<<(std::ostream& os, const ConvParams& params) {
   return os;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<ConvParams> MobileNetV3Params = {
     {{1, 3, 224, 224}, {16, 3, 3, 3}, {16}, {2, 2}, {1, 1}, {1, 1}, 1},
     {{1, 16, 112, 112}, {16, 16, 1, 1}, {16}, {1, 1}, {0, 0}, {1, 1}, 1},
@@ -79,7 +78,6 @@ std::vector<ConvParams> MobileNetV3Params = {
     {{1, 576, 1, 1}, {1280, 576, 1, 1}, {1280}, {1, 1}, {0, 0}, {1, 1}, 1},
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<ConvParams> ResNet18Params = {
     {{1, 3, 224, 224}, {64, 3, 7, 7}, {}, {2, 2}, {3, 3}, {1, 1}, 1},
     {{1, 64, 56, 56}, {64, 64, 3, 3}, {}, {1, 1}, {1, 1}, {1, 1}, 1},
@@ -103,7 +101,6 @@ std::vector<ConvParams> ResNet18Params = {
     {{1, 512, 7, 7}, {512, 512, 3, 3}, {}, {1, 1}, {1, 1}, {1, 1}, 1},
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<ConvParams> ResNet50Params = {
     {{1, 3, 224, 224}, {64, 3, 7, 7}, {}, {2, 2}, {3, 3}, {1, 1}, 1},
     {{1, 64, 56, 56}, {64, 64, 1, 1}, {}, {1, 1}, {0, 0}, {1, 1}, 1},

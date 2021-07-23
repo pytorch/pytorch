@@ -128,16 +128,13 @@ def _extract_weights_one_model(
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     results: NSResultsType,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> None:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_one_model")
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
-
     for node, ref_name in nodes_and_names_to_instrument:
         res_type = NSSingleResultValuesType.WEIGHT.value
-        extracted_weight = \
-            extract_weight_from_node(node, model, type_a_related_to_b)
+        extracted_weight = extract_weight_from_node(
+            node, model, op_to_type_to_weight_extraction_fn)
         if extracted_weight:
             if ref_name not in results:
                 results[ref_name] = {res_type: {}}
@@ -151,6 +148,7 @@ def _extract_weights_impl(
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
@@ -168,9 +166,11 @@ def _extract_weights_impl(
     # populate the results, one model at a time
     results: NSResultsType = {}
     _extract_weights_one_model(
-        model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
+        model_name_a, gm_a, nodes_and_names_to_instrument_a, results,
+        op_to_type_to_weight_extraction_fn)
     _extract_weights_one_model(
-        model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
+        model_name_b, gm_b, nodes_and_names_to_instrument_b, results,
+        op_to_type_to_weight_extraction_fn)
 
     # fill in missing fqn entries
     maybe_add_missing_fqns(results)
@@ -188,6 +188,7 @@ def extract_weights(
     model_b: nn.Module,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
     base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
@@ -207,7 +208,7 @@ def extract_weights(
         gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _extract_weights_impl(
         model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
-        unmatchable_types_map)
+        unmatchable_types_map, op_to_type_to_weight_extraction_fn)
 
 
 def _add_loggers_one_model(

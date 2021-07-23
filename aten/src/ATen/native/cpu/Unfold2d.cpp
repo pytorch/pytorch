@@ -308,9 +308,7 @@ void unfolded2d_copy_kernel(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
 
 } // namespace native
