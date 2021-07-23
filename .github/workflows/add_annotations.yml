@@ -9,6 +9,7 @@ on:
 
 jobs:
   annotate:
+    if: ${{ github.repository_owner == 'pytorch' }}
     strategy:
       fail-fast: false
       matrix:
