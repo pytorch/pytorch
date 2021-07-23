@@ -725,6 +725,15 @@ class OpInfo(object):
             out_samples.append(sample)
         return out_samples
 
+    def sample_tensors(self, device, dtype, requires_grad=False, **kwargs):
+        """Generate a sequence of sample tensors.
+
+        This list like sample_inputs(), but returns a list of Tensors instead
+        of a list of SampleInputs.
+        """
+        samples = self.sample_inputs(device, dtype, requires_grad, **kwargs)
+        return [sample.input for sample in samples]
+
     def get_one_sample_input(self, device, dtype, requires_grad=False, **kwargs):
         """Returns a single SampleInput if it exists, else None"""
         samples = self.sample_inputs(device, dtype, requires_grad, **kwargs)

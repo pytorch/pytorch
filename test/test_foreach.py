@@ -110,8 +110,8 @@ class TestForeach(TestCase):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
         inputs = [
-            opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
-            opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
+            opinfo.sample_tensors(device, dtype, N, noncontiguous=not is_fastpath),
+            opinfo.sample_tensors(device, dtype, N, noncontiguous=not is_fastpath),
         ]
         self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False)
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
@@ -151,7 +151,7 @@ class TestForeach(TestCase):
     def _test_binary_op_scalar(self, device, dtype, opinfo, N, scalar, is_fastpath, disable_fastpath):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        inputs = [opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath), scalar]
+        inputs = [opinfo.sample_tensors(device, dtype, N, noncontiguous=not is_fastpath), scalar]
         self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False)
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
 
@@ -193,7 +193,7 @@ class TestForeach(TestCase):
     def _test_binary_op_scalarlist(self, device, dtype, opinfo, N, scalarlist, is_fastpath, disable_fastpath):
         n_expected_cudaLaunchKernels = N if disable_fastpath else 1
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        inputs = [opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath), scalarlist]
+        inputs = [opinfo.sample_tensors(device, dtype, N, noncontiguous=not is_fastpath), scalarlist]
         self._binary_test(dtype, op, ref, inputs, is_fastpath, is_inplace=False)
         self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True)
 
@@ -334,8 +334,7 @@ class TestForeach(TestCase):
 
     def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
         op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
-        samples = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath)
-        inputs = [sample.input for sample in samples],
+        inputs = opinfo.sample_tensors(device, dtype, N, noncontiguous=not is_fastpath),
         # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
         if opinfo.name == "_foreach_abs" and dtype in torch.testing.get_all_complex_dtypes():
             is_fastpath = False
@@ -601,7 +600,7 @@ class TestForeach(TestCase):
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op, 1)
         # tensors: ['cuda', 'cpu]
-        tensors = [sample.input for sample in op.sample_inputs(device, dtype, 2)]
+        tensors = op.sample_tensors(device, dtype, 2)
         tensors[1] = tensors[1].to('cpu')
         try:
             actual = method((tensors,), False, False)
@@ -625,8 +624,8 @@ class TestForeach(TestCase):
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
-        _cuda_tensors = op.sample_inputs(device, dtype, 2, same_size=True)
-        _cpu_tensors = op.sample_inputs('cpu', dtype, 2, same_size=True)
+        _cuda_tensors = op.sample_tensors(device, dtype, 2, same_size=True)
+        _cpu_tensors = op.sample_tensors('cpu', dtype, 2, same_size=True)
         tensors1, tensors2 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
