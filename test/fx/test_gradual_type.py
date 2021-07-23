@@ -86,11 +86,13 @@ class AnnotationsTest(unittest.TestCase):
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), TensorType((1, 2, 3, 5))))
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), int))
 
+    @skipIfNoUnification
     def test_broadcasting1(self):
         t1 = TensorType((1, 2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
 
+    @skipIfNoUnification
     def test_broadcasting2(self):
         t1 = TensorType((2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
@@ -98,6 +100,7 @@ class AnnotationsTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             broadcast_types(t1, t2)
 
+    @skipIfNoUnification
     def test_broadcasting3(self):
         t1 = TensorType((1, 2, 3, Dyn))
         t2 = TensorType((2, 3, 4))
