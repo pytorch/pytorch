@@ -279,7 +279,7 @@ struct EH_Frame_HDR {
 // with the module_id and offset.
 extern "C" void* __tls_get_addr(void*);
 
-extern "C" int __cxa_thread_atexit(
+extern "C" int __cxa_thread_atexit_impl(
     void (*dtor)(void*),
     void* obj,
     void* dso_symbol);
@@ -1006,9 +1006,13 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     }
     auto sym_st = dyninfo_.symtab_[r_sym];
     const char* sym_name = dyninfo_.get_string(sym_st.st_name);
-    if (r_type == R_X86_64_JUMP_SLOT &&
-        strcmp(sym_name, "__tls_get_addr") == 0) {
-      return (Elf64_Addr)local__tls_get_addr;
+    if (r_type == R_X86_64_JUMP_SLOT) {
+      if (strcmp(sym_name, "__tls_get_addr") == 0) {
+        return (Elf64_Addr)local__tls_get_addr;
+      }
+      if (strcmp(sym_name, "__cxa_thread_atexit") == 0) {
+        return (Elf64_Addr)__cxa_thread_atexit_impl;
+      }
     }
     for (const auto& sys_lib : symbol_search_path_) {
       auto r = sys_lib->sym(sym_name);
@@ -1211,7 +1215,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     void* start = pthread_getspecific(tls_key_);
     if (!start) {
       auto tls_mem = new TLSMemory(shared_from_this(), tls_mem_size_);
-      __cxa_thread_atexit(delete_TLSMemory, tls_mem, &__dso_handle);
+      __cxa_thread_atexit_impl(delete_TLSMemory, tls_mem, &__dso_handle);
       start = tls_mem->mem_;
       memcpy(start, tls_initalization_image_, tls_file_size_);
       memset(
