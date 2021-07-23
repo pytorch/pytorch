@@ -15,6 +15,7 @@ def _allreduce_fut(
 
     return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
+
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
