@@ -23,7 +23,6 @@ using namespace torch::jit::tensorexpr;
 
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
@@ -32,7 +31,6 @@ TEST(Expr, BasicValueTest) {
   ASSERT_EQ(eval.value<int>(), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest02) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -44,7 +42,6 @@ TEST(Expr, BasicValueTest02) {
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest01) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -54,7 +51,6 @@ TEST(Expr, LetTest01) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest02) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -67,7 +63,6 @@ TEST(Expr, LetTest02) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetStmtTest01) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
@@ -92,7 +87,6 @@ TEST(Expr, LetStmtTest01) {
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -102,7 +96,6 @@ TEST(Expr, IntTest) {
   ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, FloatTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -112,7 +105,6 @@ TEST(Expr, FloatTest) {
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ByteTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
@@ -123,7 +115,6 @@ TEST(Expr, ByteTest) {
   ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CharTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
@@ -134,7 +125,6 @@ TEST(Expr, CharTest) {
   ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ShortTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
@@ -145,7 +135,6 @@ TEST(Expr, ShortTest) {
   ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LongTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -156,7 +145,6 @@ TEST(Expr, LongTest) {
   ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, HalfTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
@@ -167,7 +155,6 @@ TEST(Expr, HalfTest) {
   ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DoubleTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
@@ -178,7 +165,6 @@ TEST(Expr, DoubleTest) {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -225,7 +211,6 @@ TEST(Expr, VectorAdd01) {
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -259,7 +244,6 @@ TEST(Expr, CompareSelectEQ) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectDtypes) {
   // LHS and RHS expressions should have the same dtype, but this dtype could
   // differ from the dtype of the return values (but dtypes of true and false
@@ -305,7 +289,6 @@ TEST(Expr, CompareSelectDtypes) {
   ExpectAllNear(c_buffer, c_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntrinsicsDtypes) {
   KernelScope kernel_scope;
   constexpr int N = 256;
@@ -328,7 +311,6 @@ TEST(Expr, IntrinsicsDtypes) {
   ExpectAllNear(b_buffer, b_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
   const Var* x = new Var("x", kFloat);
@@ -350,7 +332,6 @@ TEST(Expr, Substitute01) {
   ASSERT_EQ(e2_str, e2_ref_str);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Math01) {
   KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
@@ -365,7 +346,6 @@ TEST(Expr, Math01) {
   ASSERT_NEAR(res, v_ref, 1e-6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, UnaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -434,7 +414,6 @@ TEST(Expr, UnaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BinaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -459,7 +438,6 @@ TEST(Expr, BinaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps01) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -493,7 +471,6 @@ TEST(Expr, LogicalOps01) {
   ASSERT_EQ(eval8.value<int>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps02) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -513,7 +490,6 @@ TEST(Expr, LogicalOps02) {
   ASSERT_EQ(eval2.value<int>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LogicalOps03) {
   KernelScope kernel_scope;
   ExprHandle a(23);
@@ -572,7 +548,6 @@ TEST(Expr, LogicalOps03) {
   ASSERT_EQ(eval12.value<uint8_t>(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
   ExprHandle a(59);
@@ -585,7 +560,6 @@ TEST(Expr, BitwiseOps) {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {

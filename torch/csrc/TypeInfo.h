@@ -12,9 +12,7 @@ struct THPFInfo : THPDTypeInfo {};
 
 struct THPIInfo : THPDTypeInfo {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPFInfoType;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPIInfoType;
 
 inline bool THPFInfo_Check(PyObject* obj) {
