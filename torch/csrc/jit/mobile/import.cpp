@@ -333,9 +333,8 @@ void BytecodeDeserializer::parseMethods(
         ? at::optional<IValue>{m_tuple[2]}
         : at::nullopt;
 
-    // NOLINTNEXTLINE(modernize-make-unique)
-    auto function = std::unique_ptr<mobile::Function>(
-        new mobile::Function(c10::QualifiedName(function_name)));
+    auto function =
+        std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
 
     const auto& ins_list =
         expect_field(codeTable, "instructions", BYTECODE_INDEX_INSTRUCTION)
