@@ -12,9 +12,7 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_per_channel_cachemask_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_grad_learnable_channel_stub);
 
 /* Per channel fake-quantizes the 'inputs' tensor.
