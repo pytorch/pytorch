@@ -131,7 +131,9 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
   res.reserve(tensors.size());
   for (auto& tensor : tensors) {
-    res.push_back(tensor.device());
+    if (res.size() == 0 || tensor[0].device() != res[0]) {
+      res.push_back(tensor.device());
+    }
   }
   return res;
 }
@@ -952,7 +954,7 @@ void check_gpu_single_tensor(const at::Tensor& tensor) {
 
 // Check that all `tensors' have the same type and shape and are distributed
 // across distinct GPUs.
-void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
+int64_t check_gpu_tensors(const std::vector<at::Tensor>& tensors, bool same_device=false) {
   if (tensors.size() == 0) {
     TORCH_CHECK(false, "Tensor list must be nonempty");
   }
@@ -967,6 +969,7 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
   std::unordered_set<decltype(first.get_device())> usedDevices;
   usedDevices.reserve(tensors.size());
 
+  int64_t total_numel = 0;
   for (const auto& t : tensors) {
     if (!t.is_cuda() || t.is_sparse()) {
       TORCH_CHECK(false, "Tensors must be CUDA and dense");
@@ -983,11 +986,19 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
     if (!t.is_non_overlapping_and_dense()) {
       TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
-    const auto inserted = usedDevices.insert(t.get_device()).second;
-    if (!inserted) {
-      TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
+    if (same_device) {
+      TORCH_CHECK(t.get_device() == tensors[0].get_device(),
+                  "Expected list of tensors on the same device");
+    } else {
+      const auto inserted = usedDevices.insert(t.get_device()).second;
+      if (!inserted) {
+        TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
+      }
     }
+    total_numel += t.numel();
   }
+
+  return total_numel;
 }
 
 // Flatten each list in `tensor_lists' for a gather or scatter operation, and
@@ -1083,12 +1094,19 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   if (sequenceNum_) {
     sequenceNum_->increment();
   }
+
+  // Inputs must either all be on different devices,
+  // or all be on different devices.
   const auto devices = getDeviceList(inputs);
+  const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
 
+  // Used many times below, so we stash the unordered_map lookup
+  const auto& ncclStreams = ncclStreams_[key];
+
   // First let NCCL streams wait for input tensors allocation streams
-  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+  syncStreams(devices, ncclEvents_[key], ncclStreams);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   bool can_profile = outputs.size() == 1;
@@ -1105,45 +1123,45 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  pre(ncclStreams_[key]);
-
-  for (const auto i : c10::irange(inputs.size())) {
-    gpuGuard.set_index(devices[i].index());
-    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-
-    // Both `inputs' and `outputs' are created on a worker stream and used in
-    // different ncclStreams.  Hence, both must record the ncclStream to
-    // prevent being freed before the collective finishes.
-    //
-    // We only record `inputs' here, and leave recording `outputs' to `fn' for
-    // operations where `inputs' and `outputs' are not the same.
-    //
-    // See [Sync Streams].
-    c10::cuda::CUDACachingAllocator::recordStream(
-        inputs[i].storage().data_ptr(), ncclStream);
-  }
+  pre(ncclStreams);
 
   {
     AutoNcclGroup nccl_group_guard;
     for (const auto i : c10::irange(inputs.size())) {
-      gpuGuard.set_index(devices[i].index());
-      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+      if (!inputs_same_dev || (inputs_same_dev && i == 0)) {
+        gpuGuard.set_index(devices[i].index());
+      }
+      decltype(i) stream_comm_i = (inputs_same_dev ? 0 : i);
+      at::cuda::CUDAStream& ncclStream = ncclStreams[stream_comm_i];
+      // Both `inputs' and `outputs' are created on a worker stream and used in
+      // different ncclStreams.  Hence, both must record the ncclStream to
+      // prevent being freed before the collective finishes.
+      //
+      // We only record `inputs' here, and leave recording `outputs' to `fn' for
+      // operations where `inputs' and `outputs' are not the same.
+      //
+      // See [Sync Streams].
+      c10::cuda::CUDACachingAllocator::recordStream(
+          inputs[i].storage().data_ptr(), ncclStream);
       C10D_NCCL_CHECK(
-          fn(inputs[i], outputs[i], ncclComms[i]->getNcclComm(), ncclStream));
+          fn(inputs[i],
+             outputs[i],
+             ncclComms[stream_comm_i]->getNcclComm(),
+             ncclStream));
     }
   }
 
-  post(ncclStreams_[key]);
+  post(ncclStreams);
 
   // Event should only be recorded after the ncclGroupEnd()
-  for (const auto i : c10::irange(inputs.size())) {
-    at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
+  for (const auto i : c10::irange(devices.size())) {
+    at::cuda::CUDAStream& ncclStream = ncclStreams[i];
     (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
   }
 
   {
-    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams);
     work->future_ = c10::make_intrusive<at::ivalue::Future>(
         c10::ListType::create(c10::TensorType::get()),
         devices);
@@ -1302,22 +1320,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
       profilingTitle);
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_impl(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
-  check_gpu_tensors(tensors);
-
-  // @lint-ignore CLANGTIDY
-  auto tensor = tensors.back();
-  RECORD_PARAM_COMMS(
-      rank_, // rank
-      "allreduce", // colName
-      tensor.numel(), // inSize
-      tensor.numel(), // outSize
-      tensor.scalar_type(), // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>()); // outSplitSizes
-
   return collective(
       tensors,
       tensors,
@@ -1338,11 +1343,42 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
       "nccl:all_reduce");
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
+    std::vector<at::Tensor>& tensors,
+    const AllreduceOptions& opts) {
+  check_gpu_tensors(tensors);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = tensors.back();
+  RECORD_PARAM_COMMS(
+      rank_, // rank
+      "allreduce", // colName
+      tensor.numel(), // inSize
+      tensor.numel(), // outSize
+      tensor.scalar_type(), // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>()); // outSplitSizes
+
+  return allreduce_impl(tensors, opts);
+}
+
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
-  TORCH_CHECK(false,
-      "allreduce_coalesced is currently not supported with NCCL");
+  auto total_numel = check_gpu_tensors(tensors, /*same_device=*/true);
+
+  // @lint-ignore CLANGTIDY
+  RECORD_PARAM_COMMS(
+      rank_, // rank
+      "allreduce_coalesced", // colName
+      total_numel, // inSize
+      total_numel, // outSize
+      tensor.scalar_type(), // dType
+      // I'm not sure what in,outSplitSizes mean here.
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>()); // outSplitSizes
+
+  return allreduce_impl(tensors, opts);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
