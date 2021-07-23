@@ -465,10 +465,9 @@ torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtyp
 
 def numpy_to_torch_dtype(np_dtype: np.dtype) -> torch.dtype:
     try:
-        return numpy_to_torch_dtype_dict[np_dtype]
+        return numpy_to_torch_dtype_dict[np_dtype]  # type: ignore[index]
     except KeyError:
-        np_dtype = getattr(np, np_dtype.name)
-        return numpy_to_torch_dtype_dict[np_dtype]
+        return numpy_to_torch_dtype_dict[np_dtype.type]  # type: ignore[index]
 
 
 ALL_TENSORTYPES = [torch.float,
