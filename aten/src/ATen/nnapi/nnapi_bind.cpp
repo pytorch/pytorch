@@ -11,9 +11,7 @@ namespace torch {
 namespace nnapi {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* nnapi;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* check_nnapi;
 
 void load_platform_library() {

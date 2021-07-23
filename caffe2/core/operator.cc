@@ -20,25 +20,21 @@
 
 #include "caffe2/core/export_c10_op_to_caffe2.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int(
     caffe2_operator_max_engine_name_length,
     10,
     "Maximum engine name length to be stored");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_disable_implicit_engine_preference,
     false,
     "If set, disable implicit engine preferences. This is useful for unit "
     "testing and debugging cases.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_exceptions,
     false,
     "If set, throws if floating point exceptions (FE_DIVBYZERO, FE_INVALID) "
     "are detected when running any operator. FE_OVERFLOW is handled separately "
     "by caffe2_operator_throw_if_fp_overflow_exceptions option.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_operator_throw_if_fp_overflow_exceptions,
     false,
@@ -152,13 +148,11 @@ vector<TensorShape> OperatorBase::InputTensorShapes() const {
 namespace {
 
 PerOpEnginePrefType& g_per_op_engine_pref() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static auto* g_per_op_engine_pref_ = new PerOpEnginePrefType();
   return *g_per_op_engine_pref_;
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static auto* g_global_engine_pref_ =
       new GlobalEnginePrefType{{CUDA, {"CUDNN"}}, {HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
@@ -386,34 +380,27 @@ std::map<DeviceType, OperatorRegistry*>* gDeviceTypeRegistry() {
   return &g_device_type_registry;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     CPUOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE_REGISTER_DEVICE_TYPE(CPU, CPUOperatorRegistry);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     CUDAOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE_REGISTER_DEVICE_TYPE(CUDA, CUDAOperatorRegistry);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     HIPOperatorRegistry,
     OperatorBase,
     const OperatorDef&,
     Workspace*);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE_REGISTER_DEVICE_TYPE(HIP, HIPOperatorRegistry);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     GradientRegistry,
     GradientMakerBase,
@@ -820,7 +807,6 @@ std::set<std::string> GetRegisteredOperators() {
   return all_keys;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::function<void(const OperatorDef&)> OperatorLogger =
     [](const OperatorDef&) { return; };
 
@@ -906,7 +892,6 @@ void OperatorBase::AddRelatedBlobInfo(EnforceNotMet* err) {
 OperatorBase::~OperatorBase() noexcept = default;
 
 #ifndef C10_MOBILE
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_TYPED_REGISTRY(
     ExternalTensorFunctionsBaseRegistry,
     TypeIdentifier,

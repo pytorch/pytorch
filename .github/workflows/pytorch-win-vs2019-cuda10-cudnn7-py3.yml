@@ -33,6 +33,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
@@ -186,7 +187,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            pytorch-${{ github.run_id }}/test-reports-*.zip
       - name: Cleanup workspace
         if: always()
         shell: bash
