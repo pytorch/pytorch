@@ -7613,31 +7613,28 @@ else:
         for with_extremal in [True, False]:
             for ndims in range(0, 4):
                 shape = self._rand_shape(ndims, min_size=5, max_size=10)
-                for n in range(ndims + 1):
-                    for c in combinations(list(range(ndims)), n):
-                        for scalar_type in [int, float, complex]:
-                            if dtype.is_complex:
-                                condition = self._generate_input(shape, dtype, device, with_extremal).abs() > 0.5
-                            else:
-                                condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
+                for scalar_type in [int, float, complex]:
+                    if dtype.is_complex:
+                        # Use make_tensor when it has a flag to add extremals.
+                        condition = self._generate_input(shape, dtype, device, with_extremal).abs() > 0.5
+                    else:
+                        # Use make_tensor when it has a flag to add extremals.
+                        condition = self._generate_input(shape, dtype, device, with_extremal) > 0.5
 
-                            x = self._generate_input(shape, dtype, device, with_extremal)
+                    # Use make_tensor when it has a flag to add extremals.
+                    x = self._generate_input(shape, dtype, device, with_extremal)
+                    scalar_1 = scalar_type(random.random())
 
-                            if not dtype.is_complex and scalar_type == complex:
-                                continue
-
-                            scalar_1 = scalar_type(random.random())
-
-                            exec_fn(scalar_type, dtype, condition, x, scalar_1)
+                    exec_fn(scalar_type, dtype, condition, x, scalar_1)
 
     # For current implementation,
     # below are the valid `TensorDtype` and `ScalarType` combinations.
     def _where_valid_scalar_tensor_combination(self, scalar_type, dtype):
-        if (scalar_type == int and dtype == torch.long):
+        if (not dtype.is_floating_point or dtype.is_complex) and scalar_type == int:
             return True
-        elif (scalar_type == float and dtype == torch.double):
+        if (dtype.is_floating_point) and scalar_type in [int, float]:
             return True
-        elif (scalar_type == complex and dtype == torch.complex128):
+        if dtype.is_complex:
             return True
         return False
 
@@ -7649,7 +7646,7 @@ else:
         def checkRaises(scalar_type, dtype, condition, x, scalar_1):
             if not self._where_valid_scalar_tensor_combination(scalar_type, dtype):
                 # Note: This should fail once `where` supports type promotion.
-                with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
+                with self.assertRaisesRegex(RuntimeError, "where: Narrowing cast from scalar"):
                     torch.where(condition, x, scalar_1)
 
         self._test_where_scalar_template(device, dtype, checkRaises)
@@ -7705,6 +7702,20 @@ else:
 
         # Reset the original dtype
         torch.set_default_dtype(default_dtype)
+
+    @onlyOnCPUAndCUDA
+    def test_where_scalar_overflow(self, device):
+        x = make_tensor((2, 2), device=device, dtype=torch.get_default_dtype())
+        with self.assertRaises(RuntimeError):
+            torch.where(x > 1, x, 1e50)
+
+        x = make_tensor((2, 2), device=device, dtype=torch.int32)
+        with self.assertRaises(RuntimeError):
+            torch.where(x > 1, x, int(1e50))
+
+        x = make_tensor((2, 2), device=device, dtype=torch.complex64)
+        with self.assertRaises(RuntimeError):
+            torch.where(x > 1, x, 1e50 + 1j)
 
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
