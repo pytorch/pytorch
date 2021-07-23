@@ -3850,6 +3850,8 @@ class DistributedTest:
                     enabled=True, deterministic=True, benchmark=False
                 ):
                     sgd_lr = 1e-2
+                    sgd_momentum = 0.9
+                    sgd_weight_decay = 0.01
                     ddp_model_with_optimizer_hook = torch.nn.parallel.DistributedDataParallel(
                         copy.deepcopy(model).cuda(),
                         device_ids=[self.rank],
@@ -3859,6 +3861,8 @@ class DistributedTest:
                     opt_hook_state = default.OptimizerHookState(
                         _FunctionalSGD,
                         sgd_lr,
+                        momentum=sgd_momentum,
+                        weight_decay=sgd_weight_decay
                     )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
@@ -3872,7 +3876,9 @@ class DistributedTest:
                     )
                     sgd_no_hook = torch.optim.SGD(
                         ddp_model_with_no_hook.parameters(),
-                        lr=sgd_lr
+                        lr=sgd_lr,
+                        momentum=sgd_momentum,
+                        weight_decay=sgd_weight_decay
                     )
 
                     # Verify parameters are equal initially.
