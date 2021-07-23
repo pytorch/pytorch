@@ -12,7 +12,6 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_string(
     caffe2_override_executor,
     "",
@@ -20,7 +19,6 @@ C10_DEFINE_string(
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(
     NetRegistry,
     NetBase,

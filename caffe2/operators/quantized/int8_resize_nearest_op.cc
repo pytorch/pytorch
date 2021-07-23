@@ -2,11 +2,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8ResizeNearest, int8::Int8ResizeNearestOp);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8ResizeNearest)
     .NumInputs(1)
     .NumOutputs(1)

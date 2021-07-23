@@ -103,21 +103,17 @@ class PyInterpreterHolder {
  private:
   c10::impl::PyInterpreter* impl_;
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPVariableClass = nullptr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *ParameterClass = nullptr;
 
 // clang-tidy gets confused by static const
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
@@ -755,9 +751,7 @@ struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
 // An alternative way to reduce the risk of python_gil_hooks going prematurely
 // dead would be to leak it at destruction time.  I didn't do that because
 // it's annoying to write the Registerer class for this case.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcretePythonGILHooks python_gil_hooks;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
 #endif
 
@@ -996,7 +990,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPVariable_as_mapping = {
   THPVariable_length,
   THPVariable_getitem,
@@ -1029,7 +1022,6 @@ struct THPVariableMeta {
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
   "torch._C._TensorMeta",                      /* tp_name */
@@ -1071,7 +1063,6 @@ PyTypeObject THPVariableMetaType = {
   nullptr,                                     /* tp_new */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,

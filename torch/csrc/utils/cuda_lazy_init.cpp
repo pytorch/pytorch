@@ -8,7 +8,6 @@
 namespace torch {
 namespace utils {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool run_yet = false;
 
 void cuda_lazy_init() {
