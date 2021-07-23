@@ -113,6 +113,11 @@ def _parse_repo_info(github):
     return repo_owner, repo_name, branch
 
 
+def _read_url(url):
+    with urlopen(url) as r:
+        return r.read().decode(r.headers.get_content_charset('utf-8'))
+
+
 def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
     # Use urlopen to avoid depending on local git.
     for url_prefix in (
@@ -122,14 +127,13 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
         while True:
             page += 1
             url = f'{url_prefix}?per_page=100&page={page}'
-            with urlopen(url) as r:
-                response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
-                # Empty response means no more data to process
-                if not response:
-                    break
-                for br in response:
-                    if br['name'] == branch or br['commit']['sha'].startswith(branch):
-                        return
+            response = json.loads(_read_url(url))
+            # Empty response means no more data to process
+            if not response:
+                break
+            for br in response:
+                if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                    return
 
     raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
