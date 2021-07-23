@@ -100,7 +100,6 @@ class CIWorkflow:
     num_test_shards: int = 1
     on_pull_request: bool = False
     only_build_on_pull_request: bool = False
-    use_proxy: bool = False
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.

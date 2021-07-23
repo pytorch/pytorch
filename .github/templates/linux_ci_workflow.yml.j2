@@ -1,3 +1,4 @@
+{%- set exclude_test = exclude_test|default(false) -%}
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
@@ -166,7 +167,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
-            -e use_proxy=on http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" -e HTTP_PROXY="$SQUID_PROXY" -e HTTPS_PROXY="$SQUID_PROXY" \
+            -e use_proxy=on -e http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" -e HTTP_PROXY="$SQUID_PROXY" -e HTTPS_PROXY="$SQUID_PROXY" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -343,7 +344,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e use_proxy=on http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" -e HTTP_PROXY="$SQUID_PROXY" -e HTTPS_PROXY="$SQUID_PROXY" \
+            -e use_proxy=on -e http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" -e HTTP_PROXY="$SQUID_PROXY" -e HTTPS_PROXY="$SQUID_PROXY" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
