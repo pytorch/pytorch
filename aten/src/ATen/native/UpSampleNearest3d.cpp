@@ -104,9 +104,7 @@ Tensor upsample_nearest3d_backward_cpu(
   return at::upsample_nearest3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest3d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest3d_backward_kernel);
 
 } // namespace native
