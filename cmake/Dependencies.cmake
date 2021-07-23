@@ -917,7 +917,7 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
   # If not given a Python installation, then use the current active Python
-  if(NOT DEFINED PYTHON_EXECUTABLE)
+  if(NOT PYTHON_EXECUTABLE)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
@@ -946,7 +946,7 @@ if(BUILD_PYTHON)
   # executable that we already found (if we didn't actually find an executable
   # then these will just use "python", but at least they'll be consistent with
   # each other).
-  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+  if(NOT PYTHON_INCLUDE_DIR)
     # TODO: Verify that sysconfig isn't inaccurate
     pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
@@ -955,9 +955,9 @@ if(BUILD_PYTHON)
     else()
       message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
     endif()
-  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+  endif(NOT PYTHON_INCLUDE_DIR)
 
-  if(NOT DEFINED PYTHON_LIBRARY)
+  if(NOT PYTHON_LIBRARY)
     pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
@@ -967,7 +967,7 @@ if(BUILD_PYTHON)
       endif()
       message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
-  endif(NOT DEFINED PYTHON_LIBRARY)
+  endif(NOT PYTHON_LIBRARY)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
