@@ -262,9 +262,6 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
-    {%- if test_environment!=build_environment +%}
-      BUILD_ENVIRONMENT: !{{ test_environment }}
-    {%- endif %}
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
@@ -321,6 +318,10 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+      {%- if test_environment!=build_environment +%}
+        env:
+          BUILD_ENVIRONMENT: !{{ test_environment }}
+      {%- endif %}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
