@@ -36,7 +36,7 @@ env:
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
-  SQUID_PROXY: "tf-lb-20210722035235925400000002-1698082088.us-east-1.elb.amazonaws.com:3128"
+  SQUID_PROXY: "http://tf-lb-20210722035235925400000002-1698082088.us-east-1.elb.amazonaws.com:3128"
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
