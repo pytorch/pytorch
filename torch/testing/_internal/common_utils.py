@@ -38,7 +38,7 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import Any, Dict, Iterable, Iterator, Optional, Union
 
 import numpy as np
 
@@ -1341,13 +1341,62 @@ class TestCase(expecttest.TestCase):
                     atol: Optional[float] = None, rtol: Optional[float] = None,
                     equal_nan=True, exact_dtype=True, exact_device=False, exact_stride=False,
                     exact_is_coalesced=False) -> None:
-        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
 
-        if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+        if isinstance(x, (torch.Tensor, np.ndarray, Number, bool, np.bool_)) and isinstance(y, (torch.Tensor, np.ndarray, Number, bool, np.bool_)):
+            if isinstance(x, (torch.Tensor, np.ndarray)) and isinstance(y, (torch.Tensor, np.ndarray)):
+                def is_tensor_like(a: Union[torch.Tensor, np.ndarray]) -> bool:
+                    if isinstance(a, torch.Tensor):
+                        return True
+
+                    return a.dtype in numpy_to_torch_dtype_dict.keys()
+
+                if not (is_tensor_like(x) and is_tensor_like(y)):
+                    return self.assertEqual(
+                        x.tolist(),
+                        y.tolist(),
+                        msg=msg,
+                        atol=atol,
+                        rtol=rtol,
+                        equal_nan=equal_nan,
+                        exact_dtype=exact_dtype,
+                        exact_device=exact_device,
+                        exact_stride=exact_stride,
+                        exact_is_coalesced=exact_is_coalesced,
+                    )
+
+                x = torch.as_tensor(x)
+                y = torch.as_tensor(y)
+                precision_dtypes = (x.dtype, y.dtype)
+            else:
+                def to_scalar_and_precision_dtype(a):
+                    if isinstance(a, bool):
+                        return a, torch.bool
+                    elif isinstance(a, np.bool_):
+                        return bool(a), torch.bool
+                    elif isinstance(a, int):
+                        return a, torch.int64
+                    elif isinstance(a, float):
+                        return a, torch.float64
+                    elif isinstance(a, complex):
+                        return a, torch.complex128
+                    elif isinstance(a, np.ndarray):
+                        return a.item(), numpy_to_torch_dtype_dict[a.dtype]
+                    else:  # isinstance(a, torch.Tensor)
+                        return a.item(), a.dtype
+
+                x, precision_dtype_x = to_scalar_and_precision_dtype(x)
+                y, precision_dtype_y = to_scalar_and_precision_dtype(y)
+                precision_dtypes = (precision_dtype_x, precision_dtype_y)
+
             # In order to honor the @toleranceOverride and @precisionOverride decorators, we need to resolve the
             # tolerances before we call assert_close
-            if rtol is None or atol is None:
-                rtol, atol = _get_default_rtol_and_atol(x, y)
+            if (rtol is None) ^ (atol is None):
+                raise ValueError(
+                    f"Both 'rtol' and 'atol' must be either specified or omitted, "
+                    f"but got no {'rtol' if rtol is None else 'atol'}.",
+                )
+            elif rtol is None or atol is None:
+                rtol, atol = _get_default_rtol_and_atol(*precision_dtypes)
             rtol = max(rtol, self.rel_tol)
             atol = max(atol, self.precision)
 
@@ -1362,84 +1411,6 @@ class TestCase(expecttest.TestCase):
                 check_is_coalesced=exact_is_coalesced,
                 equal_nan=equal_nan,
                 msg=msg,
-            )
-        elif isinstance(x, np.ndarray) or isinstance(y, np.ndarray):
-            # torch.testing.assert_close does not allow Tensor vs. ndarray comparisons
-            # def maybe_to_tensor(a: Any) -> Any:
-            #     try:
-            #         return torch.as_tensor(a)
-            #     except TypeError:
-            #         # This happens for example if the numpy dtype is non-numeric or not supported by torch
-            #         return a
-
-            def maybe_to_list(a: Any) -> Any:
-                if not isinstance(a, (np.ndarray, torch.Tensor)):
-                    return a
-
-                return a.tolist()
-
-            x = torch.as_tensor(x)
-            y = torch.as_tensor(y)
-
-            # if not (isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor)):
-            #     # In case we can't convert the inputs to a tensor, we fall back to comparing x and y as iterables
-            #     x = maybe_to_list(x)
-            #     y = maybe_to_list(y)
-
-            self.assertEqual(
-                x,
-                y,
-                msg=msg,
-                atol=atol,
-                rtol=rtol,
-                equal_nan=equal_nan,
-                exact_dtype=exact_dtype,
-                exact_device=exact_device,
-                exact_stride=exact_stride,
-                exact_is_coalesced=exact_is_coalesced,
-            )
-        elif isinstance(x, (Number, bool, np.bool_)) or isinstance(y, (Number, bool, np.bool_)):
-            # torch.testing.assert_close does not allow Tensor vs. scalar comparisons
-            dtype: Optional[torch.dtype]
-            if isinstance(x, torch.Tensor):
-                dtype = x.dtype
-            elif isinstance(y, torch.Tensor):
-                dtype = y.dtype
-            else:
-                if isinstance(x, complex) or isinstance(y, complex):
-                    dtype = torch.complex128
-                elif isinstance(x, float) or isinstance(y, float):
-                    dtype = torch.float64
-                elif isinstance(x, int) or isinstance(y, int):
-                    dtype = torch.int64
-                elif isinstance(x, np.uint8) or isinstance(x, np.uint8):
-                    dtype = torch.uint8
-                elif isinstance(x, (bool, np.bool_)) or isinstance(y, (bool, np.bool_)):
-                    dtype = torch.bool
-                else:
-                    raise TypeError(f"Unknown types {type(x)} / {type(y)}")
-
-            # try:
-            x = torch.as_tensor(x, dtype=dtype)
-            y = torch.as_tensor(y, dtype=dtype)
-            # except Exception:
-            #     return super().assertEqual(
-            #         x.item() if isinstance(x, torch.Tensor) else x,
-            #         y.item() if isinstance(y, torch.Tensor) else y,
-            #         msg,
-            #     )
-
-            self.assertEqual(
-                x,
-                y,
-                msg=msg,
-                atol=atol,
-                rtol=rtol,
-                equal_nan=equal_nan,
-                exact_dtype=exact_dtype,
-                exact_device=exact_device,
-                exact_stride=exact_stride,
-                exact_is_coalesced=exact_is_coalesced,
             )
         elif isinstance(x, string_classes) and isinstance(y, string_classes):
             debug_msg = ("Attempted to compare [string] types: "
@@ -1479,8 +1450,6 @@ class TestCase(expecttest.TestCase):
                 self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
                                  exact_dtype=exact_dtype, exact_device=exact_device, exact_stride=exact_stride,
                                  exact_is_coalesced=exact_is_coalesced)
-        elif isinstance(x, bool) and isinstance(y, bool):
-            super().assertTrue(x == y, msg=msg)
         else:
             super().assertEqual(x, y, msg=msg)
 
