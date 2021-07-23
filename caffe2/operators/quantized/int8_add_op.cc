@@ -6,17 +6,12 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Add, int8::Int8AddOp<int8::Activation::NONE>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8AddRelu, int8::Int8AddOp<int8::Activation::RELU>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Sum, int8::Int8AddOp<int8::Activation::NONE>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8SumRelu, int8::Int8AddOp<int8::Activation::RELU>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Add)
     .NumInputs(2)
     .NumOutputs(1)
@@ -33,7 +28,6 @@ OPERATOR_SCHEMA(Int8Add)
     .Input(1, "B", "Second operand. It should be of the same size as A.")
     .Output(0, "C", "Result, has same dimensions and type as A");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8AddRelu)
     .NumInputs(2)
     .NumOutputs(1)
@@ -59,7 +53,6 @@ OPERATOR_SCHEMA(Int8AddRelu)
  * We deliberately omit schema for Int8Sum/Int8SumRelu so they can
  * temporary use either legacy or the new semantics depending on the engine.
  */
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Sum)
     .NumInputs(1, std::numeric_limits<int>::max())
     .NumOutputs(1)
@@ -69,7 +62,6 @@ OPERATOR_SCHEMA(Int8Sum)
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8SumRelu)
     .NumInputs(1, std::numeric_limits<int>::max())
     .NumOutputs(1)
