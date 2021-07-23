@@ -36,13 +36,10 @@ bool SeluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Selu, SeluOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SeluGradient, SeluGradientOp<float, CPUContext>);
 
 // Input: X; output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Selu)
     .NumInputs(1)
     .NumOutputs(1)
@@ -116,7 +113,6 @@ Y:
     .InheritOnnxSchema();
 
 // Input: Y, dY; output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SeluGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -146,7 +142,6 @@ class GetSeluGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Selu, GetSeluGradient);
 
 } // namespace caffe2
