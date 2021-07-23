@@ -43,11 +43,6 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-ExportModuleMobileInfoConverter& GetMobileInfoConverter() {
-  static ExportModuleMobileInfoConverter func = nullptr;
-  return func;
-}
-
 static IValue Tup(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -412,11 +407,6 @@ void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = std::move(hook);
 }
 
-void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = std::move(converter);
-}
-
 void ScriptModuleSerializer::serialize(
     const Module& module,
     const ExtraFilesMap& extra_files,
@@ -446,7 +436,6 @@ void ScriptModuleSerializer::serialize(
         /*use_storage_context=*/true);
 
     writeByteCode(module, save_mobile_debug_info);
-    writeMobileMetadata(module, extra_files);
   } else {
     writeArchive(
         c10::ivalue::Tuple::create(ivalue_constants),
@@ -558,31 +547,6 @@ void ScriptModuleSerializer::writeExtraFiles(
       const std::string key = "extra/" + kv.first;
       writer_.writeRecord(key, kv.second.data(), kv.second.size());
     }
-  }
-}
-
-void ScriptModuleSerializer::writeMobileMetadata(
-    const Module& module,
-    const ExtraFilesMap& extra_files) {
-  auto hook = GetExtraFilesHook();
-  auto converter = GetMobileInfoConverter();
-  if (!converter) {
-    return;
-  }
-  ExtraFilesMap files_to_write = extra_files;
-  // merge hook files and extra files
-  if (hook) {
-    ExtraFilesMap hook_files = hook(module);
-    files_to_write.insert(hook_files.begin(), hook_files.end());
-  }
-  auto content_to_write = converter(module, files_to_write);
-  if (!content_to_write.empty()) {
-    writeArchive(
-        content_to_write,
-        /*archive_name=*/"metadata",
-        /*archive_dir=*/"",
-        /*tensor_dir=*/"metadata/");
-    ;
   }
 }
 
@@ -871,7 +835,6 @@ std::vector<std::string> export_opnames(const script::Module& m) {
 // Thread local flag (only happens in export, i.e. on server side)
 // to control if instructions for bytecode default inputs are emitted
 // or not. It's the major difference between bytecode v5 and v6.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool emitBytecodeDefaultInputs =
     caffe2::serialize::kProducedBytecodeVersion <= 5 ? true : false;
 bool BytecodeEmitDefaultValueForUnspecifiedArgMode::is_enabled() {

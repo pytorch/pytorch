@@ -33,7 +33,6 @@ static const auto ct_expect = R"(
   int notest(int a)
   )";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestCodeTemplate, Copying) {
   TemplateEnv e;
   e.s("hi", "foo");
@@ -45,7 +44,6 @@ TEST(TestCodeTemplate, Copying) {
   ASSERT_EQ(e.v("what")[0], "is");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestCodeTemplate, Formatting) {
   TemplateEnv e;
   e.v("args", {"hi", "8"});
