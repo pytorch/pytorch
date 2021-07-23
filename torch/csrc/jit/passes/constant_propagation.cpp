@@ -104,7 +104,6 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> skip_list = {
     prim::If,
     prim::Loop,

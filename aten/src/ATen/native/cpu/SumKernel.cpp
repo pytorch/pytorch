@@ -615,7 +615,6 @@ REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 
 // nansum on Float16 has poor accuracy with AVX2, and more so with AVX512.
 // So until it's fixed, it won't be dispatched with AVX512. GH issue 59415.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 #ifndef CPU_CAPABILITY_AVX512
 REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
 #else
