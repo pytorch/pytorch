@@ -853,6 +853,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             if self._use_extra_stream:
                 self._bwd_stream.wait_stream(self._optim_stream)
             _ = list(map(lambda x: x.wait(), self._overlap_info.broadcast_handles))
+            self._overlap_info.broadcast_handles.clear()
 
             # `step()` does not actually perform any parameter updates and is
             # only used for bookkeeping when `overlap_with_ddp=True`
