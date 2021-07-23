@@ -2436,8 +2436,7 @@ Example::
     >>> y = torch.conj(x)
     >>> y.is_conj()
     True
-
-""")
+""".format(**common_args))
 
 add_docstr(torch.resolve_conj,
            r"""
@@ -2460,8 +2459,7 @@ Example::
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
     >>> z.is_conj()
     False
-
-""")
+""".format(**common_args))
 
 add_docstr(torch.resolve_neg,
            r"""
@@ -3226,7 +3224,7 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
-""")
+""".format(**common_args))
 
 add_docstr(torch.vdot,
            r"""
@@ -4455,7 +4453,7 @@ Example::
 
     >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
     tensor([False,  True,  False,  True,  False])
-""")
+""".format(**common_args))
 
 add_docstr(torch.isposinf,
            r"""
@@ -6374,7 +6372,7 @@ Args:
 
 Keyword args:
     {out}
-""")
+""".format(**common_args))
 
 add_docstr(torch.matmul,
            r"""
@@ -7263,7 +7261,7 @@ Example:
     torch.Size([2, 3, 5])
     >>> torch.permute(x, (2, 0, 1)).size()
     torch.Size([5, 2, 3])
-""")
+""".format(**common_args))
 
 add_docstr(torch.poisson,
            r"""
@@ -8960,8 +8958,8 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple `(U, S, V)`, such that :attr:`input` `= U diag(S) Vᴴ`.
-where `Vᴴ` is the transpose of `V` for real inputs,
+namedtuple `(U, S, V)`, such that :attr:`input` :math:`= U \text{diag}(S) V^{\text{H}}`.
+where :math:`V^{\text{H}}` is the transpose of `V` for real inputs,
 and the conjugate transpose of `V` for complex inputs.
 If :attr:`input` is a batch of matrices, then `U`, `S`, and `V` are also
 batched with the same batch dimensions as :attr:`input`.
@@ -9005,9 +9003,9 @@ always be real-valued, even if :attr:`input` is complex.
                default value for both is `True`, so the default behavior is
                effectively the opposite.
              * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns
-               `Vᴴ`.
+               `Vh`, that is, :math:`V^{\text{H}}`.
              * If :attr:`compute_uv` is `False`, :func:`torch.svd` returns zero-filled
-               tensors for `U` and `Vᴴ`, whereas :func:`torch.linalg.svd` returns
+               tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,

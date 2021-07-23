@@ -436,7 +436,10 @@ static PyObject * python_exit_dual_level(PyObject* _unused, PyObject* args, PyOb
   ParsedArgs<1> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
 
-  forward_ad::exit_dual_level(_r.toInt64(0));
+  auto idx = _r.toInt64(0);
+  // Make sure the given index is valid before casting it
+  TORCH_CHECK(idx >= 0, "Dual level must be a positive number.");
+  forward_ad::exit_dual_level(static_cast<uint64_t>(idx));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
