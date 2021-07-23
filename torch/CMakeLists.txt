@@ -371,6 +371,9 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   add_library(nnapi_backend SHARED
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+          ${TORCH_ROOT}/aten/src/ATen/nnapi/nnapi_bind.cpp
+          ${TORCH_ROOT}/aten/src/ATen/nnapi/nnapi_model_loader.cpp
+          ${TORCH_ROOT}/aten/src/ATen/nnapi/nnapi_wrapper.cpp
           )
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend torch torch_python)

@@ -10,7 +10,7 @@
 
 namespace torch {
 namespace nnapi {
-namespace {
+namespace bind {
 
 void load_platform_library() {
   static int run_once = [](){
@@ -175,12 +175,7 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   CAFFE_THROW("Bad dtype");
 }
 
-ModelPtr model_;
-CompilationPtr compilation_;
-int32_t num_inputs_;
-int32_t num_outputs_;
-
-#ifndef __APPLE__
+#if !defined(__APPLE__)
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto register_NnapiCompilation = [](){
   try {
@@ -196,6 +191,6 @@ static auto register_NnapiCompilation = [](){
 }();
 #endif
 
-} // namespace
+} // namespace bind
 } // namespace nnapi
 } // namespace torch

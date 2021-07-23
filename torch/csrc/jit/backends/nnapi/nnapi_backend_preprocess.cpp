@@ -56,7 +56,7 @@ c10::IValue preprocess(
     c10::StringType::get(), c10::AnyType::get());
 
   // Cast processed items from python objects to C++ classes and add to dict
-  dict.insert("ser_model_tensor", py::cast<torch::Tensor>(nnapi_processed[1]));
+  dict.insert("ser_model", py::cast<torch::Tensor>(nnapi_processed[1]));
   // serialize shape_compute_module for mobile
   auto shape_compute_module = py::cast<torch::jit::Module>(nnapi_processed[0].attr("_c"));
   std::stringstream ss;

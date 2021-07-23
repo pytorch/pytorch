@@ -36,7 +36,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     dict.insert("weights", weights);
 
     // save ser_model to member variable
-    ser_model = dict.at("ser_model").toTensor();
+    ser_model_ = dict.at("ser_model").toTensor();
 
     // wrap procesed in dictionary: {"forward": processed}
     c10::Dict<c10::IValue, c10::IValue> handles(
@@ -48,7 +48,7 @@ class NnapiBackend : public PyTorchBackendInterface {
   c10::impl::GenericList execute(
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
-    if (!comp) {
+    if (comp_ == nullptr) {
       init(handle, inputs);
       std::cout << "init" << std::endl;
     }
@@ -57,20 +57,24 @@ class NnapiBackend : public PyTorchBackendInterface {
   }
 
  private:
-  std::unique_ptr<torch::nnapi::NnapiCompilation> comp(nullptr);
-  c10::List<at::Tensor> out_templates;
-  at::Tensor ser_model;
-  mobile::Module shape_compute_module;
+  std::unique_ptr<torch::nnapi::bind::NnapiCompilation> comp_;
+  c10::List<at::Tensor> out_templates_;
+  at::Tensor ser_model_;
+  mobile::Module shape_compute_module_;
 
   void init(c10::IValue handle, c10::impl::GenericList inputs) {
     auto dict = handle.toGenericDict();
     std::stringstream ss;
-    std::string serialized = dict.at("shape_compute_module").toString();
-    ss.str(dict.at("shape_compute_module").toString());
-    shape_compute_module = _load_for_mobile(ss);
+    auto shape_ptr = dict.at("shape_compute_module").toString();
+    ss.str(*shape_ptr);
+    shape_compute_module_ = _load_for_mobile(ss);
 
-    // TORCH_CHECK(comp == nullptr);
-    // out_templates = shape_compute_module.prepare(ser_model, )
+    TORCH_CHECK(comp_ == nullptr);
+    auto weights = dict.at("weights").toTensorList();
+    out_templates_ = shape_compute_module_.run_method("prepare", ser_model_, weights).toTensorList();
+    comp_.reset(new torch::nnapi::bind::NnapiCompilation());
+    std::vector<at::Tensor> temp;
+    comp_->init(ser_model_, temp);
   }
 };
 

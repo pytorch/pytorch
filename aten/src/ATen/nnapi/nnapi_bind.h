@@ -11,7 +11,7 @@
 
 namespace torch {
 namespace nnapi {
-namespace {
+namespace bind {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* nnapi;
@@ -47,7 +47,7 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     int32_t num_outputs_;
 };
 
-} // namespace
+} // namespace bind
 } // namespace nnapi
 } // namespace torch
 
