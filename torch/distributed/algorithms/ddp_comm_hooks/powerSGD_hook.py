@@ -468,7 +468,7 @@ def powerSGD_hook(
     ).get_future()
 
     def unpack_uncompressed_tensors_and_allreduce_ps(fut):
-        uncompressed_tensors_memory = fut.value().div_(world_size)
+        uncompressed_tensors_memory = fut.value()[0].div_(world_size)
         idx = 0
         for tensor in uncompressed_tensors:
             tensor.copy_(
@@ -486,7 +486,7 @@ def powerSGD_hook(
         )
 
     def compute_qs(fut):
-        state.p_memory_dict[bucket_index] = fut.value()[0]
+        state.p_memory_dict[bucket_index] = fut.value()
         for p in ps:
             _orthogonalize(p, state.orthogonalization_epsilon)
 
