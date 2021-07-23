@@ -52,24 +52,15 @@ namespace meta {
 void resize_reduction(
     impl::MetaBase& meta,
     const Tensor& self,
-    c10::optional<IntArrayRef> opt_dims,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType out_dtype) {
-  auto dims = opt_dims.value_or(IntArrayRef{});
-  maybe_wrap_dims(dims, self.dim());
-  auto shape = get_reduction_shape(self, dims, keepdim);
+  DimVector dims_(dims);
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(
-      meta.maybe_get_output(), self, dims, keepdim);
-}
-
-void error_on_nodim_empty_reduce(
-    const char* name,
-    const Tensor& self,
-    const c10::optional<int64_t>& dim) {
-  TORCH_CHECK_VALUE(
-      dim.has_value() || self.numel() != 0,
-      name, ": expected reduction dim to be specified for input.numel() == 0.");
+      meta.maybe_get_output(), self, dims_, keepdim);
 }
 
 ScalarType infer_dtype_from_optional(
@@ -87,6 +78,10 @@ ScalarType infer_dtype_from_optional(
     // If the self type is an integer, we promote it to kLong.
     return at::native::get_dtype_from_self(self, opt_dtype, true);
   }
+}
+
+IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
+  return opt.has_value() ? opt.value() : IntArrayRef{};
 }
 
 ScalarType check_allany_and_get_output_dtype(
@@ -131,16 +126,30 @@ TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
+void check_argmax_argmin(
+    const char* name,
+    const Tensor& self,
+    const c10::optional<int64_t>& dim) {
+  if (dim.has_value()) {
+    auto dim_ = maybe_wrap_dim(dim.value(), self.dim());
+    native::zero_numel_check_dims(self, dim_, name);
+  } else {
+    TORCH_CHECK_INDEX(
+        self.numel() != 0,
+        name, ": Expected reduction dim to be specified for input.numel() == 0.");
+  }
+}
+
 TORCH_META_FUNC(argmax)
 (const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  error_on_nodim_empty_reduce("argmax()", self, dim);
-  resize_reduction(*this, self, dim, keepdim, kLong);
+  check_argmax_argmin("argmax()", self, dim);
+  resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
 TORCH_META_FUNC(argmin)
 (const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  error_on_nodim_empty_reduce("argmin()", self, dim);
-  resize_reduction(*this, self, dim, keepdim, kLong);
+  check_argmax_argmin("argmin()", self, dim);
+  resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
 TORCH_META_FUNC2(sum, dim_IntList)
