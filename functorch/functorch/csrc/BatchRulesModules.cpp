@@ -210,11 +210,21 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
   OP_DECOMPOSE(dropout);
+
   VMAP_SUPPORT("constant_pad_nd", SINGLE_ARG(basic_unary_batch_rule<decltype(&at::constant_pad_nd), &at::constant_pad_nd, IntArrayRef, const Scalar&>));
   VMAP_SUPPORT("reflection_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad1d), &at::reflection_pad1d, IntArrayRef>));
   VMAP_SUPPORT("reflection_pad2d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad2d), &at::reflection_pad2d, IntArrayRef>));
   VMAP_SUPPORT("replication_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad1d), &at::replication_pad1d, IntArrayRef>));
   VMAP_SUPPORT("replication_pad2d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad2d), &at::replication_pad2d, IntArrayRef>));
   VMAP_SUPPORT("replication_pad3d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad3d), &at::replication_pad3d, IntArrayRef>));
+
+  VMAP_SUPPORT("upsample_bicubic2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_bicubic2d, vec)), &at::upsample_bicubic2d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_bilinear2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_bilinear2d, vec)), &at::upsample_bilinear2d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_linear1d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_linear1d, vec)), &at::upsample_linear1d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_nearest1d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest1d, vec)), &at::upsample_nearest1d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_nearest2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest2d, vec)), &at::upsample_nearest2d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_nearest3d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest3d, vec)), &at::upsample_nearest3d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_trilinear3d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_trilinear3d, vec)), &at::upsample_trilinear3d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
+
 }
 }}
