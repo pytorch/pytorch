@@ -570,8 +570,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
-                                                        example_outputs, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size,
+                                                        example_outputs, val_do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes,
                                                         export_params=export_params,
                                                         keep_initializers_as_inputs=val_keep_init_as_ip)
