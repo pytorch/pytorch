@@ -1,10 +1,8 @@
 #include "caffe2/operators/reverse_packed_segs_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReversePackedSegs, ReversePackedSegsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReversePackedSegs)
     .NumInputs(2)
     .NumOutputs(1)
@@ -31,6 +29,5 @@ class GetReversePackedSegsGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ReversePackedSegs, GetReversePackedSegsGradient);
 } // namespace caffe2
