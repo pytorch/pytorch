@@ -118,7 +118,7 @@ class CIWorkflow:
             self.ciflow_config.enabled = False
             self.ciflow_config.reset_root_job()
 
-        if self.test_environment=='':
+        if self.test_environment == '':
             self.test_environment = self.build_environment
 
         # The following code allows for scheduled jobs to be debuggable by
