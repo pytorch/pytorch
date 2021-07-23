@@ -263,12 +263,11 @@ TEST(ListTest_IValueBasedList, whenIterating_thenFindsElements) {
   List<string> list({"3", "5"});
   bool found_first = false;
   bool found_second = false;
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (List<string>::iterator iter = list.begin(); iter != list.end(); ++iter) {
-    if (static_cast<string>(*iter) == "3") {
+  for (const auto && iter : list) {
+    if (static_cast<string>(iter) == "3") {
       EXPECT_FALSE(found_first);
       found_first = true;
-    } else if (static_cast<string>(*iter) == "5") {
+    } else if (static_cast<string>(iter) == "5") {
       EXPECT_FALSE(found_second);
       found_second = true;
     } else {
@@ -876,12 +875,11 @@ TEST(ListTest_NonIValueBasedList, whenIterating_thenFindsElements) {
   List<int64_t> list({3, 5});
   bool found_first = false;
   bool found_second = false;
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (List<int64_t>::iterator iter = list.begin(); iter != list.end(); ++iter) {
-    if (static_cast<int64_t>(*iter) == 3) {
+  for (const auto && iter : list) {
+    if (static_cast<int64_t>(iter) == 3) {
       EXPECT_FALSE(found_first);
       found_first = true;
-    } else if (static_cast<int64_t>(*iter) == 5) {
+    } else if (static_cast<int64_t>(iter) == 5) {
       EXPECT_FALSE(found_second);
       found_second = true;
     } else {
