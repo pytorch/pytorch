@@ -347,7 +347,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
-        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{in}, W_{in})`, where
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
             H_{out} = (H_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
