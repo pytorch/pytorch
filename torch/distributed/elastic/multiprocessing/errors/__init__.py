@@ -160,6 +160,8 @@ class ProcessFailure:
 
 GlobalRank = int
 
+_MAX_OTHER_FAILURES_SIZE = 8
+
 _FAILURE_FORMAT_TEMPLATE = """[${idx}]:
   time: ${time}
   rank: ${rank} (local_rank: ${local_rank})
@@ -175,7 +177,7 @@ ${section}
 Root Cause:
 ${root_failure}
 ${section}
-Other Failures:
+Other Failures(first ${other_failures_size}):
 ${other_failures}
 ${boarder}
 """
@@ -241,7 +243,7 @@ class ChildFailedError(Exception):
             width = max(width, w)
             if rank == root_rank:
                 root_failure_fmt = fmt
-            else:
+            elif len(other_failures_fmt) < _MAX_OTHER_FAILURES_SIZE:
                 other_failures_fmt.append(fmt)
 
         # upper boundary on width
@@ -252,6 +254,7 @@ class ChildFailedError(Exception):
             title=title.center(width),
             section=section_delim * width,
             root_failure=root_failure_fmt,
+            other_failures_size=_MAX_OTHER_FAILURES_SIZE,
             other_failures="\n".join(other_failures_fmt or ["  <NO_OTHER_FAILURES>"]),
         )
 
