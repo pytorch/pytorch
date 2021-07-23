@@ -1016,7 +1016,7 @@ REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
 REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
-REGISTER_AVX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
 
