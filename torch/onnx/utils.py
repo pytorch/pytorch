@@ -603,7 +603,9 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                                         output_names, operator_export_type,
                                                         example_outputs, _retain_param_name,
                                                         val_do_constant_folding, fixed_batch_size=fixed_batch_size,
-                                                        training=training, dynamic_axes=dynamic_axes)
+                                                        training=training, dynamic_axes=dynamic_axes,
+                                                        export_params=export_params,
+                                                        keep_initializers_as_inputs=val_keep_init_as_ip)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
                                         operator_export_type, google_printer,
