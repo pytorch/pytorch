@@ -21,7 +21,6 @@
 using namespace at;
 using namespace torch;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPGeneratorClass = nullptr;
 
 PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
@@ -188,7 +187,6 @@ static struct PyMemberDef THPGenerator_members[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPGeneratorType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C.Generator",                   /* tp_name */

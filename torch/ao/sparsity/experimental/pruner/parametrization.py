@@ -13,7 +13,7 @@ class PruningParametrization(nn.Module):
         return x[list(valid_outputs)]
 
 
-class ActivationReconstruction:
+class LinearActivationReconstruction:
     def __init__(self, parametrization):
         self.param = parametrization
 
@@ -23,4 +23,17 @@ class ActivationReconstruction:
         reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs)))
         valid_columns = list(max_outputs - pruned_outputs)
         reconstructed_tensor[:, valid_columns] = output
+        return reconstructed_tensor
+
+
+class Conv2dActivationReconstruction:
+    def __init__(self, parametrization):
+        self.param = parametrization
+
+    def __call__(self, module, input, output):
+        max_outputs = self.param.original_outputs
+        pruned_outputs = self.param.pruned_outputs
+        reconstructed_tensor = torch.zeros((output.shape[0], len(max_outputs), output.shape[2], output.shape[3]))
+        valid_columns = list(max_outputs - pruned_outputs)
+        reconstructed_tensor[:, valid_columns, :, :] = output
         return reconstructed_tensor

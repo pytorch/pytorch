@@ -3,7 +3,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CpuIdTest, ShouldAlwaysHaveMMX) {
   EXPECT_TRUE(GetCpuId().mmx());
 }
