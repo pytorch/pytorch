@@ -7894,7 +7894,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
-        ("CUDA_VERSION", ("HIP_VERSION", API_PYTORCH)),
+        ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
         ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
         ("define MAX_NUM_BLOCKS 200", ("define MAX_NUM_BLOCKS 64", API_PYTORCH)),
