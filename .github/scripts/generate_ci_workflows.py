@@ -54,6 +54,11 @@ class CIFlowConfig:
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
 
+    # trigger_action_only controls if we listen only on the trigger_action of a pull_request.
+    # If it's False, we listen on all default pull_request actions, this is useful when
+    # ciflow (via probot) is not automated yet.
+    trigger_action_only: bool = False
+
     def gen_root_job_condition(self) -> None:
         # TODO: Make conditions strict
         # At the beginning of the rollout of ciflow, we keep everything the same as what we have
@@ -228,6 +233,12 @@ LINUX_WORKFLOWS = [
         enable_nogpu_no_avx2_test=1,
         enable_slow_test=1,
         num_test_shards=2,
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels=set(['ciflow/slow']),
+        )
     ),
     CIWorkflow(
         arch="linux",

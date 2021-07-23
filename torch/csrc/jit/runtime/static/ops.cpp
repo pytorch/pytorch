@@ -182,7 +182,6 @@ Tensor& linear_out(
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 bool opIsRegistered(const c10::Symbol& op_name) {
@@ -210,6 +209,14 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
   }
 
   return nullptr;
+}
+
+// Returns true if the node represents an op with variadic arguments.
+bool hasVarArgs(Node* n) {
+  if (n->kind() == prim::Concat) {
+    return true;
+  }
+  return false;
 }
 
 // Expensive check, use sparingly.
@@ -251,7 +258,6 @@ bool isOptimizableContainerType(Node* n) {
   return is_supported_type && inputsCanRunOutOfPlace(n);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     prim::ListConstruct,
     prim_ListConstruct,
@@ -273,7 +279,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
@@ -295,7 +300,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor"))) {
@@ -315,7 +319,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor"))) {
@@ -337,7 +340,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor")) &&
@@ -368,7 +370,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
   if (!n->matches(
           torch::schema("aten::bmm(Tensor self, Tensor mat2) -> Tensor"))) {
@@ -387,7 +388,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor"))) {
@@ -407,7 +407,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
     at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
   };
 });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   if (!n->matches(
           torch::schema("aten::cat(Tensor[] tensors, int dim=0) -> Tensor"))) {
@@ -445,10 +444,8 @@ SROperator aten_stack(Node* n) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor"))) {
@@ -619,7 +616,6 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   return wrapTECompute(wrap, A, B, N, kSleefWidth);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::relu(Tensor self) -> Tensor"))) {
     LogAndDumpSchema(n);
@@ -643,7 +639,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::tanh(Tensor self) -> Tensor"))) {
     LogAndDumpSchema(n);
@@ -667,7 +662,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     aten::sigmoid,
     aten_sigmoid,
@@ -694,7 +688,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::logit(Tensor self, float? eps=None) -> Tensor"))) {
@@ -728,7 +721,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor"))) {
@@ -759,7 +751,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     at::native::copy_(out_t, src, false);
   };
 });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
     quantized_embedding_bag_byte_rowwise_offsets,
@@ -797,7 +788,6 @@ REGISTER_OPERATOR_FUNCTOR(
             include_last_offset);
       };
     });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
     embedding_bag_4bit_rowwise_offsets,
@@ -837,7 +827,6 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 // The out variant takes precedence over native
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::narrow_copy(Tensor self, int dim, int start, int length) -> Tensor"))) {
@@ -864,7 +853,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
     at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
 });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor"))) {
@@ -883,7 +871,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     at::native::index_out(out_t, in0_t, in1_l);
   };
 });
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor")) &&
@@ -942,7 +929,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
 });
 // out variant takes precedence over native
 // NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::to_copy,
     aten_to_copy,
@@ -1008,7 +994,6 @@ REGISTER_OPERATOR_FUNCTOR(
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::reshape_copy,
     aten_reshape,
@@ -1026,7 +1011,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::flatten_copy,
     aten_flatten,
@@ -1045,7 +1029,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   if (n->inputs().size() != 2 && n->inputs().size() != 4) {
     return nullptr;
@@ -1085,7 +1068,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -> SROperator {
   // TODO: Support only 9 args once the old signature has been removed.
   if (!n->matches(torch::schema(
@@ -1187,7 +1169,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::repeat(Tensor self, int[] repeats) -> Tensor"))) {
@@ -1206,7 +1187,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::sign.Tensor(Tensor input) -> Tensor"))) {
     LogAndDumpSchema(n);
@@ -1224,7 +1204,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::div.Tensor(Tensor self, Tensor other) -> Tensor")) &&
@@ -1274,7 +1253,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::log, aten_log, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor")) &&
@@ -1301,7 +1279,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
 });
 
 // TODO: support clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     aten::clamp_min,
     aten_clamp_min,
@@ -1323,7 +1300,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::argmin(Tensor self, int? dim=None, bool keepdim=False) -> Tensor"))) {
@@ -1343,7 +1319,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor"))) {
@@ -1394,7 +1369,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor")) &&
@@ -1447,7 +1421,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
   if (!n->matches(
           torch::schema("aten::matmul(Tensor self, Tensor other) -> Tensor"))) {
@@ -1467,7 +1440,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> Tensor Y"))) {
@@ -1510,7 +1482,6 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"))) {
@@ -1537,7 +1508,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
   };
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor"))) {
@@ -1556,6 +1526,40 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
     at::native::linear_out(out_t, in0_t, in1_t, in2_t);
+  };
+});
+
+namespace {
+
+void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
+  for (const auto i : c10::irange(tensors.size())) {
+    auto& t = tensors[i];
+    TORCH_CHECK(
+        t.dim() > 0,
+        "zero-dimensional tensor (at position ",
+        i,
+        ") cannot be concatenated");
+  }
+}
+
+} // namespace
+
+REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    const size_t num_inputs = p_node->inputs().size();
+    std::vector<at::Tensor> inputs(num_inputs - 1);
+    for (const auto i : c10::irange(num_inputs - 1)) {
+      inputs[i] = p_node->Input(i).toTensor();
+    }
+    auto dim = p_node->Input(num_inputs - 1).toInt();
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = at::cat(inputs, dim);
+    } else {
+      check_cat_no_zero_dim(inputs);
+      dim = legacy_cat_wrap_dim(dim, inputs);
+      auto& out_t = p_node->Output(0).toTensor();
+      at::native::_cat_out_cpu(inputs, dim, out_t);
+    }
   };
 });
 
