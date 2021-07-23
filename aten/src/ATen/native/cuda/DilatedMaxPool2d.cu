@@ -301,6 +301,9 @@ const Tensor& indices) {
   TensorArg input_arg{ input_, "input_", 3 };
 
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
+  if (output.numel() == 0) {
+    return;
+  }
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
@@ -424,6 +427,9 @@ const Tensor& gradInput) {
 
   checkAllSameGPU(__func__,
                   {gradInput_arg, gradOutput_arg, input_arg, indices_arg});
+  if (gradOutput_.numel() == 0) {
+    return;
+  }
 
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
