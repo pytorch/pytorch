@@ -109,27 +109,8 @@ struct TORCH_API LoadBalancer {
 };
 
 struct TORCH_API InterpreterManager {
-  InterpreterManager(size_t n_interp = 2) : resources_(n_interp) {
-    TORCH_DEPLOY_TRY
-    for (const auto i : c10::irange(n_interp)) {
-      instances_.emplace_back(this);
-      auto I = instances_.back().acquire_session();
-      // make torch.version.interp be the interpreter id
-      // can be used for balancing work across GPUs
-      I.global("torch", "version").attr("__setattr__")({"interp", int(i)});
-      // std::cerr << "Interpreter " << i << " initialized\n";
-      instances_.back().pImpl_->set_find_module(
-          [this](const std::string& name) -> at::optional<std::string> {
-            auto it = registered_module_sources_.find(name);
-            if (it != registered_module_sources_.end()) {
-              return it->second;
-            } else {
-              return at::nullopt;
-            }
-          });
-    }
-    TORCH_DEPLOY_SAFE_CATCH_RETHROW
-  }
+  explicit InterpreterManager(size_t n_interp = 2);
+
   // get a free model, guarenteed that no other user of acquire_one has the same
   // model. It _is_ possible that other users will be using the interpreter.
   InterpreterSession acquire_one() {
