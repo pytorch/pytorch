@@ -523,7 +523,7 @@ class WeightedSumGradientOp : public Operator<Context> {
  *
  * For now really works only on CPU because of INDICES access
  */
-template <typename T, class Context>
+template <class Context>
 class ScatterWeightedSumOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -531,17 +531,29 @@ class ScatterWeightedSumOp : public Operator<Context> {
   USE_DISPATCH_HELPER;
 
   bool RunOnDevice() override {
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+    const auto& x0 = Input(0);
+    const auto x0Type = TypeMetaToDataType(x0.dtype());
+    if (x0Type == TensorProto_DataType_FLOAT) {
+      return ScatterWeightedSumOp::template DoRun<float>();
+    }
+    if (x0Type == TensorProto_DataType_DOUBLE) {
+      return ScatterWeightedSumOp::template DoRun<double>();
+    }
+    CAFFE_THROW("Unsupported type of tensor X_0: ", x0.dtype().name());
   }
 
  private:
-  template <typename Index>
+  template<typename T>
+  bool DoRun() {
+    return DispatchHelper<TensorTypes<int32_t, int64_t>, T>::call(this, Input(2));
+  }
+  template <typename T, typename Index>
   bool DoRunWithType() {
     int64_t block_size = Input(0).size_from_dim(1);
-    return DispatchHelper<FixedValues<1>, Index>::call(this, block_size);
+    return DispatchHelper<FixedValues<1>, T, Index>::call(this, block_size);
   }
 
-  template <typename Index, int FixedSize>
+  template <typename T, typename Index, int FixedSize>
   bool DoRunWithValue() {
     CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
     auto& X0 = Input(0);
@@ -562,7 +574,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
     int64_t block_size = M / N;
     T* data = output->template mutable_data<T>();
     const Index* idxs = indices.template data<Index>();
-    T w0 = *weight0.template data<T>();
+    float w0 = *weight0.template data<float>();
     // It's most likely a constant so exact comparison is fine
     if (w0 != 1.0) {
       for (int i = 0; i < K; ++i) {
@@ -587,7 +599,7 @@ class ScatterWeightedSumOp : public Operator<Context> {
       CAFFE_ENFORCE_EQ(X.numel(), block_size * K);
       CAFFE_ENFORCE_EQ(weight.numel(), 1);
       const T* x_data = X.template data<T>();
-      T w = *weight.template data<T>();
+      float w = *weight.template data<float>();
       for (int i = 0; i < K; ++i) {
         Index idx = idxs[i];
         // double-checking the indices, but it's fine as it's DCHECK only

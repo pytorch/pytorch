@@ -23,7 +23,7 @@ export LANG=C.UTF-8
 #       see https://github.com/pytorch/pytorch/issues/60111
 IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 
-if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
 fi
@@ -55,7 +55,8 @@ else
   export PYTORCH_TEST_SKIP_NOARCH=1
 fi
 
-if [[ -n "$IN_PULL_REQUEST" ]]; then
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
 else
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
@@ -128,10 +129,12 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
@@ -264,7 +267,9 @@ test_distributed() {
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
-    if [[ -n "$MPIEXEC" ]]; then
+    # TODO: this is disabled on GitHub Actions until this issue is resolved
+    # https://github.com/pytorch/pytorch/issues/60756
+    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
       MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
@@ -382,7 +387,7 @@ test_bazel() {
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
@@ -439,7 +444,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests

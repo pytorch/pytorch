@@ -313,7 +313,16 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
       if (profiled_type == TensorType::get()) {
         continue;
       }
-      it->input()->setType(it->ty(attr::profiled_type));
+      // If we encounter non-identical profiled types for the same value, merge
+      // them.  This situation can happen if, e.g., loop unrolling duplicates
+      // profiled types in a loop body in a manner that isn't logically
+      // consistent (see TestTEFuser.test_unrolled_cat).
+      auto input_type = it->input()->type()->expect<TensorType>();
+      if (input_type == TensorType::get()) {
+        it->input()->setType(profiled_type);
+      } else {
+        it->input()->setType(input_type->merge(*profiled_type));
+      }
       it.destroyCurrent();
 
     } else {
@@ -963,9 +972,12 @@ class TensorExprFuser {
           return false;
         }
 
-        // Float16 has a few kinks on LLVM.  Disable it until we either move to
-        // a more stable version or find workarounds.
-        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
+        // Float16 support has some issues (see e.g. #61336 and #61382), so for
+        // now it's disabled. There seem to be some problems in HalfRewriter,
+        // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
+        // additionally disable it until we either move to a more stable version
+        // or find workarounds.
+        if (*st == c10::ScalarType::Half) {
           return false;
         }
 
