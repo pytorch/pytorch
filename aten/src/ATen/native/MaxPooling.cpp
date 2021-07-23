@@ -21,12 +21,9 @@ Tensor max_pool1d_impl(
     bool ceil_mode) {
   NoNamesGuard guard;
 
-  bool valid_inputs = ((self.dim() == 2 && self.size(1) != 0) ||
-                       (self.dim() == 3 && self.size(1) != 0 && self.size(2) != 0));
-
   TORCH_CHECK(
-      valid_inputs,
-      "max_pool1d(): Expected 2D or 3D input tensor with optional non-zero batch dim, but got ",
+      self.dim() == 2 || self.dim() == 3,
+      "max_pool1d() Expected 2D or 3D input tensor with optional non-zero batch dim, but got ",
       self.dim());
   TORCH_CHECK(
       kernel_size.size() == 1,

@@ -13275,9 +13275,8 @@ class TestNNDeviceType(NNTestCase):
         mod = torch.nn.MaxPool1d(3, stride=2).to(device)
         self._test_module_empty_input(mod, inp, check_size=False)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected"):
-            inp = torch.randn(1, 0, 50, device=device)
-            mod(inp)
+        # 1D is supposed to be okay with 0 numel() inputs so dont test
+        # error raising for that case.
 
         inp = torch.randn(0, 16, 50, 32, device=device)
         mod = torch.nn.MaxPool2d(3, stride=2).to(device)
@@ -13818,8 +13817,8 @@ class TestNNDeviceType(NNTestCase):
                 model(torch.tensor(x, device=device, dtype=dtype))
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
-        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check(0, (1,), "Expected 2D or 3D input tensor with optional non-zero batch dim, but got 0")
+        check([], (1,), "Expected 2D or 3D input tensor with optional non-zero batch dim, but got 1")
         check([[]], (1, 0), "stride must be greater than zero, but got 0")
         check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
         check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
