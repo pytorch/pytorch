@@ -47,7 +47,6 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     TEST_WITH_TSAN,
 )
-from torch.utils.checkpoint import checkpoint
 
 
 class RendezvousEnvTest(TestCase):
