@@ -22,6 +22,7 @@ from common_utils import (
     parameterized_with_device,
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
+    opinfo_in_dict,
 )
 import types
 
@@ -2878,9 +2879,10 @@ class TestVmapOperatorsOpInfo(TestCase):
             'resize_',
             'to_sparse',
             'resolve_neg',
+            'nn.functional.pad.circular',
         }
         # Unsupported input types
-        if op.name in op_skip:
+        if opinfo_in_dict(op, op_skip):
             return
         # entries in here need don't work and need to be fixed.
         # Each one of these is a bug
@@ -2889,9 +2891,8 @@ class TestVmapOperatorsOpInfo(TestCase):
             'squeeze',
             'unfold',
             'nn.functional.linear',
-            'nn.functional.pad',
         }
-        if op.name in vmap_fail:
+        if opinfo_in_dict(op, vmap_fail):
             return
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:

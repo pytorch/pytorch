@@ -23,6 +23,7 @@ from common_utils import (
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
+    opinfo_in_dict
 )
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -265,7 +266,7 @@ class TestOperators(TestCase):
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
             'nn.functional.linear',
-            'nn.functional.pad',
+            'nn.functional.pad.circular',
             'broadcast_to',
             'dsplit',
             'dstack',
@@ -286,7 +287,7 @@ class TestOperators(TestCase):
             'resolve_neg',
         }
         op_skip = op_skip.union(vjp_fail)
-        if op.name in op_skip:
+        if opinfo_in_dict(op, op_skip):
             self.skipTest("Skipped; Expected failures")
             return
         if not op.supports_autograd:
@@ -309,7 +310,7 @@ class TestOperators(TestCase):
     def test_vjpvmap(self, device, dtype, op):
         op_skip = {
             'nn.functional.linear',
-            'nn.functional.pad',
+            'nn.functional.pad.circular',
             '__getitem__',
             '__rpow__',
             'broadcast_to',
@@ -338,7 +339,7 @@ class TestOperators(TestCase):
             'clamp',
             'resolve_neg',
         }
-        if op.name in op_skip:
+        if opinfo_in_dict(op, op_skip):
             self.skipTest("Skipped; Expected failures")
             return
 
