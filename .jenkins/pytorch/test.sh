@@ -438,10 +438,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
-  test_backward_compatibility
-  # Do NOT add tests after bc check tests, see its comment.
-elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
@@ -484,6 +481,11 @@ else
   if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
     test_python_gloo_with_tls
   fi
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+  test_backward_compatibility
+  # Do NOT add tests after bc check tests, see its comment.
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then

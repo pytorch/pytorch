@@ -100,6 +100,7 @@ class CIWorkflow:
     num_test_shards: int = 1
     on_pull_request: bool = False
     only_build_on_pull_request: bool = False
+    test_environment: str = ''
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -116,6 +117,9 @@ class CIWorkflow:
             self.only_build_on_pull_request = False
             self.ciflow_config.enabled = False
             self.ciflow_config.reset_root_job()
+
+        if self.test_environment=='':
+            self.test_environment = self.build_environment
 
         # The following code allows for scheduled jobs to be debuggable by
         # adding the label 'ciflow/scheduled' and assigning + unassigning pytorchbot,
@@ -184,6 +188,8 @@ LINUX_WORKFLOWS = [
     CIWorkflow(
         arch="linux",
         build_environment="pytorch-linux-xenial-py3.6-gcc5.4",
+        # piggyback BWC test on this job
+        test_environment="pytorch-linux-xenial-py3.6-gcc5.4-backward",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,

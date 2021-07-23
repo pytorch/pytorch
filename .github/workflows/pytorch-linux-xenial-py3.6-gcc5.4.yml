@@ -233,6 +233,7 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
+      BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4-backward
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc5.4-test
       TEST_CONFIG: ${{ matrix.config }}

@@ -262,6 +262,9 @@ jobs:
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
+    {%- if test_environment!=build_environment +%}
+      BUILD_ENVIRONMENT: !{{ test_environment }}
+    {%- endif %}
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
