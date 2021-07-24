@@ -8,6 +8,9 @@ namespace jit {
 // return true if graph is modified
 TORCH_API bool UnrollLoops(std::shared_ptr<Graph>& graph);
 
+// Only unrolls constant loops. Will unroll them regardless of loop block size
+TORCH_API bool UnrollConstantLoops(std::shared_ptr<Graph>& graph);
+
 TORCH_API Node* PeelLoop(Node* n, size_t times);
 
 // return true if graph is modified

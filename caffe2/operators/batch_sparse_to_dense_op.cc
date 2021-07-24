@@ -3,16 +3,17 @@
 namespace caffe2 {
 
 template <>
+template <typename TLen, typename TInd>
 void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* values_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 
@@ -33,16 +34,17 @@ void BatchSparseToDenseOp<float, CPUContext>::FillInDenseValues(
 }
 
 template <>
+template <typename TLen, typename TInd>
 void BatchDenseToSparseOp<float, CPUContext>::FillInSparseValues(
     const int64_t batch_size,
     const int64_t indice_lengths,
-    const int64_t* lengths_data,
-    const int64_t* indices_data,
+    const TLen* lengths_data,
+    const TInd* indices_data,
     const float* dense_data,
     float* output_data,
     CPUContext* /*context*/) {
-  int64_t lengths_sum = 0;
-  math::Sum<int64_t, CPUContext>(
+  TLen lengths_sum = 0;
+  math::Sum<TLen, CPUContext>(
       batch_size, lengths_data, &lengths_sum, &context_);
   CAFFE_ENFORCE_EQ(lengths_sum, indice_lengths);
 

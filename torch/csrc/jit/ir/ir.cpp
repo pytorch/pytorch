@@ -4,6 +4,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -23,22 +24,37 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
 // Constants relating to maintaining the topological index of nodes.
 //
 // Lower and upper bounds of the index. Inclusive range.
-static constexpr topo_position_t kLowerBound = INT64_MIN;
-static constexpr topo_position_t kUpperBound = INT64_MAX;
-static constexpr topo_position_t kMidPoint = 0;
+constexpr topo_position_t kLowerBound = INT64_MIN;
+constexpr topo_position_t kUpperBound = INT64_MAX;
+constexpr topo_position_t kMidPoint = 0;
 
 // How far away to space nodes that are appended to the graph.
 // should be 2^n, where:
 //   - n is the maximum number of repeated insertions without a re-index
 //   - 2^(64-n) is the maximum number of appends to the end without reindex
-static constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
+constexpr topo_position_t kAppendInterval = 1099511627776ULL /* 2^40 */;
 
-static void printValueRef(std::ostream& out, const Value* n) {
+void printValueRef(std::ostream& out, const Value* n) {
   out << "%" << n->debugName();
 }
+
+bool isNumber(c10::string_view str) {
+  return str.find_first_not_of("0123456789") == std::string::npos;
+}
+
+std::string normalizeAttrName(c10::string_view field) {
+  if (isNumber(field)) {
+    return "_" + std::string{field};
+  }
+  return std::string{field};
+}
+
+} // namespace
 
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
@@ -294,6 +310,7 @@ std::ostream& Node::print(
     }
     if (auto file_line_col = r.file_line_col()) {
       std::string filename;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t line, col;
       std::tie(filename, line, col) = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
@@ -489,6 +506,7 @@ void Graph::lint() const {
       AT_ASSERT(!contains(n));
       nodes.insert(n);
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     std::unique_ptr<LintScope> parent;
 
    private:
@@ -768,7 +786,7 @@ bool Value::isValidName(const std::string& name) {
   }
 
   // Numbers are not legal
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
+  if (isNumber(name)) {
     return false;
   }
 
@@ -867,6 +885,24 @@ void Value::replaceAllUsesAfterNodeWith(const Node* node, Value* newValue) {
           uses_.begin(),
           uses_.end(),
           [&node](const Use& u) { return u.user->isAfter(node); }),
+      uses_.end());
+}
+
+void Value::replaceAllUsesDominatedByNodeWith(
+    const Node* node,
+    Value* newValue) {
+  std::for_each(uses_.begin(), uses_.end(), [&node, newValue](Use& u) {
+    if (u.user->isDominatedBy(node)) {
+      u.user->inputs_[u.offset] = newValue;
+      newValue->uses_.push_back(u);
+    }
+  });
+
+  uses_.erase(
+      std::remove_if(
+          uses_.begin(),
+          uses_.end(),
+          [&node](const Use& u) { return u.user->isDominatedBy(node); }),
       uses_.end());
 }
 
@@ -1104,6 +1140,7 @@ bool Node::hasSideEffects() const {
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
+    case cuda::synchronize:
 #endif
     case prim::Enter:
     case prim::Exit:
@@ -1270,7 +1307,7 @@ void Node::cloneFrom(Node* s) {
 void Node::replaceAllUsesWith(Node* n) {
   AT_ASSERT(outputs().size() == n->outputs().size());
   size_t nOutputs = outputs().size();
-  for (size_t i = 0; i < nOutputs; i++) {
+  for (const auto i : c10::irange(nOutputs)) {
     outputs()[i]->replaceAllUsesWith(n->outputs()[i]);
   }
 }
@@ -1288,12 +1325,24 @@ Node* Node::replaceWithNewSymbol(Symbol new_symbol) {
     v->replaceAllUsesWith(new_out);
   }
   replace_node->copyMetadata(this);
+  replace_node->copyAttributes(*this);
   TORCH_INTERNAL_ASSERT(
       (replace_node->maybeOperator() != nullptr) == had_operator,
       "invalid symbol replacement:",
       new_symbol,
       kind());
   return replace_node;
+}
+
+bool Node::isDominatedBy(const Node* dominator) const {
+  const Node* node = this;
+  while (node) {
+    if (node->owningBlock() == dominator->owningBlock()) {
+      return dominator->isBefore(node);
+    }
+    node = node->owningBlock()->owningNode();
+  }
+  return false;
 }
 
 Value* Node::insertInput(size_t i, Value* value) {
@@ -1582,7 +1631,8 @@ Value* Graph::insert(
 Node* Graph::create(NodeKind kind, size_t num_outputs) {
   // NB: Node constructor adds node to all_nodes
   auto n = new Node(this, kind);
-  for (size_t i = 0; i < num_outputs; i++) {
+  for (const auto i : c10::irange(num_outputs)) {
+    (void)i;
     n->addOutput();
   }
   return n;
@@ -1762,6 +1812,7 @@ Node* Graph::createGetAttr(Value* obj, const std::string& field) {
 
   const auto outputType = classType->getAttribute(field);
   n->output()->setType(outputType);
+  n->output()->setDebugName(normalizeAttrName(field));
   return n;
 }
 
@@ -1928,6 +1979,53 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
+void inlineCallStackOfNode(
+    Node* n,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info);
+
+void inlineCallStackOfBlock(
+    Block* b,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  for (auto n : b->nodes()) {
+    inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
+void inlineCallStackOfNode(
+    Node* new_node,
+    std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
+    Function* callee,
+    Node* to_replace,
+    c10::optional<ModuleInstanceInfo> m_info) {
+  auto new_node_cs = new_node->callstack();
+
+  InlinedCallStack* raw_callstack_ptr =
+      new_node_cs ? new_node_cs->get() : nullptr;
+
+  if (!new_cs_entries.count(raw_callstack_ptr)) {
+    if (new_node_cs) {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          *new_node_cs, callee, to_replace->sourceRange(), m_info);
+    } else {
+      new_cs_entries[raw_callstack_ptr] = c10::make_intrusive<InlinedCallStack>(
+          callee, to_replace->sourceRange(), m_info);
+    }
+  }
+  new_node->setCallStack(new_cs_entries.at(raw_callstack_ptr));
+  // We updated the inlined callstack of new_node.
+  // Same must be done for the nodes of the blocks of new_node.
+  // For example If node's block otherwise is not annotated appropriately.
+  for (auto block : new_node->blocks()) {
+    inlineCallStackOfBlock(block, new_cs_entries, callee, to_replace, m_info);
+  }
+}
+
 // inline_optimized_graph argument is used in substitute function call for
 // ONNX conversion
 std::vector<Value*> inlineCallTo(
@@ -2004,26 +2102,12 @@ std::vector<Value*> inlineCallTo(
       continue;
     }
 
-    auto new_node_cs = new_node->callstack();
-
-    InlinedCallStack* raw_callstack_ptr =
-        new_node_cs ? new_node_cs->get() : nullptr;
-
-    if (!new_callstack_entries.count(raw_callstack_ptr)) {
-      if (new_node_cs) {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                *new_node_cs,
-                callee,
-                to_replace->sourceRange(),
-                module_instance_info);
-      } else {
-        new_callstack_entries[raw_callstack_ptr] =
-            c10::make_intrusive<InlinedCallStack>(
-                callee, to_replace->sourceRange(), module_instance_info);
-      }
-    }
-    new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
+    inlineCallStackOfNode(
+        new_node,
+        new_callstack_entries,
+        callee,
+        to_replace,
+        module_instance_info);
   }
   const auto& old_outputs = to_replace->outputs();
 

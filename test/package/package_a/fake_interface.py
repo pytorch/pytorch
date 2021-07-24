@@ -42,7 +42,7 @@ class UsesInterface(torch.nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.proxy_mod = OrigModule()  # type: ignore
+        self.proxy_mod = OrigModule()
 
     def forward(self, input: Tensor) -> Tensor:
-        return self.proxy_mod.one(input, input)  # type: ignore
+        return self.proxy_mod.one(input, input)

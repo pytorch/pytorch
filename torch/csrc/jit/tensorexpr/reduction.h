@@ -33,7 +33,7 @@ class TORCH_API Reducer {
   Reducer(ExprHandle init, RI interaction) : init_(init.node()) {
     interaction_ = interaction;
   }
-  virtual ~Reducer() {}
+  virtual ~Reducer() = default;
 
   const Expr* initializer() const {
     return init_;
@@ -109,8 +109,8 @@ class TORCH_API Reducer {
       ExprHandle body,
       const std::vector<const Expr*>& output_args,
       const std::vector<const Var*>& reduce_args) {
-    ExprHandle accum = ExprHandle(
-        new Load(body.dtype(), accumulator, output_args, new IntImm(1)));
+    ExprHandle accum =
+        ExprHandle(new Load(body.dtype(), accumulator, output_args));
     auto e = interaction(accum, body);
     return e.node();
   }
@@ -127,13 +127,14 @@ class TORCH_API Reducer {
 // This is intended to be expanded in the loopnest and not make it to codegen.
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ReduceOp(
       const Expr* body,
-      const std::vector<const Var*>& reduce_args,
+      std::vector<const Var*> reduce_args,
       const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
-        reduce_args_(reduce_args),
+        reduce_args_(std::move(reduce_args)),
         reducer_(reducer) {}
 
   // return the body expression which obtains the value to be reduced.

@@ -19,7 +19,7 @@ class Pass(nn.Module):
 class StashFoo(nn.Module):
     def forward(self, input):
         yield stash("foo", input)
-        return input # noqa
+        return input  # noqa: B901
 
 
 @skippable(pop=["foo"])
@@ -33,7 +33,7 @@ class PopFoo(nn.Module):
 class StashBar(nn.Module):
     def forward(self, input):
         yield stash("bar", input)
-        return input # noqa
+        return input  # noqa: B901
 
 
 @skippable(pop=["bar"])

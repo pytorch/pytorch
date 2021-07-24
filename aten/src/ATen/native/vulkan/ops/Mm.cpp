@@ -217,8 +217,8 @@ Tensor mm(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("addmm", TORCH_FN(addmm));
-  m.impl("mm", TORCH_FN(mm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::addmm"), TORCH_FN(addmm));
+  m.impl(TORCH_SELECTIVE_NAME("aten::mm"), TORCH_FN(mm));
 }
 
 #endif /* USE_VULKAN_API */
@@ -319,8 +319,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(addmm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},
@@ -368,8 +368,8 @@ Tensor LinearOpContext::run(
             },
             VK_KERNEL(mm),
             {
-              div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
-              div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
+              safe_downcast<uint32_t>(div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
               1,
             },
             {8, 8, 1},

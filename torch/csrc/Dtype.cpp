@@ -63,6 +63,7 @@ PyObject *THPDtype_reduce(PyObject *_self, PyObject *noargs)
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
   {"is_complex", (getter)THPDtype_is_complex, nullptr, nullptr, nullptr},
@@ -70,6 +71,7 @@ static struct PyGetSetDef THPDtype_properties[] = {
   {nullptr}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static PyMethodDef THPDtype_methods[] = {
   {"__reduce__", THPDtype_reduce, METH_NOARGS, nullptr},
   {nullptr}  /* Sentinel */

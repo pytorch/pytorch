@@ -60,8 +60,8 @@ AT_FORALL_OPERATORS(DEFINE_COMPARATOR)
 #undef AT_FORALL_OPERATORS
 #undef DEFINE_COMPARATOR
 
-Tensor& quantized_resize_cpu_(
-    Tensor& self,
+const Tensor& quantized_resize_cpu_(
+    const Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
@@ -74,6 +74,7 @@ Tensor& quantized_resize_cpu_(
           qscheme == QScheme::PER_TENSOR_SYMMETRIC,
       "Can only resize quantized tensors with per-tensor schemes!");
   auto* self_ = self.unsafeGetTensorImpl();
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
   return self;
 }

@@ -1,3 +1,4 @@
+#include <c10/util/DeadlockDetection.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
 namespace torch {
@@ -35,6 +36,7 @@ void RpcAgent::start() {
 }
 
 void RpcAgent::shutdown() {
+  TORCH_ASSERT_NO_GIL_WITHOUT_PYTHON_DEP();
   std::unique_lock<std::mutex> lock(rpcRetryMutex_);
   rpcAgentRunning_.store(false);
   lock.unlock();
@@ -42,12 +44,13 @@ void RpcAgent::shutdown() {
   if (rpcRetryThread_.joinable()) {
     rpcRetryThread_.join();
   }
+  // NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)
   shutdownImpl();
 }
 
-std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
+c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
     const WorkerInfo& to,
-    Message&& message,
+    c10::intrusive_ptr<Message> message,
     RpcRetryOptions retryOptions) {
   TORCH_CHECK(retryOptions.maxRetries >= 0, "maxRetries cannot be negative.");
   TORCH_CHECK(
@@ -57,25 +60,18 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       retryOptions.rpcRetryDuration.count() >= 0,
       "rpcRetryDuration cannot be negative.");
 
-  auto originalFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+  auto originalFuture =
+      c10::make_intrusive<JitFuture>(at::AnyClassType::get(), getDevices());
   steady_clock_time_point newTime =
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
-  // Making a copy of the message so it can be retried after the first send.
-  Message msgCopy = message;
-  auto jitFuture = send(to, std::move(message));
   auto firstRetryRpc = std::make_shared<RpcRetryInfo>(
       to,
-      std::move(msgCopy),
+      message,
       originalFuture,
       /* retryCount */ 0,
       retryOptions);
-  // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
-  jitFuture->addCallback([this,
-                          newTime,
-                          firstRetryRpc,
-                          wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-    auto future = wp.lock();
-    TORCH_INTERNAL_ASSERT(future);
+  auto jitFuture = send(to, std::move(message));
+  jitFuture->addCallback([this, newTime, firstRetryRpc](JitFuture& future) {
     rpcRetryCallback(future, newTime, firstRetryRpc);
   });
 
@@ -85,10 +81,11 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
 void RpcAgent::retryExpiredRpcs() {
   // Stores the retried futures so callbacks can be added outside the lock.
   std::vector<
-      std::pair<std::shared_ptr<JitFuture>, std::shared_ptr<RpcRetryInfo>>>
+      std::pair<c10::intrusive_ptr<JitFuture>, std::shared_ptr<RpcRetryInfo>>>
       futures;
   // Stores futures and exception messages for non-retriable error-ed futures.
-  std::vector<std::pair<std::shared_ptr<JitFuture>, std::string>> errorFutures;
+  std::vector<std::pair<c10::intrusive_ptr<JitFuture>, std::string>>
+      errorFutures;
 
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(rpcRetryMutex_);
@@ -123,16 +120,14 @@ void RpcAgent::retryExpiredRpcs() {
     for (auto it = earliestRpcList.begin(); it != earliestRpcList.end();
          /* no increment */) {
       auto& earliestRpc = *it;
-      // Making a copy of the message so it can be retried in the future.
-      Message msgCopy = earliestRpc->message_;
-      std::shared_ptr<JitFuture> jitFuture;
+      c10::intrusive_ptr<JitFuture> jitFuture;
 
       // send() will throw an exception if an RPC is retried while the agent is
       // shutdown. We must catch this exception and mark the original future
       // with an error, since this RPC never succeeded and can no longer be
       // retried.
       try {
-        jitFuture = send(earliestRpc->to_, std::move(msgCopy));
+        jitFuture = send(earliestRpc->to_, earliestRpc->message_);
         futures.emplace_back(jitFuture, earliestRpc);
       } catch (std::exception& e) {
         // We must store the futures and exception messages here and only mark
@@ -163,13 +158,7 @@ void RpcAgent::retryExpiredRpcs() {
           earliestRpc->options_, earliestRpc->retryCount_);
       earliestRpc->retryCount_++;
 
-      // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
-      jitFuture->addCallback([this,
-                              newTime,
-                              earliestRpc,
-                              wp = std::weak_ptr<JitFuture>(jitFuture)]() {
-        auto future = wp.lock();
-        TORCH_INTERNAL_ASSERT(future);
+      jitFuture->addCallback([this, newTime, earliestRpc](JitFuture& future) {
         rpcRetryCallback(future, newTime, earliestRpc);
       });
     }
@@ -188,10 +177,10 @@ void RpcAgent::retryExpiredRpcs() {
 }
 
 void RpcAgent::rpcRetryCallback(
-    const std::shared_ptr<JitFuture>& jitFuture,
+    JitFuture& jitFuture,
     steady_clock_time_point newTime,
     std::shared_ptr<RpcRetryInfo> earliestRpc) {
-  if (jitFuture->hasError()) {
+  if (jitFuture.hasError()) {
     // Adding one since we want to include the original send as well and not
     // just the retry count.
     LOG(INFO) << "Send try " << (earliestRpc->retryCount_ + 1) << " failed";
@@ -203,7 +192,7 @@ void RpcAgent::rpcRetryCallback(
           "RPC Agent is no longer running on Node ",
           RpcAgent::getWorkerInfo().id_,
           ". Cannot retry message.");
-      earliestRpc->originalFuture_->setError(jitFuture->exception_ptr());
+      earliestRpc->originalFuture_->setError(jitFuture.exception_ptr());
     } else if (earliestRpc->retryCount_ < earliestRpc->options_.maxRetries) {
       // If the previous future completed with an error and we haven't
       // completed maxRetries send attempts, we move the earliestRpc
@@ -228,7 +217,8 @@ void RpcAgent::rpcRetryCallback(
     }
   } else {
     // This try succeeded, so we can make the original future as complete.
-    earliestRpc->originalFuture_->markCompleted(jitFuture->value());
+    earliestRpc->originalFuture_->markCompleted(
+        jitFuture.value(), jitFuture.storages());
   }
 }
 
@@ -286,10 +276,15 @@ bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
 }
 
-std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
-    const WorkerInfo& dest) {
+DeviceMap RpcAgent::getDeviceMap(const WorkerInfo& /* unused */) const {
   // Default implementation has no device map.
   return {};
+}
+
+const std::vector<c10::Device>& RpcAgent::getDevices() const {
+  // By default the agent is CPU-only.
+  static const std::vector<c10::Device> noDevices = {};
+  return noDevices;
 }
 
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {

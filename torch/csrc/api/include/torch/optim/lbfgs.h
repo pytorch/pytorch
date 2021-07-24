@@ -26,11 +26,13 @@ struct TORCH_API LBFGSOptions : public OptimizerCloneableOptions<LBFGSOptions> {
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const LBFGSOptions& lhs, const LBFGSOptions& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~LBFGSOptions() = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSParamState> {
   TORCH_ARG(int64_t, func_evals) = 0;
   TORCH_ARG(int64_t, n_iter) = 0;
@@ -48,6 +50,7 @@ struct TORCH_API LBFGSParamState : public OptimizerCloneableParamState<LBFGSPara
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~LBFGSParamState() = default;
 };
 
@@ -65,6 +68,7 @@ class TORCH_API LBFGS : public Optimizer {
    }
    explicit LBFGS(
        std::vector<Tensor> params,
+       // NOLINTNEXTLINE(performance-move-const-arg)
        LBFGSOptions defaults = {}) : LBFGS({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   Tensor step(LossClosure closure) override;

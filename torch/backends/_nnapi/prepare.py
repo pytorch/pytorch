@@ -1,7 +1,8 @@
 from typing import Optional, List
 
 import torch
-from torch.backends._nnapi.serializer import serialize_model
+from torch.backends._nnapi.serializer import _NnapiSerializer
+
 
 class NnapiModule(torch.nn.Module):
     """Torch Module that wraps an NNAPI Compilation.
@@ -11,7 +12,8 @@ class NnapiModule(torch.nn.Module):
     of all inputs and outputs.
     """
 
-    comp: Optional[torch.classes._nnapi.Compilation]
+    # _nnapi.Compilation is defined
+    comp: Optional[torch.classes._nnapi.Compilation]  # type: ignore[name-defined]
     weights: List[torch.Tensor]
     out_templates: List[torch.Tensor]
 
@@ -35,7 +37,7 @@ class NnapiModule(torch.nn.Module):
     @torch.jit.export
     def init(self, args: List[torch.Tensor]):
         assert self.comp is None
-        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)
+        self.out_templates = self.shape_compute_module.prepare(self.ser_model, args)  # type: ignore[operator]
         self.weights = [w.contiguous() for w in self.weights]
         comp = torch.classes._nnapi.Compilation()
         comp.init(self.ser_model, self.weights)
@@ -74,14 +76,15 @@ class NnapiModule(torch.nn.Module):
                 raise Exception("Invalid mem_fmt")
         return outs
 
-
-def convert_model_to_nnapi(model, inputs):
+def convert_model_to_nnapi(model, inputs, serializer=None):
     model = torch.jit.freeze(model)
 
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs]
 
-    ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines, retval_count = serialize_model(model, inputs)
+    serializer = serializer or _NnapiSerializer(config=None)
+    (ser_model, used_weights, inp_mem_fmts, out_mem_fmts, shape_compute_lines,
+     retval_count) = serializer.serialize_model(model, inputs)
     ser_model_tensor = torch.tensor(ser_model, dtype=torch.int32)
 
     # We have to create a new class here every time this function is called

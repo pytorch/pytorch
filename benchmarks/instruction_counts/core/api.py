@@ -1,9 +1,10 @@
 """Key enums and structs used to handle data flow within the benchmark."""
 import dataclasses
 import enum
+import itertools as it
 import re
 import textwrap
-from typing import Dict, List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
 
@@ -41,6 +42,15 @@ class AutoLabels:
     runtime: RuntimeMode
     autograd: AutogradMode
     language: Language
+
+    @property
+    def as_dict(self) -> Dict[str, str]:
+        """Dict representation for CI reporting."""
+        return {
+            "runtime": self.runtime.value,
+            "autograd": self.autograd.value,
+            "language": "Python" if self.language == Language.PYTHON else "C++",
+        }
 
 
 @dataclasses.dataclass(frozen=True)
@@ -258,7 +268,13 @@ class GroupedBenchmark:
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
         variants: Dict[Union[Tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
-        for label in set(list(py_cases.keys()) + list(cpp_cases.keys())):
+
+        seen_labels: Set[str] = set()
+        for label in it.chain(py_cases.keys(), cpp_cases.keys()):
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+
             py_lines = py_cases.get(label, [])
             cpp_lines = cpp_cases.get(label, [])
 

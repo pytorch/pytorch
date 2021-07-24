@@ -59,7 +59,7 @@ RUN git clone ${BLIS_URL} && cd blis && \
 
 # Build PyTorch with DNNL+BLIS
 RUN git clone https://github.com/pytorch/pytorch.git && cd pytorch && \
-    git submodule update --init --recursive && \
+    git submodule update --init --recursive --jobs 0 && \
     export PATH=/root/BLISBuild/include/blis:$PATH LD_LIBRARY_PATH=/root/BLISBuild/lib:$LD_LIBRARY_PATH && \
     export BLIS_HOME=/root/BLISBuild BLAS=BLIS USE_MKLDNN_CBLAS=ON WITH_BLAS=blis && python setup.py install
 

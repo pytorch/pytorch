@@ -80,9 +80,9 @@ nn_functional_tests = [
     ('relu', (S, S, S), (), '', (True,)),
     ('relu', (S, S, S), (), 'inplace'),
     ('glu', (S - 1, S - 1, S - 1), (),),
-    ('hardtanh', (S, S, S), (-0.5, 0.5),),
+    ('hardtanh', (S, S, S), (-0.5, 0.5), '', (True,)),
     ('hardtanh', (S, S, S), (-0.5, 0.5, True), 'inplace'),
-    ('relu6', (S, S, S), (),),
+    ('relu6', (S, S, S), (), '', (True,)),
     ('relu6', (S, S, S), (True), 'inplace'),
     ('elu', (S, S, S), (0.9,),),
     ('elu', (S, S, S), (0.9, True), 'inplace'),
@@ -90,11 +90,11 @@ nn_functional_tests = [
     ('selu', (S, S, S), (True), 'inplace'),
     ('celu', (S, S, S), (0.9,),),
     ('celu', (S, S, S), (0.9, True), 'inplace'),
-    ('leaky_relu', (S, S, S), (0.02,),),
+    ('leaky_relu', (S, S, S), (0.02,), '', (True,)),
     ('leaky_relu', (S, S, S), (0.02,), 'inplace'),
     ('rrelu', (S, S), (0.1, 0.3, False),),
     ('rrelu', (S, S), (0.1, 0.3, False, True), 'inplace'),
-    ('hardshrink', (S, S, S), (0.4,),),
+    ('hardshrink', (S, S, S), (0.4,), '', (True,)),
     ('tanhshrink', (S, S, S), (),),
     ('softsign', (S, S, S), (),),
     ('softplus', (S, S, S), (),),
@@ -357,7 +357,8 @@ EXCLUDE_SCRIPT = {
     'test_nn_fold',
 
     # jit doesn't support sparse tensors.
-    'test_to_sparse'
+    'test_to_sparse',
+    'test_to_sparse_dim',
 }
 
 # generates a script function and set of example inputs
@@ -483,6 +484,9 @@ def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='m
     call = get_call(method_name, func_type, actuals, kwargs)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
+    # to clean up IR
+    torch._C._jit_pass_inline(CU.the_method.graph)
+    torch._C._jit_pass_constant_propagation(CU.the_method.graph)
     torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):

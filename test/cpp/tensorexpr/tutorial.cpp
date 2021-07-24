@@ -129,7 +129,7 @@ int main(int argc, char* argv[]) {
     // First, let's specify the sizes:
     std::vector<const Expr*> dims = {
         new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
-                                         // and represents an integer constant
+    // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
@@ -190,7 +190,7 @@ int main(int argc, char* argv[]) {
         "R",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return Z->call(i, j) * P.load(i, j);
+          return Z->load(i, j) * P.load(i, j);
         });
     std::cout << "Tensor computation: " << *R << std::endl;
     // Prints:
@@ -208,11 +208,6 @@ int main(int argc, char* argv[]) {
     // have such an expression. They need to be considered as coming to us as
     // inputs from outside - we can only load data from them.
     //
-    // Also note that we use 'call' to construct an access to an element of a
-    // Tensor and we use 'load' for accessing elements of an external tensor
-    // through its Placeholder. This is an implementation detail and could be
-    // changed in future.
-
     // TODO: Show how reductions are represented and constructed
   }
 
@@ -238,7 +233,7 @@ int main(int argc, char* argv[]) {
         "Y",
         {{64, "i"}, {32, "j"}},
         [&](const VarHandle& i, const VarHandle& j) {
-          return sigmoid(X->call(i, j));
+          return sigmoid(X->load(i, j));
         });
     std::cout << "Tensor computation X: " << *X
               << "Tensor computation Y: " << *Y << std::endl;
@@ -259,6 +254,7 @@ int main(int argc, char* argv[]) {
 
     // Creating a loop nest is as quite simple, we just need to specify a list
     // of all and a list of output tensors:
+    // NOLINTNEXTLINE(bugprone-argument-comment)
     LoopNest loopnest(/*outputs=*/{Y}, /*all=*/{X, Y});
 
     // An IR used in LoopNest is based on tensor statements, represented by
@@ -316,16 +312,17 @@ int main(int argc, char* argv[]) {
     // our loop nest now. Let's split the inner loop with a factor of 9, for
     // instance.
     std::vector<For*> loops = loopnest.getLoopStmtsFor(Y);
-    For* j_outer;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_inner;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     For* j_tail;
     int split_factor = 9;
     loopnest.splitWithTail(
         loops[1], // loops[0] is the outer loop, loops[1] is inner
         split_factor,
-        &j_outer, // These are handles that we would be using for
         &j_inner, // further transformations
         &j_tail);
+    // loops[1] will become the outer loop, j_outer, after splitWithTail.
     std::cout << *loopnest.root_stmt() << std::endl;
     // Prints:
     // {

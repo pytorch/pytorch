@@ -4,7 +4,8 @@ import itertools
 import os
 import re
 import shutil
-from typing import IO, Dict, List
+from collections import defaultdict
+from typing import IO, Dict, List, Optional
 
 import pytest
 
@@ -18,6 +19,8 @@ else:
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "typing")
 REVEAL_DIR = os.path.join(DATA_DIR, "reveal")
+PASS_DIR = os.path.join(DATA_DIR, "pass")
+FAIL_DIR = os.path.join(DATA_DIR, "fail")
 MYPY_INI = os.path.join(DATA_DIR, os.pardir, os.pardir, "mypy.ini")
 CACHE_DIR = os.path.join(DATA_DIR, ".mypy_cache")
 
@@ -35,6 +38,12 @@ def _key_func(key: str) -> str:
     return os.path.join(drive, tail.split(":", 1)[0])
 
 
+def _strip_filename(msg: str) -> str:
+    """Strip the filename from a mypy message."""
+    _, tail = os.path.splitdrive(msg)
+    return tail.split(":", 1)[-1]
+
+
 @pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
 @pytest.fixture(scope="module", autouse=True)
 def run_mypy() -> None:
@@ -46,7 +55,7 @@ def run_mypy() -> None:
     if os.path.isdir(CACHE_DIR):
         shutil.rmtree(CACHE_DIR)
 
-    for directory in (REVEAL_DIR,):
+    for directory in (REVEAL_DIR, PASS_DIR, FAIL_DIR):
         # Run mypy
         stdout, stderr, _ = api.run(
             [
@@ -80,16 +89,83 @@ def get_test_cases(directory):
                     id=relpath,
                 )
 
+
+@pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
+@pytest.mark.parametrize("path", get_test_cases(PASS_DIR))
+def test_success(path):
+    # Alias `OUTPUT_MYPY` so that it appears in the local namespace
+    output_mypy = OUTPUT_MYPY
+    if path in output_mypy:
+        msg = "Unexpected mypy output\n\n"
+        msg += "\n".join(_strip_filename(v) for v in output_mypy[path])
+        raise AssertionError(msg)
+
+
+@pytest.mark.skipif(NO_MYPY, reason="Mypy is not installed")
+@pytest.mark.parametrize("path", get_test_cases(FAIL_DIR))
+def test_fail(path):
+    __tracebackhide__ = True
+
+    with open(path) as fin:
+        lines = fin.readlines()
+
+    errors = defaultdict(lambda: "")
+
+    output_mypy = OUTPUT_MYPY
+    assert path in output_mypy
+    for error_line in output_mypy[path]:
+        error_line = _strip_filename(error_line)
+        match = re.match(
+            r"(?P<lineno>\d+): (error|note): .+$",
+            error_line,
+        )
+        if match is None:
+            raise ValueError(f"Unexpected error line format: {error_line}")
+        lineno = int(match.group('lineno'))
+        errors[lineno] += f'{error_line}\n'
+
+    for i, line in enumerate(lines):
+        lineno = i + 1
+        if line.startswith('#') or (" E:" not in line and lineno not in errors):
+            continue
+
+        target_line = lines[lineno - 1]
+        if "# E:" in target_line:
+            marker = target_line.split("# E:")[-1].strip()
+            expected_error = errors.get(lineno)
+            _test_fail(path, marker, expected_error, lineno)
+        else:
+            pytest.fail(f"Unexpected mypy output\n\n{errors[lineno]}")
+
+
+_FAIL_MSG1 = """Extra error at line {}
+Extra error: {!r}
+"""
+
+_FAIL_MSG2 = """Error mismatch at line {}
+Expected error: {!r}
+Observed error: {!r}
+"""
+
+
+def _test_fail(path: str, error: str, expected_error: Optional[str], lineno: int) -> None:
+    if expected_error is None:
+        raise AssertionError(_FAIL_MSG1.format(lineno, error))
+    elif error not in expected_error:
+        raise AssertionError(_FAIL_MSG2.format(lineno, expected_error, error))
+
+
 def _construct_format_dict():
     dct = {
         'ModuleList': 'torch.nn.modules.container.ModuleList',
         'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
         'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
-        'Tensor': 'torch.tensor.Tensor',
+        'Tensor': 'torch._tensor.Tensor',
         'Adagrad': 'torch.optim.adagrad.Adagrad',
         'Adam': 'torch.optim.adam.Adam',
     }
     return dct
+
 
 #: A dictionary with all supported format keys (as keys)
 #: and matching values

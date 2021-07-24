@@ -31,6 +31,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDOptions& lhs, const SGDOptions& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~SGDOptions() = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
@@ -43,6 +44,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const SGDParamState& lhs, const SGDParamState& rhs);
+  // NOLINTNEXTLINE(modernize-use-override)
   ~SGDParamState() = default;
 };
 
@@ -57,6 +59,7 @@ class TORCH_API SGD : public Optimizer {
   }
 
   explicit SGD(std::vector<Tensor> params,
+      // NOLINTNEXTLINE(performance-move-const-arg)
       SGDOptions defaults) : SGD({std::move(OptimizerParamGroup(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;

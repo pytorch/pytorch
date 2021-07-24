@@ -32,8 +32,7 @@ static void FusedOverhead(benchmark::State& state) {
 }
 
 static void UnfusedOverhead(benchmark::State& state) {
-  torch::NoGradGuard ng;
-  torch::AutoNonVariableTypeMode nv;
+  c10::InferenceMode guard;
   overrideCanFuseOnCPU(false);
 
   Module m("m");

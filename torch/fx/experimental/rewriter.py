@@ -4,7 +4,7 @@ import textwrap
 import copy
 from types import FunctionType
 from typing import cast, Union, Callable, Dict, Optional, Any
-from torch.fx.symbolic_trace import Tracer
+from torch.fx._symbolic_trace import Tracer
 from torch.fx.graph import Graph
 from torch.jit.frontend import normalize_source_lines
 import torch
@@ -63,6 +63,19 @@ class AST_Rewriter(ast.NodeTransformer):
         # Return the new Call node to signify that we want to use it as
         # a replacement for the original _assert node
         return ast.copy_location(expr_wrapper, node)
+
+    def visit_AnnAssign(self, node):
+        """
+        Swap out Python's AnnAssign with an Assign node where the annotation function is called.
+        Example:
+             Original:
+             y: Tensor_Type(1,2,3, Dyn) = f2(x)
+            Output:
+             y = annotate(f2(x),Tensor_Type((1,2,3,Dyn)))
+        """
+        return ast.Assign(targets=[node.target], value=ast.Call(
+            func=ast.Name(id='annotate', ctx=ast.Load()),
+            args=[node.value, node.annotation], keywords=[]))
 
 
 class RewritingTracer(Tracer):

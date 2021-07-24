@@ -119,10 +119,12 @@ compute_input_size_(const std::vector<c10::IValue>& inputs) {
 }
 } // namespace
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 OperatorBase::OperatorBase(
     const c10::FunctionSchema& fn_schema,
     std::vector<c10::IValue> inputs,
     c10::List<at::Tensor> outputs)
+    // NOLINTNEXTLINE(performance-move-const-arg)
     : fn_schema_(make_unique<c10::FunctionSchema>(std::move(fn_schema))),
       newstyle_inputs_(std::move(inputs)),
       newstyle_outputs_(std::move(outputs)),
@@ -503,6 +505,7 @@ TensorShapes InferBlobShapesAndTypes(
       // same size, we can infer their shapes.
       if (op.type() == "Sum") {
         TensorShape sum_shape;
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto inp : op.input()) {
           auto it = blob_desc.find(inp);
           if (it != blob_desc.end() && !it->second.unknown_shape()) {
@@ -512,6 +515,7 @@ TensorShapes InferBlobShapesAndTypes(
             }
           }
         }
+        // NOLINTNEXTLINE(performance-for-range-copy)
         for (auto inp : op.input()) {
           auto it = blob_desc.find(inp);
           if (it == blob_desc.end() || it->second.unknown_shape()) {
@@ -558,6 +562,7 @@ TensorShapes InferBlobShapesAndTypes(
 
           for (size_t i = 0; i < out.size(); i++) {
             if (out[i].unknown_shape()) {
+              // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
               std::string gradout = op.output(i);
 
               if (grads_to_params.find(gradout) != grads_to_params.end()) {
@@ -618,6 +623,7 @@ TensorShapes InferBlobShapesAndTypes(
 
   } // nets
   TensorShapes tps;
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto kv : blob_desc) {
     TensorShape& tp = kv.second;
     TensorShape* tpnew = tps.add_shapes();
@@ -651,6 +657,7 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
     auto dtype = function_ptr->GetExternalTensorType(b->GetRaw());
     tp.set_data_type(TypeMetaToDataType(dtype));
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t _capacity;
     DeviceOption _device;
     auto dshape =
@@ -668,6 +675,7 @@ TensorShape GetTensorShapeOfBlob(const Blob* b) {
     tp.set_data_type(TypeMetaToDataType(type_fun(b->GetRaw())));
   }
   if (tensor_info_fun) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t _capacity;
     DeviceOption _device;
     auto shape = tensor_info_fun(b->GetRaw(), &_capacity, &_device);
@@ -754,9 +762,11 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   auto Check = [&](const Blob& blob, std::string blob_name) {
     TensorInfoCall tensor_info_fun = GetTensorInfoFunction(blob.meta().id());
     if (tensor_info_fun) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t _capacity;
       DeviceOption blob_device;
       tensor_info_fun(
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<Blob&>(blob).GetRaw(), &_capacity, &blob_device);
 
       if ((blob_device.device_type() == PROTO_CUDA ||

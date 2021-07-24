@@ -1,5 +1,7 @@
 #pragma once
 #include <cmath>
+#include <cstdint>
+#include <string.h>
 #include "caffe2/utils/conversions.h"
 
 #if (ENABLE_VECTORIZATION > 0) && !defined(_DEBUG) && !defined(DEBUG)

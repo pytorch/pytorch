@@ -60,6 +60,7 @@ class GivenTensorByteStringToUInt8FillOp final : public FillerOp<Context> {
         {static_cast<int64_t>(str.size())},
         at::dtype<uint8_t>().device(CPU));
     uint8_t* values_data = values_.template mutable_data<uint8_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < str.size(); i++) {
       values_data[i] = static_cast<uint8_t>(str[i]);
     }

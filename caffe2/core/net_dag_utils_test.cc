@@ -57,6 +57,7 @@ class DagUtilTestContext {
 };
 
 void PrintChains(const dag_utils::ExecutionChains& chains) {
+  // NOLINTNEXTLINE(performance-for-range-copy,clang-diagnostic-range-loop-construct)
   for (const auto kv : chains) {
     std::stringstream ss;
     ss << kv.first << ": ";

@@ -1732,6 +1732,7 @@ TEST(NewOperatorRegistrationTest, dispatchAutogradPrecedence) {
 }
 
 TEST(NewOperatorRegistrationTest, throwsWhenRegisterToBackendMapsToAutogradOther) {
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool sparsecpu_called, math_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
   m.def("fn", torch::dispatch(c10::DispatchKey::SparseCPU, [&](const Tensor& x) { sparsecpu_called = true; return x; }));

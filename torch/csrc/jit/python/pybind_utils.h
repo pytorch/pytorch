@@ -153,7 +153,8 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
-        [pyFut(this->getPtr()), pf(std::move(pf))]() -> IValue {
+        [pyFut(this->getPtr()),
+         pf(std::move(pf))](c10::ivalue::Future& /* unused */) -> IValue {
           try {
             pybind11::gil_scoped_acquire ag;
             return toIValue(pf->func_(pyFut), PyObjectType::get());
@@ -179,6 +180,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   void add_done_callback(py::function cb) {
     auto pf = std::make_shared<PythonFunctionGuard>(std::move(cb));
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     fut->addCallback(std::bind(
         [pyFut(this->getPtr())](std::shared_ptr<PythonFunctionGuard> pf) {
           try {
@@ -251,12 +253,11 @@ struct TypedIValue : public std::pair<IValue, TypePtr> {
 inline TypedIValue toDictKeyIValue(py::handle key) {
   if (py::isinstance<py::str>(key)) {
     return TypedIValue(
-        ConstantString::create(py::cast<std::string>(key)),
-        StringType::create());
+        ConstantString::create(py::cast<std::string>(key)), StringType::get());
   } else if (py::isinstance<py::int_>(key)) {
-    return TypedIValue(py::cast<int64_t>(key), IntType::create());
+    return TypedIValue(py::cast<int64_t>(key), IntType::get());
   } else if (py::isinstance<py::float_>(key)) {
-    return TypedIValue(py::cast<double>(key), FloatType::create());
+    return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
     AT_ERROR("Dictionary inputs may only have string, int, or float keys");
   }
@@ -299,6 +300,7 @@ inline InferredType tryToInferType(py::handle input) {
   // Try basic types first
   if (py::isinstance<py::bool_>(input)) {
     return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
   } else if (py::isinstance<py::int_>(input)) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
@@ -566,7 +568,7 @@ inline IValue createGenericDict(
     const TypePtr& value_type) {
   c10::impl::GenericDict elems(key_type, value_type);
   elems.reserve(py::len(obj));
-  for (auto entry : obj) {
+  for (auto& entry : obj) {
     elems.insert(
         toIValue(entry.first, key_type), toIValue(entry.second, value_type));
   }
@@ -711,18 +713,37 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTuple()) {
     auto tuple = std::move(ivalue).toTuple();
     const auto& elements = tuple->elements();
+
     py::tuple t{elements.size()};
     for (size_t i = 0; i < elements.size(); ++i) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
+
+    // If we have a NamedTuple
     if (tuple->type() && tuple->type()->schema() &&
         tuple->type()->schema()->name() != "") {
       auto unqualName = tuple->type()->name()->name();
-      auto fieldNames = fmap(
-          tuple->type()->schema()->arguments(),
-          [](const Argument& arg) { return arg.name(); });
+
+      const std::vector<Argument>& tuple_args =
+          tuple->type()->schema()->arguments();
+
+      std::vector<pybind11::object> defaults;
+      auto it = std::find_if(
+          tuple_args.begin(), tuple_args.end(), [](const Argument& arg) {
+            return arg.default_value().has_value();
+          });
+      std::transform(
+          it,
+          tuple_args.end(),
+          std::back_inserter(defaults),
+          [](const Argument& arg) { return toPyObject(*arg.default_value()); });
+
+      std::vector<std::string> fieldNames =
+          fmap(tuple_args, [](const Argument& arg) { return arg.name(); });
+
       return py::module::import("torch._jit_internal")
-          .attr("_create_named_tuple")(t, unqualName, fieldNames);
+          .attr("_create_named_tuple")(
+              t, unqualName, fieldNames, py::make_tuple(defaults));
     } else {
       return std::move(t);
     }
@@ -950,6 +971,7 @@ inline py::object runAndInsertCall(
     auto return_type = callee.getSchema().returns().at(0).type();
     auto graph = tracing_state->graph;
     std::vector<NamedValue> named_values;
+    named_values.reserve(input_values.size());
     for (Value* v : input_values) {
       named_values.emplace_back(v);
     }
@@ -986,7 +1008,7 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
     const c10::QualifiedName qualname) {
-  std::vector<py::handle> args_vec = {callee};
+  std::vector<py::handle> args_vec;
   for (const auto& arg : args_no_self) {
     args_vec.push_back(arg);
   }
@@ -1020,12 +1042,12 @@ inline c10::optional<py::object> maybeTorchFunctionDispatch(
   if (overloaded_args.size() > 0) {
     return pybind11::reinterpret_steal<py::object>(
         handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            qualname.name().c_str(),
-            args[0].ptr(),
-            qualname.prefix().c_str()));
+            /*overloaded_args=*/overloaded_args,
+            /*args=*/args.ptr(),
+            /*kwargs=*/kwargs.ptr(),
+            /*func_name=*/qualname.name().c_str(),
+            /*torch_api_function=*/callee.ptr(),
+            /*module_name=*/qualname.prefix().c_str()));
   }
 
   return c10::nullopt;

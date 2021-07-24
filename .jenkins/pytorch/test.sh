@@ -7,6 +7,9 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# Get fully qualified path using realpath
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -14,13 +17,32 @@ echo "Testing pytorch"
 
 export LANG=C.UTF-8
 
-if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *old-gradcheck* ]]; then
+  export PYTORCH_TEST_WITH_SLOW_GRADCHECK=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
+  export COVERAGE_RCFILE="$PWD/.coveragerc" # coverage config file needed for plug-ins and settings to work
+  pip install -e tools/coverage_plugins_package # allows coverage to run with JitPlugin for JIT coverage
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  # Used so that only cuda specific versions of tests are generated
+  # mainly used so that we're not spending extra cycles testing cpu
+  # devices on expensive gpu machines
+  export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
@@ -31,6 +53,13 @@ if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
   export PYTORCH_TEST_SKIP_NOARCH=0
 else
   export PYTORCH_TEST_SKIP_NOARCH=1
+fi
+
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
+else
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -100,13 +129,15 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
+if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -131,6 +162,11 @@ test_python() {
   assert_git_not_dirty
 }
 
+test_python_gloo_with_tls() {
+  source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
+  assert_git_not_dirty
+}
+
 
 test_aten() {
   # Test ATen
@@ -146,10 +182,10 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
 
     ls build/bin
     aten/tools/run_tests.sh build/bin
@@ -203,6 +239,7 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     assert_git_not_dirty
   fi
 }
@@ -229,6 +266,13 @@ test_distributed() {
     build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
+    MPIEXEC=$(command -v mpiexec)
+    # TODO: this is disabled on GitHub Actions until this issue is resolved
+    # https://github.com/pytorch/pytorch/issues/60756
+    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
+      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
+      eval "$MPICMD"
+    fi
     build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
     build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
@@ -249,7 +293,7 @@ test_rpc() {
 test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     pushd test/custom_backend
     cp -a "$CUSTOM_BACKEND_BUILD" build
     # Run tests Python-side and export a lowered module.
@@ -266,7 +310,7 @@ test_custom_backend() {
 test_custom_script_ops() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom script operators"
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     pushd test/custom_operator
     cp -a "$CUSTOM_OP_BUILD" build
     # Run tests Python-side and export a script module.
@@ -282,7 +326,7 @@ test_custom_script_ops() {
 test_jit_hooks() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing jit hooks in cpp"
-    HOOK_BUILD="$PWD/../jit-hook-build"
+    HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     pushd test/jit_hooks
     cp -a "$HOOK_BUILD" build
     # Run tests Python-side and export the script modules with hooks
@@ -307,23 +351,9 @@ test_torch_function_benchmark() {
 }
 
 test_xla() {
-  export XLA_USE_XRT=1 XRT_DEVICE_MAP="CPU:0;/job:localservice/replica:0/task:0/device:XLA_CPU:0"
-  # Issue #30717: randomize the port of XLA/gRPC workers is listening on to reduce flaky tests.
-  XLA_PORT=$(shuf -i 40701-40999 -n 1)
-  export XRT_WORKERS="localservice:0;grpc://localhost:$XLA_PORT"
-  pushd xla
-  echo "Running Python Tests"
-  ./test/run_tests.sh
-
-  # Disabled due to MNIST download issue.
-  # See https://github.com/pytorch/pytorch/issues/53267
-  # echo "Running MNIST Test"
-  # python test/test_train_mnist.py --tidy
-
-  echo "Running C++ Tests"
-  pushd test/cpp
-  CC=clang-9 CXX=clang++-9 ./run_tests.sh
-  popd
+  # shellcheck disable=SC1091
+  source "./xla/.circleci/common.sh"
+  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
@@ -357,17 +387,20 @@ test_bazel() {
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_default.json --fuser=default --executor=default
-    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_legacy_old.json --fuser=old --executor=legacy
-    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
-    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+    # TODO: Enable these for GHA once we have credentials for forked pull requests
+    if [[ -z "${GITHUB_ACTIONS}" ]]; then
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+    fi
     assert_git_not_dirty
   fi
 }
@@ -411,20 +444,20 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
     test_torch_deploy
   fi
   test_without_numpy
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch
@@ -448,6 +481,9 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+    test_python_gloo_with_tls
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then

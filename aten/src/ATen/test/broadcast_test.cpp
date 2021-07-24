@@ -8,6 +8,7 @@ using namespace at;
 // can't expand empty tensor
 void TestEmptyTensor(DeprecatedTypeProperties& T) {
   auto empty = randn({0}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(empty.expand({3}));
 }
 
@@ -32,6 +33,7 @@ void TestOut2WithScalar(DeprecatedTypeProperties& T) {
 void TestOut2OldFallback(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
   auto b = randn({5, 3}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a + b);
 }
 
@@ -39,6 +41,7 @@ void TestOut2OldFallback(DeprecatedTypeProperties& T) {
 void TestOut2MismatchedSizes(DeprecatedTypeProperties& T) {
   auto a = randn({3, 5}, T);
   auto b = randn({7, 5}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a + b);
 }
 
@@ -69,6 +72,7 @@ void TestOut3OldFallback(DeprecatedTypeProperties& T) {
   auto a = randn({3, 2, 5}, T);
   auto b = randn({2, 3, 5}, T);
   auto c = randn({5, 3, 2}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul(b, c));
 }
 
@@ -77,6 +81,7 @@ void TestOut3MismatchedSizes(DeprecatedTypeProperties& T) {
   auto a = randn({3, 2, 5}, T);
   auto b = randn({2, 3, 5}, T);
   auto c = randn({5, 5, 5}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul(b, c));
 }
 
@@ -98,6 +103,7 @@ void TestIn2WithScalar(DeprecatedTypeProperties& T) {
 void TestIn2ExpandError(DeprecatedTypeProperties& T) {
   auto a = randn({1, 5}, T);
   auto b = randn({3, 1}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.add_(b));
 }
 
@@ -128,6 +134,7 @@ void TestIn3ExpandError(DeprecatedTypeProperties& T) {
   auto a = randn({1, 3, 5}, T);
   auto b = randn({4, 1, 1}, T);
   auto c = randn({1, 3, 1}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addcmul_(b, c));
 }
 
@@ -153,6 +160,7 @@ void TestExplicitDimWithMismatchedSizes(DeprecatedTypeProperties& T) {
   auto b = randn({5, 3}, T);
   auto c = randn({3, 7}, T);
   auto a = randn({3, 3}, T);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(a.addmm(b, c));
 }
 

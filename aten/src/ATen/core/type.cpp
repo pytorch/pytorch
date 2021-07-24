@@ -33,12 +33,15 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 
       out << "(";
       size_t i = 0;
+      bool symbolic = type_verbosity() == TypeVerbosity::Symbolic;
       for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
         if (auto s = value->sizes()[i]) {
           out << *s;
+        } else if (symbolic) {
+          out << value->symbolic_sizes().at(i);
         } else {
           out << "*";
         }
@@ -110,9 +113,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       if(i > 0)
         out << ", ";
       if (tup->schema()) {
-        out << tup->schema()->arguments()[i].name() << " : ";
+        auto arg = tup->schema()->arguments()[i];
+        out << arg.name() << " : ";
+        out << *(tup->elements()[i]);
+        if (arg.default_value()) {
+          out << " = " << *arg.default_value();
+        }
       }
-      out << *(tup->elements()[i]);
+      else {
+        out << *(tup->elements()[i]);
+      }
     }
     out << ")";
   } else if (t.kind() == TypeKind::FunctionType) {
@@ -124,7 +134,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
 }
 
 AnyTypePtr AnyType::get() {
-  static auto value = AnyType::create();
+  static AnyTypePtr value(new AnyType());
   return value;
 }
 
@@ -135,63 +145,63 @@ TensorTypePtr TensorType::get() {
 }
 
 NumberTypePtr NumberType::get() {
-  static auto value = NumberType::create();
+  static NumberTypePtr value(new NumberType());
   return value;
 }
 IntTypePtr IntType::get() {
-  static auto value = IntType::create();
+  static IntTypePtr value(new IntType());
   return value;
 }
 FloatTypePtr FloatType::get() {
-  static auto value = FloatType::create();
+  static FloatTypePtr value(new FloatType());
   return value;
 }
 ComplexTypePtr ComplexType::get() {
-  static auto value = ComplexType::create();
+  static ComplexTypePtr value(new ComplexType());
   return value;
 }
 BoolTypePtr BoolType::get() {
-  static auto value = BoolType::create();
+  static BoolTypePtr value(new BoolType());
   return value;
 }
 StorageTypePtr StorageType::get() {
-  static auto value = StorageType::create();
+  static StorageTypePtr value(new StorageType());
   return value;
 }
 NoneTypePtr NoneType::get() {
-  static auto value = NoneType::create();
+  static NoneTypePtr value(new NoneType());
   return value;
 }
 GeneratorTypePtr GeneratorType::get() {
-  static auto value = GeneratorType::create();
+  static GeneratorTypePtr value(new GeneratorType());
   return value;
 }
 QuantizerTypePtr QuantizerType::get() {
-  static auto value = QuantizerType::create();
+  static QuantizerTypePtr value(new QuantizerType());
   return value;
 }
 QSchemeTypePtr QSchemeType::get() {
-  static auto value = QSchemeType::create();
+  static QSchemeTypePtr value(new QSchemeType());
   return value;
 }
 StringTypePtr StringType::get() {
-  static auto value = StringType::create();
+  static StringTypePtr value(new StringType());
   return value;
 }
 DeviceObjTypePtr DeviceObjType::get() {
-  static auto value = DeviceObjType::create();
+  static DeviceObjTypePtr value(new DeviceObjType());
   return value;
 }
 StreamObjTypePtr StreamObjType::get() {
-  static auto value = StreamObjType::create();
+  static StreamObjTypePtr value(new StreamObjType());
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
-static auto value = ScalarTypeType::create();
+static ScalarTypeTypePtr value(new ScalarTypeType());
 return value;
 }
 LayoutTypePtr LayoutType::get() {
-static auto value = LayoutType::create();
+static LayoutTypePtr value(new LayoutType());
 return value;
 }
 OptionalTypePtr OptionalType::ofTensor() {
@@ -199,15 +209,19 @@ OptionalTypePtr OptionalType::ofTensor() {
   return value;
 }
 PyObjectTypePtr PyObjectType::get() {
-  static auto value = PyObjectType::create();
+  static PyObjectTypePtr value(new PyObjectType());
   return value;
 }
 CapsuleTypePtr CapsuleType::get() {
-  static auto value = CapsuleType::create();
+  static CapsuleTypePtr value(new CapsuleType());
   return value;
 }
 ListTypePtr ListType::ofTensors() {
   static auto value = ListType::create(TensorType::get());
+  return value;
+}
+ListTypePtr ListType::ofOptionalTensors() {
+  static auto value = ListType::create(OptionalType::ofTensor());
   return value;
 }
 ListTypePtr ListType::ofInts() {
@@ -232,26 +246,26 @@ ListTypePtr ListType::ofStrings() {
 }
 
 AnyListTypePtr AnyListType::get() {
-  static auto value = AnyListType::create();
+  static AnyListTypePtr value(new AnyListType());
   return value;
 }
 
 AnyTupleTypePtr AnyTupleType::get() {
-  static auto value = AnyTupleType::create();
+  static AnyTupleTypePtr value(new AnyTupleType());
   return value;
 }
 
 AnyClassTypePtr AnyClassType::get() {
-  static auto value = AnyClassType::create();
+  static AnyClassTypePtr value(new AnyClassType());
   return value;
 }
 
 AnyEnumTypePtr AnyEnumType::get() {
-  static auto value = AnyEnumType::create();
+  static AnyEnumTypePtr value(new AnyEnumType());
   return value;
 }
 
-c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_any=false, TypePtr type_hint=nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -294,7 +308,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
-      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i))) {
+      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_any)) {
         elements.push_back(*elem);
       } else {
         return c10::nullopt;
@@ -323,11 +337,18 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
     return t1_unshaped;
   }
 
+  // Check whether or not `type_hint` is a common parent. This case
+  // could occur if we had two class types that had been annotated with
+  // a common interface
+  if (type_hint && t1->isSubtypeOf(type_hint) && t2->isSubtypeOf(type_hint)) {
+    return type_hint;
+  }
+
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
-  auto unified = unifyTypesImpl(t1, t2);
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any, TypePtr type_hint) {
+  auto unified = unifyTypesImpl(t1, t2, default_to_any, type_hint);
 
   if (default_to_any && !unified) {
     return AnyType::get();
@@ -338,7 +359,9 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool def
 
 c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
-    std::ostream& why_not) {
+    std::ostream& why_not,
+    bool default_to_any,
+    TypePtr type_hint) {
   if (elements.size() == 0) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
@@ -346,7 +369,7 @@ c10::optional<TypePtr> unifyTypeList(
 
   TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    auto maybe_unified = unifyTypes(ret_type, elements.at(i));
+    c10::optional<TypePtr> maybe_unified = unifyTypes(ret_type, elements.at(i), default_to_any, type_hint);
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
               << elements.at(i)->repr_str()
@@ -354,7 +377,7 @@ c10::optional<TypePtr> unifyTypeList(
               << ret_type->repr_str() << ")";
       return c10::nullopt;
     }
-    ret_type = maybe_unified.value();
+    ret_type = *maybe_unified;
   }
 
   return ret_type;
@@ -390,6 +413,7 @@ MatchTypeReturn matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -415,6 +439,7 @@ MatchTypeReturn matchTypeVariables(
         const auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
+          // NOLINTNEXTLINE(performance-no-automatic-move)
           return result;
         }
       }
@@ -429,6 +454,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -442,6 +468,7 @@ MatchTypeReturn matchTypeVariables(
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -455,6 +482,7 @@ MatchTypeReturn matchTypeVariables(
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
+        // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
     } else if (!actual->isSubtypeOf(NoneType::get())) {
@@ -705,7 +733,11 @@ std::ostream& operator<<(
 }
 
 std::ostream& operator<<(std::ostream& os, const ShapeSymbol& s) {
-  os << "SS(" << s.value_ << ')';
+  if (s.value_ >= 0) {
+    os << s.value_;
+  } else {
+    os << "SS(" << s.value_ << ')';
+  }
   return os;
 }
 
@@ -730,13 +762,41 @@ TupleTypePtr TupleType::createNamed(
     const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
+      std::vector<IValue> empty_defaults;
+      return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+    }
+
+
+TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qualName,
+    const std::vector<std::string>& field_names,
+    const std::vector<TypePtr>& field_types,
+    std::vector<IValue>& field_defaults) {
   TORCH_INTERNAL_ASSERT(field_names.size() == field_types.size());
+
   std::vector<Argument> arguments;
+  arguments.reserve(field_names.size());
+  auto min_default_idx = field_names.size() - field_defaults.size();
   for (size_t i = 0; i < field_names.size(); ++i) {
-    arguments.emplace_back(
-        /*name=*/field_names[i],
-        /*type=*/field_types[i],
-        /*N=*/i);
+    if (i < min_default_idx) {
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i};
+      arguments.emplace_back(std::move(arg));
+    }
+    else {
+      size_t j = i - min_default_idx;
+      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
+                  "not supported as default NamedTuple fields. Their "
+                  "mutability could lead to potential memory aliasing "
+                  "problems");
+      Argument arg{
+          /*name=*/field_names[i],
+          /*type=*/field_types[i],
+          /*N=*/i,
+          /*default_value=*/field_defaults[j]};
+      arguments.emplace_back(std::move(arg));
+    }
   }
 
   auto schema = std::make_shared<FunctionSchema>(
@@ -853,27 +913,21 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
-        ss << ", ";
-      ss << elements()[i]->annotation_str(printer);
+    if (elements().size() == 0) {
+      // `typing.Tuple` special-cases the annotation syntax for empty tuple
+      // with `typing.Tuple[()]`. See
+      // https://docs.python.org/3/library/typing.html#typing.Tuple
+      ss << "()";
+    } else {
+      for (size_t i = 0; i < elements().size(); ++i) {
+        if (i > 0)
+          ss << ", ";
+        ss << elements()[i]->annotation_str(printer);
+      }
     }
     ss << "]";
   }
   return ss.str();
-}
-
-static std::vector<bool> findContiguous(
-    const at::IntArrayRef& sizes,
-    const at::IntArrayRef& strides) {
-  AT_ASSERT(sizes.size() == strides.size());
-  std::vector<bool> cont(sizes.size());
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    const auto expected_stride =
-        (i + 1 < sizes.size()) ? sizes[i + 1] * strides[i + 1] : 1;
-    cont[i] = (strides[i] == expected_stride);
-  }
-  return cont;
 }
 
 VaryingShape<int64_t> TensorType::strides() const {
@@ -944,6 +998,7 @@ template struct VaryingShape<int64_t>;
 TensorType::TensorType(
     c10::optional<at::ScalarType> scalar_type,
     c10::optional<Device> device,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const SymbolicShape& sizes,
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
@@ -1172,6 +1227,13 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
       "on a submodule the outer module is expecting" +
       " the same return type as the submodule's forward.";
   return return_string;
+}
+
+bool ClassType::isUnresolvedClassAttribute(const std::string& name) const {
+  return std::find(
+      unresolved_class_attributes_.begin(),
+      unresolved_class_attributes_.end(),
+      name) != unresolved_class_attributes_.end();
 }
 
 void checkForwardHookInputArguments(
@@ -1489,6 +1551,7 @@ bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const 
         return false;
       }
       if (!self_method->getSchema().isSubtypeOf(
+              // NOLINTNEXTLINE(bugprone-argument-comment)
               schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on class '" << repr_str()
@@ -1530,6 +1593,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
@@ -1575,20 +1639,27 @@ ClassTypePtr ClassType::create(
     c10::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
-    std::string doc_string) {
-  return ClassTypePtr(
-      new ClassType(std::move(qualifiedName), std::move(cu), is_module, std::move(doc_string)));
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes) {
+  return ClassTypePtr(new ClassType(
+      std::move(qualifiedName),
+      std::move(cu),
+      is_module,
+      std::move(doc_string),
+      std::move(unresolved_class_attributes)));
 }
 
 ClassType::ClassType(
     c10::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
-    bool is_module = false,
-    std::string doc_string = "")
+    bool is_module,
+    std::string doc_string,
+    std::vector<std::string> unresolved_class_attributes)
     : NamedType(TypeKind::ClassType, std::move(name)),
       compilation_unit_(std::move(cu)),
       isModule_(is_module),
-      doc_string_(std::move(doc_string)) {}
+      doc_string_(std::move(doc_string)),
+      unresolved_class_attributes_(std::move(unresolved_class_attributes)) {}
 
 const std::vector<torch::jit::Function*>& ClassType::methods() const {
   return methods_;
@@ -1610,9 +1681,9 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
   }
 
   // Check no overlap with existing attributes
-  for (size_t i = 0; i < attributes_.size(); ++i) {
+  for (const auto & attribute : attributes_) {
     TORCH_CHECK(
-        name != attributes_[i].getName(),
+        name != attribute.getName(),
         "attempting to add ",
         what,
         " '",
@@ -1620,7 +1691,7 @@ void ClassType::checkNotExist(const std::string& name, const std::string& what) 
         "' to ",
         repr_str(),
         " but an attribute field of the same name already exists with type ",
-        attributes_[i].getType()->repr_str());
+        attribute.getType()->repr_str());
   }
 }
 
@@ -1801,6 +1872,10 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+void SymbolicShape::dump() const {
+  std::cout << *this << "\n";
 }
 
 bool EnumType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {

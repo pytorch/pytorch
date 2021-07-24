@@ -1,3 +1,4 @@
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -5,6 +6,7 @@
 #include <cstdlib>
 
 using namespace at::vitals;
+using ::testing::HasSubstr;
 
 TEST(Vitals, Basic) {
   std::stringstream buffer;
@@ -28,11 +30,11 @@ TEST(Vitals, Basic) {
   std::cout.rdbuf(sbuf);
 
   auto s = buffer.str();
-  ASSERT_TRUE(s.find("Testing.Attribute0\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute1\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute2\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute3\t\t 1") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute4\t\t  1") != std::string::npos);
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute0\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute1\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute2\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute3\t\t 1"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute4\t\t  1"));
 }
 
 TEST(Vitals, MultiString) {
@@ -55,8 +57,8 @@ TEST(Vitals, MultiString) {
   std::cout.rdbuf(sbuf);
 
   auto s = buffer.str();
-  ASSERT_TRUE(s.find("Testing.Attribute0\t\t 1 of 2") != std::string::npos);
-  ASSERT_TRUE(s.find("Testing.Attribute1\t\t 1 of 2") != std::string::npos);
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute0\t\t 1 of 2"));
+  ASSERT_THAT(s, HasSubstr("Testing.Attribute1\t\t 1 of 2"));
 }
 
 TEST(Vitals, OnAndOff) {
@@ -88,4 +90,26 @@ TEST(Vitals, OnAndOff) {
       ASSERT_TRUE(f == std::string::npos);
     }
   }
+}
+
+TEST(Vitals, APIVitals) {
+  std::stringstream buffer;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  bool rvalue;
+  std::streambuf* sbuf = std::cout.rdbuf();
+  std::cout.rdbuf(buffer.rdbuf());
+  {
+#ifdef _WIN32
+    _putenv("TORCH_VITAL=1");
+#else
+    setenv("TORCH_VITAL", "1", 1);
+#endif
+    APIVitals api_vitals;
+    rvalue = api_vitals.setVital("TestingSetVital", "TestAttr", "TestValue");
+  }
+  std::cout.rdbuf(sbuf);
+
+  auto s = buffer.str();
+  ASSERT_TRUE(rvalue);
+  ASSERT_THAT(s, HasSubstr("TestingSetVital.TestAttr\t\t TestValue"));
 }

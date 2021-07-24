@@ -28,7 +28,7 @@ class TestLengthSplitOperator(serial.SerializedTestCase):
         return [np.array(output).astype(np.int32)]
 
     @given(**hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_length_split_edge(self, gc, dc):
         input_lengths = np.array([3, 4, 5]).astype(np.int32)
         n_split_ = np.array([5]).astype(np.int32)

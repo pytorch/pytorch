@@ -10,6 +10,7 @@ import unittest
 
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestStore:
@@ -68,3 +69,7 @@ class UtilTest(unittest.TestCase):
     def test_get_logger_custom_name(self):
         logger1 = get_logger("test.module")
         self.assertEqual("test.module", logger1.name)
+
+
+if __name__ == "__main__":
+    run_tests()

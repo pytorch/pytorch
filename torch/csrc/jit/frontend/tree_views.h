@@ -124,6 +124,7 @@ struct TreeView {
   const TreeRef& subtree(size_t i) const {
     return tree_->trees().at(i);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   TreeRef tree_;
 };
 
@@ -452,6 +453,8 @@ struct Property : public TreeView {
   }
 };
 
+struct Assign;
+
 struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
@@ -472,19 +475,43 @@ struct ClassDef : public TreeView {
   Maybe<List<Property>> properties() const {
     return Maybe<List<Property>>(subtree(3));
   }
+  Maybe<List<Assign>> assigns() const {
+    return Maybe<List<Assign>>(subtree(4));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range),
+         Maybe<List<Assign>>::create(range)}));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
-      c10::optional<const List<Property>> properties = {}) {
-    auto props = properties.has_value()
-        ? Maybe<List<Property>>::create(range, properties.value())
-        : Maybe<List<Property>>::create(range);
-    return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body, props}));
+      const List<Property>& properties,
+      const List<Assign>& assigns) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range, properties),
+         Maybe<List<Assign>>::create(range, assigns)}));
   }
 };
+
+TORCH_API std::vector<std::string> getUnresolvedClassAttributes(
+    const ClassDef& def);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
@@ -884,6 +911,7 @@ struct Const : public Expr {
   }
   int64_t asIntegral() const {
     try {
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
     } catch (const std::out_of_range& e) {
       throw ErrorReport(range()) << "Integral constant out of range "
@@ -893,10 +921,12 @@ struct Const : public Expr {
   double asFloatingPoint() const {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
   }
   c10::complex<double> asComplex() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* dummy;
     auto str = subtree(0)->stringValue();
     // Complex numbers (a+bj, where a is non-zero) are parsed as an addition

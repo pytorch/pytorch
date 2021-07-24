@@ -52,7 +52,6 @@ def _format_import_statement(name: str, obj: Any, importer: Importer) -> str:
         return _custom_builtins[name].import_str
     if _is_from_torch(name):
         return 'import torch'
-
     module_name, attr_name = importer.get_name(obj)
     return f'from {module_name} import {attr_name} as {name}'
 
@@ -69,17 +68,29 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
     # making `code` into a property and adding a docstring to it
     fn_src = body.get('_code') or body['code']
     forward = _forward_from_src(import_block + fn_src, {})
-    return _deserialize_graph_module(forward, body, None)
+    return _deserialize_graph_module(forward, body)
 
 
 def reduce_package_graph_module(importer: PackageImporter,
                                 body: Dict[Any, Any],
                                 generated_module_name: str) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
-    return _deserialize_graph_module(forward, body, importer)
+    return _deserialize_graph_module(forward, body)
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[PackageImporter]) -> torch.nn.Module:
+def reduce_deploy_graph_module(importer: PackageImporter,
+                               body: Dict[Any, Any],
+                               import_block: str,
+                               tracer_cls: Type) -> torch.nn.Module:
+    ns = dict()
+    ns["__builtins__"] = importer.patched_builtins
+    fn_src = body.get('_code')
+    assert fn_src is not None
+    forward = _forward_from_src(import_block + fn_src, ns)
+    return _deserialize_graph_module(forward, body, tracer_cls)
+
+
+def _deserialize_graph_module(forward, body: Dict[Any, Any], tracer_cls: Type = None) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -96,11 +107,17 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], importer: Optional[
     # Try to retrieve the forward source in a backward-compatible way
     CodeOnlyModule.forward = forward
 
-    from .symbolic_trace import Tracer
+    if tracer_cls is None:
+        from ._symbolic_trace import Tracer
+        tracer_cls = Tracer
 
-    # we shouldn't trace into any of the submodules, they were not
-    # because they were not traced in the original GraphModule
-    class KeepModules(Tracer):
+    # This is a workaround for a mypy linter issue related to
+    # passing base class as an argument - https://github.com/python/mypy/issues/5865.
+    cls_tracer : Any = tracer_cls
+
+    class KeepModules(cls_tracer):
+        # we shouldn't trace into any of the submodules,
+        # because they were not traced in the original GraphModule
         def is_leaf_module(self, _: torch.nn.Module, __: str) -> bool:
             return True
 
@@ -173,7 +190,7 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
-        class GraphModuleImpl(cls):  # type: ignore
+        class GraphModuleImpl(cls):  # type: ignore[misc, valid-type]
             pass
         return super().__new__(GraphModuleImpl)
 
@@ -301,10 +318,14 @@ class {module_name}(torch.nn.Module):
             model_str += f"{tab*2}self.{module_name} = {module_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
+            if buffer is None:
+                continue
             model_str += f"{tab*2}self.register_buffer('{buffer_name}', torch.empty({list(buffer.shape)}))\n"
 
         for param_name, param in self._parameters.items():
-            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(buffer.shape)}))\n"
+            if param is None:
+                continue
+            model_str += f"{tab*2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}))\n"
 
         model_str += f"{tab*2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
         model_str += f"{_addindent(self.code, 4)}\n"
@@ -462,6 +483,9 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        if self._graph._pytree_info is not None:
+            self._in_spec = self._graph._pytree_info.in_spec
+            self._out_spec = self._graph._pytree_info.out_spec
         python_code = self._graph.python_code(root_module='self')
         self._code = python_code.src
 
@@ -485,7 +509,7 @@ class {module_name}(torch.nn.Module):
             err_line_len = len(frame_summary.line)
             all_src_lines = _eval_cache[frame_summary.filename]
 
-            # constiuent substrings of the error message
+            # constituent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call using an FX-traced Module, "
                           f"line {err_lineno} of the traced Module's "
@@ -503,7 +527,7 @@ class {module_name}(torch.nn.Module):
             except Exception as e:
                 assert e.__traceback__
                 topmost_framesummary: traceback.FrameSummary = \
-                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
+                    traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore[arg-type]
                 if "eval_with_key" in topmost_framesummary.filename:
                     print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)
@@ -512,6 +536,15 @@ class {module_name}(torch.nn.Module):
         cls.__call__ = wrapped_call
 
         return python_code
+
+    # Passing Tracer as argument allows subclasses extending fx.GraphModule
+    # define their own Tracer (extending fx.Tracer).
+    def __reduce_deploy__(self, importer: Importer, tracer_cls: Type = None):
+        dict_without_graph = self.__dict__.copy()
+        python_code = self.recompile()
+        import_block = _format_import_block(python_code.globals, importer)
+        del dict_without_graph['_graph']
+        return (reduce_deploy_graph_module, (dict_without_graph, import_block, tracer_cls))
 
     def __reduce_package__(self, exporter: PackageExporter):
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'

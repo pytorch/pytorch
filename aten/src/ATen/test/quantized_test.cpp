@@ -159,7 +159,7 @@ TEST(TestQTensor, QuantizePerChannel4d) {
     }
   }
   // quantize and check values
-  Tensor q = at::native::quantize_per_channel_cpu(
+  Tensor q = at::native::quantize_per_channel(
       tensor, scales, zero_points, ch_axis, kQUInt8);
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int c = 0, i = 0; c < C; ++c) {
@@ -167,6 +167,7 @@ TEST(TestQTensor, QuantizePerChannel4d) {
     int64_t zero_point = zero_points[c].item<int64_t>();
     for (int e = 0; e < H * W; ++e, ++i) {
       // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
       int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }
@@ -191,7 +192,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
   }
 
   // quantize and check values
-  Tensor q = at::native::quantize_per_channel_cpu(
+  Tensor q = at::native::quantize_per_channel(
       tensor, scales, zero_points, ch_axis, kQUInt8);
   auto* q_data = (uint8_t*)q.data_ptr<quint8>();
   for (int e = 0, i = 0; e < H * W; ++e) {
@@ -199,6 +200,7 @@ TEST(TestQTensor, QuantizePerChannel4dChannelsLast) {
       float inv_scale = 1.0f / static_cast<float>(scales[c].item<double>());
       int64_t zero_point = zero_points[c].item<int64_t>();
       // downsize qval to 255 if val is greater than max uint8_t value
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,bugprone-narrowing-conversions)
       int qval = std::min<int>(zero_point + std::nearbyint(e * inv_scale), 255);
       ASSERT_EQ((int)q_data[i], qval);
     }

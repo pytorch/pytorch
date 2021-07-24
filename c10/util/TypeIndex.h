@@ -97,17 +97,17 @@ inline constexpr string_view extract(
 template <typename T>
 inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
-    #if defined(__NVCC__)
+#if defined(__NVCC__)
   return extract(
       "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<",
       ">()",
       __FUNCSIG__);
-    #else
+#else
   return extract(
       "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<",
       ">(void)",
       __FUNCSIG__);
-    #endif
+#endif
 #elif defined(__clang__)
   return extract(
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
@@ -115,11 +115,11 @@ inline C10_TYPENAME_CONSTEXPR c10::string_view fully_qualified_type_name_impl() 
       __PRETTY_FUNCTION__);
 #elif defined(__GNUC__)
   return extract(
-    #if C10_TYPENAME_SUPPORTS_CONSTEXPR
+#if C10_TYPENAME_SUPPORTS_CONSTEXPR
       "constexpr c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-    #else
+#else
       "c10::string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-    #endif
+#endif
       "; c10::string_view = c10::basic_string_view<char>]",
       __PRETTY_FUNCTION__);
 #endif
@@ -155,20 +155,19 @@ inline constexpr type_index get_type_index() {
 #else
   // There's nothing in theory preventing us from running this on device code
   // except for nvcc throwing a compiler error if we enable it.
-  return (
-      abort(),
-      type_index(0));
+  return (abort(), type_index(0));
 #endif
 }
 
 template <typename T>
-inline C10_TYPENAME_CONSTEXPR string_view get_fully_qualified_type_name() noexcept {
-  #if C10_TYPENAME_SUPPORTS_CONSTEXPR
+inline C10_TYPENAME_CONSTEXPR string_view
+get_fully_qualified_type_name() noexcept {
+#if C10_TYPENAME_SUPPORTS_CONSTEXPR
   constexpr
-  #else
+#else
   static
-  #endif
-  string_view name = detail::fully_qualified_type_name_impl<T>();
+#endif
+      string_view name = detail::fully_qualified_type_name_impl<T>();
   return name;
 }
 } // namespace util

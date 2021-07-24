@@ -4,6 +4,7 @@ namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(Int8Conv, int8::Int8ConvOp<int8::Activation::NONE>);
 
+// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 const char kConvDoc_int8[] = R"DOC(
 [Only NHWC order is supported now]Note that other parameters, such as the stride and
 kernel size, or the pads' sizes in each direction are not necessary for input

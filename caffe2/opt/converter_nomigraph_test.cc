@@ -7,6 +7,7 @@ TEST(Converter, Basic) {
   using namespace caffe2::testing;
   caffe2::NetDef net;
   for (auto i = 0; i < 10; ++i) {
+    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
     if (rand() % 2) {
       NetMutator(&net)
           .newOp("Conv", {"X", "W" + c10::to_string(i)}, {"X"})

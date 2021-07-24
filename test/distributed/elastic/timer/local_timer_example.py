@@ -13,7 +13,13 @@ import unittest
 
 import torch.distributed.elastic.timer as timer
 import torch.multiprocessing as torch_mp
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+    run_tests,
+    IS_WINDOWS,
+    IS_MACOS,
+)
 
 
 logging.basicConfig(
@@ -33,6 +39,7 @@ def _stuck_function(rank, mp_queue):
         time.sleep(5)
 
 
+@unittest.skipIf(IS_WINDOWS or IS_MACOS, "timer is not supported on macos or windowns")
 class LocalTimerExample(unittest.TestCase):
     """
     Demonstrates how to use LocalTimerServer and LocalTimerClient
@@ -75,9 +82,9 @@ class LocalTimerExample(unittest.TestCase):
     def test_example_start_method_spawn(self):
         self._run_example_with(start_method="spawn")
 
-    @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
-    def test_example_start_method_forkserver(self):
-        self._run_example_with(start_method="forkserver")
+    # @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_TSAN, "test is a/tsan incompatible")
+    # def test_example_start_method_forkserver(self):
+    #     self._run_example_with(start_method="forkserver")
 
     @unittest.skipIf(TEST_WITH_TSAN, "test is tsan incompatible")
     def test_example_start_method_fork(self):
@@ -108,3 +115,7 @@ class LocalTimerExample(unittest.TestCase):
                 self.assertEqual(0, p.exitcode)
 
         server.stop()
+
+
+if __name__ == "__main__":
+    run_tests()

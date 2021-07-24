@@ -36,6 +36,7 @@ void ElementWiseSumAVX2(
     __m256 in_v0 = _mm256_cvtepi32_ps(_mm256_add_epi32(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(reinterpret_cast<const __m128i*>(input0 + j)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     in_v0 = _mm256_fmadd_ps(
@@ -46,11 +47,13 @@ void ElementWiseSumAVX2(
     __m256 in_v1 = _mm256_cvtepi32_ps(_mm256_add_epi32(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(reinterpret_cast<const __m128i*>(input1 + j)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     __m256 acc_v = _mm256_fmadd_ps(in_v1, _mm256_set1_ps(b_scale), in_v0);
 
     __m256 x_transformed_v = _mm256_fmadd_ps(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         acc_v, _mm256_set1_ps(1.0 / c_scale), _mm256_set1_ps(c_zero_point));
 
     // y
@@ -58,6 +61,7 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input0 + j + VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     in_v0 = _mm256_fmadd_ps(
@@ -69,11 +73,13 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input1 + j + VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     acc_v = _mm256_fmadd_ps(in_v1, _mm256_set1_ps(b_scale), in_v0);
 
     __m256 y_transformed_v = _mm256_fmadd_ps(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         acc_v, _mm256_set1_ps(1.0 / c_scale), _mm256_set1_ps(c_zero_point));
 
     // z
@@ -81,6 +87,7 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input0 + j + 2 * VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     in_v0 = _mm256_fmadd_ps(
@@ -92,11 +99,13 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input1 + j + 2 * VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     acc_v = _mm256_fmadd_ps(in_v1, _mm256_set1_ps(b_scale), in_v0);
 
     __m256 z_transformed_v = _mm256_fmadd_ps(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         acc_v, _mm256_set1_ps(1.0 / c_scale), _mm256_set1_ps(c_zero_point));
 
     // w
@@ -104,6 +113,7 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input0 + j + 3 * VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     in_v0 = _mm256_fmadd_ps(
@@ -115,11 +125,13 @@ void ElementWiseSumAVX2(
         _mm256_cvtepi8_epi32(_mm_sub_epi8(
             _mm_loadl_epi64(
                 reinterpret_cast<const __m128i*>(input1 + j + 3 * VLEN)),
+            // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
             _mm_set1_epi8(0x80))),
         _mm256_set1_epi32(0x80)));
     acc_v = _mm256_fmadd_ps(in_v1, _mm256_set1_ps(b_scale), in_v0);
 
     __m256 w_transformed_v = _mm256_fmadd_ps(
+        // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
         acc_v, _mm256_set1_ps(1.0 / c_scale), _mm256_set1_ps(c_zero_point));
 
     // See fbgemm/src/QuantUtilsAvx2.cc requantizeOutputProcessingAvx2 function

@@ -196,6 +196,7 @@ output:
         "*(type: float; default: 1e-5)* The epsilon value to use to avoid division by zero.")
     .Arg(
         "order",
+        // NOLINTNEXTLINE(modernize-raw-string-literal)
         "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
     .Input(0, "input", "The input 4-dimensional NCHW tensor to be operated on.")
     .Input(1, "scale", "The input 1-dimensional scale tensor of size *C*.")

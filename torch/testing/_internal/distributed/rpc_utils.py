@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import (
     find_free_port,
 )
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
+    CudaDdpComparisonTest,
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
 )
@@ -18,12 +19,15 @@ from torch.testing._internal.distributed.pipe_with_ddp_test import (
     PipeWithDDPTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
+    CudaRemoteModuleTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
 )
 from torch.testing._internal.distributed.rpc.dist_autograd_test import (
     DistAutogradTest,
+    CudaDistAutogradTest,
     FaultyAgentDistAutogradTest,
-    TensorPipeDistAutogradTest
+    TensorPipeCudaDistAutogradTest
 )
 from torch.testing._internal.distributed.rpc.dist_optimizer_test import (
     DistOptimizerTest,
@@ -39,10 +43,11 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 from torch.testing._internal.distributed.rpc.rpc_test import (
+    CudaRpcTest,
     FaultyAgentRpcTest,
-    ProcessGroupAgentRpcTest,
     RpcTest,
     TensorPipeAgentRpcTest,
+    TensorPipeAgentCudaRpcTest,
 )
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
 from torch.testing._internal.distributed.rpc.examples.reinforcement_learning_rpc_test import (
@@ -126,18 +131,17 @@ GENERIC_TESTS = [
     JitRpcTest,
     JitDistAutogradTest,
     RemoteModuleTest,
+    ThreeWorkersRemoteModuleTest,
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
-    PipeWithDDPTest,
     ReinforcementLearningRpcTest,
 ]
-
-
-# This list contains test suites that will only be run on the ProcessGroupAgent.
-# These suites should be standalone, and separate from the ones in the generic
-# list (not subclasses of those!).
-PROCESS_GROUP_TESTS = [
-    ProcessGroupAgentRpcTest
+GENERIC_CUDA_TESTS = [
+    CudaRpcTest,
+    CudaDistAutogradTest,
+    CudaRemoteModuleTest,
+    CudaDdpComparisonTest,
+    PipeWithDDPTest,
 ]
 
 
@@ -146,7 +150,10 @@ PROCESS_GROUP_TESTS = [
 # list (not subclasses of those!).
 TENSORPIPE_TESTS = [
     TensorPipeAgentRpcTest,
-    TensorPipeDistAutogradTest
+]
+TENSORPIPE_CUDA_TESTS = [
+    TensorPipeAgentCudaRpcTest,
+    TensorPipeCudaDistAutogradTest,
 ]
 
 

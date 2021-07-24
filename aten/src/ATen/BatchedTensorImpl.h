@@ -73,7 +73,7 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   int64_t actualDim(int64_t dim, bool wrap_dim = true) const;
 
   // Override a bunch of methods inherited from TensorImpl to return error messages.
-  bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
+  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;

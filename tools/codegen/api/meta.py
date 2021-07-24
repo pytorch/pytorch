@@ -1,5 +1,4 @@
-from tools.codegen.model import *
-from tools.codegen.api.types import *
+from tools.codegen.model import NativeFunctionsGroup
 
 # Follows dispatcher calling convention, but:
 #   - Mutable arguments not allowed.  Meta functions are always

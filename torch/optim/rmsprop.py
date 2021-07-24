@@ -108,11 +108,11 @@ class RMSprop(Optimizer):
                       square_avgs,
                       grad_avgs,
                       momentum_buffer_list,
-                      group['lr'],
-                      group['alpha'],
-                      group['eps'],
-                      group['weight_decay'],
-                      group['momentum'],
-                      group['centered'])
+                      lr=group['lr'],
+                      alpha=group['alpha'],
+                      eps=group['eps'],
+                      weight_decay=group['weight_decay'],
+                      momentum=group['momentum'],
+                      centered=group['centered'])
 
         return loss

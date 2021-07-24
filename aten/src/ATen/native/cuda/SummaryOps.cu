@@ -43,9 +43,7 @@ template <
     int BDims,
     CUDAHistogramMemoryType MemoryType = CUDAHistogramMemoryType::MULTI_BLOCK,
     typename Op>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
+C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
@@ -75,7 +73,7 @@ __global__ void kernelHistogram1D(
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
-        gpuAtomicAdd(&smem[bin], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&smem[bin], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -85,7 +83,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      gpuAtomicAdd(&a.data[aOffset], smem[i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], smem[i]);
     }
 
   } else if (MemoryType == CUDAHistogramMemoryType::MULTI_BLOCK) {
@@ -104,7 +102,7 @@ __global__ void kernelHistogram1D(
         const IndexType pIdx = p.strides[0] * blockIdx.x + bin;
         const IndexType pOffset =
             detail::IndexToOffset<output_t, IndexType, PDims>::get(pIdx, p);
-        gpuAtomicAdd(&p.data[pOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&p.data[pOffset], getOp(linearIndex));
       }
     }
     __syncthreads();
@@ -117,7 +115,7 @@ __global__ void kernelHistogram1D(
     for (IndexType i = threadIdx.x; i < a.sizes[0]; i += blockDim.x) {
       const IndexType aOffset =
           detail::IndexToOffset<output_t, IndexType, ADims>::get(i, a);
-      gpuAtomicAdd(&a.data[aOffset], p.data[pOffset + i]);
+      gpuAtomicAddNoReturn(&a.data[aOffset], p.data[pOffset + i]);
     }
 
   } else {
@@ -134,7 +132,7 @@ __global__ void kernelHistogram1D(
         const IndexType bin = getBin<input_t, IndexType>(bVal, minvalue, maxvalue, nbins);
         const IndexType aOffset =
             detail::IndexToOffset<output_t, IndexType, ADims>::get(bin, a);
-        gpuAtomicAdd(&a.data[aOffset], getOp(linearIndex));
+        gpuAtomicAddNoReturn(&a.data[aOffset], getOp(linearIndex));
       }
     }
   }
@@ -389,7 +387,8 @@ Tensor _bincount_cuda(
     const Tensor& self, const c10::optional<Tensor>& weights_opt,
     int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
-  const Tensor& weights = c10::value_or_else(weights_opt, [] {return Tensor();});
+  c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);
+  const Tensor& weights = *weights_maybe_owned;
 
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

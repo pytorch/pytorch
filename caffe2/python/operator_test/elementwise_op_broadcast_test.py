@@ -75,22 +75,22 @@ class TestElementwiseBroadcast(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_broadcast_Add(self, gc, dc):
         self.__test_binary_op(gc, dc, "Add", operator.add)
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_broadcast_Mul(self, gc, dc):
         self.__test_binary_op(gc, dc, "Mul", operator.mul)
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_broadcast_Sub(self, gc, dc):
         self.__test_binary_op(gc, dc, "Sub", operator.sub)
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_broadcast_powt(self, gc, dc):
         np.random.seed(101)
 

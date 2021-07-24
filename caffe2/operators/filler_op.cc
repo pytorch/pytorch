@@ -6,6 +6,7 @@ template <>
 bool RangeFillOp<float, CPUContext>::Fill(Tensor* output) {
   float* data = output->template mutable_data<float>();
   for (int i = 0; i < output->numel(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     data[i] = i;
   }
   return true;

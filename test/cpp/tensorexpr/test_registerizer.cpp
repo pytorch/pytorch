@@ -172,11 +172,15 @@ TEST(Registerizer, RegisterizerLoopInternal) {
 
   stmt = registerize(stmt);
 
+  // TODO: the order of terms in addition changes and in general depends on
+  // some hash value. This results in unpredictable swaps of the operands from
+  // random changes, which is not great. Ideally, we should ensure some
+  // specific order (ideally, the original one).
   /*
    * for (int x = 0; x < 10; x++) {
    *   int A_1 = A[x];
-   *   A_1 = A_1 + x;
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
+   *   A_1 = x + A_1;
    *   A[x] = A_1;
    * }
    */
@@ -188,8 +192,8 @@ TEST(Registerizer, RegisterizerLoopInternal) {
       R"IR(
 # CHECK: for (int x = 0; x < 10; x++)
 # CHECK: int A_1 = A[x];
-# CHECK:   A_1 = A_1 + x;
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
+# CHECK:   A_1 = x + A_1;
 # CHECK:   A[x] = A_1;
 # CHECK: })IR";
 
@@ -210,6 +214,7 @@ TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
       0,
       10,
       Store::make(a, {x}, Add::make(Load::make(b, {y}), Load::make(b, {z}))))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -322,6 +327,7 @@ TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
                 Store::make(a, {0}, Add::make(Load::make(a, {x}), x))}))
 
       });
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -463,10 +469,7 @@ TEST(Registerizer, RegisterizerVariableLoad) {
            0,
            10,
            Block::make({Store::make(
-               a,
-               {0},
-               Add::make(Load::make(a, {0}), Load::make(b, {x2})),
-               1)}))});
+               a, {0}, Add::make(Load::make(a, {0}), Load::make(b, {x2})))}))});
 
   /*
    * A[0] = 0;
@@ -573,8 +576,7 @@ TEST(Registerizer, RegisterizerMultiLoop) {
                Block::make({Store::make(
                    a,
                    {0},
-                   Mul::make(Add::make(Load::make(a, {0}), x), y),
-                   1)})))});
+                   Mul::make(Add::make(Load::make(a, {0}), x), y))})))});
 
   /*
    * A[0] = 0;
@@ -775,6 +777,7 @@ TEST(Registerizer, RegisterizerMultiVarOverlap) {
               {Store::make(a, {x}, Add::make(Load::make(a, {0}), x)),
                Store::make(a, {x + 1}, Sub::make(Load::make(a, {1}), x))})),
   });
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -905,6 +908,7 @@ TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
       0,
       10,
       Block::make({Store::make(a, {x}, Add::make(Load::make(a, {x}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -1175,6 +1179,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(c, {x}, Load::make(a, {x})),
        Cond::make(
@@ -1234,6 +1239,7 @@ TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   VarHandle y("y", kInt);
 
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {x}, Load::make(b, {x})),
        Store::make(a, {x}, Load::make(b, {x + 1})),
        Store::make(c, {x}, Load::make(a, {x})),
@@ -1528,16 +1534,14 @@ TEST(Registerizer, RegisterizerIfThenElseHidden) {
            IfThenElse::make(
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                Add::make(Load::make(a, {x}), 1),
-               Add::make(Load::make(a, {x + 1}), 2)),
-           1),
+               Add::make(Load::make(a, {x + 1}), 2))),
        Store::make(
            b,
            {y + 1},
            IfThenElse::make(
                CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                Add::make(Load::make(a, {x}), 1),
-               Add::make(Load::make(a, {x + 1}), 2)),
-           1)});
+               Add::make(Load::make(a, {x + 1}), 2)))});
 
   /*
    * B[y] = IfThenElse(x<5 ? 1 : 0, (A[x]) + 1, (A[x + 1]) + 2);
@@ -1573,16 +1577,14 @@ TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
               Add::make(Load::make(a, {x}), 1),
-              Add::make(Load::make(a, {x + 1}), 2)),
-          1),
+              Add::make(Load::make(a, {x + 1}), 2))),
       Store::make(
           b,
           {y + 1},
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kLT),
               Add::make(Load::make(a, {x}), 1),
-              Add::make(Load::make(a, {x + 1}), 2)),
-          1),
+              Add::make(Load::make(a, {x + 1}), 2))),
   });
 
   /*
@@ -1634,8 +1636,7 @@ TEST(Registerizer, RegisterizerIfThenElseNested) {
           IfThenElse::make(
               CompareSelect::make(x, 5, CompareSelectOperation::kEQ),
               Load::make(c, {x}),
-              Load::make(d, {x}))),
-      1)});
+              Load::make(d, {x}))))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0,
@@ -1672,8 +1673,7 @@ TEST(Registerizer, RegisterizerIfThenElseInternal) {
       IfThenElse::make(
           CompareSelect::make(x, 3, CompareSelectOperation::kLT),
           Add::make(Load::make(b, {x}), Load::make(b, {x})),
-          Load::make(b, {x})),
-      1)});
+          Load::make(b, {x})))});
 
   /*
    * A[x] = IfThenElse(x<3 ? 1 : 0, (B[x]) + (B[x]), B[x]);
@@ -1799,8 +1799,7 @@ TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
           CompareSelect::make(
               Load::make(a, {x}), 5, CompareSelectOperation::kLT),
           Add::make(Load::make(a, {x}), 1),
-          Add::make(Load::make(a, {x}), 10)),
-      1)});
+          Add::make(Load::make(a, {x}), 10)))});
 
   /*
    * B[x] = IfThenElse((A[x])<5 ? 1 : 0, (A[x]) + 1, (A[x]) + 10);
@@ -1843,17 +1842,16 @@ TEST(Registerizer, RegisterizerConditionBranchOnly) {
                   IfThenElse::make(
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                       Add::make(Load::make(a, {x}), x),
-                      Add::make(Load::make(a, {x - 5}), x)),
-                  1),
+                      Add::make(Load::make(a, {x - 5}), x))),
               Store::make(
                   a,
                   {x - 5},
                   IfThenElse::make(
                       CompareSelect::make(x, 5, CompareSelectOperation::kLT),
                       Add::make(Load::make(a, {x}), x),
-                      Add::make(Load::make(a, {x - 5}), x)),
-                  1)),
+                      Add::make(Load::make(a, {x - 5}), x)))),
       }))});
+  stmt = IRSimplifier::simplify(stmt);
 
   std::ostringstream before;
   before << *stmt;
@@ -1945,8 +1943,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoop) {
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
               Load::make(a, {x}),
-              Load::make(b, {y})),
-          1));
+              Load::make(b, {y}))));
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -1996,8 +1993,7 @@ TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
           IfThenElse::make(
               CompareSelect::make(x, 3, CompareSelectOperation::kLT),
               Load::make(a, {x}),
-              Load::make(a, {y})),
-          1))});
+              Load::make(a, {y}))))});
 
   /*
    * for (int y = 0; y < 10; y++) {
@@ -2048,7 +2044,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
   /*
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * for (int x = 1; x < 10; x++) {
@@ -2063,7 +2059,7 @@ TEST(Registerizer, RegisterizerPartialAfter) {
       R"IR(
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2108,7 +2104,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
    * }
    * int A_1 = 0;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    */
@@ -2124,7 +2120,7 @@ TEST(Registerizer, RegisterizerPartialBefore) {
 # CHECK: }
 # CHECK: int A_1 = 0;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;)IR";
 
@@ -2165,7 +2161,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
   /*
    * int A_1 = 2;
    * for (int x1 = 0; x1 < 10; x1++) {
-   *   A_1 = A_1 + x1;
+   *   A_1 = x1 + A_1;
    * }
    * A[0] = A_1;
    * for (int x2 = 1; x2 < 10; x2++) {
@@ -2173,7 +2169,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
    * }
    * int A_2 = A[0];
    * for (int x3 = 0; x3 < 10; x3++) {
-   *   A_2 = A_2 + x3;
+   *   A_2 = x3 + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2185,7 +2181,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x1;
+# CHECK:   A_1 = x1 + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: for (
@@ -2193,7 +2189,7 @@ TEST(Registerizer, RegisterizerPartialInside) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x3;
+# CHECK:   A_2 = x3 + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2236,7 +2232,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
   /*
    * int A_1 = 2;
    * for (int x = 0; x < 10; x++) {
-   *   A_1 = A_1 + x;
+   *   A_1 = x + A_1;
    * }
    * A[0] = A_1;
    * if (x<5 ? 1 : 0) {
@@ -2244,7 +2240,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
    * }
    * int A_2 = A[0];
    * for (int x = 0; x < 10; x++) {
-   *   A_2 = A_2 + x;
+   *   A_2 = x + A_2;
    * }
    * A[0] = A_2;
    */
@@ -2256,7 +2252,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
       R"IR(
 # CHECK: int A_1 = 2;
 # CHECK: for (
-# CHECK:   A_1 = A_1 + x;
+# CHECK:   A_1 = x + A_1;
 # CHECK: }
 # CHECK: A[0] = A_1;
 # CHECK: if (
@@ -2264,7 +2260,7 @@ TEST(Registerizer, RegisterizerPartialCondition) {
 # CHECK: }
 # CHECK: int A_2 = A[0];
 # CHECK: for (
-# CHECK:   A_2 = A_2 + x;
+# CHECK:   A_2 = x + A_2;
 # CHECK: }
 # CHECK: A[0] = A_2;)IR";
 
@@ -2476,6 +2472,7 @@ TEST(Registerizer, RegisterizerNestedBlocks) {
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
   Stmt* stmt = Block::make(
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       {Store::make(a, {0}, Add::make(Load::make(a, {0}), 1)),
        Block::make({Store::make(a, {0}, Add::make(Load::make(a, {0}), 2))}),
        Block::make(
@@ -2675,6 +2672,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2717,6 +2715,7 @@ TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
 
   ASSERT_EQ(before.str(), after.str());
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   stmt = registerize(stmt);
 }
 
@@ -2979,6 +2978,7 @@ TEST(Registerizer, RegisterizerHiddenAccessYes) {
                10,
                Block::make(
                    {Store::make(b, {x}, 0),
+                    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                     Cond::make(
                         CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                         For::make(
@@ -3059,6 +3059,7 @@ TEST(Registerizer, RegisterizerHiddenAccessNo) {
           10,
           Block::make(
               {Store::make(b, {x}, 0),
+               // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
                Cond::make(
                    CompareSelect::make(x, 3, CompareSelectOperation::kEQ),
                    For::make(
@@ -3549,6 +3550,7 @@ TEST(Registerizer, RegisterizerMultiDimOverlap) {
            10,
            Block::make({Store::make(
                a, {0, x, 2}, Add::make(Load::make(a, {y, 2, 2}), x))}))});
+  stmt = IRSimplifier::simplify(stmt);
 
   /*
    * A[0, 1, 2] = 0;
@@ -3597,7 +3599,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
    * A[0, 1, 2] = 0;
    * int A_1 = A[y, 2, 4];
    * for (int x = 0; x < 10; x++) {
-   *   A[0, x, 2] = A_1 + x;
+   *   A[0, x, 2] = x + A_1;
    * }
    */
 
@@ -3609,7 +3611,7 @@ TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
 # CHECK: A[0, 1, 2] = 0;
 # CHECK: int A_1 = A[y, 2, 4];
 # CHECK: for (
-# CHECK:   A[0, x, 2] = A_1 + x;
+# CHECK:   A[0, x, 2] = x + A_1;
 # CHECK: })IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -3641,8 +3643,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
                   {x, y, z},
                   Add::make(
                       Load::make(c, {x, y, z}),
-                      Mul::make(
-                          Load::make(b, {x, y}, 1), Load::make(a, {x}, 1)))))));
+                      Mul::make(Load::make(b, {x, y}), Load::make(a, {x})))))));
 
   /*
    * for (int x = 0; x < 10; x++) {
@@ -3701,6 +3702,7 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
       x,
       0,
       10,
+      // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
       For::make(
           y,
           0,
@@ -3734,12 +3736,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
 
   /*
    * for (int x = 0; x < 10; x++) {
-   *   int A_1 = A[x];
    *   int C_1 = C[x];
+   *   int A_1 = A[x];
    *   for (int y = 0; y < 10; y++) {
    *     int B_1 = B[y];
    *     for (int z = 0; z < 10; z++) {
-   *       C_1 = B_1 * A_1 + C_1;
+   *       C_1 = C_1 + A_1 * B_1;
    *     }
    *   }
    *   C[x] = C_1;
@@ -3752,12 +3754,12 @@ TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   const std::string& verification_pattern =
       R"IR(
 # CHECK: for (int x
-# CHECK:   int A_1 = A[x];
 # CHECK:   int C_1 = C[x];
+# CHECK:   int A_1 = A[x];
 # CHECK:   for (int y
 # CHECK:     int B_1 = B[y];
 # CHECK:       for (int z
-# CHECK:         C_1 = B_1 * A_1 + C_1;
+# CHECK:         C_1 = C_1 + A_1 * B_1;
 # CHECK:       }
 # CHECK:     }
 # CHECK:   C[x] = C_1;

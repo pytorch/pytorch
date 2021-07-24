@@ -170,12 +170,12 @@ struct Capsule {
 ///   std::cout << my_ivalue << "\n";
 ///
 ///   // Unwrap the IValue
-///   int64_t my_int = my_ivalue.toInt()
+///   int64_t my_int = my_ivalue.toInt();
 ///   std::cout << my_int << "\n";
 ///
 ///   // This will throw an error!
 ///   // `my_ivalue` is tagged as an int and cannot be used as another type
-///   torch::Tensor my_tensor = my_ivalue.toTensor()
+///   torch::Tensor my_tensor = my_ivalue.toTensor();
 /// \endrst
 struct TORCH_API IValue final {
   IValue(const IValue& rhs)
@@ -274,8 +274,8 @@ struct TORCH_API IValue final {
    * for consistency, because Python does the same thing. This actually
    * provokes user-visible changes in behavior due to quirks in torch:
    *      [tensor1] == [tensor1] -> True (because container equality will first
-   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError: bool value
-   * of Tensor is ambiguous
+   * compare identity) [tensor1] == [tensor1_copy] -> RuntimeError:
+   * Boolean value of Tensor with more than one value is ambiguous
    */
   TORCH_API friend bool _fastEqualsForContainer(
       const IValue& lhs,
@@ -555,6 +555,7 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
+  IValue(c10::string_view v) : IValue(std::string(v)) {};
   bool isString() const {
     return Tag::String == tag;
   }
@@ -563,6 +564,7 @@ struct TORCH_API IValue final {
   const std::string& toStringRef() const;
   c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef()
       const;
+  c10::string_view toStringView() const;
 
   // DoubleList
   bool isDoubleList() const;

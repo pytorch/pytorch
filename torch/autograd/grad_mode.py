@@ -5,7 +5,8 @@ import inspect
 from typing import Any, Callable, TypeVar, cast
 
 
-__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
+__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
+           'inference_mode']
 
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
@@ -96,6 +97,10 @@ class no_grad(_DecoratorContextManager):
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
+    .. note::
+        No-grad is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -135,6 +140,10 @@ class enable_grad(_DecoratorContextManager):
 
     Also functions as a decorator. (Make sure to instantiate with parenthesis.)
 
+    .. note::
+        enable_grad is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -177,6 +186,10 @@ class set_grad_enabled(object):
                      (``False``). This can be used to conditionally enable
                      gradients.
 
+    .. note::
+        set_grad_enabled is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
 
     Example::
 
@@ -206,3 +219,58 @@ class set_grad_enabled(object):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
+
+
+class inference_mode(_DecoratorContextManager):
+    r"""Context-manager that enables or disables inference mode
+
+    InferenceMode is a new context manager analogous to :class:`~no_grad`
+    to be used when you are certain your operations will have no interactions
+    with autograd (e.g., model training). Code run under this mode gets better
+    performance by disabling view tracking and version counter bumps.
+
+    This context manager is thread local; it will not affect computation
+    in other threads.
+
+    Also functions as a decorator. (Make sure to instantiate with parenthesis.)
+
+    .. note::
+        Inference mode is one of several mechanisms that can enable or
+        disable gradients locally see :ref:`locally-disable-grad-doc` for
+        more information on how they compare.
+
+    Args:
+        mode (bool): Flag whether to enable or disable inference mode
+
+    Example::
+        >>> import torch
+        >>> x = torch.ones(1, 2, 3, requires_grad=True)
+        >>> with torch.inference_mode():
+        ...   y = x * x
+        >>> y.requires_grad
+        False
+        >>> y._version
+        Traceback (most recent call last):
+        File "<stdin>", line 1, in <module>
+        RuntimeError: Inference tensors do not track version counter.
+        >>> @torch.inference_mode()
+        ... def func(x):
+        ...   return x * x
+        >>> out = func(x)
+        >>> out.requires_grad
+        False
+
+    """
+    def __init__(self, mode=True):
+        if not torch._jit_internal.is_scripting():
+            super().__init__()
+        # Holds a python binding to a RAII guard that can enable or disable
+        # inference mode
+        self._inference_mode_raii_guard = None
+        self.mode = mode
+
+    def __enter__(self):
+        self._inference_mode_raii_guard = torch._C._InferenceMode(self.mode)
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        del self._inference_mode_raii_guard

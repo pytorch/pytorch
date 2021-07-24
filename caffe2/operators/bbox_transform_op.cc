@@ -138,8 +138,11 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
     const int num_rois = num_rois_per_batch[i];
     const auto& cur_iminfo = iminfo.row(i);
     const float scale_before = cur_iminfo(2);
+    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     const float scale_after = apply_scale_ ? cur_iminfo(2) : 1.0;
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_h = int(cur_iminfo(0) / scale_before + 0.5);
+    // NOLINTNEXTLINE(bugprone-incorrect-roundings,cppcoreguidelines-avoid-magic-numbers)
     int img_w = int(cur_iminfo(1) / scale_before + 0.5);
 
     EArrXXf cur_boxes =

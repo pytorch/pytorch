@@ -29,7 +29,7 @@ class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t * self_data, const scalar_t * src_data) const {
-    gpuAtomicAdd(self_data, *src_data);
+    gpuAtomicAddNoReturn(self_data, *src_data);
   }
 };
 static ReduceAdd reduce_add;
@@ -146,10 +146,7 @@ struct cuda_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
+    if (!is_scatter_like) {
       gather_shape_check(self, dim, index, src);
     }
 
@@ -218,10 +215,7 @@ struct cuda_scatter_gather_base_kernel {
     dim = maybe_wrap_dim(dim, self.dim());
 
     scatter_gather_dtype_check(method_name, self, index, src);
-    if (is_scatter_like) {
-      scatter_shape_check(self, dim, index, src);
-    }
-    else {
+    if (!is_scatter_like) {
       gather_shape_check(self, dim, index, src);
     }
 
@@ -341,9 +335,6 @@ struct cuda_scatter_fill_base_kernel {
 
     dim = maybe_wrap_dim(dim, self.dim());
 
-    scatter_gather_dtype_check(method_name, self, index);
-    scatter_shape_check(self, dim, index);
-
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
 
     // restride self such that
@@ -392,9 +383,6 @@ struct cuda_scatter_fill_base_kernel {
     at::assert_no_internal_overlap(self);
 
     dim = maybe_wrap_dim(dim, self.dim());
-
-    scatter_gather_dtype_check(method_name, self, index);
-    scatter_shape_check(self, dim, index);
 
     auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
 

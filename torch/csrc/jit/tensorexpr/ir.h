@@ -134,12 +134,14 @@ class BinaryOpNode : public ExprNode<Op> {
     return ExprHandle(new Op(lhs.node(), rhs.node()));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   BinaryOpNode(
       const Expr* lhs_v,
       const Expr* rhs_v,
       IRNodeType expr_type,
-      ScalarType ret_type = ScalarType::None)
+      ScalarType ret_type = ScalarType::Undefined)
       : ExprNode<Op>(
+            // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
             BinaryOpDtype(lhs_v->dtype(), rhs_v->dtype(), ret_type),
             expr_type),
         lhs_(CastIfNeeded(lhs_v, ExprNode<Op>::dtype())),
@@ -311,6 +313,7 @@ Expr* getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return new Name##Imm(initialVal);
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
     default:
@@ -334,6 +337,11 @@ T immediateAs(const Expr* e) {
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
+}
+
+template <typename T>
+T immediateAs(ExprHandle e) {
+  return immediateAs<T>(e.node());
 }
 
 template <typename T>
@@ -406,43 +414,27 @@ class TORCH_API Load : public ExprNode<Load> {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }
-  const Expr* mask() const {
-    return mask_;
-  }
   const Buf* buf() const {
     return buf_;
   }
   static ExprHandle make(
       Dtype dtype,
       const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& mask);
-  static ExprHandle make(
-      const BufHandle& buf,
-      const std::vector<ExprHandle>& indices,
-      const ExprHandle& mask);
-  static ExprHandle make(
-      Dtype dtype,
-      const BufHandle& buf,
       const std::vector<ExprHandle>& indices);
   static ExprHandle make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices);
 
-  Load(
-      Dtype dtype,
-      const Buf* base_handle,
-      const std::vector<const Expr*>& indices,
-      const Expr* mask);
-  Load(
-      const Buf* base_handle,
-      const std::vector<const Expr*>& indices,
-      const Expr* mask);
+  Load(Dtype dtype, const Buf* base_handle, std::vector<const Expr*> indices);
+  Load(const Buf* base_handle, const std::vector<const Expr*>& indices);
+
+  void set_indices(std::vector<const Expr*> indices) {
+    indices_ = indices;
+  };
 
  private:
   const Buf* buf_;
   std::vector<const Expr*> indices_;
-  const Expr* mask_;
 };
 
 class TORCH_API Broadcast : public ExprNode<Broadcast> {
@@ -579,6 +571,7 @@ class TORCH_API CompareSelect : public ExprNode<CompareSelect> {
         compare_op_(cmp_op),
         bias_(bias) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompareSelect(
       const Expr* lhs,
       const Expr* rhs,
@@ -653,6 +646,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   static ExprHandle make(
       IntrinsicsOp op_type,
       const std::vector<ExprHandle>& params) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<const Expr*> params_nodes(params.size());
     for (size_t i = 0; i < params.size(); i++) {
       params_nodes[i] = params[i].node();
@@ -742,6 +736,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, Dtype dtype)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_({}),
@@ -751,6 +746,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const Expr* v1)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype())),
         params_({v1}),
@@ -760,6 +756,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const Expr* v1, const Expr* v2)
       : ExprNodeBase(IntrinsicsDtype(op_type, v1->dtype(), v2->dtype())),
         params_({v1, v2}),
@@ -769,6 +766,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const std::vector<const Expr*>& params)
       : ExprNodeBase(IntrinsicsDtype(op_type, params)),
         params_(params),

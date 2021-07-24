@@ -21,13 +21,16 @@ class Conv2d(nn.Conv2d):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
-                 bias=True, padding_mode='zeros', qconfig=None):
+                 bias=True, padding_mode='zeros', qconfig=None,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(in_channels, out_channels, kernel_size,
                          stride=stride, padding=padding, dilation=dilation,
-                         groups=groups, bias=bias, padding_mode=padding_mode)
+                         groups=groups, bias=bias, padding_mode=padding_mode,
+                         **factory_kwargs)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
-        self.weight_fake_quant = qconfig.weight()
+        self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
     def forward(self, input):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
@@ -84,7 +87,10 @@ class Conv3d(nn.Conv3d):
         bias=True,
         padding_mode="zeros",
         qconfig=None,
-    ):
+        device=None,
+        dtype=None
+    ) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super().__init__(
             in_channels,
             out_channels,
@@ -95,10 +101,11 @@ class Conv3d(nn.Conv3d):
             groups=groups,
             bias=bias,
             padding_mode=padding_mode,
+            **factory_kwargs
         )
         assert qconfig, "qconfig must be provided for QAT module"
         self.qconfig = qconfig
-        self.weight_fake_quant = qconfig.weight()
+        self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
     def forward(self, input):
         return self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
