@@ -223,6 +223,7 @@ struct TORCH_API KinetoEvent {
 // with events manually created by us (e.g. start/stop marks,
 // memory allocation events)
 struct TORCH_API ProfilerResult {
+  ProfilerResult();
   ProfilerResult(
       std::vector<KinetoEvent> events,
       thread_event_lists legacy_events,
