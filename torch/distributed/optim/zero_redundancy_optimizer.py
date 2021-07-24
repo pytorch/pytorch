@@ -179,14 +179,28 @@ class _OverlapInfo():
             assigned to this rank.
         broadcast_handles (List[Work]): :class:`list` of async work handles for
             the parameter broadcasts.
+        bucket_to_allreduce_future (Dict[int, torch.futures.Future]):
+            :class:`dict` mapping bucket index to the corresponding all-reduce
+            future.
+        bucket_to_gradients (Dict[int, List[torch.Tensor]]): :class:`dict`
+            mapping bucket index to the bucket's gradients.
+        bucket_indices_seen (List[int]): :class:`list` of the bucket indices
+            seen so far in the iteration.
     """
     def __init__(self):
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
+
+        # Modified per bucket reconstruction
         self.params_per_bucket: List[List[torch.Tensor]] = []
         self.params_per_rank: List[List[torch.Tensor]] = \
             [[] for _ in range(dist.get_world_size())]
         self.offsets: Dict[int, int] = {}
+
+        # Modified per iteration
         self.broadcast_handles: List[Any] = []
+        self.bucket_to_allreduce_future: Dict[int, torch.futures.Future] = {}
+        self.bucket_to_gradients: Dict[int, List[torch.Tensor]] = {}
+        self.bucket_indices_seen: List[int] = []
 
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
@@ -232,9 +246,9 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             If ``False``, :meth:`step` runs disjointly after the backward pass
             (per normal).
             (default: ``False``)
-        use_extra_stream (bool, optional): if ``True``, use a second CUDA
-            stream for the optimizer computation; if ``False``, only use the
-            single default stream (default: ``False``).
+        zero_grad (bool, optional): if ``True``, zeroes gradients after
+            performing an optimizer step; if ``False``, :meth:`zero_grad()`
+            should be called by the user (default: ``False``).
         **defaults: any trailing arguments, which are forwarded to the local
             optimizer.
 
@@ -283,7 +297,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         process_group: Optional[Any] = None,
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
-        use_extra_stream: bool = False,
+        zero_grad: bool = False,
         **defaults: Any,
     ):
         # Perform type and assumption checks on the input parameters
@@ -334,14 +348,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 )
             raise ValueError(error_msg)
         self._overlap_with_ddp = overlap_with_ddp
-        self._use_extra_stream = use_extra_stream
-        if use_extra_stream:
-            assert overlap_with_ddp, \
-                "`use_extra_stream` should only be set to `True` if " \
-                "`overlap_with_ddp=True`"
-        if use_extra_stream:
-            self._bwd_stream = torch.cuda.current_stream(self._default_device)
-            self._optim_stream = torch.cuda.Stream(self._default_device)
 
         # If `overlap_with_ddp=True`, local optimizer initialization is delayed
         # to run time after the necessary information has been collected
@@ -349,6 +355,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             self._init_local_optimizer()
         else:
             self._overlap_info = _OverlapInfo()
+        self._zero_grad = zero_grad
 
         # `self._buckets` is used if `parameters_as_bucket_view=True` or
         # `overlap_with_ddp=True`, in which case parameter data is flattened
@@ -848,19 +855,16 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 # initialization of the local optimizer and supporting state
                 self._init_zero_for_overlap()
 
-            # Ensure that all parameter updates are finished before the
-            # next forward pass
-            if self._use_extra_stream:
-                self._bwd_stream.wait_stream(self._optim_stream)
-            _ = list(map(lambda x: x.wait(), self._overlap_info.broadcast_handles))
-            self._overlap_info.broadcast_handles.clear()
-
             # `step()` does not actually perform any parameter updates and is
             # only used for bookkeeping when `overlap_with_ddp=True`
             return None
 
         # Perform the local optimizer step
         loss = self._local_step(closure=closure, **kwargs)
+
+        # Zero the gradient before syncing if needed
+        if self._zero_grad:
+            self.optim.zero_grad()
 
         # Sync all of the updated parameter shards across the ranks
         self._sync_params()
@@ -1215,6 +1219,23 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
 
+    @staticmethod
+    def _zero_grad(params: List[torch.Tensor]) -> None:
+        r"""
+        Zeroes the gradient of each parameter in ``params``.
+
+        Arguments:
+            params (List[torch.Tensor]): :class:`list` of parameters whose
+                gradients should be zeroed.
+        """
+        for p in params:
+            if p.grad is not None:
+                if p.grad.grad_fn is not None:
+                    p.grad.detach_()
+                else:
+                    p.grad.requires_grad_(False)
+                p.grad.zero_()
+
     def _init_zero_for_overlap(self) -> None:
         r"""
         Performs a delayed initialization of the local optimizer and the
@@ -1227,10 +1248,25 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._partition_parameters(self._overlap_info.params_per_rank)
         self._build_ddp_param_buckets()
         self._init_local_optimizer()
+        if self._zero_grad:
+            ZeroRedundancyOptimizer._zero_grad(self._all_params)
 
     def _ddp_bucket_index_to_rank(self, bucket_index: int) -> int:
-        r"""Assigns a rank to a given bucket index."""
+        r"""Assigns a rank to a given DDP gradient bucket index."""
         return bucket_index % self.world_size
+
+    def _get_assigned_ddp_bucket_indices(self) -> List[int]:
+        r"""
+        Returns a list of the DDP gradient bucket indices assigned to this rank
+        to update.
+        """
+        assert self._overlap_info.status == _OverlapStatus.INITIALIZED
+        num_buckets = len(self._overlap_info.params_per_bucket)
+        assigned_indices = [
+            bucket_index for bucket_index in range(num_buckets)
+            if self._ddp_bucket_index_to_rank(bucket_index) == self.global_rank
+        ]
+        return assigned_indices
 
     def _check_overlap_initialized(self):
         r"""
