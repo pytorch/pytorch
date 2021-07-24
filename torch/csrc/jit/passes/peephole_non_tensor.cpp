@@ -7,6 +7,83 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
+/**
+ * Check whether the arithmetic node is binary between integers, and return a
+ * constant int value if there exists one.
+ *
+ * @pre node is integer arithmetic.
+ * @post if there's one constant in two oprands, then the second operand is
+ *       constant.
+ */
+c10::optional<int64_t> checkArithNode(Node& node) {
+  if (node.inputs().size() != 2 || node.input(0)->type() != IntType::get() ||
+      node.input(1)->type() != IntType::get()) {
+    return {};
+  }
+
+  if (node.kind() == aten::mul || node.kind() == aten::add) {
+    if (auto i = constant_as<int64_t>(node.input(0))) {
+      node.permuteInputs({1, 0});
+      return i;
+    }
+  }
+
+  return constant_as<int64_t>(node.input(1));
+}
+
+/**
+ * Remove a mul/floordiv node if it is multiplication or division by 1.
+ *
+ * @pre node is either aten::mul, aten::floordiv or aten::div
+ */
+bool trySimplifyMulOrDiv(Node& node) {
+  auto constant = checkArithNode(node);
+  if (!constant || *constant != 1) {
+    return false;
+  }
+
+  node.output()->replaceAllUsesWith(node.inputs()[0]);
+  return true;
+}
+
+/**
+ * Simplify an add/sub node with its input node, i.e. merge the constant parts
+ * together.
+ *
+ * @pre node is either aten::add or aten::sub
+ */
+bool trySimplifyAddOrSub(Node& node) {
+  auto constant = checkArithNode(node);
+  if (!constant) {
+    return false;
+  }
+
+  auto& dep = *node.inputs()[0]->node();
+  if (dep.kind() != aten::add && dep.kind() != aten::sub) {
+    return false;
+  }
+
+  auto delta = checkArithNode(dep);
+  if (!delta) {
+    return false;
+  }
+  auto merged =
+      dep.kind() == node.kind() ? *constant + *delta : *constant - *delta;
+
+  if (merged == 0) {
+    node.output()->replaceAllUsesWith(dep.inputs()[0]);
+  } else {
+    WithInsertPoint g(&node);
+    node.replaceInput(0, dep.inputs()[0]);
+    node.replaceInput(1, node.owningGraph()->insertConstant(merged));
+  }
+  return true;
+}
+
+} // namespace
+
 struct PeepholeOptimizeNonTensorImpl {
   // NOLINTNEXTLINE(modernize-pass-by-value)
   PeepholeOptimizeNonTensorImpl(const std::shared_ptr<Graph>& graph)
@@ -135,6 +212,12 @@ struct PeepholeOptimizeNonTensorImpl {
           default:
             break;
         }
+      } else if (
+          node->kind() == aten::mul || node->kind() == aten::floordiv ||
+          node->kind() == aten::div) {
+        changed |= trySimplifyMulOrDiv(*node);
+      } else if (node->kind() == aten::add || node->kind() == aten::sub) {
+        changed |= trySimplifyAddOrSub(*node);
       }
     }
     return changed;
