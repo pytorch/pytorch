@@ -26,6 +26,7 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
+  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -83,7 +84,6 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
-  _(prim, VarConcat)                 \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -370,6 +370,8 @@ namespace c10 {
   _(aten, igammac)                   \
   _(aten, igammac_)                  \
   _(aten, special_gammaincc)         \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \

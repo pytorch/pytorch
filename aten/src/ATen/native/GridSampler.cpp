@@ -758,7 +758,6 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     kCPU, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(grid_sampler_2d_cpu_kernel);
 
 
@@ -805,7 +804,6 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
     kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
 
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].

@@ -1152,6 +1152,49 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
             ms(torch.rand(4, 3))
 
+    def test_fx_create_arg(self):
+        class CustomArgObject:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            def __fx_create_arg__(self, tracer: torch.fx.Tracer):
+                return tracer.create_node(
+                    "call_function",
+                    CustomArgObject,
+                    args=(
+                        tracer.create_arg(self.x),
+                        tracer.create_arg(self.y),
+                    ),
+                    kwargs={},
+                )
+
+        class HasCustomArgObjectWhenLeaf(torch.nn.Module):
+            def forward(self, o: CustomArgObject):
+                # Not normally traceable; good reason to make
+                # this module a leaf.
+                for x in o.x:
+                    o.y += x
+                return o.y
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = HasCustomArgObjectWhenLeaf()
+
+            def forward(self, x, y):
+                o = CustomArgObject(x, y)
+                return self.inner(o)
+
+        class CreateArgTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return type(m) is HasCustomArgObjectWhenLeaf
+
+        m = Root()
+        graph = CreateArgTracer().trace(m)
+        gm = torch.fx.GraphModule(m, graph)
+        assert "CustomArgObject(" in gm.code
+
     def test_trace_fn_constant(self):
         some_constant = torch.rand(3, 4)
 

@@ -163,7 +163,6 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
@@ -486,7 +485,7 @@ Module freeze(
     c10::optional<std::vector<std::string>> preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
-      module.is_training(),
+      !module.hasattr("training") || !module.is_training(),
       "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
 
   Module out_mod = freeze_module(

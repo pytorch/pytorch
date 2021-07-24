@@ -613,9 +613,7 @@ class IrParser {
       Symbol,
       std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::unordered_set<Symbol> jit_reduction_op_registry_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static bool init_registry_;
 };
 
@@ -624,9 +622,7 @@ std::unordered_map<
     std::vector<
         std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool IrParser::init_registry_ = true;
 
 } // namespace
