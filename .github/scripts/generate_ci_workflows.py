@@ -112,21 +112,29 @@ class CIWorkflow:
     def __post_init__(self) -> None:
         if self.is_libtorch:
             self.exclude_test = True
-        if not self.on_pull_request:
-            self.only_build_on_pull_request = False
-            self.ciflow_config.enabled = False
-            self.ciflow_config.reset_root_job()
 
         # The following code allows for scheduled jobs to be debuggable by
         # adding the label 'ciflow/scheduled' and assigning + unassigning pytorchbot,
-        # ONLY if the workflow itself _hasn't_ specified its own ciflow_config.
-        if self.is_scheduled and not self.ciflow_config.enabled:
+        # without overwriting the workflow's own ciflow_config, if already enabled.
+        if self.is_scheduled:
+            if self.ciflow_config.enabled:
+                self.ciflow_config.labels.add('ciflow/scheduled')
+            else:
+                self.ciflow_config = CIFlowConfig(
+                    enabled=True,
+                    labels={'ciflow/scheduled'}
+                )
+
+        # CIFlow requires on_pull_request to be set in order to be enabled.
+        # If on_pull_request wasn't previously specified, we set trigger_action_only
+        # to True as we want to avoid unintentional pull_request event triggers
+        if self.ciflow_config.enabled:
+            self.ciflow_config.trigger_action_only = self.ciflow_config.trigger_action_only or not self.on_pull_request
             self.on_pull_request = True
-            self.ciflow_config = CIFlowConfig(
-                enabled=True,
-                trigger_action_only=True,
-                labels=set(['ciflow/scheduled']),
-            )
+
+        if not self.on_pull_request:
+            self.only_build_on_pull_request = False
+
         self.assert_valid()
 
     def assert_valid(self) -> None:
