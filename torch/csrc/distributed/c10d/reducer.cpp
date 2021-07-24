@@ -1461,15 +1461,13 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    for (const auto i : c10::irange(future_result.size())) {
-      auto& replica = bucket.replicas[i];
-      if (bucket.expect_sparse_gradient) {
-        replica.contents.copy_(future_result[i]);
-      } else {
-        // Reinitialize only `bucket_views_out` with the future_result by
-        // following the same logic in `initialize_buckets`.
-        populate_bucket_views_out(replica, future_result[i]);
-      }
+    auto& replica = bucket.replicas[0];
+    if (bucket.expect_sparse_gradient) {
+      replica.contents.copy_(future_result);
+    } else {
+      // Reinitialize only `bucket_views_out` with the future_result by
+      // following the same logic in `initialize_buckets`.
+      populate_bucket_views_out(replica, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass
