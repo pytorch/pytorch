@@ -1899,8 +1899,9 @@ struct to_ir {
           found_refinement = lhs_type;
         } else if (*maybe_smaller_type == *rhs_type) {
           // We want the narrowest possible type
-          found_refinement = found_refinement ? *(unifyTypes(found_refinement, rhs_type)) : rhs_type;
-
+          found_refinement = found_refinement
+              ? *(unifyTypes(found_refinement, rhs_type))
+              : rhs_type;
         }
       }
 
