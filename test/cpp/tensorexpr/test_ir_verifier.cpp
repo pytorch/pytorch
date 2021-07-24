@@ -16,7 +16,6 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, BitwiseOps) {
   KernelScope kernel_scope;
   const Var* X = new Var("x", kInt);
@@ -48,7 +47,6 @@ TEST(IRVerifier, BitwiseOps) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, CompareSelect) {
   KernelScope kernel_scope;
   const Expr* X = new IntImm(1);
@@ -65,7 +63,6 @@ TEST(IRVerifier, CompareSelect) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Ramp) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -77,7 +74,6 @@ TEST(IRVerifier, Ramp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Load) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -105,7 +101,6 @@ TEST(IRVerifier, Load) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, IfThenElse) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -131,7 +126,6 @@ TEST(IRVerifier, IfThenElse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, For) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -145,7 +139,6 @@ TEST(IRVerifier, For) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Block) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -163,7 +156,6 @@ TEST(IRVerifier, Block) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Store) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);

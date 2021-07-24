@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_TRANSFORM(ConvToNNPack, ConvToNNPackTransform);
 
 } // namespace caffe2
