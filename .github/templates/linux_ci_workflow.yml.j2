@@ -450,9 +450,6 @@ jobs:
   wheel-test:
     runs-on: ubuntu-18.04
     needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-test
     steps:
       - name: Log in to ECR
         run: |

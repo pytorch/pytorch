@@ -416,9 +416,6 @@ jobs:
   wheel-test:
     runs-on: ubuntu-18.04
     needs: [calculate-docker-image, build, ]
-    env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc5.4-test
     steps:
       - name: Log in to ECR
         run: |
