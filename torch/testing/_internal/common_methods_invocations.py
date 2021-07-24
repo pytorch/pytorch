@@ -3635,7 +3635,8 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
 
 
-def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+# Used for both log_softmax and softmax
+def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = (
@@ -6321,14 +6322,14 @@ op_db: List[OpInfo] = [
            aliases=('softmax',),
            aten_name="softmax",
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_log_softmax,
+           sample_inputs_func=sample_inputs_softmax_variant,
            supports_out=False),
     OpInfo('nn.functional.softmax',
            aliases=('softmax',),
            variant_test_name="with_dtype",
            aten_name="softmax",
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
+           sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
@@ -7772,7 +7773,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_log_softmax,
+        sample_inputs_func=sample_inputs_softmax_variant,
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -7780,7 +7781,7 @@ op_db: List[OpInfo] = [
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
+        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
