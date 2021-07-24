@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """This script runs cuda-memcheck on the specified unit test. Each test case
 is run in its isolated process with a timeout so that:

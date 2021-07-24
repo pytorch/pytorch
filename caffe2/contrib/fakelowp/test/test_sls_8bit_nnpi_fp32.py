@@ -49,10 +49,10 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
         data = np.random.rand(num_rows, embedding_dim).astype(np.float32)
         lengths = np.random.choice(np.arange(1, num_rows), batch_size).astype(np.int32)
 
-        indices = []
+        _indices = []
         for length in lengths:
-            indices.extend(np.random.choice(np.arange(1, num_rows), length))
-        indices = np.asarray(indices).astype(np.int64)
+            _indices.extend(np.random.choice(np.arange(1, num_rows), length))
+        indices = np.asarray(_indices).astype(np.int64)
 
         weights = np.random.uniform(
             low=0,
@@ -246,9 +246,6 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
                 "test_small_sls_acc32",
                 {
                     "seed": seed,
-                    "num_rows": num_rows,
-                    "embedding_dim": embedding_dim,
-                    "batch_size": batch_size,
                     "indices": indices,
                     "data": data,
                     "quantized_data": quantized_data,

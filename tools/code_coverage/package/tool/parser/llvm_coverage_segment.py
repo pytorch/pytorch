@@ -10,11 +10,11 @@ class LlvmCoverageSegment(NamedTuple):
     is_gap_entry: Optional[int]
 
     @property
-    def has_coverage(self):
+    def has_coverage(self) -> bool:
         return self.segment_count > 0
 
     @property
-    def is_executable(self):
+    def is_executable(self) -> bool:
         return self.has_count > 0
 
     def get_coverage(

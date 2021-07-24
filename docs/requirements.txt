@@ -4,3 +4,5 @@ docutils==0.16
 sphinxcontrib.katex
 matplotlib
 tensorboard
+# required to build torch.distributed.elastic.rendezvous.etcd* docs
+python-etcd>=0.4.5

@@ -26,9 +26,15 @@ if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
   retry bash "${WORKSPACE_DIR}"/miniconda3.sh -b -p "${WORKSPACE_DIR}"/miniconda3
 fi
 export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
-# shellcheck disable=SC1090
+# shellcheck disable=SC1091
 source "${WORKSPACE_DIR}"/miniconda3/bin/activate
-retry conda install -y mkl mkl-include numpy=1.18.5 pyyaml=5.3 setuptools=46.0.0 cmake cffi ninja typing_extensions dataclasses pip
+
+# NOTE: mkl 2021.3.0+ cmake requires sub-command PREPEND, may break the build
+retry conda install -y \
+  mkl=2021.2.0 mkl-include=2021.2.0 \
+  numpy=1.18.5 pyyaml=5.3 setuptools=46.0.0 \
+  cmake cffi ninja typing_extensions dataclasses pip
+
 # The torch.hub tests make requests to GitHub.
 #
 # The certifi package from conda-forge is new enough to make the

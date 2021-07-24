@@ -9,6 +9,7 @@ namespace jit {
 class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
  public:
   PyTorchBackendInterface();
+  // NOLINTNEXTLINE(modernize-use-override)
   virtual ~PyTorchBackendInterface();
 
   // Returns true if the backend is available to process delegation calls.

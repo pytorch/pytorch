@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -57,6 +57,17 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   # enable split torch_cuda build option in CMake
   export BUILD_SPLIT_CUDA=ON
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+  export BUILD_CAFFE2=OFF
+fi
+
+if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+  export ATEN_THREADING=TBB
+  export USE_TBB=1
+elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+  export ATEN_THREADING=NATIVE
 fi
 
 # TODO: Don't run this...
@@ -137,8 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
@@ -173,6 +184,11 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
 
+# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
+if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1-cudnn8*build ]]; then
+  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
   export TORCH_CUDA_ARCH_LIST="6.0"
 fi
@@ -184,8 +200,14 @@ fi
 
 # Patch required to build xla
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  git clone --recursive https://github.com/pytorch/xla.git
-  ./xla/scripts/apply_patches.sh
+  clone_pytorch_xla
+  # shellcheck disable=SC1091
+  source "xla/.circleci/common.sh"
+  apply_patches
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-build || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-build ]]; then
+  export USE_GLOO_WITH_OPENSSL=ON
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
@@ -229,12 +251,15 @@ else
       cp build/.ninja_log dist
     fi
 
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
     # Build custom operator tests.
-    CUSTOM_OP_BUILD="$PWD/../custom-op-build"
+    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$CUSTOM_OP_BUILD"
+    mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
@@ -242,11 +267,11 @@ else
     assert_git_not_dirty
 
     # Build jit hook tests
-    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
     JIT_HOOK_TEST="$PWD/test/jit_hooks"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir "$JIT_HOOK_BUILD"
+    mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
     cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
@@ -254,10 +279,10 @@ else
     assert_git_not_dirty
 
     # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
     CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
     python --version
-    mkdir "$CUSTOM_BACKEND_BUILD"
+    mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
     cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
@@ -288,36 +313,10 @@ fi
 
 # Test XLA build
 if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  # TODO: Move this to Dockerfile.
-
-  pip_install lark-parser
-  pip_install cloud-tpu-client
-
-  sudo apt-get -qq update
-  sudo apt-get -qq install npm nodejs
-
-  # XLA build requires Bazel
-  # We use bazelisk to avoid updating Bazel version manually.
-  sudo npm install -g @bazel/bazelisk
-  sudo ln -s "$(command -v bazelisk)" /usr/bin/bazel
-
-  # Install bazels3cache for cloud cache
-  sudo npm install -g bazels3cache
-  BAZELS3CACHE="$(which bazels3cache)"
-  if [ -z "${BAZELS3CACHE}" ]; then
-    echo "Unable to find bazels3cache..."
-    exit 1
-  fi
-
-  bazels3cache --bucket="${XLA_CLANG_CACHE_S3_BUCKET_NAME}" --maxEntrySizeBytes=0
-  pushd xla
-  export CC=clang-9 CXX=clang++-9
-  # Use cloud cache to build when available.
-  # shellcheck disable=SC1003
-  sed -i '/bazel build/ a --remote_http_cache=http://localhost:7777 \\' build_torch_xla_libs.sh
-
-  python setup.py install
-  popd
+  XLA_DIR=xla
+  # These functions are defined in .circleci/common.sh in pytorch/xla repo
+  install_deps_pytorch_xla $XLA_DIR
+  build_torch_xla $XLA_DIR
   assert_git_not_dirty
 fi
 

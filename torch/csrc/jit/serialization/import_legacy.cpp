@@ -16,6 +16,7 @@
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -89,6 +90,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
 
   at::DataPtr data_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t data_size;
   std::tie(data_ptr, data_size) = reader_->getRecord("model.json");
   // NB: cannot use JsonStringToMessage, since fbcode's protobuf is too old
@@ -143,6 +145,7 @@ Module ScriptModuleDeserializer::LEGACY_deserialize() {
 IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
     const std::string& name) {
   at::DataPtr attributes_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t attributes_size;
   std::tie(attributes_ptr, attributes_size) = reader_->getRecord(name);
   auto ivalue = unpickle(
@@ -187,6 +190,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
   auto storage_it = storageMap.find(record_key);
   if (storage_it == storageMap.end()) {
     at::DataPtr storage_ptr;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
@@ -327,6 +331,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr;
   if (module_def.has_torchscript_debug_arena()) {
     at::DataPtr data;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     std::tie(data, size) =
         reader_->getRecord(module_def.torchscript_debug_arena().key());
@@ -337,6 +342,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
 
   if (module_def.has_torchscript_arena()) {
     at::DataPtr data;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t size;
     std::tie(data, size) =
         reader_->getRecord(module_def.torchscript_arena().key());
@@ -373,7 +379,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
     }
   }
 
-  for (size_t i = 0; i < numPushed; i++) {
+  for (const auto i : c10::irange(numPushed)) {
     LEGACY_moduleStack_.pop_back();
   }
   return module;

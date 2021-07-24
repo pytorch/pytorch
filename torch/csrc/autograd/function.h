@@ -99,6 +99,7 @@ class NodeGuard {
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
@@ -119,13 +120,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       assign_parent();
     }
 
-    if (profiler::profilerEnabled()) {
-      // If profiler is enabled, thread_id is stored.
-      // See NOTE [ Sequence Numbers ]
-      thread_id_ = at::RecordFunction::currentThreadId();
-    }
+    // Store the thread_id of the forward operator.
+    // See NOTE [ Sequence Numbers ]
+    thread_id_ = at::RecordFunction::currentThreadId();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(edge_list&& next_edges = edge_list())
     : Node(/*sequence_nr=*/at::sequence_number::get_and_increment(),
     std::move(next_edges)) {}
@@ -184,12 +184,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     const at::TensorOptions& options
   , at::IntArrayRef shape
   , at::Device device) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(options, shape, device);
     return input_nr;
   }
 
   uint32_t add_input_metadata(const at::Tensor& t) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back(t);
     return input_nr;
@@ -197,6 +199,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   /// Adds a placeholder for an input that will not be used.
   uint32_t add_input_metadata(undefined_input u) noexcept {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
     input_metadata_.emplace_back();
     return input_nr;
@@ -464,17 +467,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Sequence number used to correlate backward nodes with forward ops in the
   // profiler and provide determinisim in the engine.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const uint64_t sequence_nr_;
 
   // See NOTE [ Topological Number ]
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t topological_nr_ = 0;
 
   // Tracks whether this node has been added as the next_edge of another node
   // via set_next_edge(s), which always calls topological_nr() of all its children
   // See NOTE [ Topological Number ] for why we need this.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable bool has_parent_ = false;
 
   // Id of the thread that created the instance
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   uint64_t thread_id_ = 0;
 
   // Note [Thread Safety on Autograd Node]
@@ -513,13 +520,20 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // not protect the thread safety on Node pre/post C++ hooks (python hooks are
   // automatically thread safe), we rely on the user to write thread safe C++ hooks
   // if they want the hook to be correctly applied in multithreading environment.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex mutex_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   edge_list next_edges_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PyObject* pyobj_ = nullptr; // weak reference
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   at::SmallVector<InputMetadata, 2> input_metadata_;
 };
 
@@ -537,10 +551,12 @@ struct TraceableFunction : public Node {
 
 namespace detail {
 // Implementation of `collect_next_edges` (see below).
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   edge_list next_edges;
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.defined()) {
       next_edges.push_back(impl::gradient_edge(variable));
     } else {
@@ -548,6 +564,7 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
     }
   }
   void operator()(const c10::optional<Variable>& variable) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (variable.has_value() && variable->defined()) {
       next_edges.push_back(impl::gradient_edge(*variable));
     } else {

@@ -38,6 +38,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -823,12 +824,6 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
-static bool should_run = false;
-
-static bool shouldRunCallback(const RecordFunctionCallback&) {
-  return should_run;
-}
-
 static TracedTestValues traced_inputs;
 static TracedTestValues traced_outputs;
 static std::unordered_set<std::string> ts_input_names;
@@ -843,6 +838,7 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
       if (input.isTensor()) {
         sizes.push_back(input.toTensor().sizes().vec());
       } else if (input.isScalar()) {
+        // NOLINTNEXTLINE(modernize-use-emplace)
         sizes.push_back(std::vector<int64_t>());
       }
     }
@@ -968,6 +964,7 @@ TEST(RecordFunctionTest, SampledCallbacks) {
 
   sampled_cb_ctr = 0;
   removeCallback(handle);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   handle = setup_sampled_callback(1.0);
   run_test_function();
 
@@ -991,6 +988,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
   addGlobalCallback(RecordFunctionCallback(
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
+        // NOLINTNEXTLINE(modernize-use-emplace)
         fn_names.push_back(fn.name().str());
         return nullptr;
       }));
@@ -1030,6 +1028,7 @@ TEST(RecordFunctionTest, Callbacks) {
   GraphOptimizerEnabledGuard opt_guard(false);
 
   auto h1 = add_remove_test_add_cb<1>();
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto h2 = add_remove_test_add_cb<2>();
   auto h3 = add_remove_test_add_cb<3>();
 
@@ -1159,25 +1158,31 @@ TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
-  should_run = false;
   static bool ran = false;
-  addGlobalCallback(
-      RecordFunctionCallback(
-          [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-            ran = true;
-            return nullptr;
-          })
-          .setShouldRun(shouldRunCallback));
+  auto handle = addGlobalCallback(RecordFunctionCallback(
+      [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
+        ran = true;
+        return nullptr;
+      }));
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(!ran);
+  EXPECT_TRUE(ran) << "first run didn't happen";
+  ran = false;
 
-  should_run = true;
+  disableCallback(handle);
 
   { RECORD_USER_SCOPE("test"); }
 
-  TORCH_CHECK(ran);
+  EXPECT_FALSE(ran) << "second run happened but shouldn't have";
+  ran = false;
+
+  reenableCallback(handle);
+
+  { RECORD_USER_SCOPE("test"); }
+
+  EXPECT_TRUE(ran) << "run after re-enable didn't happen";
+  ran = false;
 
   clearCallbacks();
 }
@@ -1269,6 +1274,7 @@ class TestThreadLocalDebugInfo : public c10::DebugInfoBase {
     model_id_ = model_id;
   }
 
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~TestThreadLocalDebugInfo() {}
 
  private:
@@ -2025,6 +2031,7 @@ def c(x):
           n->kindOf(attr::value) != AttributeKind::s) {
         continue;
       }
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       std::string v = n->s(attr::value);
       if (n->callstack()) {
         callstack_objects[v] = n->callstack()->get();
@@ -2037,6 +2044,62 @@ def c(x):
   // callstack entries for them.
   ASSERT_TRUE(callstack_objects.count("a1") && callstack_objects.count("a2"));
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
+}
+
+TEST(InlinedCallStackTest, BlockAnnotation) {
+  Module a("A");
+  a.define(R"(
+    def forward(self, x, y, z: int):
+      if (z == 1):
+        return x + y
+      else:
+        return x * y
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def forward(self, x, y, z: int):
+      return self.A0.forward(x, y, z) + self.B0.forward(x)
+  )");
+
+  auto graph = c.get_method("forward").function().optimized_graph();
+  std::stringstream add_ss, mul_ss;
+  for (Node* n : graph->nodes()) {
+    if (n->kind() == prim::If) {
+      for (Block* block : n->blocks()) {
+        for (Node* if_node : block->nodes()) {
+          if (if_node->kind() == aten::add) {
+            for (const auto e : if_node->callstack().value()->vec()) {
+              add_ss << std::get<1>(e);
+            }
+            add_ss << if_node->sourceRange();
+          }
+          if (if_node->kind() == aten::mul) {
+            for (const auto e : if_node->callstack().value()->vec()) {
+              mul_ss << std::get<1>(e);
+            }
+            mul_ss << if_node->sourceRange();
+          }
+        }
+      }
+    }
+  }
+  ASSERT_NE(add_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("line 4"), std::string::npos);
+  ASSERT_NE(
+      add_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(add_ss.str().find("return x + y"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 3"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("line 6"), std::string::npos);
+  ASSERT_NE(
+      mul_ss.str().find("return self.A0.forward(x, y, z)"), std::string::npos);
+  ASSERT_NE(mul_ss.str().find("return x * y"), std::string::npos);
 }
 
 TEST(AutogradSymbolsTest, Basic) {
@@ -2091,7 +2154,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_FALSE(f1->hasValue());
   int32_t sat1 = 0;
   int32_t sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->markCompleted(43);
   ASSERT_TRUE(f1->completed());
   ASSERT_TRUE(f1->hasValue());
@@ -2099,7 +2162,7 @@ TEST(FuturesTest, Basic) {
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(f1->constValue().toInt(), 43);
   ASSERT_EQ(f1->value().toInt(), 43);
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
 }
@@ -2109,7 +2172,7 @@ TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
   int sat2 = 0;
-  f1->addCallback([&]() { ++sat1; });
+  f1->addCallback([&](Future& /* unused */) { ++sat1; });
   f1->setError(
       std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
   ASSERT_EQ(sat1, 1);
@@ -2122,7 +2185,7 @@ TEST(FuturesTest, Error) {
   } catch (const std::exception& e) {
     ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
   }
-  f1->addCallback([&]() { ++sat2; });
+  f1->addCallback([&](Future& /* unused */) { ++sat2; });
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
   f1->setErrorIfNeeded(
@@ -2136,14 +2199,14 @@ TEST(FuturesTest, Error) {
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
-      [f1]() -> IValue { return f1->constValue().toInt() + 1; },
+      [](Future& f1) -> IValue { return f1.constValue().toInt() + 1; },
       IntType::get());
   auto f3 = f2->then(
-      [f2]() -> IValue { return f2->constValue().toInt() * 3; },
+      [](Future& f2) -> IValue { return f2.constValue().toInt() * 3; },
       IntType::get());
   bool done = false;
-  f3->addCallback([f3, &done]() {
-    ASSERT_EQ(f3->constValue().toInt(), (42 + 1) * 3);
+  f3->addCallback([&done](Future& f3) {
+    ASSERT_EQ(f3.constValue().toInt(), (42 + 1) * 3);
     done = true;
   });
   ASSERT_FALSE(done);
@@ -2260,7 +2323,7 @@ TEST(FuturesTest, CollectAny) {
 
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
-  auto profilerEnabledCb = []() {
+  auto profilerEnabledCb = [](Future& /* unused */) {
     ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
   };
   // test running callbacks with propagation of TLS state.
@@ -2270,7 +2333,7 @@ TEST(TLSFutureCallbacksTest, Basic) {
         torch::autograd::profiler::ProfilerConfig(
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
-    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    s1->addCallback(wrapPropagateTLSState(profilerEnabledCb));
     std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
     // Since we join here, we can ensure that all callbacks corresponding to
     // markCompleted() have finished.
@@ -2285,8 +2348,8 @@ TEST(TLSFutureCallbacksTest, Basic) {
             torch::autograd::profiler::ProfilerState::CPU, false, false));
     auto s1 = c10::make_intrusive<Future>(IntType::get());
     auto s2 = s1->then(
-        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
-          profilerEnabledCb();
+        wrapPropagateTLSState([&profilerEnabledCb](Future& s1) {
+          profilerEnabledCb(s1);
           return at::IValue(1);
         }),
         IntType::get());
@@ -2306,40 +2369,44 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::CPU, false, false));
   auto s1 = c10::make_intrusive<Future>(IntType::get());
-  auto verifyProfilerCb = wrapPropagateTLSState<void>([&profilerEnabledCb] {
-    // Ensure the profiler is still enabled in this thread.
-    profilerEnabledCb();
-    auto t1 = torch::ones({2, 2});
-    auto t2 = torch::ones({2, 2});
-    torch::add(t1, t2);
-    // Don't cleanup TLSState, and just consolidate.
-    auto opts = torch::autograd::profiler::ProfilerDisableOptions(false, true);
-    auto thread_event_lists =
-        torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
-    // Ensure that the events from this thread are still profiled and we obtain
-    // the expected in events in our consolidated list when calling
-    // disableProfilerLegacy().
-    bool found_ones = false;
-    bool found_add = false;
-    for (const auto& li : thread_event_lists) {
-      for (const auto& evt : li) {
-        if (strcmp(evt.name(), "aten::add") == 0) {
-          found_add = true;
-        } else if (strcmp(evt.name(), "aten::ones") == 0) {
-          found_ones = true;
+  auto verifyProfilerCb =
+      wrapPropagateTLSState([&profilerEnabledCb](Future& /* unused */) {
+        // Ensure the profiler is still enabled in this thread.
+        profilerEnabledCb();
+        auto t1 = torch::ones({2, 2});
+        auto t2 = torch::ones({2, 2});
+        torch::add(t1, t2);
+        // Don't cleanup TLSState, and just consolidate.
+        auto opts =
+            torch::autograd::profiler::ProfilerDisableOptions(false, true);
+        auto thread_event_lists =
+            // NOLINTNEXTLINE(performance-move-const-arg)
+            torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+        // Ensure that the events from this thread are still profiled and we
+        // obtain the expected in events in our consolidated list when calling
+        // disableProfilerLegacy().
+        bool found_ones = false;
+        bool found_add = false;
+        for (const auto& li : thread_event_lists) {
+          for (const auto& evt : li) {
+            if (strcmp(evt.name(), "aten::add") == 0) {
+              found_add = true;
+            } else if (strcmp(evt.name(), "aten::ones") == 0) {
+              found_ones = true;
+            }
+          }
+          if (found_add && found_ones) {
+            break;
+          }
         }
-      }
-      if (found_add && found_ones) {
-        break;
-      }
-    }
-    ASSERT_TRUE(found_ones);
-    ASSERT_TRUE(found_add);
-  });
+        ASSERT_TRUE(found_ones);
+        ASSERT_TRUE(found_add);
+      });
 
   s1->addCallback(verifyProfilerCb);
   // Disable the profiler, but do not consolidate results in the main thread.
   auto opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
   std::thread t([s1 = std::move(s1)]() { s1->markCompleted(at::IValue(1)); });
   t.join();
@@ -2354,6 +2421,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   // Runs callback inline
   s1->markCompleted(at::IValue(1));
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
@@ -2461,6 +2529,40 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::add_")->run(*graph);
   RemoveTensorMutation(graph, [](Node*) { return true; });
   testing::FileCheck().check_not("aten::add_")->run(*graph);
+}
+
+TEST(TestInplaceToFunctionalActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu_(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  InplaceToFunctionalActivation(graph);
+  testing::FileCheck().check("aten::relu")->run(*graph);
+  testing::FileCheck().check_not("aten::relu_")->run(*graph);
+}
+
+TEST(TestFunctionalToInplaceActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  FunctionalToInplaceActivation(graph);
+  testing::FileCheck().check("aten::relu_")->run(*graph);
+  testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
 } // namespace jit

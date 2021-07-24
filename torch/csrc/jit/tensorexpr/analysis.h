@@ -31,9 +31,10 @@ class HasRand : public IRVisitor {
 };
 
 template <typename Node>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
-  virtual void visit(const Node* v) override {
+  void visit(const Node* v) override {
     nodes.push_back((Node*)v);
     IRVisitor::visit(v);
   }
@@ -53,9 +54,10 @@ class NodeFinder : public IRVisitor {
   std::vector<Node*> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
-  virtual void visit(const Var* v) override {
+  void visit(const Var* v) override {
     vars_.insert(v);
     IRVisitor::visit(v);
   }
@@ -80,9 +82,37 @@ class VarFinder : public IRVisitor {
   std::unordered_set<const Var*> vars_;
 };
 
+class BufFinder : public IRVisitor {
+ public:
+  void visit(const Buf* v) override {
+    bufs_.insert(v);
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<const Buf*> find(Stmt* s) {
+    BufFinder nf;
+    s->accept(&nf);
+    return nf.bufs();
+  }
+
+  static std::unordered_set<const Buf*> find(const Expr* e) {
+    BufFinder nf;
+    e->accept(&nf);
+    return nf.bufs();
+  }
+
+  const std::unordered_set<const Buf*>& bufs() {
+    return bufs_;
+  }
+
+ private:
+  std::unordered_set<const Buf*> bufs_;
+};
+
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WritesToBuf(const Buf* target) : target_(target) {}
 
   std::vector<const Stmt*> writes() {
@@ -110,6 +140,60 @@ class WritesToBuf : public IRVisitor {
 
   const Buf* target_;
   std::vector<const Stmt*> writes_;
+};
+
+class StmtsReadingBuf : public IRVisitor {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  StmtsReadingBuf(const Buf* target) : target_(target) {}
+
+  std::vector<const Stmt*> reads() {
+    return reads_;
+  }
+
+  static std::vector<const Stmt*> find(Stmt* s, const Buf* b) {
+    StmtsReadingBuf finder(b);
+    s->accept(&finder);
+    return finder.reads();
+  }
+
+ private:
+  bool readsBuffer(const Stmt* s) {
+    auto loads = NodeFinder<Load>::find(s);
+    for (auto l : loads) {
+      if (l->buf() == target_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void visit(const Store* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const Let* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const Cond* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  void visit(const AtomicAdd* v) override {
+    if (readsBuffer(v)) {
+      reads_.push_back(v);
+    }
+  }
+
+  const Buf* target_;
+  std::vector<const Stmt*> reads_;
 };
 
 // Traverses the IR to determine if a particular Var is modified within it.

@@ -21,22 +21,22 @@ class TestFuture(TestCase):
 
         f = Future[T]()
         # Set exception
-        f.set_exception(value_error)  # type: ignore
+        f.set_exception(value_error)
         # Exception should throw on wait
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.wait()
 
         # Exception should also throw on value
         f = Future()
-        f.set_exception(value_error)  # type: ignore
+        f.set_exception(value_error)
         with self.assertRaisesRegex(ValueError, "Intentional"):
-            f.value()  # type: ignore
+            f.value()
 
         def cb(fut):
-            fut.value()  # type: ignore
+            fut.value()
 
         f = Future()
-        f.set_exception(value_error)  # type: ignore
+        f.set_exception(value_error)
 
         with self.assertRaisesRegex(RuntimeError, "Got the following error"):
             cb_fut = f.then(cb)
@@ -55,11 +55,11 @@ class TestFuture(TestCase):
         f = Future[T]()
         t = threading.Thread(target=wait_future, args=(f, ))
         t.start()
-        f.set_exception(value_error)  # type: ignore
+        f.set_exception(value_error)
         t.join()
 
         def cb(fut):
-            fut.value()  # type: ignore
+            fut.value()
 
         def then_future(f):
             fut = f.then(cb)
@@ -69,7 +69,7 @@ class TestFuture(TestCase):
         f = Future[T]()
         t = threading.Thread(target=then_future, args=(f, ))
         t.start()
-        f.set_exception(value_error)  # type: ignore
+        f.set_exception(value_error)
         t.join()
 
     def test_done(self) -> None:

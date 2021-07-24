@@ -366,6 +366,7 @@ OPERATOR_SCHEMA(TransformSleepSlowOp)
 class TypeSwapTransform : public Transform {
  public:
   // Determine the actual strings through inheriting from derived type.
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   explicit TypeSwapTransform(string old_type, string new_type)
       : old_type(old_type), new_type(new_type) {}
 

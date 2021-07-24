@@ -62,6 +62,7 @@ vector<TensorShape> TensorInferenceForSplit(
       return ret_invalid_shape();
     }
     split.resize(output_size, input_channels / output_size);
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   } else if (split.size() != output_size) {
     LOG(WARNING) << "`split` size (" << split.size()
                  << ") should be equal to output size (" << output_size << ")";
@@ -112,6 +113,7 @@ OPERATOR_SCHEMA(Split)
     .Arg("split", "(*Tuple(int)*): length of each output")
     .Arg(
         "order",
+        // NOLINTNEXTLINE(modernize-raw-string-literal)
         "(*string*): order of dimensions of input and output blobs; either \"NCHW\" or \"NHWC\"")
     .Output(0, "[output_0, output_1, ...]", "(*Tensor*): output tensor")
     .TensorInferenceFunction(TensorInferenceForSplit)
@@ -295,6 +297,7 @@ OpSchema::Cost CostInferenceForConcat(
     }
   }
   uint64_t nElemRead = 1;
+  // NOLINTNEXTLINE(modernize-loop-convert,clang-diagnostic-sign-compare)
   for (int i = 0; i < in.size(); ++i) {
     nElemRead += nElemFromDim(in[i]);
   }
@@ -342,6 +345,7 @@ vector<TensorShape> TensorInferenceForConcat(
   vector<int> split_shape(1, in.size());
   vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
   if (add_axis) {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE_EQ(
           in[0].dims().size(),
@@ -362,6 +366,7 @@ vector<TensorShape> TensorInferenceForConcat(
     }
     out_shape.insert(out_shape.begin() + canonical_axis, in.size());
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       CAFFE_ENFORCE(
           in[0].dims_size() == in[i].dims_size() ||
@@ -389,6 +394,7 @@ vector<TensorShape> TensorInferenceForConcat(
       }
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < in.size(); ++i) {
       out_shape[canonical_axis] += in[i].dims(canonical_axis);
     }
@@ -589,6 +595,7 @@ class GetConcatGradient : public GradientMakerBase {
     }
     vector<string> grads;
     for (int i = 0; i < def_.input_size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       grads.push_back(GI(i));
     }
     return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);

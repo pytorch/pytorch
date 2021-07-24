@@ -142,7 +142,6 @@ struct CuFFTDataLayout {
 // e.g. if the input is cloned, this will be the resulting data layout
 // See NOTE [ cuFFT Embedded Strides ].
 inline CuFFTDataLayout cufft_simple_embed(IntArrayRef sizes, bool onesided) {
-  const auto signal_ndim = sizes.size() - 1;
   CuFFTDataLayout layout;
   layout.simple = true;
   layout.must_clone = false;

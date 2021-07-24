@@ -1,12 +1,14 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/LegacyTHFunctionsCUDA.h>
-#include <ATen/native/UnaryOps.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/detail/KernelUtils.h>
+#include <ATen/native/UnaryOps.h>
+#include <ATen/native/cuda/LaunchUtils.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+#include <ATen/native/cuda/block_reduce.cuh>
 
 #include <THC/THCReduceApplyUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -24,9 +26,7 @@ namespace {
 
 // Normalizes the L1 norm of every row to 1; used by multinomial
 template <typename scalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
 __global__ void renormRowsL1(scalar_t* dist, long rows, long cols) {
   extern __shared__  unsigned char my_smem[];
   scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
@@ -163,25 +163,21 @@ sampleMultinomialWithReplacement(PhiloxCudaState philox_args,
 }
 
 template <typename scalar_t, typename accscalar_t>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(1024)
-#endif
-__global__ void
-sampleMultinomialOnce(int64_t* dest,
-                      int64_t distributions,
-                      int categories,
-                      scalar_t* sampled,
-                      scalar_t* dist,
-                      int stride_dist,        // dist->stride(0)
-                      int stride_categories   // dist->stride(1)
+C10_LAUNCH_BOUNDS_1(cuda::detail::CUDA_NUM_THREADS)
+__global__ void sampleMultinomialOnce(
+    int64_t* dest,
+    int64_t distributions,
+    int categories,
+    scalar_t* sampled,
+    scalar_t* dist,
+    int stride_dist, // dist->stride(0)
+    int stride_categories // dist->stride(1)
 ) {
   extern __shared__  unsigned char my_smem[];
   __shared__ bool found;
+  __shared__ unsigned foundPos;
 
-  // Shared Memory hold blockdim.x T for holding the cumulative sum,
-  // blockDim.x AccT for normalizing the probabilities,
-  scalar_t *smem = reinterpret_cast<scalar_t *>(my_smem);
-  accscalar_t *asmem = reinterpret_cast<accscalar_t *>(&my_smem[blockDim.x * sizeof(scalar_t)]);
+  accscalar_t *smem = reinterpret_cast<accscalar_t *>(my_smem);
 
   accscalar_t accZero = static_cast<accscalar_t>(0);
   scalar_t zero = static_cast<scalar_t>(0);
@@ -201,7 +197,7 @@ sampleMultinomialOnce(int64_t* dest,
     }
 
     // threadIdx.x == 0 has the sum value from this
-    sum = reduceBlock(asmem, blockDim.x, sum, ReduceAdd<accscalar_t>(), accZero);
+    sum = cuda_utils::BlockReduceSum(sum, smem);
 
     // Broadcast sum and sample value
     if (threadIdx.x == 0) {
@@ -209,13 +205,14 @@ sampleMultinomialOnce(int64_t* dest,
       CUDA_KERNEL_ASSERT(!THCNumerics<accscalar_t>::isinf(sum));
       CUDA_KERNEL_ASSERT(sum > accZero);
 
-      asmem[0] = sum;
-      smem[0] = sampled[curDist];
+      foundPos = 0;
+      smem[0] = sum;
+      smem[1] = sampled[curDist];
     }
     __syncthreads();
 
-    sum = asmem[0];
-    scalar_t sample = smem[0];
+    sum = smem[0];
+    scalar_t sample = static_cast<scalar_t>(smem[1]);
     __syncthreads();
 
     if (sum == accZero) {
@@ -228,24 +225,23 @@ sampleMultinomialOnce(int64_t* dest,
     }
 
     int chunks = (categories + (int)blockDim.x - 1) / blockDim.x;
-    scalar_t prevHighProb = zero;
+    accscalar_t prevHighProb = accZero;
     found = false;
 
     for (int chunk = 0; chunk < chunks && !found; ++chunk) {
       // All threads in bounds load a value
       int cat = chunk * blockDim.x + threadIdx.x;
 
-      accscalar_t a_dist_val = cat < categories ?
-                               static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
-                               accZero;
-      scalar_t dist_val = static_cast<scalar_t>(a_dist_val);
+      accscalar_t dist_val = cat < categories ?
+                             static_cast<accscalar_t>(dist[curDist * stride_dist + cat * stride_categories]) / sum :
+                             accZero;
 
       smem[threadIdx.x] = dist_val;
       __syncthreads();
 
       // Perform an inclusive prefix sum of the shared memory contents
       for (int offset = 1; offset < blockDim.x; offset *= 2) {
-        scalar_t val = zero;
+        accscalar_t val = accZero;
 
         if (threadIdx.x >= offset) {
           val = smem[threadIdx.x - offset] + smem[threadIdx.x];
@@ -260,20 +256,21 @@ sampleMultinomialOnce(int64_t* dest,
 
       // Each thread will check to see if the sample falls in its
       // bucket
-      scalar_t curBucket = smem[threadIdx.x] + prevHighProb;
-      scalar_t prevBucket =
-          threadIdx.x == 0 ? prevHighProb :
-          smem[threadIdx.x - 1] + prevHighProb;
+      scalar_t curBucket =
+          static_cast<scalar_t>(smem[threadIdx.x] + prevHighProb);
+      scalar_t prevBucket = static_cast<scalar_t>(
+          threadIdx.x == 0 ? prevHighProb
+                          : smem[threadIdx.x - 1] + prevHighProb);
       bool inBucket =
           (cat < categories) &&
           (!(sample >= curBucket) &&
-           (sample >= prevBucket) &&
-           (dist_val > zero));
+          (sample >= prevBucket) &&
+          (dist_val > zero));
 
       if (inBucket) {
         // We're done; we have the sample
         // Torch indices are 1-based
-        dest[curDist] = cat;
+        atomicMax(&foundPos, cat);
         found = true;
       }
 
@@ -283,17 +280,21 @@ sampleMultinomialOnce(int64_t* dest,
       __syncthreads();
     }
 
-    if (threadIdx.x == 0 && !found) {
-      // This should address a rare bug where we don't select a valid index. This likely occurs when
-      // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
-      // and our uniform sample is greater than this value. In this case we likely have unitialized memory
-      // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
-      // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
-      // rarity in which this occurs, this should not be an issue.
-      for (int cat = categories - 1; cat >= 0; --cat) {
-        if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
-          dest[curDist] = cat;
-          break;
+    if (threadIdx.x == 0) {
+      if (found) {
+          dest[curDist] = foundPos;
+      } else {
+        // This should address a rare bug where we don't select a valid index. This likely occurs when
+        // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
+        // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+        // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
+        // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
+        // rarity in which this occurs, this should not be an issue.
+        for (int cat = categories - 1; cat >= 0; --cat) {
+          if (dist[curDist * stride_dist + cat * stride_categories] > zero) {
+            dest[curDist] = cat;
+            break;
+          }
         }
       }
     }
@@ -325,8 +326,10 @@ void multinomial_with_replacement_kernel_impl(
     int numSM = props->multiProcessorCount;
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
-    int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
-                         * (sizeof(scalar_t) + sizeof(accscalar_t));
+
+    int requiredWarps = at::cuda::ATenCeilDiv(numCategories, C10_WARP_SIZE);
+    int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
+    int requiredShared = requiredThreads * sizeof(accscalar_t);
 
     if (n_sample == 1 && maxShared >= requiredShared) {
       // Optimized allocation-free implementation
@@ -338,8 +341,8 @@ void multinomial_with_replacement_kernel_impl(
                                           self_v.options().pinned_memory_opt());
       at::native::uniform_(sampled, 0.0, 1.0, generator);
 
-      dim3 block(numCategories < maxThreads ? numCategories : maxThreads);
-      dim3 grid(numDist < numSM * 4 ? numDist : numSM * 4);
+      dim3 block(requiredThreads);
+      dim3 grid(std::min(static_cast<int>(numDist), numSM * 4));
 
       sampleMultinomialOnce<scalar_t, accscalar_t>
           <<<grid, block,

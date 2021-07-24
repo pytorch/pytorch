@@ -1,8 +1,8 @@
 #include <algorithm>
 
-#include <gtest/gtest.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
+#include <gtest/gtest.h>
 
 namespace c10_test {
 
@@ -50,21 +50,23 @@ TEST(LoggingTest, TestEnforceEquals) {
 
 namespace {
 struct EnforceEqWithCaller {
-  void test(const char *x) {
+  void test(const char* x) {
     CAFFE_ENFORCE_EQ_WITH_CALLER(1, 1, "variable: ", x, " is a variable");
   }
 };
-}
+} // namespace
 
 TEST(LoggingTest, TestEnforceMessageVariables) {
-  const char *const x = "hello";
+  const char* const x = "hello";
   CAFFE_ENFORCE_EQ(1, 1, "variable: ", x, " is a variable");
 
   EnforceEqWithCaller e;
   e.test(x);
 }
 
-TEST(LoggingTest, EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {
+TEST(
+    LoggingTest,
+    EnforceEqualsObjectWithReferenceToTemporaryWithoutUseOutOfScope) {
   std::vector<int> x = {1, 2, 3, 4};
   // This case is a little tricky. We have a temporary
   // std::initializer_list to which our temporary ArrayRef
@@ -96,7 +98,7 @@ std::ostream& operator<<(std::ostream& out, const Noncopyable& nc) {
   out << "Noncopyable(" << nc.x << ")";
   return out;
 }
-}
+} // namespace
 
 TEST(LoggingTest, DoesntCopyComparedObjects) {
   CAFFE_ENFORCE_EQ(Noncopyable(123), Noncopyable(123));
@@ -124,7 +126,8 @@ TEST(LoggingTest, EnforceShowcase) {
   WRAP_AND_PRINT(CAFFE_ENFORCE_EQ(
       one * two + three, three * two, "It's a pretty complicated expression"));
 
-  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(std::equal_to<void>(), ==, one * two + three, three * two));
+  WRAP_AND_PRINT(CAFFE_ENFORCE_THAT(
+      std::equal_to<void>(), ==, one * two + three, three * two));
 }
 
 TEST(LoggingTest, Join) {
@@ -147,6 +150,7 @@ TEST(LoggingTest, TestDanglingElse) {
 TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   bool kTrue = true;
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_DEATH(CAFFE_ENFORCE(false, "This goes fatal."), "");
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }

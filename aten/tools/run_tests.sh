@@ -25,6 +25,7 @@ VALGRIND=${VALGRIND:=ON}
 ./NamedTensor_test
 ./cpu_generator_test
 ./vmap_test
+./operators_test
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
@@ -57,6 +58,9 @@ if [[ -x ./cuda_complex_test ]]; then
 fi
 if [[ -x ./cuda_complex_math_test ]]; then
   ./cuda_complex_math_test
+fi
+if [[ -x ./cuda_cub_test ]]; then
+  ./cuda_cub_test
 fi
 if [ "$VALGRIND" == "ON" ]
 then

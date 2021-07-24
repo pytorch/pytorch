@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -177,18 +179,18 @@ const Expr* IRMutator::mutate(const Load* v) {
     }
     indices_new.push_back(new_ind);
   }
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && mask == mask_new) {
+  if (buf == buf_new && !any_index_changed) {
     return v;
   }
-  return new Load(dtype, buf_new, indices_new, mask_new);
+  return new Load(dtype, buf_new, indices_new);
 }
 
-const Expr* IRMutator::mutate(const Buf* v) {
+const Expr* IRMutator::mutate(Buf* v) {
   const Var* var = v->base_handle();
-  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  Var* var_new =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      dynamic_cast<Var*>(const_cast<Expr*>(var->accept_mutator(this)));
   if (!var_new) {
     return nullptr;
   }
@@ -196,7 +198,7 @@ const Expr* IRMutator::mutate(const Buf* v) {
 
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
+  for (const auto i : c10::irange(dims_old.size())) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     any_change |= (dims_new[i] != dims_old[i]);
   }
@@ -205,7 +207,9 @@ const Expr* IRMutator::mutate(const Buf* v) {
     return (Expr*)v;
   }
 
-  return new Buf(var_new, dims_new, v->dtype());
+  v->set_base_handle(var_new);
+  v->set_dims(dims_new);
+  return v;
 }
 
 const Expr* IRMutator::mutate(const Broadcast* v) {
@@ -371,15 +375,12 @@ Stmt* IRMutator::mutate(const Store* v) {
     indices_new.push_back(new_ind);
   }
   const Expr* value = v->value();
-  const Expr* mask = v->mask();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   const Expr* value_new = value->accept_mutator(this);
-  const Expr* mask_new = mask->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && value == value_new &&
-      mask == mask_new) {
+  if (buf == buf_new && !any_index_changed && value == value_new) {
     return (Stmt*)v;
   }
-  return new Store(buf_new, indices_new, value_new, mask_new);
+  return new Store(buf_new, indices_new, value_new);
 }
 
 Stmt* IRMutator::mutate(const AtomicAdd* v) {
@@ -518,7 +519,7 @@ Stmt* StmtClone::mutate(const Block* v) {
 }
 
 Stmt* StmtClone::mutate(const Store* v) {
-  return new Store(v->buf(), v->indices(), v->value(), v->mask());
+  return new Store(v->buf(), v->indices(), v->value());
 }
 
 Stmt* StmtClone::mutate(const AtomicAdd* v) {

@@ -95,6 +95,7 @@ set_property(TARGET torch_deployinterpreter APPEND_STRING PROPERTY
 # need to ensure headers are present before any .cpp in interpreter are compiled,
 # but cpp themselves don't clearly depend on cpython so there is a race otherwise
 add_dependencies(torch_deployinterpreter cpython)
+add_dependencies(torch_python_obj cpython)
 target_compile_options(
     torch_deployinterpreter PRIVATE
     -fvisibility=hidden

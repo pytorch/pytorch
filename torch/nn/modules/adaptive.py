@@ -12,7 +12,7 @@ from .module import Module
 from ..functional import log_softmax
 
 
-_ASMoutput = namedtuple('ASMoutput', ['output', 'loss'])
+_ASMoutput = namedtuple('_ASMoutput', ['output', 'loss'])
 
 
 class AdaptiveLogSoftmaxWithLoss(Module):
@@ -115,8 +115,11 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         n_classes: int,
         cutoffs: Sequence[int],
         div_value: float = 4.,
-        head_bias: bool = False
+        head_bias: bool = False,
+        device=None,
+        dtype=None
     ) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(AdaptiveLogSoftmaxWithLoss, self).__init__()
 
         cutoffs = list(cutoffs)
@@ -141,7 +144,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         self.n_clusters = len(self.cutoffs) - 1
         self.head_size = self.shortlist_size + self.n_clusters
 
-        self.head = Linear(self.in_features, self.head_size, bias=self.head_bias)
+        self.head = Linear(self.in_features, self.head_size, bias=self.head_bias,
+                           **factory_kwargs)
         self.tail = ModuleList()
 
         for i in range(self.n_clusters):
@@ -150,8 +154,8 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             osz = self.cutoffs[i + 1] - self.cutoffs[i]
 
             projection = Sequential(
-                Linear(self.in_features, hsz, bias=False),
-                Linear(hsz, osz, bias=False)
+                Linear(self.in_features, hsz, bias=False, **factory_kwargs),
+                Linear(hsz, osz, bias=False, **factory_kwargs),
             )
 
             self.tail.append(projection)

@@ -8,6 +8,7 @@
 namespace torch {
 namespace jit {
 namespace {
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 c10::FunctionSchema getIsAvailableSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument available("available", c10::BoolType::get());
@@ -21,6 +22,7 @@ c10::FunctionSchema getIsAvailableSchema() {
 
 constexpr static auto kBackendsNamespace = "__backends__";
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 c10::FunctionSchema getCompileSchema() {
   c10::Argument self("self", c10::AnyType::get());
   c10::Argument mod("processed", c10::AnyType::get());
@@ -37,6 +39,7 @@ c10::FunctionSchema getCompileSchema() {
   return compile_schema;
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 c10::FunctionSchema getExecuteSchema() {
   auto any_list_ty = c10::ListType::create(c10::AnyType::get());
   c10::Argument self("self", c10::AnyType::get());
@@ -95,21 +98,20 @@ class backend {
   // Registers a new backend with /p name, and the given /p preprocess
   // function.
   backend(const std::string& name) : backend_name_(name) {
-    static auto cls =
-        torch::class_<TBackendInterface>(kBackendsNamespace, name)
-            .def(torch::init<>())
-            ._def_unboxed(
-                "is_available",
-                getIsAvailableFunc<TBackendInterface>(),
-                getIsAvailableSchema())
-            ._def_unboxed(
-                "compile",
-                getCompileFunc<TBackendInterface>(),
-                getCompileSchema())
-            ._def_unboxed(
-                "execute",
-                getExecuteFunc<TBackendInterface>(),
-                getExecuteSchema());
+    static auto cls = torch::class_<TBackendInterface>(kBackendsNamespace, name)
+                          .def(torch::init<>())
+                          ._def_unboxed(
+                              "is_available",
+                              getIsAvailableFunc<TBackendInterface>(),
+                              getIsAvailableSchema())
+                          ._def_unboxed(
+                              "compile",
+                              getCompileFunc<TBackendInterface>(),
+                              getCompileSchema())
+                          ._def_unboxed(
+                              "execute",
+                              getExecuteFunc<TBackendInterface>(),
+                              getExecuteSchema());
   }
 };
 

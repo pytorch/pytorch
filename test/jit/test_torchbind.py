@@ -171,7 +171,9 @@ class TestTorchbind(JitTestCase):
             # getY method intentionally adds 4 to x
             return fooGetterSetter.y
 
-        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 'Tried to set read-only attribute: y',
+                                                 'fooGetterSetter.y = old + 4'):
             scripted = torch.jit.script(foo_not_setter)
 
     def test_torchbind_def_property_readwrite(self):
@@ -188,7 +190,9 @@ class TestTorchbind(JitTestCase):
             fooReadWrite.y = 5
             return fooReadWrite
 
-        with self.assertRaisesRegex(RuntimeError, 'Tried to set read-only attribute: y'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 'Tried to set read-only attribute: y',
+                                                 'fooReadWrite.y = 5'):
             scripted = torch.jit.script(foo_readwrite_error)
 
     def test_torchbind_take_instance_as_method_arg(self):
@@ -328,7 +332,7 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(torch.zeros(4, 4), traced())
 
     def test_torchbind_pass_wrong_type(self):
-        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+        with self.assertRaisesRegex(RuntimeError, 'but instead found type \'Tensor\''):
             torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
 
     def test_torchbind_tracing_nested(self):

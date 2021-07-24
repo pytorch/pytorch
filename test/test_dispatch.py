@@ -4,7 +4,9 @@ from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
+import os
 import re
+import torch.utils.cpp_extension
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -264,7 +266,7 @@ Inferred operator schema for a C++ kernel function doesn't match the expected fu
     registered at /dev/null:0
   inferred schema: (Tensor _0) -> (Tensor _0)
     impl_t_t
-  reason: The number of arguments is different. 2 vs 1.''')  # noqa
+  reason: The number of arguments is different. 2 vs 1.''')
 
     def test_def_with_inference(self):
         state = self.commute("foo", [
@@ -722,7 +724,7 @@ alias analysis kind: PURE_FUNCTION
             self.commute("foo", ops, expect_raises=True).state,
             '''Tried to register an operator (test::foo(Tensor x) -> (Tensor)) with the same name and overload '''
             '''name multiple times. Each overload's schema should only be registered with a single call to def(). '''
-            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''  # noqa
+            '''Duplicate registration: registered at /dev/null:0. Original registration: registered at /dev/null:0'''
         )
 
     def test_multiple_fallback(self):
@@ -734,7 +736,7 @@ alias analysis kind: PURE_FUNCTION
             self.assertExpectedInline(
                 str(e),
                 '''Tried to register multiple backend fallbacks for the same dispatch key XLA; previous registration '''
-                '''registered at /dev/null:0, new registration registered at /dev/null:0'''  # noqa
+                '''registered at /dev/null:0, new registration registered at /dev/null:0'''
             )
         else:
             self.assertTrue(False)
@@ -754,6 +756,35 @@ CompositeImplicitAutograd[alias]: fn2 :: (Tensor _0) -> (Tensor _0) [ boxed unbo
 CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 '''
         )
+
+    def test_find_dangling_impls(self):
+        dangling_impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(
+            0,
+            len(dangling_impls),
+            msg=f"Expect zero dangling impls, but found: {dangling_impls}"
+        )
+
+    def test_find_dangling_impls_ext(self):
+        extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
+        module = torch.utils.cpp_extension.load(
+            name="dangling_impl_extension",
+            sources=[
+                extension_path,
+            ],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+
+        impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(1, len(impls))
+        self.assertEqual(
+            '''\
+name: __test::foo
+schema: (none)
+CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
+'''.format(extension_path),
+            impls[0])
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
@@ -885,7 +916,6 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 RuntimeError,
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
-
 
 if __name__ == '__main__':
     run_tests()

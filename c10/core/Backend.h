@@ -30,11 +30,15 @@ enum class Backend {
   CPU,
   CUDA,
   HIP,
+  VE,
   FPGA,
   XPU,
   SparseCPU,
   SparseCUDA,
+  SparseCsrCPU,
+  SparseCsrCUDA,
   SparseHIP,
+  SparseVE,
   SparseXPU,
   MSNPU,
   XLA,
@@ -46,6 +50,7 @@ enum class Backend {
   Undefined,
   MkldnnCPU,
   MLC,
+  HPU,
   NumOptions
 };
 
@@ -56,6 +61,8 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::CUDA;
   } else if (t == DispatchKey::HIP) {
     return Backend::HIP;
+  } else if (t == DispatchKey::VE) {
+    return Backend::VE;
   } else if (t == DispatchKey::FPGA) {
     return Backend::FPGA;
   } else if (t == DispatchKey::MSNPU) {
@@ -74,18 +81,26 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCUDA;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
+  } else if (t == DispatchKey::SparseVE) {
+    return Backend::SparseVE;
+  } else if (t == DispatchKey::SparseCsrCPU) {
+    return Backend::SparseCsrCPU;
+  } else if (t == DispatchKey::SparseCsrCUDA) {
+    return Backend::SparseCsrCUDA;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
-  } else if (t == DispatchKey::XPU) {
+  } else if (t == DispatchKey::XPU || t == DispatchKey::AutogradXPU) {
     return Backend::XPU;
   } else if (t == DispatchKey::SparseXPU) {
     return Backend::SparseXPU;
   } else if (t == DispatchKey::QuantizedXPU) {
     return Backend::QuantizedXPU;
+  } else if (t == DispatchKey::HPU || t == DispatchKey::AutogradHPU) {
+    return Backend::HPU;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -101,6 +116,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::CUDA;
     case Backend::HIP:
       return DispatchKey::HIP;
+    case Backend::VE:
+      return DispatchKey::VE;
     case Backend::FPGA:
       return DispatchKey::FPGA;
     case Backend::MSNPU:
@@ -117,6 +134,12 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
+    case Backend::SparseVE:
+      return DispatchKey::SparseVE;
+    case Backend::SparseCsrCPU:
+      return DispatchKey::SparseCsrCPU;
+    case Backend::SparseCsrCUDA:
+      return DispatchKey::SparseCsrCUDA;
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -131,6 +154,8 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::Undefined;
     case Backend::MLC:
       return DispatchKey::MLC;
+    case Backend::HPU:
+      return DispatchKey::HPU;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -144,6 +169,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::HIP:
       return DeviceType::HIP;
+    case Backend::VE:
+      return DeviceType::VE;
     case Backend::FPGA:
       return DeviceType::FPGA;
     case Backend::MSNPU:
@@ -156,6 +183,12 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
+    case Backend::SparseVE:
+      return DeviceType::VE;
+    case Backend::SparseCsrCPU:
+      return DeviceType::CPU;
+    case Backend::SparseCsrCUDA:
+      return DeviceType::CUDA;
     case Backend::XPU:
     case Backend::SparseXPU:
     case Backend::QuantizedXPU:
@@ -171,6 +204,8 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::Metal;
     case Backend::MLC:
       return DeviceType::MLC;
+    case Backend::HPU:
+      return DeviceType::HPU;
     case Backend::Undefined:
       TORCH_CHECK(false, "Undefined backend is not a valid device type");
     default:
@@ -187,6 +222,8 @@ static inline const char* toString(Backend b) {
       return "CUDA";
     case Backend::HIP:
       return "HIP";
+    case Backend::VE:
+      return "VE";
     case Backend::FPGA:
       return "FPGA";
     case Backend::XPU:
@@ -203,8 +240,14 @@ static inline const char* toString(Backend b) {
       return "SparseCUDA";
     case Backend::SparseHIP:
       return "SparseHIP";
+    case Backend::SparseVE:
+      return "SparseVE";
     case Backend::SparseXPU:
       return "SparseXPU";
+    case Backend::SparseCsrCPU:
+      return "SparseCsrCPU";
+    case Backend::SparseCsrCUDA:
+      return "SparseCsrCUDA";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -217,6 +260,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedCUDA";
     case Backend::QuantizedXPU:
       return "QuantizedXPU";
+    case Backend::HPU:
+      return "HPU";
     default:
       return "UNKNOWN_BACKEND";
   }
@@ -228,6 +273,17 @@ static inline bool isSparse(Backend b) {
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
+    case Backend::SparseVE:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static inline bool isSparseCsr(Backend b) {
+  switch (b) {
+    case Backend::SparseCsrCPU:
+    case Backend::SparseCsrCUDA:
       return true;
     default:
       return false;
