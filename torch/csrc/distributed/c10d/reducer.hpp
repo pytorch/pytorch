@@ -194,16 +194,22 @@ class TORCH_API Reducer {
   bool require_finalize_;
   size_t next_bucket_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_marked_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool find_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
   // Previous iteration's unused params, used for checking if unused parameters
   // change between iterations. Only filled during the first backwards call.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> prev_iteration_unused_parameters_;
   // Whether graph is static or not. When user does not explicitly set static
   // graph, the only possible dynamism is set of unused parameters changing
   // between iterations which is tracked by this flag.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
