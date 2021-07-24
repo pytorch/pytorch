@@ -1090,25 +1090,6 @@ def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
-def sample_inputs_nn_activation_softmax(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    cases = (
-        ((), (0, )),
-        ((S, ), (0, )),
-        ((S, S), (0, )),
-        ((S, S), (1, )),
-        ((S, M, S), (2, ))
-    )
-
-    def generator():
-        for shape, dim in cases:
-            yield SampleInput(make_arg(shape), args=(dim))
-            yield SampleInput(make_arg(shape), args=(dim), kwargs={'dtype': dtype})
-
-    return list(generator())
-
-
 def sample_inputs_norm_fro(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -3657,14 +3638,20 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if with_dtype:
-        cases = (((S, S, S), (1, ), {'dtype': torch.float64}),)
-    else:
-        cases = (((S, S, S), (1,), {}),)  # type:ignore[assignment]
+    cases = (
+        ((), (0, )),
+        ((S, ), (0, )),
+        ((S, S), (0, )),
+        ((S, S), (1, )),
+        ((S, M, S), (2, ))
+    )
 
     def generator():
-        for shape, args, kwargs in cases:
-            yield SampleInput(make_arg(shape), args=args, kwargs=kwargs)
+        for shape, dim in cases:
+            if with_dtype:
+                yield SampleInput(make_arg(shape), args=dim, kwargs={'dtype': torch.float64})
+            else:
+                yield SampleInput(make_arg(shape), args=dim)
 
     return list(generator())
 
@@ -5250,7 +5237,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
-           assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist,
            ),
     UnaryUfuncInfo('ceil',
@@ -6329,15 +6315,23 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    # `softmax` supports different dtypes based on whether `dtype` argument,
+    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('nn.functional.softmax',
+           aliases=('softmax',),
            aten_name="softmax",
-           supports_autograd=True,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           sample_inputs_func=sample_inputs_nn_activation_softmax,
+           sample_inputs_func=sample_inputs_log_softmax,
+           supports_out=False),
+    OpInfo('nn.functional.softmax',
+           aliases=('softmax',),
+           variant_test_name="with_dtype",
+           aten_name="softmax",
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
            supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
-           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -6346,14 +6340,11 @@ op_db: List[OpInfo] = [
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.leaky_relu',
-           aliases=None,
            aten_name="leaky_relu",
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=True,
            assert_autodiffed=True,
-           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
     UnaryUfuncInfo(
@@ -6362,9 +6353,6 @@ op_db: List[OpInfo] = [
         ref=reference_logsigmoid,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
-        supports_autograd=True,
-        assert_autodiffed=False,
-        supports_gradgrad=True,
         supports_out=False,
         # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
         decorators=[
@@ -6392,10 +6380,8 @@ op_db: List[OpInfo] = [
            aten_name="hardshrink",
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
-           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardshrink"]),
     OpInfo('nn.functional.hardtanh',
@@ -6404,20 +6390,16 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCPU=all_types(),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
-           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
-           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardtanh"],
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
-           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::gelu"]),
     OpInfo('nn.functional.relu6',
@@ -6427,10 +6409,8 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCPU=floating_types(),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
-           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
-           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::relu6"]),
     OpInfo('mm',
@@ -7582,7 +7562,6 @@ op_db: List[OpInfo] = [
            aten_name='special_zeta',
            variant_test_name='grad',
            dtypes=all_types_and(torch.bool),
-           supports_autograd=True,
            safe_casts_outputs=True,
            skips=(
                # Lambda doesn't work in JIT test
@@ -7802,23 +7781,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
-        skips=(
-            # NOTE: This should work once https://github.com/pytorch/pytorch/pull/58838 is in
-            # RuntimeError:
-            # Unknown type name 'dtype':
-            # File "<string>", line 2
-            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
-            #                                     ~~~~~ <--- HERE
-            #             return variant(t0, s0, dtype=torch.float64)
-
-            # 'defaults' is being compiled since it was called from '_fn'
-            # File "<string>", line 2
-            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
-            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            #             return variant(t0, s0, dtype=torch.float64)
-            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-            SkipInfo('TestJit', 'test_jit_alias_remapping'),
-        ),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
