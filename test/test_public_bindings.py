@@ -210,6 +210,7 @@ class TestPublicBindings(unittest.TestCase):
             "TupleType",
             "Type",
             "unify_type_list",
+            "UnionType",
             "Use",
             "Value",
             "vitals_enabled",
