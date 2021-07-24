@@ -1723,6 +1723,7 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
@@ -1863,7 +1864,7 @@ struct to_ir {
     // then `x` would be `str` in the true branch and `None` in the
     // false branch, not `(List[str], str, int)` in the true branch
     // and `None` in the false branch
-    for (TypePtr lhs_type : lhs_types) {
+    for (const TypePtr& lhs_type : lhs_types) {
       if (lhs_type == AnyType::get()) {
         isinstance_types.insert(
             isinstance_types.end(), rhs_types.begin(), rhs_types.end());
@@ -1888,7 +1889,7 @@ struct to_ir {
       };
 
       TypePtr found_refinement = nullptr;
-      for (TypePtr rhs_type : rhs_types) {
+      for (const TypePtr& rhs_type : rhs_types) {
         TypePtr maybe_smaller_type = get_smaller_type(lhs_type, rhs_type);
         if (!maybe_smaller_type) {
           continue;
@@ -2995,6 +2996,26 @@ struct to_ir {
     }
   }
 
+  void checkApplyNumInputsRange(
+      Apply& apply,
+      size_t min_expected_inputs,
+      size_t max_expected_inputs) {
+    const SourceRange& loc = apply.range();
+    size_t position_arg_size = apply.inputs().size();
+    if (position_arg_size < min_expected_inputs ||
+        position_arg_size > max_expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name()
+          << " expected to have number of arguments between "
+          << min_expected_inputs << " and " << max_expected_inputs
+          << " but found " << position_arg_size;
+    }
+    if (apply.attributes().size() > 0) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " takes no keyword arguments";
+    }
+  }
+
   std::shared_ptr<SugaredValue> emitApplyExpr(
       Apply& apply,
       size_t n_binders,
@@ -3081,7 +3102,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(v);
       } break;
       case prim::GetAttr: {
-        checkApplyNumInputs(apply, 2);
+        checkApplyNumInputsRange(apply, 2, 3);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
         auto selector = apply.inputs()[1];
         if (selector.kind() != TK_STRINGLITERAL) {
@@ -3089,8 +3110,20 @@ struct to_ir {
               << "getattr's second argument must be a string literal";
         }
         const std::string& name = StringLiteral(selector).text();
-        return obj->attr(apply.range(), method, name);
-      }
+
+        if (apply.inputs().size() == 2) {
+          return obj->attr(apply.range(), method, name);
+        } else {
+          // 3 inputs form of getattr, the third argument is the default value
+          // to return when attribute is not found
+          if (obj->hasAttr(apply.range(), method, name)) {
+            return obj->attr(apply.range(), method, name);
+          } else {
+            // attribute not found, just default val (3rd arg)
+            return emitSugaredExpr(apply.inputs()[2], 1);
+          }
+        }
+      } break;
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);

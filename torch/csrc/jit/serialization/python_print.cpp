@@ -529,7 +529,7 @@ struct PythonPrintImpl {
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
     if (lhs->type()->kind() == UnionType::Kind) {
-      return anotated_unions_.insert(lhs).second;
+      return annotated_unions_.insert(lhs).second;
     } else {
       return *lhs->type() != *rhs->type();
     }
