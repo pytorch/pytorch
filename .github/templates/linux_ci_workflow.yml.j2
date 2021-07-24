@@ -445,6 +445,22 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endblock %}
 {%- endif -%}
+{% if enable_wheel_test %}
+{% block wheel_test %}
+  wheel-test:
+    runs-on: ubuntu-18.04
+    needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
+    env:
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      JOB_BASE_NAME: !{{ build_environment }}-test
+    steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+{% endblock %}
+{% endif %}
 {%- if enable_doc_jobs %}
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
