@@ -121,9 +121,7 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject *module);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPFunctionType;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPFunctionClass;
 
 inline bool THPFunction_Check(PyObject* obj) {

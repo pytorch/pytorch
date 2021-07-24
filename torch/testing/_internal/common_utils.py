@@ -273,13 +273,19 @@ def sanitize_test_filename(filename):
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
-        global slow_tests_dict
-        with open(IMPORT_SLOW_TESTS, 'r') as fp:
-            slow_tests_dict = json.load(fp)
+        if os.path.exists(IMPORT_SLOW_TESTS):
+            global slow_tests_dict
+            with open(IMPORT_SLOW_TESTS, 'r') as fp:
+                slow_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
-        global disabled_tests_dict
-        with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-            disabled_tests_dict = json.load(fp)
+        if os.path.exists(IMPORT_DISABLED_TESTS):
+            global disabled_tests_dict
+            with open(IMPORT_DISABLED_TESTS, 'r') as fp:
+                disabled_tests_dict = json.load(fp)
+        else:
+            print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         suite = unittest.TestLoader().loadTestsFromModule(__main__)
@@ -332,6 +338,15 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+
+def is_avx512_vnni_supported():
+    if sys.platform != 'linux':
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "avx512vnni" in lines
+
+IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
 if IS_WINDOWS:
     @contextmanager

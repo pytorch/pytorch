@@ -103,21 +103,17 @@ class PyInterpreterHolder {
  private:
   c10::impl::PyInterpreter* impl_;
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPVariableClass = nullptr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *ParameterClass = nullptr;
 
 // clang-tidy gets confused by static const
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
@@ -755,9 +751,7 @@ struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
 // An alternative way to reduce the risk of python_gil_hooks going prematurely
 // dead would be to leak it at destruction time.  I didn't do that because
 // it's annoying to write the Registerer class for this case.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcretePythonGILHooks python_gil_hooks;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(&python_gil_hooks);
 #endif
 
@@ -996,7 +990,6 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {nullptr}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPVariable_as_mapping = {
   THPVariable_length,
   THPVariable_getitem,
@@ -1029,14 +1022,12 @@ struct THPVariableMeta {
 
 int THPVariableMetaType_init(PyObject *cls, PyObject *args, PyObject *kwargs);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableMetaType = {
   PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
   "torch._C._TensorMeta",                      /* tp_name */
   sizeof(THPVariableMeta),                     /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
@@ -1072,7 +1063,6 @@ PyTypeObject THPVariableMetaType = {
   nullptr,                                     /* tp_new */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPVariableType = {
     PyVarObject_HEAD_INIT(
         &THPVariableMetaType,
@@ -1083,7 +1073,6 @@ PyTypeObject THPVariableType = {
     // directly.  Subclasses will have their tp_dealloc set appropriately
     // by the metaclass
     nullptr, /* tp_dealloc */
-    // NOLINTNEXTLINE(modernize-use-nullptr)
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -1150,10 +1139,8 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (obj != NULL) {
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        *(PyObject**)addr = NULL;
+      if (obj != nullptr) {
+        *(PyObject**)addr = nullptr;
         Py_DECREF(obj);
       }
     }
@@ -1237,14 +1224,11 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   // All Python defined classes have __dict__
   if (C10_LIKELY(type->tp_dictoffset)) {
     PyObject** dictptr = _PyObject_GetDictPtr(self);
-    // NOLINTNEXTLINE(modernize-use-nullptr)
-    if (dictptr != NULL) {
+    if (dictptr != nullptr) {
       PyObject* dict = *dictptr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (dict != NULL) {
+      if (dict != nullptr) {
         Py_DECREF(dict);
-        // NOLINTNEXTLINE(modernize-use-nullptr)
-        *dictptr = NULL;
+        *dictptr = nullptr;
       }
     }
   }
@@ -1319,8 +1303,7 @@ static int traverse_slots(
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;
       PyObject* obj = *(PyObject**)addr;
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if (obj != NULL) {
+      if (obj != nullptr) {
         int err = visit(obj, arg);
         if (err)
           return err;
@@ -1518,17 +1501,34 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments));
-  // TODO: actually populate kwargs sometimes?  At the moment, every argument
-  // just gets passed positionally
-  py::dict kwargs;
   // For now, overloads get coalesced.  Might be easier for users if they get
   // overload resolution but is more complicated (need to expose separate
   // functions per overload)
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
-  for (int64_t idx = 0; idx < arguments.size(); idx++) {
+  // Pre-scan for arguments that match defaults
+  int64_t default_suffix_len = 0;
+  for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+    const auto& arg = schema.arguments()[idx];
+    if (!arg.default_value().has_value()) {
+      break;
+    }
+    const auto& default_ivalue = *arg.default_value();
+    const auto& ivalue = arguments[idx];
+    if (default_ivalue != ivalue) {
+      break;
+    }
+    default_suffix_len++;
+  }
+
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments - default_suffix_len));
+
+  // TODO: actually populate kwargs sometimes?  At the moment, every argument
+  // just gets passed positionally
+  py::dict kwargs;
+
+  for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
     auto& ivalue = arguments[idx];
     // Search for Tensors (as they may have the torch functions we need)
     if (ivalue.isTensor()) {
