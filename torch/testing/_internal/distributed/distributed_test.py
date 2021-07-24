@@ -20,7 +20,6 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -63,6 +62,10 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
 )
+
+if not IS_WINDOWS:
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
+
 from torch.utils.data.distributed import DistributedSampler
 
 try:
@@ -3830,11 +3833,6 @@ class DistributedTest:
             # type if it didn't exist.
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @skip_if_lt_x_gpu(2)
         def _test_ddp_hook_with_optimizer_parity(self, grad_as_bucket_view, static_graph):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3938,6 +3936,10 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @unittest.skipIf(
+            IS_WINDOWS,
+            "FunctionalSGD not yet supported with Windows."
         )
         @skip_if_lt_x_gpu(2)
         def test_ddp_hook_with_optimizer_parity(self):
