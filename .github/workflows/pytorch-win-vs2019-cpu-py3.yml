@@ -24,13 +24,19 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
 
+
 concurrency:
   group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
+    needs: []
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
     steps:
@@ -38,10 +44,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -71,15 +74,19 @@ jobs:
           if-no-files-found: error
           name: ${{ env.BUILD_ENVIRONMENT }}
           path: C:\${{ github.run_id }}\build-results
-      - name: Cleanup build-results
+      - name: Cleanup build-results and workspaces
+        if: always()
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+        # Should remove the entirety of pytorch-${{ github.run_id }}
         run: |
           rm -rf "${PYTORCH_FINAL_PACKAGE_DIR}"
+          rm -rf ./*
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
+    needs: []
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.4xlarge
@@ -103,22 +110,21 @@ jobs:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-    needs:
-      - build
-      - generate-test-matrix
+      TEST_CONFIG: ${{ matrix.config }}
+    needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        working-directory: pytorch-${{ github.run_id }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
           submodules: recursive
-      - name: Clean workspace (including things in .gitignore)
-        shell: bash
-        run: |
-          git clean -xdf
+          path: pytorch-${{ github.run_id }}
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -163,7 +169,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path:
-            test-reports-*.zip
+            pytorch-${{ github.run_id }}/test-reports-*.zip
+      - name: Cleanup workspace
+        if: always()
+        shell: bash
+        # Should remove the entirety of pytorch-${{ github.run_id }}
+        run: |
+          rm -rf ./*
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -172,10 +184,8 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
-    runs-on: ubuntu-18.04
+    needs: [generate-test-matrix, test, ]
+    runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
@@ -194,17 +204,14 @@ jobs:
       - name: Unzip test reports
         run: |
           unzip -o 'test-reports-*.zip'
-      - uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
       - name: Install dependencies
         # boto3 version copied from .circleci/docker/common/install_conda.sh
         run: |
-          pip install -r requirements.txt
-          pip install boto3==1.16.34 junitparser rich
+          pip3 install -r requirements.txt
+          pip3 install boto3==1.16.34 junitparser rich
       - name: Output Test Results (Click Me)
         run: |
-          python tools/render_junit.py test
+          python3 tools/render_junit.py test
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
@@ -212,9 +219,7 @@ jobs:
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
-          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -222,4 +227,4 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
+          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test

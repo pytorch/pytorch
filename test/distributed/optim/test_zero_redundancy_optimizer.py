@@ -17,7 +17,7 @@ import torch.distributed as dist
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-from torch.distributed.algorithms.join import _Join, _JoinHook
+from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -717,14 +717,13 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         # A process must still set the remaining gradients after joining, so we
         # define a join hook to do this before the ZeRO join hook
         class _JoinGradInfo():
-            def __init__(self, grads, device):
+            def __init__(self, grads):
                 self.grads = grads  # remaining gradients to set (in order)
                 self.index = 0
-                self.device = device
 
         class _SetGradsJoinHook(_JoinHook):
-            def __init__(self, zero_optim, grads, device):
-                zero_optim._join_grad_info = _JoinGradInfo(grads, device)
+            def __init__(self, zero_optim, grads):
+                zero_optim._join_grad_info = _JoinGradInfo(grads)
                 self.zero = zero_optim
                 super().__init__()
 
@@ -732,26 +731,36 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 grads = self.zero._join_grad_info.grads[self.zero._join_grad_info.index]
                 self.zero._join_grad_info.index += 1
                 for p, grad in zip(self.zero._all_params, grads):
-                    p.grad = grad.detach().clone().to(self.zero._join_grad_info.device)
+                    p.grad = grad.detach().clone().to(device)
+
+        class _GradientSetter(_Joinable):
+            def __init__(self):
+                super().__init__()
+
+            def _join_hook(self, **kwargs):
+                assert "zero_optim" in kwargs
+                assert "grads" in kwargs
+                zero_optim = kwargs["zero_optim"]
+                grads = kwargs["grads"]
+                return _SetGradsJoinHook(zero_optim, grads)
 
             @property
-            def device(self):
-                return self.zero._join_grad_info.device
+            def _join_device(self):
+                return device
 
             @property
-            def process_group(self):
+            def _join_process_group(self):
                 return dist.group.WORLD
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
         grads = grads_at_each_iter[-num_grads_after_joining:]
-        set_grads_jh = _SetGradsJoinHook(zero_optim, grads, device)
-        zero_jh = zero_optim._join_hook()
+        gradient_setter = _GradientSetter()
         iter = 0
-        with _Join([set_grads_jh, zero_jh]):
+        with _Join([gradient_setter, zero_optim], zero_optim=zero_optim, grads=grads):
             for _ in range(NUM_EPOCHS):
                 for input in inputs:
-                    # Schedule an all-reduce to indicate not joined
-                    dist.all_reduce(torch.ones(1, device=device), group=dist.group.WORLD)
+                    # Notify join context that this process has not joined
+                    _Join.notify_join_context(gradient_setter)
 
                     # Set gradients manually
                     for p, grad in zip(zero_model.parameters(), grads_at_each_iter[iter]):

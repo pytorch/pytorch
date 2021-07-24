@@ -28,7 +28,6 @@ C10_DEFINE_bool(
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_reductions_enabled = false;
 
 bool isSupportedForBlock(Node* node) {
@@ -249,9 +248,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_fuser_enabled_ = true;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool texpr_parallel_cpu_enabled = false;
 
 bool texprParallelCPUEnabled() {
@@ -972,9 +969,12 @@ class TensorExprFuser {
           return false;
         }
 
-        // Float16 has a few kinks on LLVM.  Disable it until we either move to
-        // a more stable version or find workarounds.
-        if (*st == c10::ScalarType::Half && *device == c10::kCPU) {
+        // Float16 support has some issues (see e.g. #61336 and #61382), so for
+        // now it's disabled. There seem to be some problems in HalfRewriter,
+        // but on top of that Float16 has a few kinks on LLVM.  Thus, on CPU we
+        // additionally disable it until we either move to a more stable version
+        // or find workarounds.
+        if (*st == c10::ScalarType::Half) {
           return false;
         }
 
@@ -1303,7 +1303,6 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
         prim::TensorExprGroup,
