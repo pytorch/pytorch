@@ -5288,7 +5288,6 @@ class DistributedTest:
                     torch.cuda.synchronize(device=self.rank)
 
         def _test_ddp_profiling(self, profiler_ctx):
-            torch.cuda.set_device(self.rank)
             batch = 3
             dim = 10
             num_iters = 6
