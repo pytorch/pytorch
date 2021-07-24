@@ -48,7 +48,6 @@ class AliasDb {
       bool isFrozen = false);
   TORCH_API ~AliasDb();
 
-
   // There are limitations to what effects the alias analysis can track. Two
   // kinds of nodes may have untracked effects:
   // 1. Nodes that write to a value that may alias the graph inputs (since
@@ -257,8 +256,8 @@ class AliasDb {
       Element* container_elem,
       const AliasTypeSet& mut_types);
   void pointUnionTypeElementToAllContainedTypes(
-        Element* container_elem,
-        const AliasTypeSet& mut_types);
+      Element* container_elem,
+      const AliasTypeSet& mut_types);
 
   std::vector<Element*> getElements(at::ArrayRef<Value*> vs) const;
   bool mayAliasWildcard(const Value* v) const;
