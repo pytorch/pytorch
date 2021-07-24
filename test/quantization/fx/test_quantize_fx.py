@@ -2737,7 +2737,7 @@ class TestQuantizeFx(QuantizationTestCase):
             }
             node_list = [
                 ns.call_function(torch.quantize_per_tensor),
-                ns.call_module(torch.nn.Avgpool2d),
+                ns.call_module(torch.nn.AvgPool2d),
                 ns.call_method("dequantize"),
             ]
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
