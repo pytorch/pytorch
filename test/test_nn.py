@@ -9382,6 +9382,11 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.cosine_similarity(input1, input2)
 
+        # Check type promotion, issue #61454
+        input = torch.tensor(12.)
+        out = F.cosine_similarity(input.to(torch.int8), input, dim=-1)
+        self.assertEqual(out, 1.)
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
