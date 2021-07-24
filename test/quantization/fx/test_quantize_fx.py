@@ -2684,10 +2684,10 @@ class TestQuantizeFx(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
+                self.avgpool2d = torch.nn.AvgPool2d(kernel_size=3)
 
             def forward(self, x):
-                x = self.maxpool2d(x)
+                x = self.avgpool2d(x)
                 return x
 
         for quant_type in self.static_quant_types:
