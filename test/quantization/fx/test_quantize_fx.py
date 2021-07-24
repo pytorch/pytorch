@@ -2684,7 +2684,7 @@ class TestQuantizeFx(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.avgpool2d = torch.nn.Avgpool2d(kernel_size=3)
+                self.avgpool2d = torch.nn.AvgPool2d(kernel_size=3)
 
             def forward(self, x):
                 x = self.avgpool2d(x)
