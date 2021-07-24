@@ -14,9 +14,8 @@ namespace jit {
 namespace {
 
 TypePtr toSingleType(AliasTypeSet& mut_types) {
-  return mut_types.size() == 1
-    ? mut_types[0]
-    : c10::UnionType::create(mut_types);
+  return mut_types.size() == 1 ? mut_types[0]
+                               : c10::UnionType::create(mut_types);
 }
 
 // This class determines whether a type is mutable, and, if so, it maps
@@ -80,7 +79,8 @@ class MutableTypePtrHelper {
         return AliasTypeSet{unshapedType(type)};
       case TypeKind::UnionType: {
         AliasTypeSet mutable_types;
-        for (const TypePtr& inner : type->expect<UnionType>()->containedTypes()) {
+        for (const TypePtr& inner :
+             type->expect<UnionType>()->containedTypes()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
@@ -1712,7 +1712,6 @@ c10::optional<Element*> AliasDb::tryGetOrCreateWildcard(const TypePtr& type) {
   }
   return wildcard_elem;
 }
-
 
 void AliasDb::pointUnionTypeElementToAllContainedTypes(
     Element* container_elem,
