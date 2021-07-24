@@ -12,8 +12,10 @@
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
-#include <ATen/native/mkldnn/Gelu.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -326,21 +328,36 @@ bool use_mkldnn(const Tensor& input) {
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
+#if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self)) {
-    at::native::_mkldnn_gelu(self, result);
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor y = itensor_from_tensor(result);
+    ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
   } else {
     GeluKernel(kCPU, *this);
   }
+#else
+  GeluKernel(kCPU, *this);
+#endif
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
+#if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self)) {
-    at::native::_mkldnn_gelu_backward(grad, self, grad_input);
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor grady = itensor_from_tensor(grad);
+    ideep::tensor gradx = itensor_from_tensor(grad_input);
+    ideep::eltwise_backward::compute(x, grady, gradx,
+      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
   } else {
     GeluBackwardKernel(kCPU, *this);
   }
+#else
+  GeluBackwardKernel(kCPU, *this);
+#endif
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
