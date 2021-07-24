@@ -7,9 +7,7 @@ namespace caffe2 {
 // A global variable to mark if Caffe2 has cuda linked to the current runtime.
 // Do not directly use this variable, but instead use the HasCudaRuntime()
 // function below.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<bool> g_caffe2_has_cuda_linked{false};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<bool> g_caffe2_has_hip_linked{false};
 
 bool HasCudaRuntime() {
