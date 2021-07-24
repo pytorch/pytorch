@@ -16,12 +16,11 @@ from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
 from xml.dom import minidom
 
-import requests
 from typing_extensions import TypedDict
 from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                         Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                         Version1Report, Version2Report, ReportMetaMeta)
-
+from tools.stats.scribe import send_to_scribe
 
 
 SimplerSuite = Dict[str, Version2Case]
@@ -610,7 +609,8 @@ class TestSuite:
         sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
-        print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
+        print(
+            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
         if test_count >= 2:
@@ -645,7 +645,8 @@ class TestFile:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
             else:
-                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+                raise RuntimeWarning(
+                    f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -729,33 +730,21 @@ def build_message(
 
 
 def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
-    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
-
-    if not access_token:
-        print("No scribe access token provided, skip sending report!")
-        return
-    print("Scribe access token provided, sending report...")
-    url = "https://graph.facebook.com/scribe_logs"
     meta_info = build_info()
-    r = requests.post(
-        url,
-        data={
-            "access_token": access_token,
-            "logs": json.dumps(
-                [
-                    {
-                        "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
-                        "line_escape": False,
-                    }
-                    for test_file in reports.values()
-                    for test_suite in test_file.test_suites.values()
-                    for test_case in test_suite.test_cases.values()
-                ]
-            ),
-        },
+    logs = json.dumps(
+        [
+            {
+                "category": "perfpipe_pytorch_test_times",
+                "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
+                "line_escape": False,
+            }
+            for test_file in reports.values()
+            for test_suite in test_file.test_suites.values()
+            for test_case in test_suite.test_cases.values()
+        ]
     )
-    r.raise_for_status()
+    res = send_to_scribe(logs)
+    print(res)
 
 
 def assemble_s3_object(
@@ -767,7 +756,7 @@ def assemble_s3_object(
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
         'format_version': 2,
-        'files' : {
+        'files': {
             name: {
                 'total_seconds': test_file.total_time,
                 'suites': {
@@ -880,6 +869,7 @@ def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
                 return False
     return True
 
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -948,7 +938,7 @@ if __name__ == '__main__':
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests : List[TestCase] = []
+    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():

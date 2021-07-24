@@ -91,20 +91,20 @@ Tensor avg_pool1d(
   if (stride.empty()) {
     stride = kernel_size;
   }
-  checkDim("avg_pool1d", TensorArg(self, "self", 1), 3);
+  checkDimRange("avg_pool1d", TensorArg(self, "self", 1), 2, 4 /* exclusive */);
   check1d("avg_pool1d", "kernel_size", kernel_size);
   check1d("avg_pool1d", "stride", stride);
   check1d("avg_pool1d", "padding", padding);
 
   auto output = at::avg_pool2d(
-      self.unsqueeze(2),
+      self.unsqueeze(-2),
       {1, kernel_size[0]},
       {1, stride[0]},
       {0, padding[0]},
       ceil_mode,
       count_include_pad);
 
-  return output.squeeze(2);
+  return output.squeeze(-2);
 }
 
 Tensor max_pool2d(

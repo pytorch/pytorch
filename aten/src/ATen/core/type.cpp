@@ -1444,7 +1444,6 @@ VaryingShape<Stride> TensorType::computeStrideProps(
   return VaryingShape<Stride>{stride_properties};
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<size_t> ShapeSymbol::num_symbols{1};
 
 template struct VaryingShape<c10::ShapeSymbol>;
