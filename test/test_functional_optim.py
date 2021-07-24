@@ -1,9 +1,11 @@
+import unittest
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.optim.functional_sgd import _FunctionalSGD
 from torch.optim import SGD
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
 _SUPPORTED_OPTIM_MAPPING = {
     SGD: _FunctionalSGD,
@@ -81,6 +83,10 @@ class TestFunctionalOptimParity(TestCase):
                 self.assertNotEqual(old_module_optim_params[i], optim_param)
                 self.assertNotEqual(old_module_functional_params[i], functional_param)
 
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "Functional optimizer not support on windows, see https://github.com/pytorch/pytorch/issues/62137",
+    )
     def test_functional_optim_parity(self):
         self._test_functional_optim_parity(SGD, 1e-2)
 
