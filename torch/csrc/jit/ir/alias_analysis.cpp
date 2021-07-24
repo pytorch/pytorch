@@ -80,7 +80,7 @@ class MutableTypePtrHelper {
         return AliasTypeSet{unshapedType(type)};
       case TypeKind::UnionType: {
         AliasTypeSet mutable_types;
-        for (TypePtr inner : type->expect<UnionType>()->containedTypes()) {
+        for (const TypePtr& inner : type->expect<UnionType>()->containedTypes()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
@@ -109,7 +109,7 @@ class MutableTypePtrHelper {
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
-        for (TypePtr inner : type->expectRef<TupleType>().elements()) {
+        for (const TypePtr& inner : type->expectRef<TupleType>().elements()) {
           if (auto maybe_inner_types = mapTypeToAliasTypeSet(inner)) {
             mutable_types.insert(
                 mutable_types.end(),
