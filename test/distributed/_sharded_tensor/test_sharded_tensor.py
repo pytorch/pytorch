@@ -490,6 +490,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         sharded_tensor = _sharded_tensor.empty(spec, 10, 20)
         self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
 
+        # Test with single *args
+        sharded_tensor = _sharded_tensor.empty(spec, 10)
+        self.assertEqual(torch.Size([10]), sharded_tensor.size())
+
         # Test with list
         sharded_tensor = _sharded_tensor.empty(spec, [10, 20])
         self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
@@ -497,6 +501,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         # Test with tuple
         sharded_tensor = _sharded_tensor.empty(spec, (10, 20))
         self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
+
+        with self.assertRaises(TypeError):
+            sharded_tensor = _sharded_tensor.empty(spec, 'foo')
 
 
 @unittest.skipIf(

@@ -429,11 +429,12 @@ class AbstractDistributedDataParallelTest(object):
         self, state: object, bucket: dist.GradBucket
     ) -> torch.futures.Future:
         fut = torch.futures.Future()
-        fut.set_result([torch.ones_like(bucket.get_tensor())])
+        fut.set_result(torch.ones_like(bucket.get_tensor()))
 
         def fut_then(fut):
             # Add ones to fut's result.
-            return [t + torch.ones_like(t) for t in fut.value()]
+            t = fut.value()
+            return t + torch.ones_like(t)
 
         return fut.then(fut_then)
 
