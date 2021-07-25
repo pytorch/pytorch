@@ -2752,7 +2752,7 @@ class TestQuantizeFx(QuantizationTestCase):
             node_list = [
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method("dequantize"),
-                ns.call_module(torch.nn.Avgpool2d),
+                ns.call_module(torch.nn.AvgPool2d),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method("dequantize"),
             ]
