@@ -188,14 +188,12 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
-      grad_accumulators_;
+      grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
-      hooks_;
+      hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool expect_autograd_hooks_;
