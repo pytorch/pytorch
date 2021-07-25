@@ -4270,19 +4270,43 @@ else:
             with CudaSyncGuard(level):
                 f()
 
-        def _ind_fn(x, ind, val):
+        def _ind_put_fn(x, ind, val):
             x[ind] = val
             return x
+
+        def _ind_get_fn(x, ind):
+            return x[ind]
+
+        def _cond_fn(x):
+            if x: #taking boolean value of a tensor synchronizes
+                return x
+            else:
+                return 2 * x
+
         # prepare inputs for subsequent ops
         size = 4
-        x = torch.rand(size, device="cuda")
-        y = torch.rand((), device="cuda")
-        ind = torch.randint(size, (3,), device="cuda")
-        mask = torch.randint(2, (size,), device="cuda", dtype=bool)
-        expect_no_sync = (lambda: _ind_fn(x, mask, 1.),
-                          lambda: torch.randperm(20000, device="cuda"))
-        expect_sync = (lambda: _ind_fn(x, mask, y),
-                       lambda: x.nonzero(),)
+        x = torch.rand(size, device=device)
+        y = torch.rand((), device=device)
+        ind = torch.randint(size, (3,), device=device)
+        ind_cpu = ind.cpu()
+        repeats = torch.full((1,), 2, device=device)
+        mask = torch.randint(2, (size,), device=device, dtype=bool)
+        expect_no_sync = (lambda: _ind_put_fn(x, mask, 1.),
+                          lambda: _ind_put_fn(x, ind, y),
+                          lambda: _ind_get_fn(x, ind),
+                          lambda: torch.nn.functional.one_hot(ind, num_classes=size),
+                          lambda: torch.randperm(20000, device=device),
+                          lambda: torch.repeat_interleave(x, 2, output_size = 2 * size),
+                          lambda: torch.repeat_interleave(x, repeats, output_size = 2 * size))
+        expect_sync = (lambda: _ind_put_fn(x, mask, y),
+                       lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_get_fn(x, mask),
+                       lambda: _ind_get_fn(x, ind_cpu),
+                       lambda: x.nonzero(),
+                       lambda: _cond_fn(y),
+                       lambda: torch.nn.functional.one_hot(ind),
+                       lambda: torch.repeat_interleave(x, 2),
+                       lambda: torch.repeat_interleave(x, repeats))
         for f, level in product(expect_no_sync, (1, 2)):
             _no_sync_helper(f, level)
         for f, level in product(expect_sync, (1, 2)):

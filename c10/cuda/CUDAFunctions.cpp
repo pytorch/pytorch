@@ -138,19 +138,19 @@ void device_synchronize() {
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
-void warn_or_error_on_sync(){
-    if (warning_state().get_sync_warning_level() == SyncWarningLevel::L_ERROR) {
-       TORCH_CHECK(false, "called a synchronizing operation");
-    } else if (warning_state().get_sync_warning_level() == SyncWarningLevel::L_WARN){
-       TORCH_WARN("called a synchronizing operation");
-    }
+void warn_or_error_on_sync() {
+  if (warning_state().get_sync_warning_level() == SyncWarningLevel::L_ERROR) {
+    TORCH_CHECK(false, "called a synchronizing operation");
+  } else if (
+      warning_state().get_sync_warning_level() == SyncWarningLevel::L_WARN) {
+    TORCH_WARN("called a synchronizing operation");
+  }
 }
 
-WarningState& warning_state(){
+WarningState& warning_state() {
   static WarningState warning_state_;
   return warning_state_;
 }
-
 
 } // namespace cuda
 } // namespace c10
