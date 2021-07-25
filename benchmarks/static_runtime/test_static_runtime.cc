@@ -136,7 +136,7 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
 
   torch::jit::StaticModule makeStaticModule(
       StaticModuleOptions opt) const override {
-    return torch::jit::StaticModule(module_, opt);
+    return torch::jit::StaticModule(module_, /* is_frozen */ false, opt);
   }
 
  private:
@@ -752,6 +752,8 @@ TEST(StaticRuntime, IndividualOps_VarCat) {
   // 3D tensors - cat dim = 2
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
   testStaticRuntime(var_cat_script, args3);
+
+  testStaticRuntime(var_cat_script, args1, args2);
 }
 
 TEST(StaticRuntime, LongModel) {
@@ -942,7 +944,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               enable_out_variant,
               optimize_memory,
               optimize_graph_output_memory};
-          torch::jit::StaticModule smod(mod, opts);
+          torch::jit::StaticModule smod(mod, false, opts);
 
           for (int batch_size : {1, 8, 32}) {
             for (int i = 0; i < 2; ++i) {
