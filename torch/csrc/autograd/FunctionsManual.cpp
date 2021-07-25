@@ -2386,6 +2386,41 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+// jvp functions for eigenvalues and eigenvectors are separate
+// because currently forward AD only works with one rule per output
+Tensor eigh_jvp_eigenvalues(
+    const Tensor& input_tangent,
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors) {
+  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
+  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
+  // Section 3.1 Eigenvalues and eigenvectors
+
+  auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), input_tangent), eigenvectors);
+  auto eigenvalues_tangent = tmp.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  if (eigenvalues_tangent.is_complex()) {
+    return at::real(eigenvalues_tangent);
+  }
+  return eigenvalues_tangent;
+}
+
+Tensor eigh_jvp_eigenvectors(
+    const Tensor& input_tangent,
+    const Tensor& eigenvalues,
+    const Tensor& eigenvectors) {
+  // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
+  // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
+  // Section 3.1 Eigenvalues and eigenvectors
+
+  auto F = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
+  F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+  F = F.pow(-1);
+
+  auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), input_tangent), eigenvectors);
+  auto eigenvectors_tangent = at::matmul(eigenvectors, F.mul(tmp));
+  return eigenvectors_tangent;
+}
+
 Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                      bool eigenvectors, const Tensor& L, const Tensor& V) {
   // This function is used for both torch.symeig and torch.linalg.eigh.
