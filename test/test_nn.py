@@ -13141,15 +13141,12 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyOnCPUAndCUDA
     def test_Bilinear_empty(self, device):
-        mod = torch.nn.Bilinear(20, 30, 40)
-        inp1 = torch.randn(0, 10, 20)
-        inp2 = torch.randn(0, 10, 30)
-        inp1.requires_grad_(True)
-        inp2.requires_grad_(True)
+        mod = torch.nn.Bilinear(20, 30, 40).to(device)
+        inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
+        inp2 = torch.randn(0, 10, 30, requires_grad=True, device=device)
 
         output = mod(inp1, inp2)
-        g0 = torch.rand_like(output)
-        output.backward(g0)
+        output.sum().backward()
 
         self.assertEqual(inp1, torch.zeros_like(inp1))
         self.assertEqual(inp2, torch.zeros_like(inp2))
