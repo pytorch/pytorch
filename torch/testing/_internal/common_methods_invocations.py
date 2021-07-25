@@ -5841,6 +5841,7 @@ op_db: List[OpInfo] = [
            # got: vmap: Calling Tensor.as_strided is not supported
            # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
@@ -5854,9 +5855,14 @@ op_db: List[OpInfo] = [
            aten_name='linalg_cholesky_ex',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # Gradcheck for complex generates invalid inputs for this function
+               SkipInfo('TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),),
+           ),
     OpInfo('linalg.cond',
            aten_name='linalg_cond',
            dtypes=floating_and_complex_types(),
@@ -7537,6 +7543,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_transpose_swapdims),
     OpInfo('tril',
            dtypes=all_types_and_complex_and(torch.bool, torch.half),

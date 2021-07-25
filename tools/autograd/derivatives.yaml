@@ -339,6 +339,7 @@
 
 - name: linalg_cholesky_ex(Tensor self, *, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, false, L)
+  L: cholesky_jvp(self_t, self_p, L)
 
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
@@ -1319,6 +1320,7 @@
 
 - name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   self: grad.transpose(dim0, dim1)
+  result: auto_linear
 
 - name: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   self: grad.transpose(dim0, dim1)

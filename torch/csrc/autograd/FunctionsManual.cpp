@@ -997,6 +997,17 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
+Tensor cholesky_jvp(Tensor input_tangent, Tensor input_primal, Tensor L) {
+  // Differentiation of the Cholesky decomposition, Iain Murray
+  // https://arxiv.org/abs/1602.07527
+  // equation 8
+  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L, /*upper=*/false));
+  auto phi = at::matmul(at::matmul(L_inverse, input_tangent), L_inverse.transpose(-2, -1).conj());
+  phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
+  auto L_tangent = L.matmul(phi);
+  return L_tangent;
+}
+
 Tensor cholesky_backward(Tensor grad, bool upper, Tensor L) {
   // cf. Iain Murray (2016); arXiv 1602.07527
   // This gradient is symmetric, and not triangular.
