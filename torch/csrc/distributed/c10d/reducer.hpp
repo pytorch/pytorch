@@ -179,19 +179,29 @@ class TORCH_API Reducer {
 
   void push_rebuilt_params(const size_t& index);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<std::vector<at::Tensor>> replicas_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
       grad_accumulators_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
       hooks_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool expect_autograd_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool require_finalize_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t next_bucket_;
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
