@@ -997,7 +997,7 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntArra
   return mask_selected.view(sizes);
 }
 
-Tensor cholesky_jvp(Tensor input_tangent, Tensor input_primal, Tensor L) {
+Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& input_primal, const Tensor& L) {
   // Differentiation of the Cholesky decomposition, Iain Murray
   // https://arxiv.org/abs/1602.07527
   // equation 8
