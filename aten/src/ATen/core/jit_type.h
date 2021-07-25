@@ -157,6 +157,8 @@ using Pybind11_OptionalTypePtr = std::shared_ptr<Pybind11_OptionalType>;
 struct TORCH_API Pybind11_OptionalType : public UnionType {
   static Pybind11_OptionalTypePtr create(std::vector<TypePtr> types);
 
+  static const TypeKind Kind = TypeKind::Pybind11_OptionalType;
+
   static UnionTypePtr legacy_OptionalOfTensor();
 
  protected:

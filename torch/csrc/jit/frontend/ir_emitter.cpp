@@ -4145,7 +4145,7 @@ struct to_ir {
     // None/undefined tensor(optional tensor)
     auto opt_tensor = UnionType::createOptionalOf(TensorType::get());
     auto* index =
-        graph->insertNode(graph->createList(std::move(opt_tensor), indices))
+        graph->insertNode(graph->createList(opt_tensor, indices))
             ->output();
     return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
   }
