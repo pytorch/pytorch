@@ -192,6 +192,8 @@ _(aten, any) \
 _(aten, arange) \
 _(aten, argmax) \
 _(aten, argmin) \
+_(aten, amax) \
+_(aten, amin) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
 _(aten, atan2) \
@@ -516,7 +518,6 @@ _(aten, multilabel_margin_loss_backward) \
 _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
-_(aten, mvlgamma) \
 _(aten, nansum) \
 _(aten, nan_to_num) \
 _(aten, narrow) \
@@ -564,7 +565,6 @@ _(aten, pinverse) \
 _(aten, pixel_shuffle) \
 _(aten, pixel_unshuffle) \
 _(aten, poisson) \
-_(aten, polygamma) \
 _(aten, pow) \
 _(aten, float_power) \
 _(aten, prelu) \

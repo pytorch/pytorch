@@ -29,9 +29,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cat_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -1040,19 +1038,41 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  auto stride =
-      at::detail::computeStride(self.sizes(), self.strides(), shape);
-    // `computeStride` returns the proper strides to use if this
-    // `reshape` can be just a view.
-    //
-    // NB: Even though we have viewable geometry and the target strides here,
-    //     we do not just call `as_strided` on `self` because the backward
-    //     for `as_strided` is not as efficient as that of `view` (since the
-    //     former is meant to handle general cases).
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    return self.view(shape);
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    if (! self.is_xla()) {
+      return self._reshape_alias(shape, stride.value());
+    } else {
+      return self.view(shape);
+    }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -2152,11 +2172,13 @@ Tensor numpy_T(const Tensor &self) {
   return self.permute(transpose_dims);
 }
 
-Tensor view(const Tensor& self, IntArrayRef size) {
+Tensor view(const Tensor& self,
+            IntArrayRef size) {
+
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
-                                          self.strides(),
-                                          inferred_size);
+                                        self.strides(),
+                                        inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");

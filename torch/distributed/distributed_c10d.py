@@ -2199,6 +2199,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
     Each process will receive exactly one tensor and store its data in the
     ``tensor`` argument.
 
+    Complex tensors are supported.
+
     Args:
         tensor (Tensor): Output tensor.
         scatter_list (list[Tensor]): List of tensors to scatter (default is
@@ -2223,6 +2225,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
 
     if _rank_not_in_group(group):
         return
+    scatter_list = [t if not t.is_complex() else torch.view_as_real(t) for t in scatter_list]
+    tensor = tensor if not tensor.is_complex() else torch.view_as_real(tensor)
 
     my_rank = get_rank()
     if src == my_rank:
@@ -2406,6 +2410,8 @@ def all_to_all_single(
     to all processes in a group. Then concatenate the received tensors from all
     the processes in the group and return single output tensor.
 
+    Complex tensors are supported.
+
     Args:
         output (Tensor): Gathered cancatenated output tensor.
         input (Tensor): Input tensor to scatter.
@@ -2470,6 +2476,22 @@ def all_to_all_single(
         tensor([ 2,  3, 13, 14, 22, 32, 33])                             # Rank 1
         tensor([ 4, 15, 16, 23, 34, 35])                                 # Rank 2
         tensor([ 5, 17, 18, 24, 36])                                     # Rank 3
+
+
+        >>> # Another example with tensors of torch.cfloat type.
+        >>> input = torch.tensor([1+1j, 2+2j, 3+3j, 4+4j], dtype=torch.cfloat) + 4 * rank * (1+1j)
+        >>> input
+        tensor([1+1j, 2+2j, 3+3j, 4+4j])                                # Rank 0
+        tensor([5+5j, 6+6j, 7+7j, 8+8j])                                # Rank 1
+        tensor([9+9j, 10+10j, 11+11j, 12+12j])                          # Rank 2
+        tensor([13+13j, 14+14j, 15+15j, 16+16j])                        # Rank 3
+        >>> output = torch.empty([4], dtype=torch.int64)
+        >>> dist.all_to_all_single(output, input)
+        >>> output
+        tensor([1+1j, 5+5j, 9+9j, 13+13j])                              # Rank 0
+        tensor([2+2j, 6+6j, 10+10j, 14+14j])                            # Rank 1
+        tensor([3+3j, 7+7j, 11+11j, 15+15j])                            # Rank 2
+        tensor([4+4j, 8+8j, 12+12j, 16+16j])                            # Rank 3
     """
     if _rank_not_in_group(group):
         return
@@ -2477,6 +2499,12 @@ def all_to_all_single(
     opts = AllToAllOptions()
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
+
+    if input.is_complex():
+        input = torch.view_as_real(input)
+    if output.is_complex():
+        output = torch.view_as_real(output)
+
     output_split_sizes = [] if output_split_sizes is None else output_split_sizes
     input_split_sizes = [] if input_split_sizes is None else input_split_sizes
 
@@ -2500,6 +2528,8 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
+
+    Complex tensors are supported.
 
     Args:
         output_tensor_list (list[Tensor]): List of tensors to be gathered one
@@ -2566,6 +2596,23 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
         [tensor([2, 3]), tensor([13, 14]), tensor([22]), tensor([32, 33])]           # Rank 1
         [tensor([4]), tensor([15, 16]), tensor([23]), tensor([34, 35])]              # Rank 2
         [tensor([5]), tensor([17, 18]), tensor([24]), tensor([36])]                  # Rank 3
+
+        >>> # Another example with tensors of torch.cfloat type.
+        >>> input = torch.tensor([1+1j, 2+2j, 3+3j, 4+4j], dtype=torch.cfloat) + 4 * rank * (1+1j)
+        >>> input = list(input.chunk(4))
+        >>> input
+        [tensor([1+1j]), tensor([2+2j]), tensor([3+3j]), tensor([4+4j])]            # Rank 0
+        [tensor([5+5j]), tensor([6+6j]), tensor([7+7j]), tensor([8+8j])]            # Rank 1
+        [tensor([9+9j]), tensor([10+10j]), tensor([11+11j]), tensor([12+12j])]      # Rank 2
+        [tensor([13+13j]), tensor([14+14j]), tensor([15+15j]), tensor([16+16j])]    # Rank 3
+        >>> output = list(torch.empty([4], dtype=torch.int64).chunk(4))
+        >>> dist.all_to_all(output, input)
+        >>> output
+        [tensor([1+1j]), tensor([5+5j]), tensor([9+9j]), tensor([13+13j])]          # Rank 0
+        [tensor([2+2j]), tensor([6+6j]), tensor([10+10j]), tensor([14+14j])]        # Rank 1
+        [tensor([3+3j]), tensor([7+7j]), tensor([11+11j]), tensor([15+15j])]        # Rank 2
+        [tensor([4+4j]), tensor([8+8j]), tensor([12+12j]), tensor([16+16j])]        # Rank 3
+
     """
     if _rank_not_in_group(group):
         return
@@ -2573,6 +2620,13 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     opts = AllToAllOptions()
     _check_tensor_list(output_tensor_list, "output_tensor_list")
     _check_tensor_list(input_tensor_list, "input_tensor_list")
+
+    input_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in input_tensor_list
+    ]
+    output_tensor_list = [
+        t if not t.is_complex() else torch.view_as_real(t) for t in output_tensor_list
+    ]
 
     if group is None:
         default_pg = _get_default_group()
