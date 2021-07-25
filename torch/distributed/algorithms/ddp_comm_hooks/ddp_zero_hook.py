@@ -12,7 +12,7 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 # method, and ZeRO requires a functional optimizer to overlap with DDP
 # Passing a `None` instead of an actual gradient indicates to the optimizer
 # to not update the corresponding parameter
-_PARAM_NO_UPDATE = None
+_NO_PARAM_UPDATE = None
 
 
 def hook_then_zero_step(
@@ -54,6 +54,11 @@ def hook_then_zero_step(
                 gradient bucket.
         """
         fut = hook(state, bucket)
+
+        # Proceed as normal until the DDP buckets have been rebuilt
+        if not ddp._has_rebuilt_buckets:
+            return fut
+
         if zero._use_extra_stream:
             fut.wait()
 
@@ -68,9 +73,7 @@ def hook_then_zero_step(
                     A :class:`torch.Tensor` representing the contents of the
                     gradient bucket.
                 """
-                # Proceed as normal until the DDP buckets have been rebuilt
-                if not ddp._has_rebuilt_buckets:
-                    return bucket.get_tensor()
+                assert ddp._has_rebuilt_buckets
 
                 bucket_index = bucket.get_index()
                 rank = zero.global_rank
@@ -94,6 +97,7 @@ def hook_then_zero_step(
 
                     return bucket.get_tensor()
 
+                overlap_info.bucket_indices_seen.append(bucket_index)
                 if rank_to_update == rank:
                     assert len(zero.optim.param_groups) == 1, \
                         "Overlapping DDP with ZeRO only supports a single " \
@@ -103,7 +107,7 @@ def hook_then_zero_step(
                     # corresponding parameter should not be updated
                     num_local_optim_params = len(zero.optim.param_groups[0]["params"])
                     gradients: List[Optional[torch.Tensor]] = \
-                        [_PARAM_NO_UPDATE for _ in range(num_local_optim_params)]
+                        [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
                     assert bucket_index in overlap_info.offsets, \
                         f"Bucket index {bucket_index} was not assigned to rank " \
                         f"{rank}"
@@ -123,6 +127,15 @@ def hook_then_zero_step(
                         async_op=True
                     )
                 )
+
+                num_buckets = len(overlap_info.params_per_bucket)
+                if len(overlap_info.bucket_indices_seen) == num_buckets:
+                    # Ensure that all parameter updates are finished before the
+                    # next forward pass
+                    if zero._use_extra_stream:
+                        zero._bwd_stream.wait_stream(zero._optim_stream)
+                    _ = list(map(lambda x: x.wait(), overlap_info.broadcast_handles))
+                    overlap_info.broadcast_handles.clear()
 
                 return bucket.get_tensor()
 

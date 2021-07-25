@@ -179,14 +179,21 @@ class _OverlapInfo():
             assigned to this rank.
         broadcast_handles (List[Work]): :class:`list` of async work handles for
             the parameter broadcasts.
+        bucket_indices_seen (List[int]): :class:`list` of the bucket indices
+            seen on this iteration.
     """
     def __init__(self):
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
+
+        # Modified per DDP bucket reconstruction
         self.params_per_bucket: List[List[torch.Tensor]] = []
         self.params_per_rank: List[List[torch.Tensor]] = \
             [[] for _ in range(dist.get_world_size())]
         self.offsets: Dict[int, int] = {}
+
+        # Modified per iteration
         self.broadcast_handles: List[Any] = []
+        self.bucket_indices_seen: List[int] = []
 
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
@@ -847,13 +854,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 # Since all information has been collected, perform the delayed
                 # initialization of the local optimizer and supporting state
                 self._init_zero_for_overlap()
-
-            # Ensure that all parameter updates are finished before the
-            # next forward pass
-            if self._use_extra_stream:
-                self._bwd_stream.wait_stream(self._optim_stream)
-            _ = list(map(lambda x: x.wait(), self._overlap_info.broadcast_handles))
-            self._overlap_info.broadcast_handles.clear()
 
             # `step()` does not actually perform any parameter updates and is
             # only used for bookkeeping when `overlap_with_ddp=True`
