@@ -549,7 +549,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 
   // Three conditionals are necessary since this function is meant to work for both
   // forward and backward, which changes the dimensions of the inputs.
-  // The output should have zero elems if (at least) one of i1, i2, i3 has zero elems.
+  // Note that if output has zero elems is because (at least) one of i1, i2, i3 has zero elems.
   if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
     if (! sumdim[unroll_dim]) {
       for (const auto k : c10::irange(unroll_size)) {
