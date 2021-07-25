@@ -5,13 +5,13 @@ import sys
 import torch
 import torch.nn as nn
 
-from typing import Any
+from typing import Any, Tuple
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything
-from typing import List, Tuple
+from typing import List
 from torch import Tensor
 
 class TestAsync(JitTestCase):
@@ -41,8 +41,7 @@ class TestAsync(JitTestCase):
 
     def test_async_parsing(self):
         @torch.jit.script
-        def foo(x):
-            # type: (Tensor) -> List[Tensor]
+        def foo(x: Tensor) -> List[Tensor]:
             return [torch.neg(x), x.t()]
 
         @torch.jit.script
@@ -138,7 +137,7 @@ class TestAsync(JitTestCase):
     def test_async_script_no_script_mod(self):
         x = torch.rand(3, 4)
 
-        with self.assertRaisesRegex(RuntimeError, 'cannot call a value'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'cannot call a value', 'torch.jit._fork(x'):
             @torch.jit.script
             def wait_script(x):
                 fut = torch.jit._fork(x)
@@ -257,8 +256,7 @@ class TestAsync(JitTestCase):
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
             @torch.jit.script_method
-            def forward(self, x):
-                # type: (Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]
+            def forward(self, x: Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]:
                 future1 = torch.jit._fork(self.traced, x)
                 future2 = torch.jit._fork(torch.neg, x)
 
@@ -315,16 +313,18 @@ class TestAsync(JitTestCase):
 
         # no future
         error_msg = 'The size.*must match the size of tensor'
-        with self.assertRaisesRegex(Exception, error_msg):
+        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'x.t() + x'):
             foo(x)
 
         # one future
-        with self.assertRaisesRegex(Exception, error_msg):
+        with self.assertRaisesRegexWithHighlight(Exception, error_msg, 'torch.jit._fork(foo, x'):
             wait_script(x)
 
         # two futures with a different error
         x = torch.rand(3, 4, 5)
-        with self.assertRaisesRegex(Exception, 'expects a tensor with <= 2 dimensions'):
+        with self.assertRaisesRegexWithHighlight(Exception,
+                                                 'expects a tensor with <= 2 dimensions',
+                                                 'torch.jit._fork(wait_script, x'):
             wait_script_nest(x)
 
     def test_async_grad_guard_with_grad(self):
@@ -398,9 +398,9 @@ class TestAsync(JitTestCase):
             val = torch.jit._wait(fut)
             return my_list[0]
 
-        with self.assertRaisesRegex(RuntimeError, 'did not have observable data dependence with trace inputs; '
-                                                  'this probably indicates your program cannot be understood '
-                                                  'by the tracer.'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'did not have observable data dependence with trace inputs; '
+                                                 'this probably indicates your program cannot be understood '
+                                                 'by the tracer.', ''):
             traced = torch.jit.trace(fn, (torch.rand(3, 4),), check_trace=False)
 
     def test_trace_fork_wait_inline(self):
@@ -493,7 +493,7 @@ class TestAsync(JitTestCase):
         self.checkTrace(TestModule(), (torch.randn(5, 5),))
 
     def test_no_future_subtype_message(self):
-        with self.assertRaisesRegex(RuntimeError, 'Future without a contained type'):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, 'Future without a contained type', ''):
             @torch.jit.script
             def forward(self, x):
                 futs = torch.jit.annotate(List[torch.jit.Future], [])
@@ -515,9 +515,10 @@ class TestAsync(JitTestCase):
             return fut.wait()
 
         # Unsuccessful subtyping.
-        with self.assertRaisesRegex(
+        with self.assertRaisesRegexWithHighlight(
                 RuntimeError,
                 r"was annotated as having type Future\[float\] but is actually of type Future\[int\]",
+                "fut = returns_future_float(x"
         ):
             def returns_future_float(x: int) -> torch.jit.Future[float]:
                 return torch.jit._fork(returns_int, (x))

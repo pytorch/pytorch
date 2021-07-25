@@ -11,6 +11,8 @@
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 TEST(MathTest, GemmNoTransNoTrans) {
@@ -166,6 +168,7 @@ namespace {
 
 constexpr float kEps = 1e-5;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class GemmBatchedTest
     : public testing::TestWithParam<testing::tuple<bool, bool>> {
  protected:
@@ -244,12 +247,19 @@ class GemmBatchedTest
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor W_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor Y_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool trans_X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool trans_W_;
 };
 
@@ -456,15 +466,19 @@ class BroadcastTest : public testing::Test {
         Y_.mutable_data<float>(),
         cpu_context_.get());
     ASSERT_EQ(Y_data.size(), Y_.numel());
-    for (int i = 0; i < Y_data.size(); ++i) {
+    for (const auto i : c10::irange(Y_data.size())) {
       EXPECT_FLOAT_EQ(Y_data[i], Y_.data<float>()[i]);
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor X_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Tensor Y_;
 };
 
@@ -485,7 +499,9 @@ class RandFixedSumTest : public testing::Test {
   void SetUp() override {
     cpu_context_ = make_unique<CPUContext>(option_);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   DeviceOption option_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<CPUContext> cpu_context_;
 };
 

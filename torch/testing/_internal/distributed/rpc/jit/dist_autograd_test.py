@@ -1,4 +1,4 @@
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -34,8 +34,7 @@ class JitDistAutogradTest(RpcAgentTestFixture):
         dst_rank = self.rank
 
         @torch.jit.script
-        def dist_get_gradients(context_id):
-            # type: (int) -> (Dict[Tensor, Tensor])
+        def dist_get_gradients(context_id: int) -> (Dict[Tensor, Tensor]):
             return dist_autograd.get_gradients(context_id)
 
         FileCheck().check("get_gradients").run(str(dist_get_gradients.graph))

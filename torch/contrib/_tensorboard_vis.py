@@ -1,6 +1,7 @@
 import time
 from collections import defaultdict
 from functools import partial
+from typing import DefaultDict
 
 import torch
 
@@ -52,7 +53,7 @@ def visualize(graph, name_prefix='', pb_graph=None, executors_it=None):
 def visualize_graph_executor(state, name_prefix, pb_graph, inline_graph):
     """Appends the state of a given GraphExecutor to the graph protobuf.
 
-    Arguments:
+    Args:
         state (GraphExecutor or GraphExecutorState): GraphExecutor to display.
         name_prefix (str): Name prefix of the containing subgraph.
         pb_graph (GraphDef): graph to append to.
@@ -104,7 +105,7 @@ def visualize_rec(graph, value_map, name_prefix, pb_graph, executors_it=None):
         for out, val in zip(subgraph.outputs(), node.outputs()):
             value_map[val.unique()] = rec_value_map[out.unique()]
 
-    op_id_counter = defaultdict(int)
+    op_id_counter: DefaultDict[str, int] = defaultdict(int)
 
     def name_for(node):
         kind = node.kind()[node.kind().index('::') + 2:]

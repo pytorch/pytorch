@@ -118,7 +118,7 @@ class DBFileReader(Reader):
             )
         )
         col_names = [
-            blob_name[len(blob_prefix):] for blob_name in workspace.Blobs()
+            blob_name[len(blob_prefix):] for blob_name in sorted(workspace.Blobs())
             if blob_name.startswith(blob_prefix)
         ]
         schema = from_column_list(col_names)

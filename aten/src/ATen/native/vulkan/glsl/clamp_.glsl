@@ -2,7 +2,6 @@
 #define PRECISION $precision
 
 layout(std430) buffer;
-layout(std430) uniform;
 
 /* Qualifiers: layout - storage - precision - memory */
 

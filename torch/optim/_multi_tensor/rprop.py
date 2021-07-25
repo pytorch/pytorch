@@ -5,7 +5,7 @@ from collections import defaultdict
 class Rprop(Optimizer):
     """Implements the resilient backpropagation algorithm.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -29,7 +29,7 @@ class Rprop(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -81,7 +81,7 @@ class Rprop(Optimizer):
 
             # for dir<0, dfdx=0
             # for dir>=0 dfdx=dfdx
-            for i in range(len(grads)): 
+            for i in range(len(grads)):
                 grads[i] = grads[i].clone(memory_format=torch.preserve_format)
                 grads[i][signs[i].eq(etaminus)] = 0
 

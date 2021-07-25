@@ -534,6 +534,7 @@ TEST(SubgraphMatcher, DagMatchingRandomLargeGraph) {
   for (int i = 0; i < numPatterns; i++) {
     std::vector<int> nodeIdx;
     for (int k = 0; k < 5; k++) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       nodeIdx.emplace_back(random.nextInt() % numNodes);
     }
     graph.createEdge(nodes[nodeIdx[0]], nodes[nodeIdx[1]]);
@@ -598,8 +599,11 @@ TEST(SubgraphMatcher, ReplaceGraphRealistic) {
 
   // Test that the graph is transformed as expected.
   EXPECT_EQ(nodes.size(), testGraph.numInputs + 4);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef opFused;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef dataI;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   TestGraph::NodeRef dataOut;
   for (auto node : nodes) {
     if (node->data() == "opFused") {

@@ -64,6 +64,7 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/deform_conv_op.h"
 #include "caffe2/operators/deform_conv_op_impl.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -336,6 +337,7 @@ void DeformConvOpBase<DType, Context>::DeformableIm2col(
           col_shape[1],
           col_shape[2],
           data_col);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /*!
@@ -406,7 +408,7 @@ __global__ void deformable_col2im_gpu_kernel(
               cur_w + dx,
               height,
               width);
-          atomicAdd(grad_im + cur_bottom_grad_pos, weight * cur_top_grad);
+          gpu_atomic_add(grad_im + cur_bottom_grad_pos, weight * cur_top_grad);
         }
       }
     }
@@ -469,6 +471,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2im(
           col_shape[1],
           col_shape[2],
           grad_im);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /*!
@@ -617,6 +620,7 @@ void DeformConvOpBase<DType, Context>::DeformableCol2imCoord(
           col_shape[1],
           col_shape[2],
           grad_offset);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 REGISTER_CUDA_OPERATOR(DeformConv, DeformConvOp<float, CUDAContext>);

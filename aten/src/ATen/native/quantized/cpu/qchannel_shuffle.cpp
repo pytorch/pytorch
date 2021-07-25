@@ -36,11 +36,13 @@ Tensor quantized_channel_shuffle_impl(
   const Tensor self_nhwc = self.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::native::empty_affine_quantized(
       self_nhwc.sizes(),
-      at::device(kCPU).dtype(kQUInt8).memory_format(MemoryFormat::ChannelsLast),
+      kQUInt8,
+      c10::nullopt /* layout */,
+      kCPU,
+      c10::nullopt /* pin_memory */,
       self_nhwc.q_scale(),
       self_nhwc.q_zero_point(),
-      c10::nullopt
-      );
+      MemoryFormat::ChannelsLast);
 
   // Degenerate case of just copying.
   if (groups == 1) {

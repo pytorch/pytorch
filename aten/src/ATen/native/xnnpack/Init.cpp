@@ -32,6 +32,7 @@ bool initialize() {
   return is_initialized_;
 }
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 bool deinitialize() {
   using namespace internal;
 

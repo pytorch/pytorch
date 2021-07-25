@@ -107,11 +107,12 @@ struct createSingleReturn {
 };
 
 C10_API FunctionSchema make_function_schema(std::string&& name, std::string&& overload_name, c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
+C10_API FunctionSchema make_function_schema(c10::ArrayRef<ArgumentDef> arguments, c10::ArrayRef<ArgumentDef> returns);
 
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
 /// function. Flattens std::tuple returns into multiple return types
 template <typename FunctionTraits>
-FunctionSchema createFunctionSchemaFromTraitsFlattenedReturns(std::string&& name, std::string&& overload_name) {
+FunctionSchema createFunctionSchemaFromTraitsFlattenedReturns() {
  using ReturnType = typename FunctionTraits::return_type;
  using ParameterTypes = typename FunctionTraits::parameter_types;
 
@@ -121,7 +122,7 @@ FunctionSchema createFunctionSchemaFromTraitsFlattenedReturns(std::string&& name
  constexpr auto arguments = createArguments<ParameterTypes>::call();
  constexpr auto returns = createReturns<ReturnType>::call();
 
- return make_function_schema(std::move(name), std::move(overload_name), arguments, returns);
+ return make_function_schema(arguments, returns);
 }
 
 /// Creates a `FunctionSchema` object from a `FunctionTraits` type for a
@@ -144,8 +145,8 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
 }
 
 template<class FuncType>
-FunctionSchema inferFunctionSchemaFlattenedReturns(std::string&& name, std::string&& overload_name) {
-  return detail::infer_schema::createFunctionSchemaFromTraitsFlattenedReturns<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
+FunctionSchema inferFunctionSchemaFlattenedReturns() {
+  return detail::infer_schema::createFunctionSchemaFromTraitsFlattenedReturns<guts::infer_function_traits_t<FuncType>>();
 }
 
 template<class FuncType>

@@ -1,5 +1,5 @@
 import torch
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -9,7 +9,7 @@ class Adagrad(Optimizer):
     It has been proposed in `Adaptive Subgradient Methods for Online Learning
     and Stochastic Optimization`_.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
@@ -54,7 +54,7 @@ class Adagrad(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -84,9 +84,9 @@ class Adagrad(Optimizer):
                       grads,
                       state_sums,
                       state_steps,
-                      group['lr'],
-                      group['weight_decay'],
-                      group['lr_decay'],
-                      group['eps'])
+                      lr=group['lr'],
+                      weight_decay=group['weight_decay'],
+                      lr_decay=group['lr_decay'],
+                      eps=group['eps'])
 
         return loss

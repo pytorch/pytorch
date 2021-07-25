@@ -183,8 +183,8 @@ struct ControlFlowLoadStores {
   std::shared_ptr<TypeEnvironment> environment_stack = nullptr;
 };
 
-// Given a graph where outputs have been added to control flow nodes, and
-// loads and stores are represented in the graph, erases the Loads & Stores.
+// Given a graph where 1) outputs have been added to control flow nodes and
+// 2) loads and stores are represented in the graph, erase the Loads & Stores.
 struct EraseLoadStores {
   void eraseBlockLoadStores(Block* block) {
     pushFrame(block);
@@ -261,6 +261,7 @@ struct LoopContinuations {
   void addLoopCarriedOutputs(Node* n) {
     auto g = n->owningGraph();
     WithInsertPoint insert(n);
+    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     auto continuation = curr_loop_->blocks().at(0)->return_node();
     for (auto out : continuation->inputs()) {
       auto load_node = out->node();
@@ -294,6 +295,7 @@ struct LoopContinuations {
           auto loop_continuation =
               graph_->create(prim::LoopContinuation, 0)->insertAfter(n);
           auto header_block = loop_continuation->addBlock();
+          // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
           auto pre_header = curr_loop_->blocks().at(1);
           header_block->cloneFrom(pre_header, [](Value* v) { return v; });
           InlineBlockBeforeNode(n, header_block);

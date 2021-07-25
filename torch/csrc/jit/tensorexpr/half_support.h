@@ -45,6 +45,7 @@ class HalfChecker : public IRVisitor {
   bool hasHalf_{false};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class HalfRewriter : public IRMutator {
   const Expr* mutate(const Load* v) override {
     const Expr* child = IRMutator::mutate(v);
@@ -69,7 +70,7 @@ class HalfRewriter : public IRMutator {
       inserted_half_casts_.insert(new_val);
     }
 
-    return new Store(v->buf(), v->indices(), new_val, v->mask());
+    return new Store(v->buf(), v->indices(), new_val);
   }
 
   const Expr* mutate(const HalfImm* v) override {

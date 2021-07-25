@@ -19,6 +19,7 @@ class IDEEPSumOp final : public IDEEPOperator {
       : IDEEPOperator(operator_def, ws),
         fallback_sum_(operator_def, ws),
         fallback_add_(operator_def, ws) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPSumOp() override {}
 
   bool RunOnDevice() override {

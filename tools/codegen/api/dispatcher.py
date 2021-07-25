@@ -1,9 +1,10 @@
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, FunctionSchema, Return,
+                                 SelfArgument, TensorOptionsArguments, Type,
+                                 assert_never)
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
-import tools.codegen.api.native as native
-import tools.codegen.local as local
+from tools.codegen.api.types import ArgName, Binding, NamedCType, CType
+from tools.codegen.api import cpp
+from tools.codegen.utils import concatMap
 
 import itertools
 from typing import Sequence, List, Union
@@ -19,10 +20,6 @@ from typing import Sequence, List, Union
 #
 # Prominent characteristics of the dispatcher API:
 #
-#   - 'use_c10_dispatcher: full' controls whether or not we actually
-#     use the modern calling convention or not.  When use_c10_dispatcher
-#     is not enabled, we don't use the template machinery.
-#
 #   - dtype, layout, device and pin_memory are represented as separate
 #     arguments.
 #
@@ -30,54 +27,39 @@ from typing import Sequence, List, Union
 def name(func: FunctionSchema) -> str:
     return cpp.name(func)
 
-def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
-    if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        # This is a faux amis.  If it makes sense in the future to add
-        # more special cases here, or invert things so cpp.argument_type
-        # calls this, or just completely inline the function, please do
-        # it.
-        return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
-    else:
-        # This is real sharing.  If you're modifying this path, ask
-        # yourself why you are changing the native functions protocol
-        # here and not in native.
-        return native.argumenttype_type(t, mutable=mutable, binds=binds)
+def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
+    # This is a faux amis.  If it makes sense in the future to add
+    # more special cases here, or invert things so cpp.argument_type
+    # calls this, or just completely inline the function, please do
+    # it.
+    return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
 
-def argument_type(a: Argument, *, binds: ArgName) -> CType:
+def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-def returns_type(rs: Sequence[Return]) -> str:
+def returns_type(rs: Sequence[Return]) -> CType:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
 
-def argument(
-    a: Union[Argument, TensorOptionsArguments, SelfArgument]
-) -> List[Binding]:
-    # We could forward to native.argument but it is a bit suspect because
-    # the grouping may not be set correctly
-    assert local.use_c10_dispatcher().dispatcher_uses_new_style()
-
-    if isinstance(a, Argument):
-        return [Binding(
-            ctype=argument_type(a, binds=a.name),
-            name=a.name,
-            argument=a,
-        )]
-    elif isinstance(a, SelfArgument):
-        return argument(a.argument)
-    elif isinstance(a, TensorOptionsArguments):
-        return argument(a.dtype) + argument(a.layout) + argument(a.device) + argument(a.pin_memory)
-    else:
-        assert_never(a)
+def jit_arguments(func: FunctionSchema) -> List[Argument]:
+    def to_argument(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> List[Argument]:
+        if isinstance(a, Argument):
+            return [a]
+        elif isinstance(a, SelfArgument):
+            return [a.argument]
+        elif isinstance(a, TensorOptionsArguments):
+            return [a.dtype, a.layout, a.device, a.pin_memory]
+        else:
+            assert_never(a)
+    return list(concatMap(to_argument, itertools.chain(
+        func.arguments.positional,
+        func.arguments.kwarg_only,
+        func.arguments.out)))
 
 def arguments(func: FunctionSchema) -> List[Binding]:
-    if local.use_c10_dispatcher().dispatcher_uses_new_style():
-        return [
-            r for a in itertools.chain(
-                func.arguments.positional,
-                func.arguments.kwarg_only,
-                func.arguments.out
-            ) for r in argument(a)
-        ]
-    else:
-        return native.arguments(func)
+    return [
+        Binding(
+            nctype=argument_type(a, binds=a.name),
+            name=a.name,
+            argument=a,
+        ) for a in jit_arguments(func)]

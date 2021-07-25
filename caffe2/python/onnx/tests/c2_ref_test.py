@@ -6,9 +6,7 @@
 
 
 
-import json
 import os
-import six
 import unittest
 
 from caffe2.python import core
@@ -18,7 +16,7 @@ import onnx
 from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
 from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
 
-from onnx import defs, mapping
+from onnx import mapping
 import caffe2.python.onnx.frontend as c2_onnx
 import caffe2.python.onnx.backend as c2
 
@@ -44,9 +42,8 @@ class TestCaffe2Basic(TestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with six.assertRaisesRegex(self,
-                                   RuntimeError,
-                                   "Don't know how to map unexpected argument (foo|bar)"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_dynamicslice_3inputs_graph(self):

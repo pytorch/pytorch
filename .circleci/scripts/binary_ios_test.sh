@@ -24,6 +24,6 @@ rm cert.txt
 if ! [ -x "$(command -v xcodebuild)" ]; then
     echo 'Error: xcodebuild is not installed.'
     exit 1
-fi 
+fi
 PROFILE=PyTorch_CI_2021
 ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}

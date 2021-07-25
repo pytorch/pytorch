@@ -1,7 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/BinaryOps.h>
+
+#include <c10/util/irange.h>
 
 #include <cstring>
 #include <memory>
@@ -13,21 +15,13 @@ namespace at { namespace native {
 
 Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-  TORCH_CHECK(weight.dim() >= 1, "'weight' must be at least 1-D");
+  TORCH_CHECK(weight.dim() == 2,  "'weight' must be 2-D");
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding", indices_arg, {kLong, kInt});
 
-  auto zerofill_padding = [&](Tensor& embedding) {
-    if (padding_idx >= 0) {
-      embedding.masked_fill_((indices == padding_idx).reshape({-1, 1}), 0);
-    }
-  };
-
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
-    auto out = weight.index_select(0, indices);
-    zerofill_padding(out);
-    return out;
+    return weight.index_select(0, indices);
   }
 
   auto size = indices.sizes().vec();
@@ -35,9 +29,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     size.push_back(d);
   }
 
-  auto out = weight.index_select(0, indices.reshape(-1));
-  zerofill_padding(out);
-  return out.view(size);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
 Tensor embedding_backward(
@@ -68,7 +60,7 @@ Tensor embedding_sparse_backward(
   Tensor indices = indices_;
   Tensor grad = grad_;
   if (padding_idx != -1) {
-    auto c = indices != padding_idx;
+    torch::List<c10::optional<Tensor>> c({indices != padding_idx});
     indices = indices.index(c);
     grad = grad.index(c);
   }
@@ -101,40 +93,58 @@ Tensor embedding_dense_backward_cpu(
   int64_t numel = indices.numel();
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
 
+  auto add_iter = TensorIteratorConfig()
+    .add_output(grad_weight)
+    .add_input(grad_weight)
+    .add_input(grad)
+    .resize_outputs(false)
+    .declare_static_shape(grad.sizes(), /*squash_dims=*/0)
+    .build();
+
+  const auto gW_data = reinterpret_cast<char*>(grad_weight.data_ptr());
+  const auto gO_data = reinterpret_cast<char*>(grad.data_ptr());
+  const auto gW_stride = grad_weight.strides()[0] * grad_weight.element_size();
+  const auto gO_stride = grad.strides()[0] * grad.element_size();
+
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cpu", [&] () {
     auto indices_data = indices_contig.data_ptr<index_t>();
 
+    // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     std::unique_ptr<index_t[]> counts;
     if (scale_grad_by_freq) {
       counts.reset(new index_t[num_weights]);
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]] = 0;
       }
-      for (int i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
         counts[indices_data[i]]++;
       }
     }
 
     auto parallel_section = [&](index_t start, index_t end) {
+      TensorIterator iter(add_iter);
       for (int64_t i = 0; i < numel; i++) {
         if (indices_data[i] != padding_idx) {
           index_t k = indices_data[i];
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scale /= counts[k];
             }
-            grad_weight[k].add_(grad[i], scale);
+
+            // grad_weight[k].add_(grad[i], scale);
+            iter.unsafe_replace_operand(0, gW_data + k * gW_stride);
+            iter.unsafe_replace_operand(1, gW_data + k * gW_stride);
+            iter.unsafe_replace_operand(2, gO_data + i * gO_stride);
+            add_stub(kCPU, iter, scale);
           }
         }
       }
     };
 
-    if (numel > 1000) {
-      at::parallel_for(0, num_weights, 0, parallel_section);
-    } else {
-      parallel_section(0, num_weights);
-    }
+    at::parallel_for(0, num_weights, 1000, parallel_section);
+
   });
 
   return grad_weight;

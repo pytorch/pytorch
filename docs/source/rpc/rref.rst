@@ -42,7 +42,7 @@ Assumptions
 RRef protocol is designed with the following assumptions.
 
 - **Transient Network Failures**: The RRef design handles transient
-  network failures by retrying messages. It cannot handle node crashes or 
+  network failures by retrying messages. It cannot handle node crashes or
   permanent network partitions. When those incidents occur, the application
   should take down all workers, revert to the previous checkpoint, and resume
   training.
@@ -136,7 +136,7 @@ owner before Y's messages. the owner will learn of Z's deletion befores
 knowing Y exists. Nevertheless, this does not cause any problem. Because, at least
 one of Y's ancestors will be alive (A) and it will
 prevent the owner from deleting the ``OwnerRRef``. More specifically, if the
-owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A 
+owner does not know Y, A cannot be deleted due to **G2**, and the owner knows A
 since it is A's parent.
 
 Things get a little trickier if the RRef is created on a user:

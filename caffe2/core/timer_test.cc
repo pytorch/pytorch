@@ -22,15 +22,15 @@ TEST(TimerTest, Test) {
   float us = timer.MicroSeconds();
   float ms = timer.MilliSeconds();
 
-  // Time should be at least accurate +- 10%. (20% on Windows)
+  // Time should be at least accurate +- 10%. (30% on Windows)
 #ifndef _WIN32
   EXPECT_NEAR(ns, 100000000, 10000000);
   EXPECT_NEAR(us, 100000, 10000);
   EXPECT_NEAR(ms, 100, 10);
 #else
-  EXPECT_NEAR(ns, 100000000, 20000000);
-  EXPECT_NEAR(us, 100000, 20000);
-  EXPECT_NEAR(ms, 100, 20);
+  EXPECT_NEAR(ns, 100000000, 30000000);
+  EXPECT_NEAR(us, 100000, 30000);
+  EXPECT_NEAR(ms, 100, 30);
 #endif
 
   // Test restarting the clock.

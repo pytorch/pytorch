@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 #include <algorithm>
 #include <vector>
@@ -19,6 +20,7 @@ namespace {
 bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
   TORCH_CHECK(qxs.size() > 0);
   bool is_fast_path = dim == 1;
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     is_fast_path &= qx.dim() == 4;
     is_fast_path &= qx.is_contiguous(c10::MemoryFormat::ChannelsLast);
@@ -29,6 +31,26 @@ bool is_cat_nhwc_fast_path(const c10::List<Tensor>& qxs, int dim) {
 bool is_valid_quantization_scheme(const Tensor& t) {
   const auto qtype = t.qscheme();
   return (qtype == kPerTensorAffine) || (qtype == kPerTensorSymmetric);
+}
+
+bool all_inputs_sharing_qparams(TensorList qxs) {
+  bool is_valid = true;
+  for (const auto i : c10::irange(1, qxs.size())) {
+    is_valid |= qxs[0].is_quantized();
+    is_valid |= qxs[i].is_quantized() == qxs[0].is_quantized();
+    is_valid |= qxs[i].qscheme() == qxs[0].qscheme();
+    is_valid |= qxs[i].dtype() == qxs[0].dtype();
+    if (qxs[0].qscheme() == kPerTensorAffine) {
+      is_valid |= qxs[i].q_scale() == qxs[0].q_scale();
+      is_valid |= qxs[i].q_zero_point() == qxs[0].q_zero_point();
+    } else if (qxs[0].qscheme() == kPerChannelAffine) {
+      is_valid |= qxs[i].q_per_channel_scales().equal(qxs[0].q_per_channel_scales());
+      is_valid |= qxs[i].q_per_channel_zero_points().equal(qxs[0].q_per_channel_zero_points());
+    } else {
+      TORCH_CHECK(false, "Unrecognized qscheme:", toString(qxs[0].qscheme()));
+    }
+  }
+  return is_valid;
 }
 
 /* Quantized concatenation.
@@ -53,6 +75,7 @@ Tensor quantized_cat_impl(
   const auto x_qscheme = qxs.get(0).qscheme();
   std::vector<Tensor> xs;
   xs.reserve(qxs.size());
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {
     TORCH_CHECK(x_dtype == qx.scalar_type(), "All dtypes must be the same.");
     TORCH_CHECK(
@@ -62,6 +85,7 @@ Tensor quantized_cat_impl(
   const Tensor y = at::cat(xs, dim);
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(x_dtype, "qcat", [&]() {
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     qy = at::quantize_per_tensor(y, scale, zero_point, SCALAR_TYPE);
     if (ReLUFused) {
       auto iter = TensorIterator::unary_op(qy, qy);
@@ -110,13 +134,17 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
-              "Only per-tensor quantization is supported in 'cat'!")
+              "Only per-tensor quantization is supported in 'cat'!");
+  TORCH_CHECK(
+      all_inputs_sharing_qparams(qxs),
+      "All inputs should share the same quantization parameters.");
+
   double _scale = qxs[0].q_scale();
   int64_t _zero_point = qxs[0].q_zero_point();
   return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
 }
 
-Tensor& cat_out_quantized_cpu(Tensor& out, TensorList qxs, int64_t dim) {
+Tensor& cat_out_quantized_cpu(TensorList qxs, int64_t dim, Tensor& out) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),

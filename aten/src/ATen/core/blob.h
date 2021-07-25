@@ -69,7 +69,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   // TODO(jerryzh): add a Get(DeviceType) function?
   template <class T>
   const T& Get() const {
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
         meta_.name(),
@@ -78,6 +78,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
     // TODO: after we add Get<Tensor>(DeviceType)
     // and changed all the callsites, we can add
     // a static assert here to enforce T != Tensor
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.UndefReturn)
     return *static_cast<const T*>(pointer_);
   }
 

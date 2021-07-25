@@ -129,18 +129,64 @@ TEST(AutogradAPITests, GradUnreachableTest) {
   ASSERT_THROWS_WITH(grad({x * 2}, {x, y}, {}, {}, false, false), "Set allow_unused=True");
 }
 
+TEST(CustomAutogradTest, GradUnreachableDiscoveryTest) {
+  // Test that certain nodes are not erroneously executed when an input
+  // is unreachable. See #39784
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable var) {
+      return var;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      ADD_FAILURE() << "This node should not be executed!";
+      return grad_output;
+    }
+  };
+
+  auto x = torch::randn(1, torch::requires_grad());
+  auto x1 = torch::randn(1);
+  auto x2 = MyFunction::apply(x + x1);
+
+  auto y = torch::randn(1, torch::requires_grad());
+  auto grad_res = torch::autograd::grad({x2}, {y}, {}, {}, false, true);
+  ASSERT_FALSE(grad_res[0].defined());
+}
+
+TEST(AutogradAPITests, EmptyInput) {
+  Variable x = torch::ones({1}, torch::requires_grad());
+  ASSERT_THROWS_WITH(grad({x * 2}, /*inputs=*/{}, {x}),
+                     "grad requires non-empty inputs.");
+}
+
 TEST(AutogradAPITests, RetainGrad) {
   auto input = torch::rand({1, 3}, torch::requires_grad());
   auto h1 = input * 3;
   auto out = (h1 * h1).sum();
 
+  {
+    // Warning when grad is accessed for non-leaf tensor
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_TRUE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
   // It should be possible to call retain_grad() multiple times
   h1.retain_grad();
   h1.retain_grad();
+  {
+    // If retain_grad is true for a non-leaf tensor,
+    // there should not be any warning when grad is accessed
+    WarningCapture warnings;
+    ASSERT_FALSE(h1.grad().defined());
+    ASSERT_FALSE(
+      warnings.str().find("is not a leaf") != std::string::npos);
+  }
 
   // Gradient should be accumulated
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 2, h1.grad());
+  // NOLINTNEXTLINE(bugprone-argument-comment)
   out.backward({}, /*keep_graph=*/true);
   ASSERT_VARIABLE_EQ(h1 * 4, h1.grad());
 
@@ -174,8 +220,9 @@ TEST(AutogradAPITests, AnomalyMode) {
     auto x = torch::tensor({0.0}, torch::requires_grad());
     auto y = x.pow(1.5);
     auto gr =
+        // NOLINTNEXTLINE(bugprone-argument-comment)
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x});, "returned nan");
+    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});, "returned nan");
     auto msgs = warnings.messages();
     ASSERT_EQ(msgs.size(), 2);
     ASSERT_TRUE(
@@ -790,8 +837,36 @@ TEST(CustomAutogradTest, BackwardWithNonLeafInputs) {
   Variable x = torch::randn({5,5}, torch::requires_grad());
   Variable y = torch::randn({5,5}, torch::requires_grad());
   Variable z = x * x;
-  Variable w = z + x * y + y * y;
-  ASSERT_THROWS_WITH(w.backward(torch::ones({5, 5}), false, false, {z}), "is not a leaf Tensor");
+  Variable w = y * z + x * y + y * y;
+
+  Variable x_grad_expected = 2 * x * y + y;
+  Variable z_grad_expected = y;
+
+  w.backward(torch::ones({5, 5}), false, false, std::vector<Variable>{x, z});
+
+  ASSERT_VARIABLE_EQ(x.grad(), x_grad_expected);
+  ASSERT_VARIABLE_EQ(z.grad(), z_grad_expected);
+  ASSERT_FALSE(y.grad().defined());
+}
+
+TEST(CustomAutogradTest, BackwardWithCreateGraphWarns) {
+  c10::Warning::WarnAlways guard(true);
+
+  torch::Tensor x = torch::randn({5,5}).set_requires_grad(true);
+  auto z = x * x;
+  {
+    WarningCapture warnings;
+    z.backward(torch::ones({5, 5}), c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
+
+  {
+    WarningCapture warnings;
+    torch::autograd::backward({z}, {torch::ones({5, 5})}, c10::nullopt, true);
+    ASSERT_TRUE(
+        warnings.str().find("Using backward() with create_graph=True") != std::string::npos);
+  }
 }
 
 // TODO add these tests if needed

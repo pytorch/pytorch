@@ -69,8 +69,6 @@ class Cauchy(Distribution):
         return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):

@@ -20,9 +20,11 @@ from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
-from torch._jit_internal import _qualified_name
+from torch._jit_internal import _qualified_name, is_scripting, get_callable_argument_names
 from torch.autograd import function
 from torch.nn import Module
+
+from torch.testing._core import _get_default_tolerance
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -146,7 +148,7 @@ def _clone_inputs(args):
             # TODO: figure out one liner to .clone() and set requires_grad
             v = (
                 a.detach()
-                .clone(memory_format=torch.preserve_format)
+                .clone(memory_format=None if a.is_mkldnn else torch.preserve_format)
                 .requires_grad_(a.requires_grad)
             )
             if a.grad is not None:
@@ -194,7 +196,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     parameters), so don't expect the model to come out exactly the same as what
     you passed in.
 
-    Arguments:
+    Args:
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
@@ -217,7 +219,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     # TODO: Consider adding a utility function to torch.jit to test
     # for this case
-    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore[attr-defined]
         raise TypeError(
             "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
         )
@@ -483,11 +485,15 @@ def _check_trace(
                         orig = orig.dequantize()
                     if ref.is_quantized:
                         ref = ref.dequantize()
+                    if orig.is_mkldnn:
+                        orig = orig.to_dense()
+                    if ref.is_mkldnn:
+                        ref = ref.to_dense()
                     torch.testing.assert_allclose(
                         orig.double(),
                         ref.double(),
                         rtol=check_tolerance,
-                        atol=torch.testing._get_default_tolerance(orig, ref)[1],
+                        atol=_get_default_tolerance(orig, ref)[1],
                     )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
@@ -552,7 +558,8 @@ def make_module(mod, _module_class, _compilation_unit):
         return torch.jit._recursive.create_script_module(
             mod,
             infer_methods_stubs_fn,
-            share_types=False
+            share_types=False,
+            is_tracing=True
         )
     else:
         if _module_class is None:
@@ -626,7 +633,7 @@ def trace(
         invocations of the model. The tracer will try to emit warnings when
         doing something that may cause an incorrect trace to be produced.
 
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be run with `example_inputs`. `func` arguments and return
             values  must be tensors or (possibly nested) tuples that contain
@@ -776,7 +783,13 @@ def trace(
 
     name = _qualified_name(func)
     traced = torch._C._create_function_from_trace(
-        name, func, example_inputs, var_lookup_fn, strict, _force_outplace
+        name,
+        func,
+        example_inputs,
+        var_lookup_fn,
+        strict,
+        _force_outplace,
+        get_callable_argument_names(func)
     )
 
     # Check the trace against new traces created from user-specified inputs
@@ -830,7 +843,7 @@ def trace_module(
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
-    Arguments:
+    Args:
         mod (torch.nn.Module):  A ``torch.nn.Module`` containing methods whose names are
                                 specified in ``inputs``. The given methods will be compiled
                                 as a part of a single `ScriptModule`.
@@ -928,9 +941,19 @@ def trace_module(
         module = make_module(mod, _module_class, _compilation_unit)
 
         for method_name, example_inputs in inputs.items():
-            # this is needed since Module.__call__ sets up some extra tracing
-            func = mod if method_name == "forward" else getattr(mod, method_name)
+            if method_name == "forward":
+                # "forward" is a special case because we need to trace
+                # `Module.__call__`, which sets up some extra tracing, but uses
+                # argument names of the real `Module.forward` method.
+                func = mod
+                forward_method = getattr(mod, method_name)
+                argument_names = get_callable_argument_names(forward_method)
+            else:
+                func = getattr(mod, method_name)
+                argument_names = get_callable_argument_names(func)
+
             example_inputs = make_tuple(example_inputs)
+
             module._c._create_method_from_trace(
                 method_name,
                 func,
@@ -938,6 +961,7 @@ def trace_module(
                 var_lookup_fn,
                 strict,
                 _force_outplace,
+                argument_names,
             )
             check_trace_method = module._c._get_method(method_name)
 
@@ -976,6 +1000,8 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
+    if is_scripting():
+        return False
     return torch._C._is_tracing()
 
 
@@ -998,7 +1024,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore[attr-defined]
             type(orig)
         )
 
@@ -1035,12 +1061,14 @@ class TracedModule(ScriptModule):
             )
 
         for name, submodule in orig._modules.items():
+            if submodule is None:
+                continue
             tmp_module._modules[name] = make_module(
                 submodule, TracedModule, _compilation_unit=None
             )
 
         script_module = torch.jit._recursive.create_script_module(
-            tmp_module, lambda module: (), share_types=False
+            tmp_module, lambda module: (), share_types=False, is_tracing=True
         )
 
         self.__dict__["_name"] = type(orig).__name__
@@ -1075,7 +1103,7 @@ class TopLevelTracedModule(TracedModule):
         """
         Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
 
-        Arguments:
+        Args:
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
@@ -1088,11 +1116,11 @@ def _script_if_tracing(fn):
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)  # type: ignore
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore[attr-defined]
         return compiled_fn(*args, **kwargs)
 
-    wrapper.__original_fn = fn  # type: ignore
-    wrapper.__script_if_tracing_wrapper = True  # type: ignore
+    wrapper.__original_fn = fn  # type: ignore[attr-defined]
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore[attr-defined]
 
     return wrapper
 
@@ -1115,7 +1143,7 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
 
-    Arguments:
+    Args:
         f (torch.nn.Module or function): the function or module
             to be traced.
         args (tuple or Tensor): the positional arguments to pass to the

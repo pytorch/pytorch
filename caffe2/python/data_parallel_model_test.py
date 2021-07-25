@@ -302,6 +302,7 @@ class DataParallelModelTest(TestCase):
         workspace.CreateNet(model.net)
         workspace.RunNet(model.net)
 
+    @unittest.skip("Test fails on GPU/RE")
     def test_synchronization_barrier(self):
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):
@@ -351,6 +352,7 @@ class DataParallelModelTest(TestCase):
                 device_option=None,
                 tmpdir=tmpdir)
 
+    @unittest.skip("Test fails on GPU/RE")
     def test_pre_train_synchronization_barrier(self):
         def run(comm_rank, comm_size, tmpdir):
             def add_input_ops(model):

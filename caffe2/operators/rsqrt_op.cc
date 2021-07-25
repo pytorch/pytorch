@@ -18,6 +18,7 @@ bool RsqrtGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   EigenVectorMap<T>(dX, size) = ConstEigenVectorMap<T>(dY, size).array() *
       ConstEigenVectorMap<T>(Y, size).array().cube() * static_cast<T>(-0.5);

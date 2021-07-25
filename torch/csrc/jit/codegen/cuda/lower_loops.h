@@ -29,7 +29,7 @@ namespace cuda {
  * nests to initialize reduction buffers.
  *
  */
-class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
+class TORCH_CUDA_CU_API LoopNestGenerator : public OptOutDispatch {
  public:
   static std::vector<Expr*> loweredExprs(
       Fusion* fusion,

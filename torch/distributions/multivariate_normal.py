@@ -68,7 +68,7 @@ def _batch_mahalanobis(bL, bx):
 
 def _precision_to_scale_tril(P):
     # Ref: https://nbviewer.jupyter.org/gist/fehiepsi/5ef8e09e61604f10607380467eb82006#Precision-to-scale_tril
-    Lf = torch.cholesky(torch.flip(P, (-2, -1)))
+    Lf = torch.linalg.cholesky(torch.flip(P, (-2, -1)))
     L_inv = torch.transpose(torch.flip(Lf, (-2, -1)), -2, -1)
     L = torch.triangular_solve(torch.eye(P.shape[-1], dtype=P.dtype, device=P.device),
                                L_inv, upper=False)[0]
@@ -113,7 +113,7 @@ class MultivariateNormal(Distribution):
                        'covariance_matrix': constraints.positive_definite,
                        'precision_matrix': constraints.positive_definite,
                        'scale_tril': constraints.lower_cholesky}
-    support = constraints.real
+    support = constraints.real_vector
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
@@ -148,7 +148,7 @@ class MultivariateNormal(Distribution):
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
         elif covariance_matrix is not None:
-            self._unbroadcasted_scale_tril = torch.cholesky(covariance_matrix)
+            self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 

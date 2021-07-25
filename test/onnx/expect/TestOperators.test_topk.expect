@@ -67,7 +67,7 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "4_0"
+            dim_param: "TopK4_dim_0"
           }
         }
       }
@@ -80,7 +80,7 @@ graph {
         elem_type: 7
         shape {
           dim {
-            dim_param: "5_0"
+            dim_param: "TopK5_dim_0"
           }
         }
       }

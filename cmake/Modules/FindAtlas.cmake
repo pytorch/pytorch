@@ -49,4 +49,3 @@ if(ATLAS_FOUND)
 
   message(STATUS "Found Atlas (include: ${Atlas_CBLAS_INCLUDE_DIR}, library: ${Atlas_BLAS_LIBRARY})")
 endif(ATLAS_FOUND)
-

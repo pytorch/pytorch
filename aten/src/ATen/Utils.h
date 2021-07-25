@@ -2,13 +2,14 @@
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
+#include <ATen/Formatting.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StorageImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
-
-#include <c10/core/ScalarType.h>
-#include <ATen/Formatting.h>
+#include <c10/util/accumulate.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <sstream>
@@ -51,7 +52,7 @@ static inline TensorImpl* checked_dense_tensor_unwrap(const Tensor& expr, const 
 static inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(ArrayRef<Tensor> tensors, const char * name, int pos, DeviceType device_type, ScalarType scalar_type) {
   std::vector<TensorImpl*> unwrapped;
   unwrapped.reserve(tensors.size());
-  for (unsigned int i = 0; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
       AT_ERROR("Expected dense tensor but got ", expr.layout(),
@@ -89,22 +90,6 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
-inline int64_t sum_intlist(ArrayRef<int64_t> list) {
-  return std::accumulate(list.begin(), list.end(), 0ll);
-}
-
-//std::accumulate infers return type from `init` type, so if `init` type is not enough to hold the result, computation can overflow
-//the next 2 functions set `init` type to int64_t to avoid overflow.
-template<typename C, typename std::enable_if<std::is_integral<typename C::value_type>::value, int>::type = 0>
-inline int64_t prod_intlist(const C &container){
-    return std::accumulate(container.begin(), container.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-}
-
-template<typename Iter,
-typename std::enable_if<std::is_integral<typename std::iterator_traits<Iter>::value_type>::value, int>::type = 0>
-inline int64_t prod_intlist(Iter begin, Iter end){
-    return std::accumulate(begin, end, static_cast<int64_t>(1), std::multiplies<int64_t>());
-}
 /**
  * Utility function to static cast input Generator* to
  * the backend generator type (CPU/CUDAGeneratorImpl etc.)
@@ -138,6 +123,20 @@ namespace detail {
 TORCH_API
 Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
                  c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
+
+TORCH_API
+Tensor empty_generic(
+  IntArrayRef size,
+  c10::Allocator* allocator,
+  // technically this can be inferred from the device, but usually the
+  // correct setting is obvious from the call site so just make callers
+  // pass it in
+  c10::DispatchKey dispatch_key,
+  ScalarType dtype,
+  Device device,
+  c10::optional<c10::MemoryFormat> memory_format
+);
+
 
 template <typename T>
 TORCH_API

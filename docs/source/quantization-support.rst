@@ -111,8 +111,10 @@ accuracy
 
   * :class:`~torch.nn.intrinsic.ConvBn1d` — Conv1d + BatchNorm1d
   * :class:`~torch.nn.intrinsic.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.ConvBnReLU1d` — Conv1d + BatchNorm1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU1d` — Conv1d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU2d` — Conv2d + ReLU
   * :class:`~torch.nn.intrinsic.ConvReLU3d` — Conv3d + ReLU
@@ -121,8 +123,11 @@ accuracy
 * `torch.nn.intrinsic.qat` — versions of layers for quantization-aware training:
 
   * :class:`~torch.nn.intrinsic.qat.ConvBn2d` — Conv2d + BatchNorm
+  * :class:`~torch.nn.intrinsic.qat.ConvBn3d` — Conv3d + BatchNorm3d
   * :class:`~torch.nn.intrinsic.qat.ConvBnReLU2d` — Conv2d + BatchNorm + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvBnReLU3d` — Conv3d + BatchNorm3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.ConvReLU2d` — Conv2d + ReLU
+  * :class:`~torch.nn.intrinsic.qat.ConvReLU3d` — Conv3d + ReLU
   * :class:`~torch.nn.intrinsic.qat.LinearReLU` — Linear + ReLU
 
 * `torch.nn.intrinsic.quantized` — quantized version of fused layers for
@@ -141,6 +146,7 @@ Layers for the quantization-aware training
 
 * :class:`~torch.nn.qat.Linear` — Linear (fully-connected) layer
 * :class:`~torch.nn.qat.Conv2d` — 2D convolution
+* :class:`~torch.nn.qat.Conv3d` — 3D convolution
 
 `torch.quantization`
 ~~~~~~~~~~~~~~~~~~~~
@@ -171,9 +177,10 @@ Layers for the quantization-aware training
     used by the :func:`torch.quantization.quantize`
   * :func:`~torch.quantization.fuse_modules`
 
-* Functions for graph mode quantization:
-  * :func:`~torch.quantization.quantize_jit` - Function for graph mode post training static quantization
-  * :func:`~torch.quantization.quantize_dynamic_jit` - Function for graph mode post training dynamic quantization
+* Functions for FX graph mode quantization:
+  * :func:`~torch.quantization.quantize_fx.prepare_fx` - Function for preparing the model for post training quantization with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.prepare_qat_fx` - Function for preparing the model for quantization aware training with FX graph mode quantization
+  * :func:`~torch.quantization.quantize_fx.convert_fx` - Function for converting a prepared model to a quantized model with FX graph mode quantization
 
 * Quantization configurations
     * :class:`~torch.quantization.QConfig` — Quantization configuration class

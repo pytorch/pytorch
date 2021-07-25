@@ -12,12 +12,17 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
+    no_observer_set,
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+from .qconfig import (
+    add_module_to_qconfig_obs_ctr,
+    default_dynamic_qconfig,
+    float16_dynamic_qconfig,
+    float_qparams_weight_only_qconfig)
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -49,11 +54,15 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    module.qconfig = module_qconfig
+    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
+
+    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    module.qconfig = qconfig_with_device_check
+
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
-                                  module_qconfig, module_prefix)
+                                  qconfig_with_device_check, module_prefix)
 
 # TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
@@ -129,7 +138,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
-            m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
+            m.add_module('activation_post_process', get_activation_post_process(
+                m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
             handle = register_activation_post_process_hook(m)
@@ -152,7 +162,10 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         elif needs_observation(child) and type(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
-            insert_activation_post_process(observed_child)
+            # TODO: These are the modules that cannot be observed
+            #       Once there are more, we should move them to a separate list
+            if custom_module_class_mapping[type(child)] not in no_observer_set():
+                insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
@@ -252,9 +265,12 @@ def _remove_activation_post_process(module):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess hook
+    handle_ids_to_remove = set()
     for handle_id, hook_fn in module._forward_hooks.items():
         if hook_fn is _observer_forward_hook:
-            module._forward_hooks.pop(handle_id)
+            handle_ids_to_remove.add(handle_id)
+    for handle_id in handle_ids_to_remove:
+        module._forward_hooks.pop(handle_id)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):
@@ -496,7 +512,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     custom_module_class_mapping)
+                     convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():

@@ -21,12 +21,16 @@ using BlockReduce2D = cub::
     if (size >= 128) {                                                        \
       Func<T, 1, 128>                                                         \
           <<<grid_dim, dim3(1, 128), 0, cuda_stream>>>(__VA_ARGS__);          \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
     } else if (size >= 64) {                                                  \
       Func<T, 2, 64><<<grid_dim, dim3(2, 64), 0, cuda_stream>>>(__VA_ARGS__); \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
     } else if (size >= 32) {                                                  \
       Func<T, 4, 32><<<grid_dim, dim3(4, 32), 0, cuda_stream>>>(__VA_ARGS__); \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
     } else {                                                                  \
       Func<T, 8, 16><<<grid_dim, dim3(8, 16), 0, cuda_stream>>>(__VA_ARGS__); \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                         \
     }                                                                         \
   } while (false)
 
@@ -36,15 +40,19 @@ using BlockReduce2D = cub::
     if (size >= 128) {                                               \
       Func<T1, T2, 1, 128>                                           \
           <<<grid_dim, dim3(1, 128), 0, cuda_stream>>>(__VA_ARGS__); \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                \
     } else if (size >= 64) {                                         \
       Func<T1, T2, 2, 64>                                            \
           <<<grid_dim, dim3(2, 64), 0, cuda_stream>>>(__VA_ARGS__);  \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                \
     } else if (size >= 32) {                                         \
       Func<T1, T2, 4, 32>                                            \
           <<<grid_dim, dim3(4, 32), 0, cuda_stream>>>(__VA_ARGS__);  \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                \
     } else {                                                         \
       Func<T1, T2, 8, 16>                                            \
           <<<grid_dim, dim3(8, 16), 0, cuda_stream>>>(__VA_ARGS__);  \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                                \
     }                                                                \
   } while (false)
 

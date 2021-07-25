@@ -26,6 +26,12 @@ graph {
   initializer {
     dims: 2
     data_type: 1
+    name: "weight"
+    raw_data: "\000\000\200?\000\000\200?"
+  }
+  initializer {
+    dims: 2
+    data_type: 1
     name: "bias"
     raw_data: "\000\000\000\000\000\000\000\000"
   }
@@ -39,12 +45,6 @@ graph {
     dims: 2
     data_type: 1
     name: "running_var"
-    raw_data: "\000\000\200?\000\000\200?"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
-    name: "weight"
     raw_data: "\000\000\200?\000\000\200?"
   }
   input {

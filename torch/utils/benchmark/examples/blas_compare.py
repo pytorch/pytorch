@@ -12,8 +12,9 @@ import sys
 import tempfile
 import threading
 import time
+from typing import Tuple, Dict
 
-import blas_compare_setup
+from . import blas_compare_setup
 
 
 MIN_RUN_TIME = 1
@@ -31,7 +32,7 @@ BLAS_CONFIGS = (
 
 
 _RESULT_FILE_LOCK = threading.Lock()
-_WORKER_POOL = queue.Queue()
+_WORKER_POOL: queue.Queue[Tuple[str, str, int]] = queue.Queue()
 def clear_worker_pool():
     while not _WORKER_POOL.empty():
         _, result_file, _ = _WORKER_POOL.get_nowait()
@@ -107,8 +108,8 @@ def run_subprocess(args):
         with open(result_file, "wb"):
             pass
 
-        env_vars = {
-            "PATH": os.getenv("PATH"),
+        env_vars: Dict[str, str] = {
+            "PATH": os.getenv("PATH") or "",
             "PYTHONPATH": os.getenv("PYTHONPATH") or "",
 
             # NumPy

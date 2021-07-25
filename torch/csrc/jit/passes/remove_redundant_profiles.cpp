@@ -18,8 +18,8 @@ void RemoveRedundantProfiles(Block* block, AliasDb& db) {
       RemoveRedundantProfiles(b, db);
     }
 
-    // we only check prim::profile and not prim::profile_optional bc profile
-    // is inserted on each use, while profile_optional is inserted on the def
+    // we only check prim::profile and not prim::profile_ivalue bc profile
+    // is inserted on each use, while profile_ivalue is inserted on the def
     if (n->kind() != prim::profile ||
         n->input()->node()->kind() != prim::profile) {
       continue;

@@ -56,6 +56,7 @@ struct TORCH_API KernelSpec {
   // Note: assumes the spec is a single block
   // Note: This is the appropriate place to generalize if you want to add other
   //  passes to upfront compilation that walk the graph.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   KernelSpec(const int64_t _key, const std::shared_ptr<Graph>& _graph)
       : key_{_key},
         graph_{_graph},
@@ -66,7 +67,9 @@ struct TORCH_API KernelSpec {
         inputChunks_{},
         has_random_{false},
         kernels_{} {
-    for (const auto& n : graph_->nodes()) {
+    // No need to iterate over reference since n is pointer
+    for (const auto n : graph_->nodes()) {
+      static_assert(std::is_pointer<decltype(n)>::value, "n must be a pointer");
       if (n->kind() == aten::rand_like) {
         has_random_ = true;
         break;

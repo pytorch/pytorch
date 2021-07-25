@@ -43,6 +43,8 @@ bool SeluOp<float, CUDAContext>::RunOnDevice() {
           Y->template mutable_data<float>(),
           alpha_,
           lambda_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -65,6 +67,8 @@ bool SeluGradientOp<float, CUDAContext>::RunOnDevice() {
           dX->template mutable_data<float>(),
           alpha_,
           lambda_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

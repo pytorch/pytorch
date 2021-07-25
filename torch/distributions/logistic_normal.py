@@ -1,4 +1,3 @@
-import torch
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -32,12 +31,12 @@ class LogisticNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale, validate_args=None):
-        base_dist = Normal(loc, scale)
+        base_dist = Normal(loc, scale, validate_args=validate_args)
+        if not base_dist.batch_shape:
+            base_dist = base_dist.expand([1])
         super(LogisticNormal, self).__init__(base_dist,
                                              StickBreakingTransform(),
                                              validate_args=validate_args)
-        # Adjust event shape since StickBreakingTransform adds 1 dimension
-        self._event_shape = torch.Size([s + 1 for s in self._event_shape])
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LogisticNormal, _instance)
@@ -45,8 +44,8 @@ class LogisticNormal(TransformedDistribution):
 
     @property
     def loc(self):
-        return self.base_dist.loc
+        return self.base_dist.base_dist.loc
 
     @property
     def scale(self):
-        return self.base_dist.scale
+        return self.base_dist.base_dist.scale

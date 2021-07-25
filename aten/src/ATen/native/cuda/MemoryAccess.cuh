@@ -260,10 +260,39 @@ struct vectorized {
 };
 
 template <typename data_t, typename inp_calc_t, typename out_calc_t, int num_outputs>
-struct multi_outputs_unroll : unroll<data_t, inp_calc_t, out_calc_t, LoadWithoutCast, StoreWithoutCast, num_outputs> {
+struct multi_outputs_unroll {
+  //multi_outputs_unroll struct members and check_inbounds and load methods are copypasted from unroll struct
+  //we don't use inheritance because of compiler bug in cuda 10.2+
+  data_t data;
+  int remaining;
+  inp_calc_t input_offset_calculator;
+  out_calc_t output_offset_calculator;
+  LoadWithoutCast loader;
+  StoreWithoutCast storer;
 
   __device__ multi_outputs_unroll(data_t data, int remaining, inp_calc_t ic, out_calc_t oc):
-    unroll<data_t, inp_calc_t, out_calc_t, LoadWithoutCast, StoreWithoutCast, num_outputs>(data, remaining, ic, oc, LoadWithoutCast(), StoreWithoutCast()) {}
+  data(data), remaining(remaining), input_offset_calculator(ic), output_offset_calculator(oc) {}
+
+  __device__ inline bool check_inbounds(int thread_work_elem) {
+    return ((threadIdx.x  + thread_work_elem*num_threads) < remaining);
+  }
+
+  template<typename args_t>
+  __device__ inline void load(args_t *args, int idx) {
+    constexpr int arity = std::tuple_size<args_t>::value;
+    int thread_idx = threadIdx.x;
+    #pragma unroll
+    for (int i = 0; i < thread_work_size; i++) {
+      if (thread_idx >= remaining) {
+        return;
+      }
+      int linear_idx = thread_idx + block_work_size * idx;
+      auto offset = input_offset_calculator.get(linear_idx);
+      detail::static_unroll<detail::unroll_load_helper, arity>::with_args(*this, args, offset, loader, i, num_outputs);
+      thread_idx += num_threads;
+    }
+  }
+
 
   template <typename return_t>
   __device__ inline void store(return_t *from, int idx) {

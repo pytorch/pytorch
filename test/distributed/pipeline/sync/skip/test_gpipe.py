@@ -11,7 +11,7 @@ from torch import nn
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
 from torch.distributed.pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
-from torch.testing._internal.distributed.pipeline.utils import convert_to_balance
+from torch.distributed.pipeline.sync.utils import partition_model
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
@@ -30,7 +30,7 @@ def test_1to3(balance, checkpoint, setup_rpc):
         def forward(self, input):
             yield stash("1to3", input)
             output = self.conv(input)
-            return output # noqa
+            return output  # noqa: B901
 
     class Layer2(nn.Module):
         def __init__(self):
@@ -53,7 +53,7 @@ def test_1to3(balance, checkpoint, setup_rpc):
             return output
 
     model = nn.Sequential(Layer1(), Layer2(), Layer3())
-    model = convert_to_balance(model, balance)
+    model = partition_model(model, balance)
     model = Pipe(model, chunks=3, checkpoint=checkpoint)
 
     in_device = model.devices[0]
@@ -73,7 +73,7 @@ def test_none_skip(setup_rpc):
     class Stash(nn.Module):
         def forward(self, input):
             yield stash("none", None)
-            return input # noqa
+            return input  # noqa: B901
 
     @skippable(pop=["none"])
     class Pop(nn.Module):

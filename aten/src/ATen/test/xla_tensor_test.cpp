@@ -5,10 +5,12 @@
 using namespace at;
 
 void XLAFree(void *ptr) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(ptr);
 }
 
 void* XLAMalloc(ptrdiff_t size) {
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   return malloc(size);
 }
 

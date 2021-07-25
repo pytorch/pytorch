@@ -4,10 +4,9 @@
 
 
 import abc
-import six
 
 
-class NetModifier(six.with_metaclass(abc.ABCMeta, object)):
+class NetModifier(metaclass=abc.ABCMeta):
     """
     An abstraction class for supporting modifying a generated net.
     Inherited classes should implement the modify_net method where

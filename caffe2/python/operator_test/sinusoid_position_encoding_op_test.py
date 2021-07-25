@@ -33,7 +33,7 @@ class TestSinusoidPositionEncodingOp(serial.SerializedTestCase):
         amplitude=st.floats(MIN_TEST_AMPLITUDE, MAX_TEST_AMPLITUDE),
         **hu.gcs_cpu_only
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sinusoid_embedding(
         self, positions_vec, embedding_size, batch_size, alpha, amplitude, gc, dc
     ):

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/FakeGuardImpl.h>
+#include <c10/core/impl/InlineDeviceGuard.h>
 
 using namespace c10;
 using namespace c10::impl;
@@ -52,8 +52,9 @@ TEST(InlineDeviceGuard, Constructor) {
 }
 
 TEST(InlineDeviceGuard, ConstructorError) {
-  EXPECT_ANY_THROW(InlineDeviceGuard<FakeGuardImpl<DeviceType::CUDA>>
-                   g(Device(DeviceType::HIP, 1)));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  EXPECT_ANY_THROW(InlineDeviceGuard<FakeGuardImpl<DeviceType::CUDA>> g(
+      Device(DeviceType::HIP, 1)));
 }
 
 TEST(InlineDeviceGuard, SetDevice) {
@@ -104,7 +105,8 @@ TEST(InlineDeviceGuard, SetIndex) {
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i2);
 }
 
-// -- InlineOptionalDeviceGuard --------------------------------------------------
+// -- InlineOptionalDeviceGuard
+// --------------------------------------------------
 
 using MaybeTestGuard = InlineOptionalDeviceGuard<TestGuardImpl>;
 

@@ -38,7 +38,9 @@ void SegmentMomentsAVX2<uint8_t>(
     sum_v = _mm256_add_epi32(sum_v, _mm256_madd_epi16(cur_v, kOneInt16));
     sumsq_v = _mm256_add_epi32(sumsq_v, _mm256_madd_epi16(cur_v, cur_v));
   }
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int32_t sum_arr[8];
+  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   int32_t sumsq_arr[8];
   _mm256_storeu_si256(reinterpret_cast<__m256i*>(sum_arr), sum_v);
   _mm256_storeu_si256(reinterpret_cast<__m256i*>(sumsq_arr), sumsq_v);

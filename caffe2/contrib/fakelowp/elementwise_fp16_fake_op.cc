@@ -68,7 +68,7 @@ OPERATOR_SCHEMA(SumFakeFp16).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX);
 REGISTER_CPU_OPERATOR(
     AddFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float, int>,
+        TensorTypes<float, int, long>,
         CPUContext,
         FP16PairWiseCPUFunctor<AddFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
@@ -76,7 +76,7 @@ OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
 REGISTER_CPU_OPERATOR(
     DivFakeFp16,
     BinaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         FP16PairWiseCPUFunctor<DivFunctor<CPUContext>>>);
 OPERATOR_SCHEMA(DivFakeFp16).NumInputs(2).NumOutputs(1);

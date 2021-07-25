@@ -75,7 +75,7 @@ def run(optimizer_name, iterations, sample_every):
         loss.backward()
 
         def closure():
-            return torch.Tensor([10])
+            return torch.tensor([10.])
         optimizer.step(closure)
 
         if i % sample_every == 0:

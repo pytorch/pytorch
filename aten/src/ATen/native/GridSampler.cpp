@@ -485,7 +485,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               }
             }
           } else if (interpolation_mode == GridSamplerInterpolation::Bicubic) {
-            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding, 
+            // grid_sampler_compute_source_index will "clip the value" of idx depends on the padding,
             // which would cause calculation to be wrong,
             // for example x = -0.1 -> ix = 0 for zero padding, but in bicubic ix = floor(x) = -1
             // There would be more problem in reflection padding, since the -1 and +1 direction is not fixed in boundary condition
@@ -501,6 +501,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
             scalar_t *inp_ptr_NC = inp_ptr_N;
             scalar_t *out_ptr_NCHW = out_ptr + n * out_sN + h * out_sH + w * out_sW;
             for (int64_t c = 0; c < C; ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scalar_t coefficients[4];
 
               // Interpolate 4 values in the x directon
@@ -589,6 +590,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
           scalar_t y = grid_ptr_NHW[grid_sCoor];
 
           // multipliers for gradients on ix, iy
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           scalar_t gix_mult, giy_mult;
           scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
           scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
@@ -677,9 +679,13 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             const scalar_t tx = ix - ix_nw;
             const scalar_t ty = iy - iy_nw;
 
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
             scalar_t x_coeffs[4];
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
             scalar_t y_coeffs[4];
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
             scalar_t x_coeffs_grad[4];
+            // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
             scalar_t y_coeffs_grad[4];
 
             get_cubic_upsample_coefficients<scalar_t>(x_coeffs, tx);
@@ -740,7 +746,7 @@ Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
     //       or only for strided access to the grid tensor
     auto max_gather_offset = std::max(
       (sizes[2] - 1) * strides[2] + (sizes[3] - 1) * strides[3],
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback(
@@ -786,7 +792,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
       std::max(
         (isizes[2] - 1) * istrides[2] + (isizes[3] - 1) * istrides[3],
         (gsizes[2] - 1) * gstrides[2] + (gsizes[3] - 1) * gstrides[3]),
-      grid_sW * (vec256::Vec256<float>::size() - 1));
+      grid_sW * (vec::Vectorized<float>::size() - 1));
 
     if (max_gather_offset > std::numeric_limits<int32_t>::max()) {
       return native::_grid_sampler_2d_cpu_fallback_backward(

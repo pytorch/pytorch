@@ -179,7 +179,9 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
     DNNLOWP,
     SpatialBNDNNLowPOp<uint8_t, true>);
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8SpatialBN).NumInputs(5).NumOutputs(1);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8SpatialBNRelu).NumInputs(5).NumOutputs(1);
 
 } // namespace caffe2

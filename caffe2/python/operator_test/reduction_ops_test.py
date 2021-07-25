@@ -3,7 +3,6 @@
 
 
 
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 from hypothesis import assume, given, settings
 import caffe2.python.hypothesis_test_util as hu
@@ -168,3 +167,14 @@ class TestReductionOps(serial.SerializedTestCase):
             inputs=[X],
             reference=columnwise_max,
         )
+
+        # Test shape inference logic
+        net = core.Net("test_shape_inference")
+        workspace.FeedBlob("x", X)
+        output = net.ColwiseMax(["x"], ["y"])
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+
+        self.assertEqual(shapes[output], list(workspace.blobs[output].shape))
+        self.assertEqual(shapes[output], [X.shape[0]] + [X.shape[2]])
+        self.assertEqual(types[output], core.DataType.FLOAT)

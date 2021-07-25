@@ -1,6 +1,6 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec, LeafSpec
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten, TreeSpec, LeafSpec
 from torch.utils._pytree import _broadcast_to_and_flatten
 
 class TestPytree(TestCase):
@@ -96,8 +96,31 @@ class TestPytree(TestCase):
             {'a': 0, 'b': [{'c': 1}]},
             {'a': 0, 'b': [1, {'c': 2}, torch.randn(3)], 'c': (torch.randn(2, 3), 1)},
         ]
-        for case in cases:
-            run_test(case)
+
+
+    def test_treemap(self):
+        def run_test(pytree):
+            def f(x):
+                return x * 3
+            sm1 = sum(map(tree_flatten(pytree)[0], f))
+            sm2 = tree_flatten(tree_map(f, pytree))[0]
+            self.assertEqual(sm1, sm2)
+
+            def invf(x):
+                return x // 3
+
+            self.assertEqual(tree_flatten(tree_flatten(pytree, f), invf), pytree)
+
+            cases = [
+                [()],
+                ([],),
+                {'a': ()},
+                {'a': 1, 'b': [{'c': 2}]},
+                {'a': 0, 'b': [2, {'c': 3}, 4], 'c': (5, 6)},
+            ]
+            for case in cases:
+                run_test(case)
+
 
     def test_treespec_repr(self):
         # Check that it looks sane

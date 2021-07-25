@@ -82,8 +82,6 @@ class Normal(ExponentialFamily):
         return 0.5 * (1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2)))
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
     def entropy(self):

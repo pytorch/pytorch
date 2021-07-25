@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-import inspect
 
 import hypothesis.strategies as st
 import numpy as np
 import torch
-from caffe2.python import core, workspace
+from caffe2.python import core
 from caffe2.python.test_util import TestCase
 from hypothesis import given, settings
 from torch import nn

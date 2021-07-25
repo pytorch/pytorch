@@ -10,9 +10,9 @@ it is very easy to run these tests yourself:
    ``registry.pytorch.org/pytorch/pytorch-$BUILD_ENVIRONMENT:$DOCKER_VERSION``,
    where ``$BUILD_ENVIRONMENT`` is one of the build environments
    enumerated in
-   [pytorch-dockerfiles](https://github.com/pietern/pytorch-dockerfiles/blob/master/build.sh)
+   [pytorch-dockerfiles](https://github.com/pytorch/pytorch/blob/master/.circleci/docker/build.sh). The dockerfile used by jenkins can be found under the `.circle` [directory](https://github.com/pytorch/pytorch/blob/master/.circleci/docker)
 
-2. Run ``docker -it -u jenkins $DOCKER_IMAGE``, clone PyTorch and
+2. Run ``docker run -it -u jenkins $DOCKER_IMAGE``, clone PyTorch and
    run one of the scripts in this directory.
 
 The Docker images are designed so that any "reasonable" build commands
@@ -38,5 +38,5 @@ mechanisms we use:
   build scripts.
 
 - We reroute well known paths like `/usr/bin/gcc` to alternate
-  implementations with `update-alternatives, instead of setting
+  implementations with `update-alternatives`, instead of setting
   `CC` and `CXX` in our implementations.

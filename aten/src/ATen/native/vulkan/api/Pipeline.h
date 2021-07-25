@@ -72,7 +72,7 @@ struct Pipeline final {
 
       typedef Layout::Descriptor Descriptor;
       typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef Handle<VkPipelineLayout, Deleter> Handle;
+      typedef api::Handle<VkPipelineLayout, Deleter> Handle;
 
       struct Hasher {
         size_t operator()(const Descriptor& descriptor) const;
@@ -131,7 +131,7 @@ struct Pipeline final {
 
     typedef Pipeline::Descriptor Descriptor;
     typedef VK_DELETER(Pipeline) Deleter;
-    typedef Handle<VkPipeline, Deleter> Handle;
+    typedef api::Handle<VkPipeline, Deleter> Handle;
 
     struct Hasher {
       size_t operator()(const Descriptor& descriptor) const;
@@ -196,6 +196,7 @@ inline Pipeline::Barrier::operator bool() const {
 inline bool operator==(
     const Pipeline::Layout::Descriptor& _1,
     const Pipeline::Layout::Descriptor& _2) {
+
   return (_1.descriptor_set_layout == _2.descriptor_set_layout);
 }
 
@@ -207,9 +208,10 @@ inline size_t Pipeline::Layout::Factory::Hasher::operator()(
 inline bool operator==(
     const Pipeline::Descriptor& _1,
     const Pipeline::Descriptor& _2) {
-  return (_1.pipeline_layout == _2.pipeline_layout) &&
-         (_1.shader_module == _2.shader_module) &&
-         (_1.local_work_group == _2.local_work_group);
+
+  return (_1.pipeline_layout == _2.pipeline_layout && \
+          _1.shader_module == _2.shader_module && \
+          _1.local_work_group == _2.local_work_group);
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
@@ -234,10 +236,6 @@ inline Pipeline::Object Pipeline::Cache::retrieve(
     descriptor.pipeline_layout,
     descriptor.local_work_group,
   };
-}
-
-inline void Pipeline::Cache::purge() {
-  cache_.purge();
 }
 
 } // namespace api

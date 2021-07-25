@@ -45,11 +45,13 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
       GLSLC_PATH glslc
       PATHS
       ENV VULKAN_SDK
-      PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin")
+      PATHS "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin"
+      PATHS "$ENV{VULKAN_SDK}/bin"
+    )
 
     if(NOT GLSLC_PATH)
       message(FATAL_ERROR "USE_VULKAN glslc not found")
-    endif(GLSLC_PATH)
+    endif(NOT GLSLC_PATH)
   endif()
 
   set(PYTHONPATH "$ENV{PYTHONPATH}")

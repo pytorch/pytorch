@@ -1,9 +1,32 @@
 #include <torch/csrc/jit/ir/scope.h>
+
 #include <ATen/core/function.h>
 
 namespace torch {
 namespace jit {
+// util functions
+namespace utils {
 
+std::string get_module_info(const ModuleInstanceInfo& module_instance_info) {
+  std::string module_info;
+  const auto& class_type = module_instance_info.class_type();
+  std::string instance_name = module_instance_info.instance_name();
+  std::string type_name;
+  if (class_type) {
+    type_name += class_type->name()->qualifiedName();
+    type_name = type_name.substr(type_name.find_last_of('.') + 1);
+  }
+  if (type_name.empty()) {
+    type_name = "UNKNOWN_TYPE";
+  }
+  if (instance_name.empty()) {
+    instance_name = "UNKNOWN_INSTANCE";
+  }
+  module_info.append(instance_name).append("(").append(type_name).append(")");
+  return module_info;
+}
+
+} // namespace utils
 ScopePtr Scope::intrusive_from_this() {
   c10::raw::intrusive_ptr::incref(this); // we are creating a new pointer
                                          // from a raw `this` pointer
@@ -87,7 +110,11 @@ InlinedCallStackPtr InlinedCallStack::intrusive_from_this() {
 }
 
 InlinedCallStack::InlinedCallStack(Function* fn, SourceRange source_range)
-    : fn_(fn), source_range_(std::move(source_range)) {}
+    : fn_(fn), source_range_(std::move(source_range)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     Function* fn,
@@ -95,7 +122,11 @@ InlinedCallStack::InlinedCallStack(
     c10::optional<ModuleInstanceInfo> module_instance_info)
     : fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {}
+      module_instance_info_(std::move(module_instance_info)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -103,7 +134,11 @@ InlinedCallStack::InlinedCallStack(
     SourceRange source_range)
     : callee_(std::move(callee)),
       fn_(fn),
-      source_range_(std::move(source_range)) {}
+      source_range_(std::move(source_range)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 InlinedCallStack::InlinedCallStack(
     InlinedCallStackPtr callee,
@@ -113,10 +148,38 @@ InlinedCallStack::InlinedCallStack(
     : callee_(std::move(callee)),
       fn_(fn),
       source_range_(std::move(source_range)),
-      module_instance_info_(std::move(module_instance_info)) {}
+      module_instance_info_(std::move(module_instance_info)) {
+  if (fn_) {
+    set_function_name(fn_->name());
+  }
+}
 
 c10::optional<InlinedCallStackPtr> InlinedCallStack::callee() const {
   return callee_;
+}
+
+void InlinedCallStack::setCallee(c10::optional<InlinedCallStackPtr> callee) {
+  callee_ = std::move(callee);
+}
+
+c10::optional<ModuleInstanceInfo> InlinedCallStack::module_instance() const {
+  return module_instance_info_;
+}
+
+SourceRange InlinedCallStack::source_range() const {
+  return source_range_;
+}
+
+Function* InlinedCallStack::function() const {
+  return fn_;
+}
+
+void InlinedCallStack::set_function_name(std::string fn_name) {
+  fn_name_ = std::move(fn_name);
+}
+
+std::string InlinedCallStack::function_name() const {
+  return fn_name_;
 }
 
 std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {

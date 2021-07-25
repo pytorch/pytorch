@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/codegen.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
@@ -93,7 +94,7 @@ static void setInputChunkDescriptors(KernelSpec& spec) {
   // furthermore we know that the tensor inputs are in the
   // beginning of the fusion group's inputs.
   spec.inputChunks().reserve(spec.nTensorInputs());
-  for (int64_t i = 0; i < spec.nTensorInputs(); i++) {
+  for (const auto i : c10::irange(spec.nTensorInputs())) {
     const Value* input = spec.graph()->inputs()[i];
     if (const Node* chunk = usedInFusedChunk(input)) {
       spec.inputChunks().emplace_back(
@@ -207,7 +208,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  for (size_t i = 0; i < input_desc.size(); i++) {
+  for (const auto i : c10::irange(input_desc.size())) {
     const auto& desc = input_desc[i];
 
     // TODO: can't get rid of this use of TensorType
@@ -260,7 +261,7 @@ std::shared_ptr<FusedKernel> compileKernel(
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
 
-    auto scalar_type = o->type()->expect<TensorType>()->scalarType();
+    auto scalar_type = o->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);

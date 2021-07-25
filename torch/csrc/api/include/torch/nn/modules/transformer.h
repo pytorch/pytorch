@@ -32,6 +32,7 @@ namespace nn {
 /// ```
 /// Transformer trans(TransformerOptions(512, 8));
 /// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API TransformerImpl : public Cloneable<TransformerImpl> {
 
   public:

@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 
 #if !AT_MKLDNN_ENABLED()
@@ -8,22 +9,23 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    const Scalar& alpha,
+    Tensor& result
+    ) {
   TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
   TORCH_CHECK(false, "mkldnn_add: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
   TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with MKLDNN support");
 }
 
-Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
   TORCH_CHECK(false, "mkldnn_mul_out: ATen not compiled with MKLDNN support");
 }
 
@@ -45,22 +47,54 @@ Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
 namespace at {
 namespace native {
 
+Tensor emptyBinaryOp(const Tensor& self, const Tensor& other) {
+  if (!self.requires_grad() && !other.requires_grad()) {
+    auto out_size = infer_size(self.sizes(), other.sizes());
+    auto out_dtype = promoteTypes(
+        c10::typeMetaToScalarType(self.dtype()),
+        c10::typeMetaToScalarType(other.dtype()));
+    TORCH_CHECK(
+        self.device() == other.device(),
+        "Expected same device for binary mkldnn op");
+    return empty_mkldnn(
+        out_size,
+        out_dtype,
+        self.options().layout_opt(),
+        self.options().device_opt(),
+        self.options().pinned_memory_opt());
+  } else {
+    TORCH_CHECK(
+        false,
+        "MKLDNN does not support Binary Ops with a 0-dimension Tensor in training");
+  }
+}
+
 Tensor& mkldnn_add_out(
-    Tensor& result,
     const Tensor& self,
     const Tensor& other,
-    Scalar alpha) {
+    const Scalar& alpha,
+    Tensor& result
+    ) {
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
   ideep::tensor& z = itensor_from_mkldnn(result);
-  const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute(scales, {x, y}, z);
+  if (result.is_same(other)) {
+    const std::vector<float> scales{alpha.to<float>(), 1.0};
+    ideep::sum::compute(scales, {y, x}, z);
+  } else {
+    const std::vector<float> scales{1.0, alpha.to<float>()};
+    ideep::sum::compute(scales, {x, y}, z);
+  }
 
   return result;
 }
 
-Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    return emptyBinaryOp(self, other);
+  }
+
   ideep::tensor& x = itensor_from_mkldnn(self);
   ideep::tensor& y = itensor_from_mkldnn(other);
 
@@ -72,11 +106,11 @@ Tensor mkldnn_add(const Tensor& self, const Tensor& other, Scalar alpha) {
                                  self.options().device_opt());
 }
 
-Tensor& mkldnn_add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  return native::mkldnn_add_out(self, self, other, alpha);
+Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
+  return native::mkldnn_add_out(self, other, alpha, self);
 }
 
-Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
+Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
   TORCH_CHECK(result.sizes() == self.sizes(),
              "mkldnn_mul_out: the output size should be same as input size");
   ideep::tensor& z = itensor_from_mkldnn(result);
@@ -100,14 +134,17 @@ Tensor& mkldnn_mul_out(Tensor& result, const Tensor& self, const Tensor& other) 
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
+  if (self.numel() == 0 || other.numel() == 0) {
+    return emptyBinaryOp(self, other);
+  }
   Tensor result = empty_mkldnn(self.sizes(), optTypeMetaToScalarType(self.options().dtype_opt()),
                                self.options().layout_opt(), self.options().device_opt(),
                                self.options().pinned_memory_opt());
-  return native::mkldnn_mul_out(result, self, other);
+  return native::mkldnn_mul_out(self, other, result);
 }
 
 Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
-  return native::mkldnn_mul_out(self, self, other);
+  return native::mkldnn_mul_out(self, other, self);
 }
 
 } // namespace native

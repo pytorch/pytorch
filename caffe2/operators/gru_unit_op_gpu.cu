@@ -100,6 +100,7 @@ void GRUUnit<float, CUDAContext>(
          0,
          context->cuda_stream()>>>(
           N * D, D, t, H_prev, X, seqLengths, drop_states, H);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -132,6 +133,7 @@ void GRUUnitGradient<float, CUDAContext>(
           drop_states,
           H_prev_diff,
           X_diff);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 }
 

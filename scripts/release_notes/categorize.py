@@ -1,8 +1,7 @@
-import json
 import argparse
 import os
 import textwrap
-from common import dict_to_features, categories, topics, get_features, CommitDataCache
+from common import categories, topics, CommitDataCache
 from commitlist import CommitList
 
 class Categorizer:
@@ -15,12 +14,14 @@ class Categorizer:
         self.category = category
 
     def categorize(self):
-        commits = self.commits.filter(self.category)
+        commits = self.commits.filter(category=self.category)
+        total_commits = len(self.commits.commits)
+        already_done = total_commits - len(commits)
         i = 0
         while i < len(commits):
             cur_commit = commits[i]
             next_commit = commits[i + 1] if i + 1 < len(commits) else None
-            jump_to = self.handle_commit(cur_commit, i + 1, len(commits), commits)
+            jump_to = self.handle_commit(cur_commit, already_done + i + 1, total_commits, commits)
 
             # Increment counter
             if jump_to is not None:
@@ -34,15 +35,26 @@ class Categorizer:
         return self.cache.get(commit.commit_hash)
 
     def potential_reverts_of(self, commit, commits):
-        if 'Updating submodules' in commit.title:
+        submodule_update_str = ['Update TensorPipe submodule',
+                                'Updating submodules',
+                                'Automated submodule update']
+        if any(a in commit.title for a in submodule_update_str):
             return []
+
+        features = self.features(commit)
+        if 'Reverted' in features.labels:
+            reasons = {'GithubBot': "Reverted"}
+        else:
+            reasons = {}
+
         index = commits.index(commit)
         # -8 to remove the (#35011)
         cleaned_title = commit.title[:-10]
         # NB: the index + 2 is sketch
-        return {(index + 2 + delta): cand for delta, cand in enumerate(commits[index + 1:])
+        reasons.update({(index + 2 + delta): cand for delta, cand in enumerate(commits[index + 1:])
                 if cleaned_title in cand.title and
-                commit.commit_hash != cand.commit_hash}
+                commit.commit_hash != cand.commit_hash})
+        return reasons
 
     def handle_commit(self, commit, i, total, commits):
         potential_reverts = self.potential_reverts_of(commit, commits)
@@ -54,11 +66,11 @@ class Categorizer:
         features = self.features(commit)
 
         breaking_alarm = ""
-        if 'topic: bc-breaking' in features.labels:
-            breaking_alarm += "!!!!!! BC BREAKING !!!!!!"
+        if 'module: bc-breaking' in features.labels:
+            breaking_alarm += "\n!!!!!! BC BREAKING !!!!!!"
 
         if 'module: deprecation' in features.labels:
-            breaking_alarm += "!!!!!! DEPRECATION !!!!!!"
+            breaking_alarm += "\n!!!!!! DEPRECATION !!!!!!"
 
         os.system('clear')
         view = textwrap.dedent(f'''\
@@ -66,13 +78,13 @@ class Categorizer:
 ================================================================================
 {features.title}
 
+{potential_reverts} {breaking_alarm}
+
 {features.body}
 
 Files changed: {features.files_changed}
 
 Labels: {features.labels}
-
-{potential_reverts} {breaking_alarm}
 
 Current category: {commit.category}
 

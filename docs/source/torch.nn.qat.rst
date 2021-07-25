@@ -16,6 +16,3 @@ Linear
 ~~~~~~~~~~~~~~~
 .. autoclass:: Linear
     :members:
-
-
-

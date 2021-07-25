@@ -72,6 +72,8 @@ bool ArgMaxReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::lowest(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -98,6 +100,8 @@ bool ArgMinReducer<CUDAContext>::operator()(
       std::numeric_limits<T>::max(),
       X,
       Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
