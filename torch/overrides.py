@@ -202,6 +202,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.vitals_enabled,
         torch.set_vital,
         torch.read_vitals,
+        torch.frombuffer,
         Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
