@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext, noarchTest,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -4253,6 +4253,41 @@ else:
                 expected[idx[i]] += src[i]
 
             self.assertEqual(res, expected, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_sync_warning(self, device):
+
+        def _sync_raises_helper(f, level):
+            with CudaSyncGuard(level):
+                if level == 1:
+                    with self.assertWarnsRegex(UserWarning, "called a synchronizing operation"):
+                        f()
+                elif level == 2:
+                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing operation"):
+                        f()
+
+        def _no_sync_helper(f, level):
+            with CudaSyncGuard(level):
+                f()
+
+        def _ind_fn(x, ind, val):
+            x[ind] = val
+            return x
+        # prepare inputs for subsequent ops
+        size = 4
+        x = torch.rand(size, device="cuda")
+        y = torch.rand((), device="cuda")
+        ind = torch.randint(size, (3,), device="cuda")
+        mask = torch.randint(2, (size,), device="cuda", dtype=bool)
+        expect_no_sync = (lambda: _ind_fn(x, mask, 1.),
+                          lambda: torch.randperm(20000, device="cuda"))
+        expect_sync = (lambda: _ind_fn(x, mask, y),
+                       lambda: x.nonzero(),)
+        for f, level in product(expect_no_sync, (1, 2)):
+            _no_sync_helper(f, level)
+        for f, level in product(expect_sync, (1, 2)):
+            _sync_raises_helper(f, level)
+
 
     @dtypes(*torch.testing.get_all_fp_dtypes())
     def test_log_normal(self, device, dtype):

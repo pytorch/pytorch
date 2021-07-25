@@ -500,6 +500,17 @@ class DeterministicGuard:
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
 
+class CudaSyncGuard:
+    def __init__(self, sync_warn_level):
+        self.level = sync_warn_level
+
+    def __enter__(self):
+        self.warn_level_restore = torch.cuda.get_warn_on_synchronization()
+        torch.cuda.set_warn_on_synchronization(self.level)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.cuda.set_warn_on_synchronization(self.warn_level_restore)
+
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
 # restore the previous deterministic flag setting.

@@ -453,6 +453,19 @@ PyObject * THCPModule_cudaSetSyncWarningLevel(PyObject * _unused, PyObject * arg
   END_HANDLE_TH_ERRORS
 }
 
+PyObject * THCPModule_cudaGetSyncWarningLevel(PyObject *self, PyObject *noargs){
+  HANDLE_TH_ERRORS
+  auto warning_level = c10::cuda::warning_state().get_sync_warning_level();
+  switch (warning_level){
+    case c10::cuda::SyncWarningLevel::L_DISABLED: return THPUtils_packInt32(0);
+    case c10::cuda::SyncWarningLevel::L_WARN: return THPUtils_packInt32(1);
+    case c10::cuda::SyncWarningLevel::L_ERROR: return THPUtils_packInt32(2);
+    default: return THPUtils_packInt32(-1); // can't happen
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -590,6 +603,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
   {"_cuda_set_sync_warning_level", THCPModule_cudaSetSyncWarningLevel, METH_O, nullptr},
+  {"_cuda_get_sync_warning_level", THCPModule_cudaGetSyncWarningLevel, METH_NOARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},
