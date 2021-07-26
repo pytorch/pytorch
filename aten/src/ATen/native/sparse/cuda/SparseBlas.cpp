@@ -48,12 +48,12 @@ Tensor& addmv_out_sparse_csr_cuda(const Tensor &self, const Tensor &mat, const T
   // addmm works fine
   if (vec.scalar_type() == kHalf || vec.scalar_type() == kBFloat16) {
     result.unsqueeze_(-1);
-    sparse::cuda::impl::addmm_out_sparse_csr_dense_cuda_impl(mat, vec.unsqueeze(-1), beta, alpha, result);
+    sparse::impl::cuda::addmm_out_sparse_csr(mat, vec.unsqueeze(-1), beta, alpha, result);
     result.squeeze_(-1);
     return result;
   }
 
-  sparse::cuda::impl::addmv_out_sparse_csr_cuda_impl(mat, vec, beta, alpha, result);
+  sparse::impl::cuda::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
   return result;
 }
 
