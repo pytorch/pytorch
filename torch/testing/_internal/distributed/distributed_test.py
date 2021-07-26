@@ -932,11 +932,10 @@ class DistributedTest:
                     nn.Linear(1, 5, bias=False)
                 ).cuda(device_id)
             )
-
             # Test global model averaging
             for p in model.parameters():
                 p.data = torch.ones_like(p.data)
-            model_averaging_utils.average_parameters(module=model, process_group=None)
+            model_averaging_utils.average_parameters(params=model.parameters(), process_group=None)
             # Every element will be the same as the input.
             for p in model.parameters():
                 self.assertEqual(p.data, torch.ones_like(p.data))
@@ -945,7 +944,7 @@ class DistributedTest:
             for p in model.parameters():
                 p.data = torch.ones_like(p.data) * rank
             group_nccl = dist.new_group(ranks=[0, 1], backend="nccl")
-            model_averaging_utils.average_parameters(module=model, process_group=group_nccl)
+            model_averaging_utils.average_parameters(params=model.parameters(), process_group=group_nccl)
             if not dist._rank_not_in_group(group_nccl):
                 # Every element on device 0 or 1 should be the average of 0 and 1, i.e., 0.5.
                 for p in model.parameters():
@@ -972,7 +971,7 @@ class DistributedTest:
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(model, warmup_steps=warmup_steps, period=period)
+                averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=warmup_steps, period=period)
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
@@ -4142,11 +4141,11 @@ class DistributedTest:
 
                 def mult(fut):
                     # Multiply the result by 2.
-                    return [2 * t for t in fut.wait()]
+                    return 2 * fut.wait()[0]
 
                 def div(fut):
                     # Divide the result by 2 * world_size.
-                    return [t / (2 * world_size) for t in fut.wait()]
+                    return fut.wait() / (2 * world_size)
 
                 return fut.then(mult).then(div)
 
@@ -5288,7 +5287,6 @@ class DistributedTest:
                     torch.cuda.synchronize(device=self.rank)
 
         def _test_ddp_profiling(self, profiler_ctx):
-            torch.cuda.set_device(self.rank)
             batch = 3
             dim = 10
             num_iters = 6
