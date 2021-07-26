@@ -50,9 +50,9 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
       weak_grad_fn_ = variable.grad_fn();
     }
 
-    if (get_default_hooks_()) {
+    if (get_default_hooks()) {
       save_metadata(variable);
-      register_hooks_(get_default_hooks_(), variable);
+      register_hooks_(get_default_hooks(), variable);
       return;
     }
 
