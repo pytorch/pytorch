@@ -35,12 +35,7 @@ __all__ = [
     "integral_types",
     "integral_types_and",
     "make_non_contiguous",
-    "rand_like",
-    "randn_like",
 ]
-
-rand_like = torch.rand_like
-randn_like = torch.randn_like
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
@@ -137,8 +132,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        a = a.resolve_conj()
-        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
