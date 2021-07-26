@@ -93,11 +93,11 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             dill_function = dill.dumps(self.fn)
         else:
             dill_function = self.fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        state = (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:

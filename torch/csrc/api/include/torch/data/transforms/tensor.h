@@ -66,8 +66,7 @@ struct Normalize : public TensorTransform<Target> {
                    .unsqueeze(/*dim=*/1)
                    .unsqueeze(/*dim=*/2)) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,modernize-use-override)
-  torch::Tensor operator()(Tensor input) {
+  torch::Tensor operator()(Tensor input) override {
     return input.sub(mean).div(stddev);
   }
 

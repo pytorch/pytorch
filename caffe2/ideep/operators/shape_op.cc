@@ -65,7 +65,6 @@ class IDEEPShapeOp : public IDEEPOperator {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Shape, IDEEPShapeOp);
 
 } // namespace
