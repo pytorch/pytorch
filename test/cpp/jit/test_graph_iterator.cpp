@@ -4,9 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
-#include <test/cpp/jit/test_utils.h>
 #include <torch/jit.h>
 #include <torch/script.h>
 #include <torch/torch.h>
