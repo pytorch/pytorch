@@ -1,12 +1,11 @@
 import itertools
 import torch
-from torch.autograd import DeviceType, ProfilerActivity, ProfilerState
+from torch.autograd import DeviceType
 
 from collections import defaultdict, namedtuple
 from operator import attrgetter
 
 from typing import Dict, List, Tuple, Optional
-from warnings import warn
 
 import bisect
 import math
@@ -858,8 +857,7 @@ def _build_table(
         row_values = [
             name,
             # Self CPU total %, 0 for async events.
-            _format_time_share(evt.self_cpu_time_total,
-                              sum_self_cpu_time_total),
+            _format_time_share(evt.self_cpu_time_total, sum_self_cpu_time_total),
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
             _format_time_share(evt.cpu_time_total, sum_self_cpu_time_total) if not evt.is_async else 0,

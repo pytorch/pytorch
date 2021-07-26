@@ -5,13 +5,13 @@ from torch.autograd.profiler_util import (
 
 from torch.autograd import (
     DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
-    kineto_available, _disable_profiler, _enable_profiler,
+    kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
     _prepare_profiler, _supported_activities
 )
 import torch
 import torch.cuda
 from torch.futures import Future
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional
 from warnings import warn
 
 
@@ -124,7 +124,7 @@ class profile(object):
         if not self.enabled:
             return
         self.use_cuda = use_cuda
-        self.function_events = None
+        self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -132,7 +132,7 @@ class profile(object):
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.use_cpu = use_cpu
-        self.kineto_results = None
+        self.kineto_results: Optional[_ProfilerResult] = None
 
         if not self.use_cpu:
             assert use_kineto, \

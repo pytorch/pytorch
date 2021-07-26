@@ -378,6 +378,11 @@
   self: grad
   result: auto_linear
 
+- name: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
+  self: grad.to(self.options(), /*non_blocking*/false, /*copy*/false)
+  result: _to_copy(self_t, dtype, layout, device, pin_memory, non_blocking, memory_format)
+  output_differentiability: ["dtype && isDifferentiableType(*dtype)"]
+
 - name: _coalesce(Tensor self) -> Tensor
   self: grad
 

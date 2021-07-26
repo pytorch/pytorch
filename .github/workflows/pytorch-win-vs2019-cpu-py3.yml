@@ -23,6 +23,7 @@ env:
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
+  SQUID_PROXY: "http://tf-lb-20210722035235925400000002-1698082088.us-east-1.elb.amazonaws.com:3128"
 
 
 concurrency:
@@ -39,6 +40,8 @@ jobs:
     needs: []
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -111,6 +114,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
