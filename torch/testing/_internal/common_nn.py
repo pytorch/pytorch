@@ -2180,6 +2180,14 @@ new_module_tests = [
         desc='norm',
     ),
     dict(
+        module_name='LPPool2d',
+        constructor_args=(1.5, 2),
+        cpp_constructor_args='torch::nn::LPPool2dOptions(1.5, 2)',
+        input_fn=lambda: torch.rand(3, 7, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='LPPool1d',
         constructor_args=(1.5, 2),
         cpp_constructor_args='torch::nn::LPPool1dOptions(1.5, 2)',
@@ -2191,6 +2199,14 @@ new_module_tests = [
         constructor_args=(2, 2, 3),
         cpp_constructor_args='torch::nn::LPPool1dOptions(2, 2).stride(3)',
         input_size=(1, 3, 7),
+    ),
+    dict(
+        module_name='LPPool1d',
+        constructor_args=(2, 2, 3),
+        cpp_constructor_args='torch::nn::LPPool1dOptions(2, 2).stride(3)',
+        input_size=(3, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='LocalResponseNorm',
