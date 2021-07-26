@@ -445,7 +445,7 @@ class Tensor(torch._C._TensorBase):
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
              center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
-             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = True):
         r"""See :func:`torch.stft`
 
         .. warning::

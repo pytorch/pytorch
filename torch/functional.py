@@ -374,14 +374,12 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          win_length: Optional[int] = None, window: Optional[Tensor] = None,
          center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
          onesided: Optional[bool] = None,
-         return_complex: Optional[bool] = None) -> Tensor:
+         return_complex: Optional[bool] = True) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
     .. warning::
-        From version 1.8.0, :attr:`return_complex` must always be given
-        explicitly for real inputs and `return_complex=False` has been
-        deprecated. Strongly prefer `return_complex=True` as in a future
-        pytorch release, this function will only return complex tensors.
+        From version 1.10.0, :attr:`return_complex` must always be True, using
+        False was removed.
 
         Note that :func:`torch.view_as_real` can be used to recover a real
         tensor with an extra last dimension for real and imaginary components.
@@ -439,14 +437,8 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     * If :attr:`normalized` is ``True`` (default is ``False``), the function
       returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame\_length})^{-0.5}`.
 
-    * If :attr:`return_complex` is ``True`` (default if input is complex), the
-      return is a ``input.dim() + 1`` dimensional complex tensor. If ``False``,
-      the output is a ``input.dim() + 2`` dimensional real tensor where the last
-      dimension represents the real and imaginary components.
-
-    Returns either a complex tensor of size :math:`(* \times N \times T)` if
-    :attr:`return_complex` is true, or a real tensor of size :math:`(* \times N
-    \times T \times 2)`. Where :math:`*` is the optional batch size of
+    Returns a complex tensor of size :math:`(* \times N \times T)`. Where
+    :math:`*` is the optional batch size of
     :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
     and :math:`T` is the total number of frames used.
 
@@ -476,6 +468,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         return_complex (bool, optional): whether to return a complex tensor, or
             a real tensor with an extra last dimension for the real and
             imaginary components.
+
+            .. versionchanged: 1.10
+               Only accepts True
 
     Returns:
         Tensor: A tensor containing the STFT result with shape described above

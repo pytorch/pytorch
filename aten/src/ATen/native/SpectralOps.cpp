@@ -624,7 +624,7 @@ static Stream& write_opt(Stream& SS, const optional<T>& value) {
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
             const bool normalized, const optional<bool> onesidedOpt,
-            const optional<bool> return_complexOpt) {
+            const bool return_complex) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -640,7 +640,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     } \
     SS << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", return_complex="; \
-    write_opt(SS, return_complexOpt) << ") "
+    SS <<  return_complex << ") "
 
   TORCH_CHECK(!window.defined() || window.device() == self.device(),
               "stft input and window must be on the same device but got self on ",
@@ -649,24 +649,8 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
-  const bool return_complex = return_complexOpt.value_or(
-      self.is_complex() || (window.defined() && window.is_complex()));
-  if (!return_complex) {
-    if (!return_complexOpt.has_value()) {
-      TORCH_WARN_ONCE(
-        "stft will soon require the return_complex parameter be given for real inputs, "
-        "and will further require that return_complex=True in a future PyTorch release."
-      );
-    }
 
-
-    // TORCH_WARN_ONCE(
-    //     "stft with return_complex=False is deprecated. In a future pytorch "
-    //     "release, stft will return complex tensors for all inputs, and "
-    //     "return_complex=False will raise an error.\n"
-    //     "Note: you can still call torch.view_as_real on the complex output to "
-    //     "recover the old return format.");
-  }
+  TORCH_CHECK(return_complex, "stft requires return_complex=True")
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
@@ -748,11 +732,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     out.squeeze_(0);
   }
 
-  if (return_complex) {
-    return out;
-  } else {
-    return at::view_as_real(out);
-  }
+  return out;
 }
 
 // Create complex tensor from the old style of real tensor with size=(..., 2)
@@ -945,7 +925,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
             const bool normalized, const optional<bool> onesidedOpt) {
   return at::native::stft(
       self, n_fft, hop_lengthOpt, win_lengthOpt, window, normalized, onesidedOpt,
-      /*return_complex=*/c10::nullopt);
+      /*return_complex=*/true);
 }
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,

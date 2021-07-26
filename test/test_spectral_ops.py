@@ -837,14 +837,11 @@ class TestFFT(TestCase):
                 window = None
             if expected_error is None:
                 result = x.stft(n_fft, hop_length, win_length, window,
-                                center=center, return_complex=False)
+                                center=center)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
-                self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=False)
-                # With return_complex=True, the result is the same but viewed as complex instead of real
-                result_complex = x.stft(n_fft, hop_length, win_length, window, center=center, return_complex=True)
-                self.assertEqual(result_complex, torch.view_as_complex(result))
+                self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=True)
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
@@ -901,13 +898,13 @@ class TestFFT(TestCase):
             }
 
             # Functional interface
-            x_stft = torch.stft(x, pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_stft = torch.stft(x, pad_mode=pad_mode, **common_kwargs)
             x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
                                       length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
 
             # Tensor method interface
-            x_stft = x.stft(pad_mode=pad_mode, return_complex=True, **common_kwargs)
+            x_stft = x.stft(pad_mode=pad_mode, **common_kwargs)
             x_roundtrip = torch.istft(x_stft, return_complex=dtype.is_complex,
                                       length=x.size(-1), **common_kwargs)
             self.assertEqual(x_roundtrip, x)
@@ -1052,7 +1049,6 @@ class TestFFT(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'complex'):
             x.stft(10, pad_mode='constant', onesided=True)
 
-    # stft is currently warning that it requires return-complex while an upgrader is written
     @onlyOnCPUAndCUDA
     @skipCPUIfNoFFT
     def test_stft_requires_complex(self, device):
