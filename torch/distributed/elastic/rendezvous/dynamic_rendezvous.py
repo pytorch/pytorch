@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import inspect
 import logging
 import os
 import pickle
@@ -18,6 +19,10 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from torch.distributed import PrefixStore, Store
+from torch.distributed.elastic.events import (
+    NodeState,
+    construct_and_record_rdzv_event,
+)
 
 from .api import (
     RendezvousClosedError,
@@ -27,11 +32,15 @@ from .api import (
     RendezvousStateError,
     RendezvousTimeoutError,
 )
-
 from .utils import _delay, _PeriodicTimer
 
-
 log = logging.getLogger(__name__)
+
+
+def get_method_name(depth=2):
+    if len(inspect.stack()) > depth:
+        return inspect.stack()[depth].function
+    return "no_method_name"
 
 
 Token = Any
@@ -344,7 +353,10 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
     _dead_nodes: List[_NodeDesc]
 
     def __init__(
-        self, backend: RendezvousBackend, settings: RendezvousSettings, cache_duration: int = 1
+        self,
+        backend: RendezvousBackend,
+        settings: RendezvousSettings,
+        cache_duration: int = 1,
     ) -> None:
         self._backend = backend
         self._state = _RendezvousState()
@@ -354,6 +366,14 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         self._dirty = False
         self._last_sync_time = -1
         self._dead_nodes = []
+
+    def _record(self, message: str, node_state: NodeState = NodeState.RUNNING):
+        construct_and_record_rdzv_event(
+            name=f"{self.__class__.__name__}.{get_method_name()}",
+            run_id=self._settings.run_id,
+            message=message,
+            node_state=node_state,
+        )
 
     @property
     def state(self) -> _RendezvousState:
@@ -402,10 +422,12 @@ class _BackendRendezvousStateHolder(_RendezvousStateHolder):
         if has_set and self._dead_nodes and log.isEnabledFor(logging.DEBUG):
             node_list = ", ".join(f"'{dead_node}'" for dead_node in self._dead_nodes)
 
-            log.debug(
+            msg = (
                 f"As part of the sync operation the node(s) {node_list} have been removed from the "
                 f"rendezvous '{self._settings.run_id}' since they had no heartbeat."
             )
+            self._record(message=msg)
+            log.debug(msg)
 
         self._token = token
 
@@ -510,7 +532,9 @@ class _RendezvousOpExecutor(ABC):
 
     @abstractmethod
     def run(
-        self, state_handler: Callable[[_RendezvousContext, float], _Action], deadline: float
+        self,
+        state_handler: Callable[[_RendezvousContext, float], _Action],
+        deadline: float,
     ) -> None:
         """Executes a rendezvous operation.
 
@@ -556,8 +580,21 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         self._state_holder = state_holder
         self._settings = settings
 
+    def _record(self, message: str, node_state: NodeState = NodeState.RUNNING) -> None:
+        construct_and_record_rdzv_event(
+            name=f"{self.__class__.__name__}.{get_method_name()}",
+            run_id=self._settings.run_id,
+            message=message,
+            node_state=node_state,
+            hostname=self._node.fqdn,
+            pid=self._node.pid,
+            local_id=self._node.local_id,
+        )
+
     def run(
-        self, state_handler: Callable[[_RendezvousContext, float], _Action], deadline: float
+        self,
+        state_handler: Callable[[_RendezvousContext, float], _Action],
+        deadline: float,
     ) -> None:
         """See base class."""
         action = None
@@ -569,15 +606,18 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             has_set = self._state_holder.sync()
             if has_set is not None:
                 if has_set:
-                    log.debug(
+                    msg = (
                         f"The node '{self._node}' has successfully synced its local changes with "
                         f"other nodes in the rendezvous '{self._settings.run_id}'."
                     )
                 else:
-                    log.debug(
+                    msg = (
                         f"The node '{self._node}' has a stale state and failed to sync its local "
                         f"changes with other nodes in the rendezvous '{self._settings.run_id}'."
                     )
+
+                self._record(message=msg)
+                log.debug(msg)
 
             self._state = self._state_holder.state
 
@@ -620,18 +660,22 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
                 self._state_holder.mark_dirty()
 
     def _keep_alive(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' updated its keep-alive heartbeat time for the rendezvous "
             f"'{self._settings.run_id}'. Pending sync."
         )
+        self._record(message=msg)
+        log.debug(msg)
 
         self._state.last_heartbeats[self._node] = datetime.utcnow()
 
     def _add_to_participants(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' added itself to the participants of round "
             f"{self._state.round} of the rendezvous '{self._settings.run_id}'. Pending sync."
         )
+        self._record(message=msg)
+        log.debug(msg)
 
         state = self._state
 
@@ -653,20 +697,24 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             self._mark_rendezvous_complete()
 
     def _add_to_wait_list(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' added itself to the wait list of round "
             f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
         )
+        self._record(message=msg)
+        log.debug(msg)
 
         self._state.wait_list.add(self._node)
 
         self._keep_alive()
 
     def _remove_from_participants(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' removed itself from the participants of round "
             f"{self._state.round} of the rendezvous '{self._settings.run_id}'. Pending sync."
         )
+        self._record(message=msg)
+        log.debug(msg)
 
         state = self._state
 
@@ -679,20 +727,24 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
         _remove_participant_epilogue(state, self._settings)
 
     def _remove_from_wait_list(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' removed itself from the wait list of round "
             f"{self._state.round + 1} of the rendezvous '{self._settings.run_id}'. Pending sync."
         )
+        self._record(message=msg)
+        log.debug(msg)
 
         self._state.wait_list.remove(self._node)
 
         del self._state.last_heartbeats[self._node]
 
     def _mark_rendezvous_complete(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' marked round {self._state.round} of the rendezvous "
             f"'{self._settings.run_id}' as complete. Pending sync."
         )
+        self._record(message=msg, node_state=NodeState.SUCCEEDED)
+        log.debug(msg)
 
         state = self._state
 
@@ -704,10 +756,12 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
             state.participants[node] = rank
 
     def _mark_rendezvous_closed(self) -> None:
-        log.debug(
+        msg = (
             f"The node '{self._node}' marked the rendezvous '{self._settings.run_id}' as closed. "
             "Pending sync."
         )
+        self._record(message=msg, node_state=NodeState.SUCCEEDED)
+        log.debug(msg)
 
         self._state.closed = True
 
@@ -917,6 +971,23 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         self._keep_alive_timer = None
 
+    def _record(
+        self,
+        message: str,
+        node_state: NodeState = NodeState.RUNNING,
+        rank: Optional[int] = None,
+    ) -> None:
+        construct_and_record_rdzv_event(
+            name=f"{self.__class__.__name__}.{get_method_name()}",
+            run_id=self._settings.run_id,
+            message=message,
+            node_state=node_state,
+            hostname=self._this_node.fqdn,
+            pid=self._this_node.pid,
+            local_id=self._this_node.local_id,
+            rank=rank,
+        )
+
     @property
     def settings(self) -> RendezvousSettings:
         """Gets the settings of the rendezvous."""
@@ -928,58 +999,93 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
     def next_rendezvous(self) -> Tuple[Store, int, int]:
         """See base class."""
-        log.info(
+        msg = (
             f"The node '{self._this_node}' attempts to join the next round of the rendezvous "
             f"'{self._settings.run_id}'."
         )
+        self._record(message=msg)
+        log.info(msg)
 
-        self._stop_heartbeats()
+        try:
+            self._stop_heartbeats()
 
-        # Delay the execution for a small random amount of time if this is our
-        # first run. This will slightly skew the rendezvous attempts across the
-        # nodes and reduce the load on the backend.
-        if self._state_holder.state.round == 0:
-            _delay(seconds=(0, 0.3))
+            # Delay the execution for a small random amount of time if this is our
+            # first run. This will slightly skew the rendezvous attempts across the
+            # nodes and reduce the load on the backend.
+            if self._state_holder.state.round == 0:
+                _delay(seconds=(0, 0.3))
 
-        exit_op = _RendezvousExitOp()
-        join_op = _RendezvousJoinOp()
+            exit_op = _RendezvousExitOp()
+            join_op = _RendezvousJoinOp()
 
-        deadline = self._get_deadline(self._settings.timeout.join)
+            deadline = self._get_deadline(self._settings.timeout.join)
 
-        self._op_executor.run(exit_op, deadline)
-        self._op_executor.run(join_op, deadline)
+            self._op_executor.run(exit_op, deadline)
+            self._op_executor.run(join_op, deadline)
 
-        self._start_heartbeats()
+            self._start_heartbeats()
 
-        rank, world_size = self._get_world()
-        store = self._get_store()
+            rank, world_size = self._get_world()
+            store = self._get_store()
 
-        log.info(
+        except Exception as e:
+            self._record(
+                message=f"{type(e).__name__}: {str(e)}",
+                node_state=NodeState.FAILED,
+            )
+            raise
+
+        msg = (
             f"The node '{self._this_node}' has joined round {self._state_holder.state.round} of "
             f"the rendezvous '{self._settings.run_id}' as rank {rank} in a world of size "
             f"{world_size}."
         )
+        self._record(message=msg, rank=rank)
+        log.info(msg)
 
         return store, rank, world_size
 
     def is_closed(self) -> bool:
         """See base class."""
-        with self._heartbeat_lock:
-            self._state_holder.sync()
+        try:
+            with self._heartbeat_lock:
+                self._state_holder.sync()
 
-            return self._state_holder.state.closed
+                return self._state_holder.state.closed
+
+        except Exception as e:
+            self._record(
+                message=f"{type(e).__name__}: {str(e)}",
+                node_state=NodeState.FAILED,
+            )
+            raise
 
     def set_closed(self) -> None:
         """See base class."""
-        with self._heartbeat_lock:
-            self._close()
+        try:
+            with self._heartbeat_lock:
+                self._close()
+        except Exception as e:
+            self._record(
+                message=f"{type(e).__name__}: {str(e)}",
+                node_state=NodeState.FAILED,
+            )
+            raise
 
     def num_nodes_waiting(self) -> int:
         """See base class."""
-        with self._heartbeat_lock:
-            self._state_holder.sync()
+        try:
+            with self._heartbeat_lock:
+                self._state_holder.sync()
 
-            return len(self._state_holder.state.wait_list)
+                return len(self._state_holder.state.wait_list)
+
+        except Exception as e:
+            self._record(
+                message=f"{type(e).__name__}: {str(e)}",
+                node_state=NodeState.FAILED,
+            )
+            raise
 
     def get_run_id(self) -> str:
         """See base class."""
@@ -994,12 +1100,20 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
             return True
         except RendezvousError as ex:
-            log.warning(
+            msg = (
                 f"The node '{self._this_node}' has failed to shutdown the rendezvous "
                 f"'{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
+            self._record(message=msg, node_state=NodeState.FAILED)
+            log.warning(msg)
 
             return False
+        except Exception as e:
+            self._record(
+                message=f"{type(e).__name__}: {str(e)}",
+                node_state=NodeState.FAILED,
+            )
+            raise
 
     def _close(self) -> None:
         op = _RendezvousCloseOp()
@@ -1008,9 +1122,9 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         self._op_executor.run(op, deadline)
 
-        log.info(
-            f"The node '{self._this_node}' has closed the rendezvous '{self._settings.run_id}'."
-        )
+        msg = f"The node '{self._this_node}' has closed the rendezvous '{self._settings.run_id}'."
+        self._record(message=msg, node_state=NodeState.SUCCEEDED)
+        log.info(msg)
 
     @staticmethod
     def _keep_alive_weak(weak_self) -> None:
@@ -1028,15 +1142,19 @@ class DynamicRendezvousHandler(RendezvousHandler):
         try:
             self._op_executor.run(op, deadline)
 
-            log.debug(
+            msg = (
                 f"The node '{self._this_node}' has sent a keep-alive heartbeat to the rendezvous "
                 f"'{self._settings.run_id}'."
             )
+            self._record(message=msg)
+            log.debug(msg)
         except RendezvousError as ex:
-            log.warning(
+            msg = (
                 f"The node '{self._this_node}' has failed to send a keep-alive heartbeat to the "
                 f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
             )
+            self._record(message=msg, node_state=NodeState.FAILED)
+            log.warning(msg)
         finally:
             self._heartbeat_lock.release()
 
@@ -1106,17 +1224,25 @@ def create_handler(
     |                   | 30 seconds.                                          |
     +-------------------+------------------------------------------------------+
     """
-    timeout = RendezvousTimeout(
-        _get_timeout(params, "join"),
-        _get_timeout(params, "last_call"),
-        _get_timeout(params, "close"),
-    )
+    try:
+        timeout = RendezvousTimeout(
+            _get_timeout(params, "join"),
+            _get_timeout(params, "last_call"),
+            _get_timeout(params, "close"),
+        )
 
-    return DynamicRendezvousHandler.from_backend(
-        params.run_id,
-        store,
-        backend,
-        params.min_nodes,
-        params.max_nodes,
-        timeout,
-    )
+        return DynamicRendezvousHandler.from_backend(
+            params.run_id,
+            store,
+            backend,
+            params.min_nodes,
+            params.max_nodes,
+            timeout,
+        )
+    except Exception as e:
+        construct_and_record_rdzv_event(
+            message=f"{type(e).__name__}: {str(e)}",
+            run_id=params.run_id,
+            node_state=NodeState.FAILED,
+        )
+        raise
