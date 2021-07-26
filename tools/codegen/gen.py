@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -8,6 +8,8 @@ import pathlib
 import functools
 import json
 from dataclasses import dataclass
+import itertools
+import hashlib
 
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import (Argument, DispatchKey, FunctionSchema,
@@ -33,6 +35,8 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function_and_indices,
                                    with_native_function)
 import tools.codegen.dest as dest
+
+T = TypeVar('T')
 
 # Welcome to the ATen code generator v2!  The ATen code generator is
 # responsible for parsing native_functions.yaml and then generating
@@ -790,6 +794,12 @@ def compute_registration_declarations(f: NativeFunction, backend_indices: Dict[D
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 
+
+# String hash that's stable across different executions, unlike builtin hash
+def string_stable_hash(s: str) -> int:
+    sha1 = hashlib.sha1(s.encode('latin1')).digest()
+    return int.from_bytes(sha1, byteorder='little')
+
 # A small abstraction for writing out generated files and keeping track
 # of what files have been written (so you can write out a list of output
 # files)
@@ -817,7 +827,7 @@ class FileManager:
                 f.write(contents)
 
     def write_with_template(self, filename: str, template_fn: str,
-                            env_callable: Callable[[], Union[str, Dict[str, object]]]) -> None:
+                            env_callable: Callable[[], Union[str, Dict[str, Any]]]) -> None:
         filename = '{}/{}'.format(self.install_dir, filename)
         assert filename not in self.filenames, "duplicate file write {filename}"
         self.filenames.add(filename)
@@ -837,8 +847,54 @@ class FileManager:
                 assert_never(env)
 
 
-    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, object]]]]) -> None:
+    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, Any]]]]) -> None:
         self.write_with_template(filename, filename, env_callable)
+
+    def write_sharded(
+            self,
+            filename: str,
+            items: List[T],
+            *,
+            key_fn: Callable[[T], str],
+            env_callable: Callable[[T], Dict[str, List[str]]],
+            num_shards: int,
+            base_env: Dict[str, Any] = {},
+    ) -> None:
+        everything: Dict[str, Any] = {**base_env, 'shard_id': 'Everything'}
+        shards: List[Dict[str, Any]] = [
+            {**base_env, 'shard_id': f'_{i}'} for i in range(num_shards)]
+
+        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]):
+            for k, v in from_.items():
+                if k in into:
+                    assert isinstance(into[k], list)
+                    into[k] += v
+                else:
+                    into[k] = list(v)
+
+        for item in items:
+            key = key_fn(item)
+            sid = string_stable_hash(key) % num_shards
+            env = env_callable(item)
+
+            merge_env(shards[sid], env)
+            merge_env(everything, env)
+
+        dot_pos = filename.rfind('.')
+        if dot_pos == -1:
+            dot_pos = len(filename)
+        base_filename = filename[:dot_pos]
+        extension = filename[dot_pos:]
+
+        for shard in itertools.chain((everything,), shards):
+            shard_id = shard['shard_id']
+            self.write_with_template(f"{base_filename}{shard_id}{extension}",
+                                     filename,
+                                     lambda: shard)
+
+        # filenames is used to track compiled files, but FooEverything.cpp isn't meant to be compiled
+        self.filenames.discard(
+            f"{self.install_dir}/{base_filename}Everything{extension}")
 
     def write_outputs(self, filename: str) -> None:
         """Write a file containing the list of all outputs which are

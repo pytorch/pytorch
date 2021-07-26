@@ -1,5 +1,5 @@
 import itertools
-from typing import Optional, List, Sequence, Union
+from typing import Optional, List, Sequence, Union, Dict
 
 from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
 from tools.codegen.api import cpp
@@ -364,9 +364,8 @@ def type_wrapper_name(f: NativeFunction) -> str:
         return cpp.name(f.func)
 
 @with_native_function
-def method_definition(f: NativeFunction) -> Optional[str]:
-    if cpp.name(f.func) in MANUAL_TRACER:
-        return None
+def method_definition(f: NativeFunction) -> str:
+    assert cpp.name(f.func) not in MANUAL_TRACER
 
     formals = ', '.join(
         # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -390,9 +389,8 @@ m.impl("${name}",
 """)
 
 @with_native_function
-def method_registration(f: NativeFunction) -> Optional[str]:
-    if cpp.name(f.func) in MANUAL_TRACER:
-        return None
+def method_registration(f: NativeFunction) -> str:
+    assert cpp.name(f.func) not in MANUAL_TRACER
 
     return WRAPPER_REGISTRATION.substitute(
         name=f.func.name,
@@ -400,29 +398,27 @@ def method_registration(f: NativeFunction) -> Optional[str]:
         class_type='TraceType',
     )
 
-def gen_trace_type_shard(
-    fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str
-) -> None:
-    fm.write_with_template('TraceType%s.cpp' % suffix, 'TraceType.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/TraceType.cpp',
-        'trace_method_definitions': list(mapMaybe(method_definition, native_functions)),
-        'trace_wrapper_registrations': list(mapMaybe(method_registration, native_functions)),
-    })
+def gen_trace_type_func(
+    fn: NativeFunction
+) -> Dict[str, List[str]]:
+    return {
+        'trace_method_definitions': [method_definition(fn)],
+        'trace_wrapper_registrations': [method_registration(fn)],
+    }
 
 def gen_trace_type(out: str, native_yaml_path: str, template_path: str) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 5
-    shards: List[List[NativeFunction]] = [[] for _ in range(num_shards)]
-
-    # functions are assigned arbitrarily but stably to a file based on hash
-    native_functions = parse_native_yaml(native_yaml_path).native_functions
-    native_functions = list(sorted(native_functions, key=lambda f: cpp.name(f.func)))
-    for f in native_functions:
-        x = sum(ord(c) for c in cpp.name(f.func)) % num_shards
-        shards[x].append(f)
-
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    for i, shard in enumerate(shards):
-        gen_trace_type_shard(fm, shard, '_%d' % i)
-    gen_trace_type_shard(fm, native_functions, 'Everything')
+    native_functions = parse_native_yaml(native_yaml_path).native_functions
+    fm.write_sharded(
+        'TraceType.cpp',
+        [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
+        key_fn=lambda fn: cpp.name(fn.func),
+        base_env={
+            'generated_comment':
+            f'@generated from {template_path}/TraceType.cpp',
+        },
+        env_callable=gen_trace_type_func,
+        num_shards=5
+    )
