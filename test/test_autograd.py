@@ -5938,7 +5938,7 @@ for shape in [(1,), ()]:
 
     def test_graph_save_on_cpu(self):
         try:
-            torch.autograd.graph.set_save_on_cpu(True)
+            torch.autograd.graph.set_save_on_cpu_hooks()
             a = torch.randn(5, requires_grad=True)
             y = a * a
             self.assertEqual(a, y.grad_fn._saved_self)
@@ -5946,7 +5946,7 @@ for shape in [(1,), ()]:
             y.sum().backward()
             self.assertEqual(2 * a, a.grad)
         finally:
-            torch.autograd.graph.set_save_on_cpu(False)
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_graph_save_on_cpu_cuda(self):
@@ -5975,13 +5975,13 @@ for shape in [(1,), ()]:
 
         # with hooks
         try:
-            torch.autograd.graph.set_save_on_cpu(True)
+            torch.autograd.graph.set_save_on_cpu_hooks()
             a = torch.ones(1, requires_grad=True, device="cuda")
             y = f(a)
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
         finally:
-            torch.autograd.graph.set_save_on_cpu(False)
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
 
 def index_perm_variable(shape, max_indices):
