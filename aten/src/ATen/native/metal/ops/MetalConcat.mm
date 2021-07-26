@@ -60,57 +60,106 @@ Tensor cat_feature(const TensorList tensors, MetalTensorImplStorage& mt) {
   MetalCommandBuffer* commandBuffer = getCommandBuffer(tensor);
   MPSImage* Y = mt.texture()->image();
   ushort channel_offset = 0;
+
+  auto temp_size = tensor.sizes().vec();
+  temp_size[1] = 4;
+  MetalTensorImplStorage tt{temp_size};
+  tt.texture()->setCommandBuffer(commandBuffer);
+  tt.texture()->allocateTemporaryStorage(temp_size, commandBuffer);
+  MPSImage* T = tt.texture()->image();
+
   for (int i = 0; i < tensors.size(); ++i) {
-    const auto& t = tensors[i];
-    MPSImage* X = imageFromTensor(t);
-    MetalCommandBuffer* Xcb = getCommandBuffer(t);
+    MPSImage* X = imageFromTensor(tensors[i]);
+    MetalCommandBuffer* Xcb = getCommandBuffer(tensors[i]);
     TORCH_CHECK(
         [commandBuffer isEqual:Xcb],
         @"inputs have different Metal command buffers");
-    id<MTLComputeCommandEncoder> encoder =
-        [commandBuffer.buffer computeCommandEncoder];
-    auto kernelString = metal::mpscnn::kernelFor(
-        X, "append_features_off0", "append_features_off0_nonarray");
     ushort tex_offset = channel_offset % 4;
-    if (tex_offset == 1) {
-      kernelString = metal::mpscnn::kernelFor(
-          X, "append_features_off1", "append_features_off1_nonarray");
-    } else if (tex_offset == 2) {
-      kernelString = metal::mpscnn::kernelFor(
-          X, "append_features_off2", "append_features_off2_nonarray");
-    } else if (tex_offset == 3) {
-      kernelString = metal::mpscnn::kernelFor(
-          X, "append_features_off3", "append_features_off3_nonarray");
+    std::string kernelString = tex_offset == 0 ? "append_features" : "append_features_off";
+
+    {
+      id<MTLComputeCommandEncoder> encoder =
+          [commandBuffer.buffer computeCommandEncoder];
+      id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
+          specializedPipelineState:kernelString
+                         Constants:@[
+                           @(T.height),
+                           @(T.width),
+                           @(T.featureChannels),
+                           @(T.numberOfImages),
+                           @(X.height),
+                           @(X.width),
+                           @(X.featureChannels),
+                           @(X.numberOfImages),
+                         ]];
+      id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
+          newBufferWithLength:6 * sizeof(ushort)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+      ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
+      offsetBufferPtr[0] = (X.featureChannels + tex_offset + 3) / 4;
+      offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
+      offsetBufferPtr[2] = channel_offset / 4;
+      offsetBufferPtr[3] = (X.featureChannels + 3) / 4;
+      offsetBufferPtr[4] = X.numberOfImages * offsetBufferPtr[0];
+      offsetBufferPtr[5] = tex_offset;
+
+      [encoder setComputePipelineState:state];
+      if (tex_offset == 0) {
+        [encoder setTexture:[X texture] atIndex:0];
+        [encoder setTexture:[Y texture] atIndex:1];
+        [encoder setBuffer:offsetBuffer offset:0 atIndex:0];
+      }
+      else {
+        [encoder setTexture:[X texture] atIndex:0];
+        [encoder setTexture:[T texture] atIndex:1];
+        [encoder setTexture:[Y texture] atIndex:2];
+        [encoder setBuffer:offsetBuffer offset:0 atIndex:0];
+      }
+
+      ushort featureChannels = X.featureChannels;
+      if (channel_offset % 4 > 0) {
+        featureChannels += tex_offset;
+      }
+      const auto& launchParams =
+          metal::mpscnn::spatialPointwiseKernelLaunchParams(
+              state, X.numberOfImages, featureChannels, X.height, X.width);
+      [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+              threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+      [encoder endEncoding];
     }
 
-    id<MTLComputePipelineState> state =
-        [[MetalContext sharedInstance] pipelineState:kernelString];
-    id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
-        newBufferWithLength:5 * sizeof(ushort)
-                    options:MTLResourceOptionCPUCacheModeWriteCombined];
-    ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
-    offsetBufferPtr[0] = (X.featureChannels + tex_offset + 3) / 4;
-    offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
-    offsetBufferPtr[2] = channel_offset / 4;
-    offsetBufferPtr[3] = (X.featureChannels + 3) / 4;
-    offsetBufferPtr[4] = X.numberOfImages * offsetBufferPtr[0];
-
-    [encoder setComputePipelineState:state];
-    [encoder setTexture:[X texture] atIndex:0];
-    [encoder setTexture:[Y texture] atIndex:1];
-    [encoder setBuffer:offsetBuffer offset:0 atIndex:0];
-
-    ushort featureChannels = X.featureChannels;
-    if (channel_offset % 4 > 0) {
-      featureChannels += tex_offset;
-    }
-    const auto& launchParams =
-        metal::mpscnn::spatialPointwiseKernelLaunchParams(
-            state, X.numberOfImages, featureChannels, X.height, X.width);
-    [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
-            threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
-    [encoder endEncoding];
     channel_offset += X.featureChannels;
+
+    {
+      id<MTLComputeCommandEncoder> encoder =
+          [commandBuffer.buffer computeCommandEncoder];
+
+      id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
+          specializedPipelineState:"store_features"
+                         Constants:@[
+                           @(T.height),
+                           @(T.width),
+                           @(T.featureChannels),
+                           @(T.numberOfImages),
+                         ]];
+      id<MTLBuffer> offsetBuffer = [[MetalContext sharedInstance].device
+          newBufferWithLength:2 * sizeof(ushort)
+                      options:MTLResourceOptionCPUCacheModeWriteCombined];
+      ushort* offsetBufferPtr = (ushort*)[offsetBuffer contents];
+      offsetBufferPtr[0] = channel_offset / 4;
+      offsetBufferPtr[1] = (Y.featureChannels + 3) / 4;
+
+      [encoder setComputePipelineState:state];
+      [encoder setTexture:[Y texture] atIndex:0];
+      [encoder setTexture:[T texture] atIndex:1];
+      [encoder setBuffer:offsetBuffer offset:0 atIndex:0];
+
+      const auto& launchParams =
+          metal::mpscnn::spatialPointwiseKernelLaunchParams(state, T);
+      [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+              threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+      [encoder endEncoding];
+    }
   }
   auto output = makeTensor(std::move(mt), tensor.options());
   return output;
