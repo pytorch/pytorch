@@ -10,10 +10,9 @@ namespace at {
 namespace native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
+DEFINE_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
 
@@ -37,6 +36,17 @@ Tensor fake_quantize_per_tensor_affine(
     int64_t quant_max) {
   const auto res = at::fake_quantize_per_tensor_affine_cachemask(
       self, scale, zero_point, quant_min, quant_max);
+  return std::get<0>(res);
+}
+
+Tensor fake_quantize_per_tensor_affine(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  const auto res = at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+      self, scale, zero_point, at::ones(1, self.options().dtype(at::kLong)), quant_min, quant_max);
   return std::get<0>(res);
 }
 
@@ -74,6 +84,26 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
   fake_quant_tensor_cachemask_stub(
       self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
+  // TODO(future, optional): look into packing the mask further (BoolTensor uses
+  //   1 byte per element, we only need 1 bit per element).
+  return std::make_tuple(Y, mask);
+}
+
+std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    const Tensor& fake_quant_enabled,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(
+      quant_min <= quant_max,
+      "`quant_min` should be less than or \
+        equal to `quant_max`.");
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
+  fake_quant_tensor_cachemask_tensor_qparams_stub(
+      self.device().type(), Y, mask, self, scale, zero_point, fake_quant_enabled, quant_min, quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   return std::make_tuple(Y, mask);
