@@ -626,9 +626,15 @@ void batch_norm_cpu_contiguous_impl<BFloat16>(Tensor& output, const Tensor& inpu
   float* alpha_data = alpha.data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
-     alpha_data, beta_data, n_channel, weight, bias,
-     save_mean, save_invstd, running_mean, running_var, train, eps);
+  if (weight.scalar_type() == ScalarType::BFloat16) {
+    batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
+       alpha_data, beta_data, n_channel, weight, bias,
+       save_mean, save_invstd, running_mean, running_var, train, eps);
+  } else {
+    batch_norm_cpu_collect_linear_and_constant_terms<float, float>(
+       alpha_data, beta_data, n_channel, weight, bias,
+       save_mean, save_invstd, running_mean, running_var, train, eps);
+  }
 
   BFloat16* output_data = output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
@@ -715,9 +721,15 @@ void batch_norm_cpu_channels_last_impl<BFloat16>(Tensor& output, const Tensor& i
   float* alpha_data = alpha.data_ptr<float>();
   float* beta_data = beta.data_ptr<float>();
 
-  batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
-      alpha_data, beta_data, n_channel, weight, bias,
-      save_mean, save_invstd, running_mean, runnning_var, train, eps);
+  if (weight.scalar_type() == ScalarType::BFloat16) {
+    batch_norm_cpu_collect_linear_and_constant_terms<BFloat16, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, runnning_var, train, eps);
+  } else {
+    batch_norm_cpu_collect_linear_and_constant_terms<float, float>(
+        alpha_data, beta_data, n_channel, weight, bias,
+        save_mean, save_invstd, running_mean, runnning_var, train, eps);
+  }
 
   BFloat16* output_data = output.data_ptr<BFloat16>();
   const BFloat16* input_data = input.data_ptr<BFloat16>();
