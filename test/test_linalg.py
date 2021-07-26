@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, enableSparseCSR)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, addLayoutSparseCSR)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 from torch.distributions.binomial import Binomial
@@ -5940,10 +5940,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)),
                                                    include_half=(not TEST_WITH_ROCM)))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @enableSparseCSR(only_cuda=True,
-                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
-                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                                   include_half=SM53OrLater)))
+    @addLayoutSparseCSR(only_cuda=True,
+                        dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                     *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                      include_half=SM53OrLater)))
     def test_addmv(self, device, dtype, layout):
         # have to use torch.randn(...).to(bfloat16) instead of
         # torch.randn(..., dtype=bfloat16). randn does not support
@@ -5978,9 +5978,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(torch.float, torch.double)
-    @enableSparseCSR(only_cuda=True,
-                     dtypes_cuda=torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                                 include_half=SM53OrLater))
+    @addLayoutSparseCSR(only_cuda=True,
+                        dtypes_cuda=torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                    include_half=SM53OrLater))
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype, layout):
         # tests (o, s)*(s).  o is output size, s is summed size.
         o = 5
@@ -6014,10 +6014,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                   *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @tf32_on_and_off(0.05)
-    @enableSparseCSR(only_cuda=True,
-                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
-                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                                   include_half=SM53OrLater)))
+    @addLayoutSparseCSR(only_cuda=True,
+                        dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                     *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                      include_half=SM53OrLater)))
     def test_addmm(self, device, dtype, layout):
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
@@ -6051,10 +6051,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] + torch.testing.get_all_complex_dtypes()))
     @tf32_on_and_off(0.005)
-    @enableSparseCSR(only_cuda=True,
-                     dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
-                                  *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
-                                                                   include_half=SM53OrLater)))
+    @addLayoutSparseCSR(only_cuda=True,
+                        dtypes_cuda=(*torch.testing.get_all_complex_dtypes(),
+                                     *torch.testing.get_all_fp_dtypes(include_bfloat16=SM80OrLater,
+                                                                      include_half=SM53OrLater)))
     def test_addmm_sizes(self, device, dtype, layout):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:

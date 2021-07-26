@@ -5,9 +5,6 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/typeid.h>
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
 
 scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
 {
@@ -26,16 +23,9 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar
       2,
       "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
-                                  cudaMemcpyHostToDevice,
-                                  stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
+  at::cuda::memcpy_and_sync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
-                              stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+                              stream);
 }
 
 scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
@@ -46,14 +36,8 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
       "index out of bounds");
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
-                                  cudaMemcpyDeviceToHost, stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
-                              cudaMemcpyDeviceToHost, stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+  at::cuda::memcpy_and_sync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
+                                  cudaMemcpyDeviceToHost, stream);
   return value;
 }
 
