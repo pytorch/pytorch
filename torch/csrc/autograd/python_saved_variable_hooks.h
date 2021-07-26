@@ -28,11 +28,13 @@ struct PyDefaultSavedVariableHooks {
   static void reset_hooks();
   static std::unique_ptr<SavedVariableHooks> get_hooks();
 
+  // Mutex to ensure that concurrent operations that modify default pack_hook_ and
+  // unpack_hook_ are thread-safe.
+  static std::mutex mutex_;
+
 private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::atomic<PyObject*> pack_hook_;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::atomic<PyObject*> unpack_hook_;
+  static PyObject* pack_hook_;
+  static PyObject* unpack_hook_;
 };
 
 }}
