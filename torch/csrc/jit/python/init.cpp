@@ -349,6 +349,9 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
+      .def(
+          "_is_freezable_module",
+          [](Module& module) { return is_freezable(module); })
       .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
       .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
       .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)

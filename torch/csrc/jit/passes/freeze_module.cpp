@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
 
 #include <stack>
+#include "jit/ir/ir.h"
 
 namespace torch {
 namespace jit {
@@ -756,7 +757,59 @@ class AttributePropagator {
   // Contains the attributes names (e.g. {"self", "subModule", "a"}
   std::deque<std::string> names_;
 }; // class AttributePropagator
+
+bool has_interface_attr(Block* b) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == prim::GetAttr &&
+        n->output()->type()->cast<InterfaceType>()) {
+      return true;
+    }
+
+    for (auto ib : n->blocks()) {
+      if (has_interface_attr(b)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 } // namespace
+
+bool is_freezable(Module& module) {
+  bool has_interfaces = false;
+  auto interface_searcher = [&has_interfaces](Module& m) {
+    GRAPH_DEBUG("Running on module", m.dump_to_str(false, false, false));
+    if (has_interfaces) {
+      return;
+    }
+    auto is_interface = [](Value* v) {
+      return v->type()->cast<InterfaceType>() != nullptr;
+    };
+
+    for (auto m : m.get_methods()) {
+      GRAPH_DEBUG("Processing ", m.name());
+      auto graph = m.function().graph();
+      GRAPH_DUMP("Method graph: ", graph);
+      bool input_interface = std::any_of(
+          graph->inputs().begin(), graph->inputs().end(), is_interface);
+      bool output_interface = std::any_of(
+          graph->outputs().begin(), graph->outputs().end(), is_interface);
+      if (input_interface || output_interface) {
+        has_interfaces = true;
+        return;
+      }
+
+      if (has_interface_attr(graph->block())) {
+        has_interfaces = true;
+        return;
+      }
+    }
+  };
+
+  module.apply(interface_searcher);
+  return !has_interfaces;
+}
 
 Module freeze_module(
     const Module& module,
