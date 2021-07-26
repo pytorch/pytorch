@@ -360,7 +360,7 @@ void DumpGraph(NNGraph* g, const std::string& fname) {
   }
 }
 
-caffe2::NetDef OptimizeForBackend(
+CutResult OptimizeForBackend(
     caffe2::NetDef& net,
     std::function<bool(const caffe2::OperatorDef&)> supports,
     std::function<caffe2::NetDef(const caffe2::NetDef&)> transform_func,
@@ -441,9 +441,12 @@ caffe2::NetDef OptimizeForBackend(
     DumpGraph(&dfg, "dump.dot");
   }
 
+  CutResult cutResult;
+  cutResult.numberOfSubnets = subs.size();
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");
-  return new_net;
+  cutResult.net = std::move(new_net);
+  return cutResult;
 }
 
 } // namespace opt
