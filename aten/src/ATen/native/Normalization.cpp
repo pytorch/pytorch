@@ -33,13 +33,9 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(batch_norm_cpu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(batch_norm_cpu_collect_stats_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
@@ -75,7 +71,8 @@ struct Var {
 };
 
 static inline bool is_contiguous(const Tensor& t) {
-  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast);
+  return t.is_contiguous() || t.is_contiguous(at::MemoryFormat::ChannelsLast)
+      || t.is_contiguous(at::MemoryFormat::ChannelsLast3d);
 }
 
 template<typename scalar_t>

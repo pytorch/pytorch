@@ -18,7 +18,7 @@ from torch._six import string_classes
 from torch.jit import _unique_state_dict
 from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes, TrainingMode
 from torch._C import ListType, OptionalType, _propagate_and_assign_input_shapes, _check_onnx_proto
-from typing import Union, Tuple, List
+from typing import List, Tuple, Union
 
 
 # the flag to tell the user whether it's in the middle of ONNX export or not
@@ -443,6 +443,17 @@ def _model_to_graph(model, args, verbose=False,
                     _retain_param_name=False, do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
                     training=None, dynamic_axes=None):
+    r"""Converts model into an ONNX graph.
+
+    Returns:
+      graph (torch._C.Graph): A TorchScript IR Graph with ONNX nodes.
+      params_dict (Dict[str, torch.Tensor]): Dict from input param name to param value.
+      torch_out (Union[NoneType, torch.Tensor, Tuple[torch.Tensor], List[torch.Tensor]]):
+        The output tensors resulting from the trace of ``model``.
+        If ``model`` is a :class:`torch.jit.ScriptModule` or :class:`torch.jit.ScriptFunction`,
+        this will be None, since we are not doing any tracing.
+    """
+    # TODO: can we simplify this to always return a tuple of Tensor or None?
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     # Special case for common case of passing a single Tensor
     if isinstance(args, (torch.Tensor, int, float, bool)):
@@ -624,10 +635,6 @@ def _find_missing_ops_onnx_export(model, args, f, verbose=False, training=Traini
             unsupported_ops.append(node.kind())
     return graph, unsupported_ops
 
-# NOTE: the output `torch_out` will contain the output tensors resulting from
-# the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
-# this output will be None, since we are not doing any tracing but rather
-# directly extracting the graph.
 def _export(model, args, f, export_params=True, verbose=False, training=None,
             input_names=None, output_names=None, operator_export_type=None,
             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
@@ -948,7 +955,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
         import torch.onnx.symbolic_registry as sym_registry
 
-        sym_registry.register_version('', opset_version)
+        sym_registry.register_version("", opset_version)
 
         # Quantized op symbolics are registered for opset 9 only.
         if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK and opset_version == 9:
@@ -971,7 +978,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())
 
         elif ns == "aten":
-            is_exportable_aten_op = sym_registry.is_registered_op(op_name, '', opset_version)
+            is_exportable_aten_op = sym_registry.is_registered_op(op_name, "", opset_version)
             is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
             is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
             if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
@@ -982,7 +989,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 return _graph_at(g, op_name, *inputs, aten=True, **attrs)
             else:
                 # Export it regularly
-                domain = ''
+                domain = ""
                 symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)
                 if symbolic_fn is None:
                     return None
@@ -1091,7 +1098,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                     return new_op_outputs
             else:
                 symbolic_name = "prim_" + op_name
-                domain = ''
+                domain = ""
                 symbolic_fn = _find_symbolic_in_registry(domain, symbolic_name, opset_version,
                                                          operator_export_type)
                 if symbolic_fn is None:
@@ -1102,7 +1109,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                 return symbolic_fn(g, *inputs, **attrs)
 
         elif ns == "quantized":
-            domain = ''
+            domain = ""
             if operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK:
                 domain = "caffe2"
             symbolic_fn = _find_symbolic_in_registry(domain, op_name, opset_version, operator_export_type)

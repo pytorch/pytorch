@@ -38,3 +38,8 @@
 
 # Docker
 /.circleci/docker/ @jeffdaily @jithunnair-amd
+
+# Github Actions
+# This list is for people wanting to be notified every time there's a change
+# related to Github Actions
+/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati

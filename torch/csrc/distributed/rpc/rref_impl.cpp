@@ -34,7 +34,6 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<local_id_t> RRefContext::nextLocalId_{0};
 
 //////////////////////////  RRefForkData  /////////////////////////////////

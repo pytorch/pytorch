@@ -10,6 +10,7 @@ PLATFORM_TO_HASH = {
 }
 
 OUTPUT_DIR = os.path.join(PYTORCH_ROOT, ".clang-tidy-bin")
+INSTALLATION_PATH = os.path.join(OUTPUT_DIR, "clang-tidy")
 
 if __name__ == "__main__":
     ok = download("clang-tidy", OUTPUT_DIR, PLATFORM_TO_URL, PLATFORM_TO_HASH)

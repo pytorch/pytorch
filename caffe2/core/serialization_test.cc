@@ -61,7 +61,6 @@ void logBlob(c10::string_view data) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TensorSerialization, TestUnknownDType) {
   // This code was used to generate the blob data listed above.
   constexpr size_t kTestTensorSize = 10;
