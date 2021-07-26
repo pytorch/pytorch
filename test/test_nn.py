@@ -16772,7 +16772,6 @@ class TestNNDeviceType(NNTestCase):
             target = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
 
             for reduction in ['none', 'mean', 'sum']:
-                print('reduction:', reduction)
                 # Ensure result with unit weights is equivalent to result without weights.
                 m = torch.nn.CrossEntropyLoss(reduction=reduction)
                 m_unit = torch.nn.CrossEntropyLoss(weight=torch.ones(C, dtype=target.dtype),
@@ -16796,7 +16795,6 @@ class TestNNDeviceType(NNTestCase):
             target_one_hot = target_one_hot.permute(0, -1, *range(1, target_one_hot.dim() - 1))
 
             for reduction, w in product(['none', 'mean', 'sum'], [None, weight]):
-                print('reduction:', reduction, 'weight:', w, 'k:', k)
                 # Ensure loss computed with class indices matches loss
                 # computed with one-hot class probs.
                 m = torch.nn.CrossEntropyLoss(weight=w, reduction=reduction)
