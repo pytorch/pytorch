@@ -16026,6 +16026,24 @@ class TestNNDeviceType(NNTestCase):
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
 
+    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypes(torch.float)
+    def test_maxpool_indices_no_batch_dim(self, device, dtype):
+        """Check that indices with no batch dim is consistent with a single batch."""
+        max_pool_cases = [
+            (nn.AdaptiveMaxPool1d(3, return_indices=True),
+             torch.randn(3, 5, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool2d(3, return_indices=True),
+             torch.randn(3, 5, 6, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool3d(3, return_indices=True),
+             torch.randn(3, 5, 6, 7, device=device, dtype=dtype))]
+
+        for module, input in max_pool_cases:
+            _, indices_no_batch = module(input)
+            _, indicies_single_batch = module(input.unsqueeze(0))
+            self.assertEqual(indices_no_batch, indicies_single_batch.squeeze(0))
+
+
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @onlyOnCPUAndCUDA  # TODO: Fails on XLA
