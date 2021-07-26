@@ -4782,6 +4782,10 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("unused_parameter_size", 0), 0)
             self.assertEqual(ddp_logging_data.get("has_rebuilt_buckets"), 1)
             self.assertEqual(
+                int(ddp_logging_data.get("bucket_size_limits")),
+                dist._DEFAULT_FIRST_BUCKET_BYTES
+            )
+            self.assertEqual(
                 ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size)
             )
             # It is hard to test accurate latency, but it can test whether the latency is
@@ -7291,6 +7295,56 @@ class DistributedTest:
                         model.parameters(), model_static_graph.parameters()
                     ):
                         self.assertEqual(p, p_static)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_get_bucket_sizes(self):
+            torch.cuda.set_device(self.rank)
+            default_bucket_cap_mb = 25 * (1024 ** 2)
+            first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
+
+            class MyModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.model = nn.Sequential(nn.Linear(2, 4000, bias=False),
+                        *[
+                            nn.Linear(4000, 4000, bias=False) for _ in range(10)
+                        ])
+
+                def forward(self, x):
+                    return self.model(x)
+
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                MyModel().cuda(),
+                device_ids=[self.rank]
+            )
+            inp = torch.randn(10, 2)
+            for i in range(6):
+                out = ddp(inp).sum()
+                out.backward()
+                logging_data = ddp._get_ddp_logging_data()
+                bucket_size_limits = [
+                    int(b) for b in logging_data["bucket_size_limits"].split(", ")
+                ]
+                if i < 2:
+                    # first_bucket_bytes is actually the last because we reverse
+                    # parameter bucket order.
+                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                    for j, bucket_size in enumerate(bucket_size_limits):
+                        if j != len(bucket_size_limits) - 1:
+                            self.assertEqual(bucket_size, default_bucket_cap_mb)
+                else:
+                    # TODO: rebuild buckets places first bucket at beginning, but
+                    # might be better to move it to end.
+                    self.assertEqual(
+                        bucket_size_limits[0], first_bucket_bytes_mb
+                    )
+                    for j, bucket_size in enumerate(bucket_size_limits):
+                        if j != 0:
+                            self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
