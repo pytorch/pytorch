@@ -27,7 +27,6 @@ struct THPEngine {
     PyObject_HEAD
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool _reinitialize_engine = false;
 
 namespace torch { namespace autograd { namespace python {
@@ -141,7 +140,6 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 }}} // namespace torch::autograd::python
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPEngineClass = nullptr;
 
 // Implementation of torch._C._EngineBase.run_backward
@@ -322,14 +320,12 @@ static struct PyMethodDef THPEngine_methods[] = {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPEngineType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                      /* tp_name */
   sizeof(THPEngine),                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
