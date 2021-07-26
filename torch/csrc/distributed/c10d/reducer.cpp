@@ -989,7 +989,6 @@ void Reducer::initialize_buckets(
       }
     }
 
-    // Iterate over model replicas.
     BucketReplica replica;
     size_t replica_index = 0;
     if (bucket.expect_sparse_gradient) {
