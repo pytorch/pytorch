@@ -607,13 +607,14 @@ def flatten_refinement_rule(n: Node):
 
     if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
         l = len(n.type.__args__)
+        arg_type = n.args[0].type
         start_dim = l if start_dim == -1 else start_dim
-        end_dim = l + end_dim if end_dim < 0 else end_dim
+        end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
-        for t1, t2 in zip(n.type.__args__[0:start_dim], n.args[0].type.__args__[0:start_dim]):
+        for t1, t2 in zip(n.type.__args__[0:start_dim], arg_type.__args__[0:start_dim]):
             eq_const.append(Equality(t1, t2))
 
-        for t1, t2 in zip(n.type.__args__[start_dim:end_dim], n.args[0].type.__args__[start_dim:end_dim]):
+        for t1, t2 in zip(n.type.__args__[end_dim:], arg_type.__args__[end_dim:]):
             eq_const.append(Equality(t1, t2))
     return eq_const
 

@@ -93,10 +93,8 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(APMeter, APMeterOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(APMeter)
     .NumInputs(2)
     .NumOutputs(1)
@@ -127,7 +125,6 @@ per class for the average precision of that class.
         "1-D tensor (Tensor<float>) of size num_classes containing "
         "average precision for each class");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(APMeter);
 
 } // namespace
