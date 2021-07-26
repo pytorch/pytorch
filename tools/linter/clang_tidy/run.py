@@ -401,11 +401,11 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
         e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
         raise e
 
-    files = collections.defaultdict(list)
+    files: Any = collections.defaultdict(list)
 
     for file in unidiff.PatchSet(diff):
         for hunk in file:
-            added_line_nos = [ line.target_line_no for line in hunk if line.is_added ]
+            added_line_nos = [line.target_line_no for line in hunk if line.is_added]
 
             if len(added_line_nos) == 0:
                 continue
@@ -415,8 +415,8 @@ def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
             i = 1
             ranges = [[added_line_nos[0], added_line_nos[0]]]
             while i < len(added_line_nos):
-                if added_line_nos[i] != added_line_nos[i-1] + 1:
-                    ranges[-1][1] = added_line_nos[i-1]
+                if added_line_nos[i] != added_line_nos[i - 1] + 1:
+                    ranges[-1][1] = added_line_nos[i - 1]
                     ranges.append([added_line_nos[i], added_line_nos[i]])
                 i += 1
             ranges[-1][1] = added_line_nos[-1]
