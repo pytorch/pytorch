@@ -5,7 +5,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProtoUtilsTest, IsSameDevice) {
   DeviceOption a;
   DeviceOption b;
@@ -23,7 +22,6 @@ TEST(ProtoUtilsTest, IsSameDevice) {
   EXPECT_FALSE(IsSameDevice(a, b));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProtoUtilsTest, SimpleReadWrite) {
   string content("The quick brown fox jumps over the lazy dog.");
   string name = std::tmpnam(nullptr);
@@ -33,7 +31,6 @@ TEST(ProtoUtilsTest, SimpleReadWrite) {
   EXPECT_EQ(content, read_back);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProtoUtilsTest, CleanupExternalInputsAndOutputs) {
   caffe2::NetDef net;
   caffe2::testing::NetMutator(&net)
