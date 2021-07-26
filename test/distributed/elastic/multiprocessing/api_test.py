@@ -261,7 +261,6 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
             self.assertEqual(
                 {0: Std.ERR, 1: Std.OUT}, to_map({0: Std.ERR, 1: Std.OUT}, local_world_size)
             )
->>>>>>> source: f3a577268116 sandcastle_skip_if - pritam: [2/N] Remove unitte...
 
         def test_invalid_log_dir(self):
             with tempfile.NamedTemporaryFile(dir=self.test_dir) as not_a_dir:
