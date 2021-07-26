@@ -24,7 +24,6 @@ struct XLAAllocator final : public at::Allocator {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(XlaTensorTest, TestNoStorage) {
   XLAAllocator allocator;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(

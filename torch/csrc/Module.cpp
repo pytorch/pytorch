@@ -79,10 +79,8 @@
 
 namespace py = pybind11;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* module;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 THPGenerator *THPDefaultCPUGenerator = nullptr;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -108,7 +106,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
     THPUtils_assert(THPUtils_checkString(module_name.get()),
         "expected __module__ to be a string");
     std::string name = THPUtils_unpackString(module_name.get());
-    names.push_back(name + "." + type->tp_name);
+    names.emplace_back(name + "." + type->tp_name);
     type->tp_name = names.back().c_str();
   }
   Py_RETURN_NONE;
@@ -769,7 +767,6 @@ bool THDPBFloat16Storage_init(PyObject *module);
 bool THDPComplexDoubleStorage_init(PyObject *module);
 bool THDPComplexFloatStorage_init(PyObject *module);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1094,5 +1091,4 @@ struct call_duplicate_guard {
   call_duplicate_guard() { pytorch_duplicate_guard(); }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static call_duplicate_guard _call_duplicate_guard;
