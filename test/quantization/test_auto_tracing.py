@@ -11,6 +11,62 @@ import torch.quantization._quantize_dynamic_tracing as _quantize_dynamic_tracing
 
 class TestAutoTracing(QuantizationTestCase):
 
+    def _test_auto_tracing(self, m, example_inputs):
+        mp = _quantize_dynamic_tracing.prepare(m, example_inputs)
+        print(mp)
+        mp(*example_inputs)
+        print(mp)
+        mq = _quantize_dynamic_tracing.convert(mp)
+        print(mq)
+        # TODO: implement quant/dequant
+        example_inputs_q = tuple([
+            torch.quantize_per_tensor(x, 0.01, 0, torch.quint8)
+            for x in example_inputs
+        ])
+        example_inputs_q = example_inputs
+        # verify it runs
+        out_q = mq(*example_inputs_q)
+        print(out_q)
+
+        # verify torch.jit.trace works
+        mq_jit_traced = torch.jit.trace(
+            mq, example_inputs_q, check_trace=False)
+        # print(mq_jit_traced.graph)
+        traced_out = mq_jit_traced(*example_inputs_q)
+        assert torch.all(traced_out.int_repr() == out_q.int_repr())
+
+        # verify torch.jit.script works
+        rewritten = mq.rewrite()
+        print(rewritten)
+        rewritten_out = rewritten(*example_inputs_q)
+        assert torch.all(rewritten_out.int_repr() == out_q.int_repr())
+
+        scripted_rewritten = torch.jit.script(rewritten)
+        scripted_rewritten_out = scripted_rewritten(*example_inputs_q)
+        assert torch.all(scripted_rewritten_out.int_repr() == out_q.int_repr())
+
+        traced_rewritten = torch.jit.trace(
+            rewritten, example_inputs_q, check_trace=False)
+        traced_rewritten_out = traced_rewritten(*example_inputs_q)
+        assert torch.all(traced_rewritten_out.int_repr() == out_q.int_repr())
+
+    @skipIfNoFBGEMM
+    def test_conv_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                print(x)
+                x2 = x1 + x
+                return x2
+
+        m = M().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(m, (torch.randn(1, 1, 2, 2),))
+
     @skipIfNoFBGEMM
     def test_auto_tracing_conv_relu_add(self):
         class M(torch.nn.Module):
@@ -22,7 +78,7 @@ class TestAutoTracing(QuantizationTestCase):
             def forward(self, x):
                 x1 = self.conv(x)
                 x2 = self.relu(x)
-                x3 = x1 + x2
+                x3 = x1 + x
                 x4 = x3 + x3
                 return x4
 
@@ -35,42 +91,7 @@ class TestAutoTracing(QuantizationTestCase):
                                                         weight=torch.quantization.MinMaxObserver.with_args(dtype=torch.qint8))
 
         model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
-
-        model_fp32_prepared = _quantize_dynamic_tracing.prepare(model_fp32_fused)
-        # print(model_fp32_prepared)
-
-        input_fp32 = torch.randn(1, 1, 2, 2)
-        model_fp32_prepared(input_fp32)
-
-        input_fp32 = torch.randn(1, 1, 2, 2)
-        model_fp32_prepared(input_fp32)
-        print(model_fp32_prepared)
-
-        model_int8 = _quantize_dynamic_tracing.convert(model_fp32_prepared)
-        print(model_int8)
-        input_q = torch.quantize_per_tensor(input_fp32, 0.1, 0, torch.quint8)
-        out = model_int8(input_q)
-        print(out)
-
-        input_q2 = torch.quantize_per_tensor(torch.randn(1, 1, 2, 2), 0.1, 0, torch.quint8)
-        out = model_int8(input_q2)
-
-        traced_model_int8 = torch.jit.trace(model_int8, (input_q,), check_trace=False)
-        # confirm quantized::add op
-        traced_out = traced_model_int8(input_q2)
-        assert torch.all(traced_out.int_repr() == out.int_repr())
-
-        rewritten = model_int8.rewrite()
-        rewritten_out = rewritten(input_q2)
-        assert torch.all(rewritten_out.int_repr() == out.int_repr())
-
-        scripted_rewritten = torch.jit.script(rewritten)
-        scripted_rewritten_out = scripted_rewritten(input_q2)
-        assert torch.all(scripted_rewritten_out.int_repr() == out.int_repr())
-
-        traced_rewritten = torch.jit.trace(rewritten, (input_q,), check_trace=False)
-        traced_rewritten_out = traced_rewritten(input_q2)
-        assert torch.all(traced_rewritten_out.int_repr() == out.int_repr())
+        self._test_auto_tracing(model_fp32_fused, (torch.randn(1, 1, 2, 2),))
 
     # TODO(future PR): enable this test
     @unittest.skip("this is currently broken")
