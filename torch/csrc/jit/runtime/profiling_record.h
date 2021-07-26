@@ -188,6 +188,8 @@ struct ProfilingRecord {
   // the value is a mapping from a Value in a graph
   // to a profiled TensorType
   std::map<int64_t, std::map<Value*, TensorTypePtr>> profiled_types_per_frame_;
+  // collect tensor sizes
+  std::map<int64_t, std::map<Value*, size_t>> nbytes_per_frame_;
 
   // A thin wrapper around `partitionSetByDimension` to ensure
   // `new_sizes` and `sym_shapes` are of the same rank
@@ -211,6 +213,7 @@ struct ProfilingRecord {
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
   void insertShapeProfile(Node* n, size_t offset);
+  void insertMemoryProfile(Node* n, size_t offset);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 

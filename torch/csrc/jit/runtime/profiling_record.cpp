@@ -3,8 +3,6 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/clear_profiling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -200,6 +198,49 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
   n->replaceInput(offset, pn->output());
 }
 
+void ProfilingRecord::insertMemoryProfile(Node* n, size_t offset) {
+  Value* o = n->output(offset);
+  auto pn = createProfileNode(nullptr, {o});
+  pn->ty_(attr::profiled_type, TensorType::get());
+
+  std::function<void(Stack&)> memory_profiler = [this, o](Stack& stack) {
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue v;
+    pop(stack, v);
+    if (v.isTensor()) {
+      std::lock_guard<std::mutex> lock(this->mutex_);
+      auto& bytes_per_t = nbytes_per_frame_[frame_id];
+      auto& t = v.toTensor();
+      if (t.defined()) {
+        auto t_nbytes = t.storage().nbytes();
+        GRAPH_DEBUG(
+            "In run ",
+            frame_id,
+            " annotating %",
+            o->debugName(),
+            " computed nbytes ", t_nbytes);
+        if (bytes_per_t.count(o) == 0) {
+          bytes_per_t.insert({o, t_nbytes});
+        } else {
+          auto prev_t_bytes = bytes_per_t.at(o);
+          GRAPH_DEBUG("Existing bytes for %", o->debugName(), " ", prev_t_bytes)
+          bytes_per_t[o] = std::max(prev_t_bytes, t_nbytes);
+          GRAPH_DEBUG("Updated bytes for %", o->debugName(), " ", bytes_per_t[o])
+        }
+      } else {
+        bytes_per_t[o] = 0;
+      }
+    }
+    // passing t through
+    push(stack, v);
+  };
+
+  pn->setCallback(memory_profiler);
+  pn->insertAfter(n);
+}
+
+
 bool needsProfiledInputs(Node* n) {
   if (tensorexpr::isSupported(n)) {
     return true;
@@ -266,6 +307,16 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, offset);
+      }
+    }
+
+    // insert memory profiling nodes to collect info from outputs
+    for (const auto offset : c10::irange(n->outputs().size())) {
+      if (n->kind() == prim::profile) continue;
+      auto o = n->output(offset);
+      if (o->type()->kind() == c10::TypeKind::TensorType &&
+          (needsProfiledInputs(n) || needsProfiledOutput(o->node()))) {
+        insertMemoryProfile(n, offset);
       }
     }
 

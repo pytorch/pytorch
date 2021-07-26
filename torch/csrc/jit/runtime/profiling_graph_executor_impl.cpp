@@ -27,7 +27,6 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -498,6 +497,67 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
 }
 
+void runMemoryPlanningPipeline(
+    std::shared_ptr<Graph>& copy,
+    std::unique_ptr<ProfilingRecord>& pr) {
+  GRAPH_DEBUG("Before runMemoryPlanningPipeline:\n", *copy);
+
+  // count max bytes mem
+  std::unordered_set<const Value*> managed_tensor_values;
+  size_t managed_bytes = 0;
+  for (const auto& frame_id_bytes_per_ts : pr->nbytes_per_frame_) {
+    auto _frame_id = frame_id_bytes_per_ts.first;
+    auto bytes_per_ts = frame_id_bytes_per_ts.second;
+    for (const auto& outputs_nbytess : bytes_per_ts) {
+      auto out_v = outputs_nbytess.first;
+      auto nbytes = outputs_nbytess.second;
+      managed_tensor_values.emplace(out_v);
+      managed_bytes += nbytes;
+    }
+  }
+
+  // insert slab allocation node
+  auto* slab = copy->create(prim::AllocateStorage, 1);
+  // TODO: pass device type here
+  slab->i_(attr::size, managed_bytes); //->ty_(attr::device, at::kCPU);
+  slab->insertBefore(copy->nodes().front());
+
+  GRAPH_DEBUG("After insterting AllocateStorage node:\n", *copy);
+
+  // prepare graph
+  std::unordered_set<Node*> nodes_to_be_destoyed;
+  for (const auto& node : copy->nodes()) {
+    if (node->kind().is_aten()) {
+      const auto& variants = getAllOperatorsFor(node->kind());
+      for (const auto& variant : variants) {
+        if (variant->schema().overload_name() == "out") {
+          // replace with out variant of ops
+          auto out_var_node = node->replaceWithNewSymbol(
+              Symbol::fromQualString(variant->schema().name()));
+          // mark original variant for removal from graph
+          nodes_to_be_destoyed.emplace(node);
+
+          // insert prim::allocate nodes
+          // TODO: put here all of the attrs *for* the output tensor
+          auto* alloc = copy->create(prim::AllocateTensor, 1);
+          alloc->insertBefore(out_var_node);
+
+          // pass slab to allocation nodes
+          alloc->addInput(slab->output());
+          // pass allocated region to out variant of op
+          out_var_node->addInput(alloc->output());
+        }
+      }
+    }
+  }
+
+  // remove original variants
+  for (auto& node : nodes_to_be_destoyed) {
+    node->destroy();
+  }
+  GRAPH_DEBUG("After runMemoryPlanningPipeline:\n", *copy);
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
@@ -680,6 +740,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
+  runMemoryPlanningPipeline(copy, pr_);
   runProfilingOptimizations(copy);
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists

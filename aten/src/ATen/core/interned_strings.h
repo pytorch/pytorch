@@ -29,6 +29,8 @@ namespace c10 {
   _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
+  _(prim, AllocateStorage)           \
+  _(prim, AllocateTensor)           \
   _(prim, ConstantMKLDNNTensor)      \
   _(prim, BroadcastMKLDNNTensors)    \
   _(prim, MKLDNNGroup)               \

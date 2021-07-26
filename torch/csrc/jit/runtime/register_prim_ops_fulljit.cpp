@@ -2,23 +2,16 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <algorithm>
-#include <bitset>
-#include <cctype>
 #include <cmath>
 #include <exception>
-#include <fstream>
-#include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <ostream>
 #include <stdexcept>
 #include <string>
-#include <typeinfo>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -124,6 +117,38 @@ RegisterOperators reg(
                  stack->emplace_back();
                }
              }
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::AllocateStorage, /*size*/
+         [](const Node* node) -> Operation {
+           size_t size = node->i(attr::size);
+           auto device = at::kCPU;
+           return [size, device](Stack* stack) {
+             auto aligned_size =
+                 MemoryPlanner::compute_aligned_tensor_size(size);
+             at::DataPtr buffer =
+                 MemoryPlanner::allocate_buffer(aligned_size, device);
+             at::Tensor slab;
+             uint8_t* start = static_cast<uint8_t*>(buffer.get());
+             void* src = static_cast<void*>(start);
+             slab.storage().set_data_ptr_noswap(
+                 at::DataPtr(src, src, nullptr, device));
+             slab.storage().set_nbytes(aligned_size);
+             push(stack, slab);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::AllocateTensor,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+             at::Tensor slab;
+             pop(stack, slab);
+             // TODO: offset calculations and etc;
+             // void* src = static_cast<void*>(start + offset);
+             push(stack, slab);
            };
          },
          aliasAnalysisSpecialCase()),

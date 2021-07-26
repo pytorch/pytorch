@@ -1012,8 +1012,6 @@ TensorType::TensorType(
       undefined_(undefined) {}
 
 TensorTypePtr TensorType::create(const at::Tensor& t) {
-  VaryingShape<bool> contiguity;
-  VaryingShape<size_t> stride_indices;
   VaryingShape<int64_t> strides;
   VaryingShape<int64_t> sizes;
   if (!t.is_mkldnn() && !t.is_sparse()) {

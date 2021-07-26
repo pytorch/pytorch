@@ -50,5 +50,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   c10::optional<size_t> remaining_bailout_depth_;
 };
 
+TORCH_API void runMemoryPlanningPipeline(std::shared_ptr<Graph>&, std::unique_ptr<ProfilingRecord>&);
+
 } // namespace jit
 } // namespace torch
