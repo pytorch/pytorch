@@ -110,6 +110,7 @@ extern "C" struct _frozen _PyImport_FrozenModules[];
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
 const char* startup = R"RAW(
+import _ssl # must come before _hashlib otherwise ssl's locks will be set to a Python that might no longer exist...
 import sys
 import importlib.abc
 import linecache
@@ -283,7 +284,8 @@ struct InitLockAcquire {
   std::mutex& init_lock_;
 };
 
-struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
+struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
+    : public torch::deploy::InterpreterImpl {
   ConcreteInterpreterImpl() {
 #define APPEND_INIT(name) PyImport_AppendInittab(#name, PyInit_##name);
     FOREACH_LIBRARY(APPEND_INIT)
@@ -376,7 +378,7 @@ struct ConcreteInterpreterImpl : public torch::deploy::InterpreterImpl {
   std::mutex init_lock_;
 };
 
-struct ConcreteInterpreterSessionImpl
+struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     : public torch::deploy::InterpreterSessionImpl {
   ConcreteInterpreterSessionImpl(ConcreteInterpreterImpl* interp)
       : interp_(interp) {}
