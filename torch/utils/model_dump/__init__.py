@@ -41,7 +41,8 @@ run "python -m http.server", then load http://localhost:8000/skeleton.html
 in the browser.  In another terminal, run
 "python -m torch.utils.model_dump --style=json FILE > \
     torch/utils/model_dump/model_info.json"
-every time you update the Python code.  When you update JS, just refresh.
+every time you update the Python code or model.
+When you update JS, just refresh.
 
 Possible improvements:
     - Fix various TODO comments in this file and the JS.
@@ -119,7 +120,7 @@ def hierarchical_pickle(data):
         }
     if isinstance(data, torch.utils.show_pickle.FakeObject):
         typename = f"{data.module}.{data.name}"
-        if typename.startswith("__torch__."):
+        if typename.startswith("__torch__.") or typename.startswith("torch.jit.LoweredModule."):
             assert data.args == ()
             return {
                 "__module_type__": typename,
@@ -220,9 +221,14 @@ def get_model_info(
         assert path_prefix is not None
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
-        with zf.open(path_prefix + "/data.pkl") as handle:
-            raw_model_data = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
-            model_data = hierarchical_pickle(raw_model_data)
+        def get_pickle(name):
+            assert path_prefix is not None
+            with zf.open(path_prefix + f"/{name}.pkl") as handle:
+                raw = torch.utils.show_pickle.DumpUnpickler(handle, catch_invalid_utf8=True).load()
+                return hierarchical_pickle(raw)
+
+        model_data = get_pickle("data")
+        constants = get_pickle("constants")
 
         # Intern strings that are likely to be re-used.
         # Pickle automatically detects shared structure,
@@ -317,6 +323,7 @@ def get_model_info(
         interned_strings=list(interned_strings),
         code_files=code_files,
         model_data=model_data,
+        constants=constants,
         extra_files_jsons=extra_files_jsons,
         extra_pickles=extra_pickles,
     )}
@@ -334,10 +341,10 @@ def get_inline_skeleton():
 
     import importlib.resources
 
-    skeleton = importlib.resources.read_text(__package__, "skeleton.html")  # type: ignore[attr-defined]
-    js_code = importlib.resources.read_text(__package__, "code.js")  # type: ignore[attr-defined]
+    skeleton = importlib.resources.read_text(__package__, "skeleton.html")
+    js_code = importlib.resources.read_text(__package__, "code.js")
     for js_module in ["preact", "htm"]:
-        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")  # type: ignore[attr-defined]
+        js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
     skeleton = skeleton.replace(' src="./code.js">', ">\n" + js_code)
@@ -360,7 +367,7 @@ def burn_in_info(skeleton, info):
         "BURNED_IN_MODEL_INFO = " + json.dumps(info).replace("/", "\\/"))
 
 
-def main(argv, stdout=None):
+def main(argv, *, stdout=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")

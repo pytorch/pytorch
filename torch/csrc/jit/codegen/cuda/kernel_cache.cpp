@@ -146,6 +146,7 @@ at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
   const int rank = static_cast<int>(stride_properties->size());
 
   // stores axes with stride_index;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::set<int> ordered_axes;
 
   // TODO: this does not support broadcast yet;
@@ -183,6 +184,7 @@ at::DimVector inversePermutation(
   int rank = static_cast<int>(permuted.size());
 
   if (!reduction_axes.empty()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int red_rank = rank - static_cast<int>(reduction_axes.size());
 
     // see [ NOTE - reduction in graph ] part 1.
@@ -303,6 +305,7 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     evictCache(id_lookup_ret.evict_id);
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const size_t unique_id = id_lookup_ret.id;
   auto kernel_runtime = getKernelRuntimeFor(inputs, unique_id);
   most_recent_runtime_ = kernel_runtime;
@@ -737,7 +740,9 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
 
       int rank = static_cast<int>(type->dim().value());
 
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::ShapeSymbol> permuted_vec_ss;
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
       for (const auto i : c10::irange(rank)) {
         permuted_vec_ss.emplace_back(
@@ -808,6 +813,7 @@ void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::GraphCache");
   TORCH_INTERNAL_ASSERT(
@@ -855,9 +861,11 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing
   if (requiresPermutation()) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<IValue> permuted_inputs;
     permuted_inputs.reserve(inputs.size());
     for (const auto& input : inputs) {
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (input.isTensor()) {
         permuted_inputs.emplace_back(
             input.toTensor().permute(input_permutation_));
@@ -866,6 +874,7 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
       }
     }
     auto outputs = fusion_executor_cache_->runFusionWithInputs(permuted_inputs);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {

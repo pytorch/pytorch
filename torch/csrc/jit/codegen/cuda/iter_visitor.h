@@ -31,10 +31,10 @@ class Val;
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~IterVisitor() = default;
+  ~IterVisitor() override = default;
 
   IterVisitor() = default;
 
@@ -134,6 +134,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  * will be visited but the `N` output will not.
  *
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  protected:
   // NOLINTNEXTLINE(modernize-use-override)

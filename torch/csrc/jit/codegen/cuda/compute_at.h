@@ -35,6 +35,10 @@ class ComputeAt {
       unsigned int producer_position,
       ComputeAtMode mode = ComputeAtMode::Standard);
 
+  ComputeAt() = delete;
+  ComputeAt(ComputeAt&) = delete;
+  ComputeAt& operator=(const ComputeAt& other) = delete;
+
  private:
   TensorView* producer_;
   TensorView* consumer_;
@@ -98,10 +102,7 @@ class ComputeAt {
       unsigned int _reference_position,
       ComputeAtMode _mode);
 
-  ComputeAt() = delete;
   ~ComputeAt() = default;
-  ComputeAt(ComputeAt&) = delete;
-  ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
 } // namespace cuda

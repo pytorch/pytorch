@@ -53,6 +53,7 @@ namespace {
 // CudaFusionManager is not thread safe!
 // TODO: we should make the tradeoff here to use thread_local instead of global
 // singleton;
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class CudaFusionManager {
  public:
   static CudaFusionManager& getManager() {
@@ -168,6 +169,7 @@ class CudaFusionManager {
     const int rank = static_cast<int>(stride_properties->size());
 
     // stores axes with stride_index;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::set<int> ordered_axes;
 
     // TODO: this does not support broadcast yet;

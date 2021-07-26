@@ -143,7 +143,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     # see the explanation in the except clause below.
     for is_server in [is_host, False]:
         try:
-            store = TCPStore(  # type: ignore[call-arg]
+            store = TCPStore(
                 host, port, is_master=is_server, timeout=timedelta(seconds=read_timeout)
             )
 

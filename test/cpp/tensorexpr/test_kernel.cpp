@@ -28,7 +28,6 @@ class Kernel : public ::testing::Test {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, InliningIntermediates) {
   // here, each mul has only one use, so it should be completely inlined
   {
@@ -88,7 +87,6 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _1) {
   KernelScope kernel_scope;
 
@@ -128,7 +126,6 @@ TEST_F(Kernel, _1) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _2) {
   KernelScope kernel_scope;
 
@@ -169,7 +166,6 @@ TEST_F(Kernel, _2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _3) {
   KernelScope kernel_scope;
 
@@ -210,7 +206,6 @@ TEST_F(Kernel, _3) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, DISABLED_Shape_Inference) {
   // disabled: doesn't do stride propagation, and isn't being used currently
 
@@ -460,7 +455,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
@@ -518,7 +512,6 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -580,7 +573,6 @@ TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = false;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, OptimizeConditionals) {
   bool old_cat_wo_conditionals = getCatWoConditionals();
   bool old_opt_conditionals = getOptConditionals();
@@ -674,7 +666,6 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumAllAxes) {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
@@ -740,7 +731,6 @@ std::string li_to_str(at::ArrayRef<int64_t> li) {
   return out.str();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumOneAxis) {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
@@ -804,7 +794,6 @@ TEST_F(Kernel, SumOneAxis) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
@@ -871,7 +860,6 @@ TEST_F(Kernel, SumMultipleAxes) {
 // This test and the following ones testing Softmax only tests with dim set
 // to one of the valid input dimensions. It does not test with dim=None
 // because that is supposed to be deprecated.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax2D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -939,7 +927,6 @@ TEST_F(Kernel, Softmax2D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax3D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
@@ -1019,7 +1006,6 @@ TEST_F(Kernel, Softmax3D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax4D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
@@ -1103,7 +1089,6 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, InlineProducerIntoReduction) {
   KernelScope kernel_scope;
 
@@ -1143,7 +1128,6 @@ TEST_F(Kernel, InlineProducerIntoReduction) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, InlineReductionIntoConsumer) {
   KernelScope kernel_scope;
 
@@ -1188,7 +1172,6 @@ TEST_F(Kernel, InlineReductionIntoConsumer) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SanitizeNames_CUDA) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cuda:0),
@@ -1212,7 +1195,6 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, ConstantTensors) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1241,7 +1223,6 @@ TEST_F(Kernel, ConstantTensors) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, ConstantTensorsNonContiguous) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1346,6 +1327,47 @@ TEST_F(Kernel, CodegenInspection) {
   ASSERT_TRUE(
       !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
 #endif
+}
+
+Tensor* lowerNanToNum(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto e = Compute(
+      "custom_nan_to_num",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        auto load = input_buf.load(indices);
+        return IfThenElse::make(Cast::make(kBool, isnan(load)), 0.0f, load);
+      });
+  return e;
+}
+
+TEST_F(Kernel, CustomLowering) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+          %none : NoneType = prim::Constant()
+          %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+          return (%y)
+)IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
+      {aten::nan_to_num, lowerNanToNum}};
+  TensorExprKernel k(graph, lowerings);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check that our custom lowering is actually used
+  torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
+  torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
 } // namespace jit

@@ -4,7 +4,9 @@ from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
 import itertools
+import os
 import re
+import torch.utils.cpp_extension
 
 # TODO: Expand the dispatcher API to be a generic API for interfacing with
 # the dispatcher from Python!
@@ -755,6 +757,35 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> (Tensor _0) [
 '''
         )
 
+    def test_find_dangling_impls(self):
+        dangling_impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(
+            0,
+            len(dangling_impls),
+            msg=f"Expect zero dangling impls, but found: {dangling_impls}"
+        )
+
+    def test_find_dangling_impls_ext(self):
+        extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
+        module = torch.utils.cpp_extension.load(
+            name="dangling_impl_extension",
+            sources=[
+                extension_path,
+            ],
+            extra_cflags=["-g"],
+            verbose=True,
+        )
+
+        impls = C._dispatch_find_dangling_impls()
+        self.assertEqual(1, len(impls))
+        self.assertEqual(
+            '''\
+name: __test::foo
+schema: (none)
+CPU: registered at {}:5 :: () -> () [ boxed unboxed ]
+'''.format(extension_path),
+            impls[0])
+
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
         dispatcher = PythonDispatcher()
@@ -885,7 +916,6 @@ CompositeImplicitAutograd[alias] fn_CompositeImplicitAutograd
                 RuntimeError,
                 r"Registration to both CompositeImplicitAutograd and CompositeExplicitAutograd is not allowed"):
             dispatcher.register(["CompositeExplicitAutograd", "CompositeImplicitAutograd"])
-
 
 if __name__ == '__main__':
     run_tests()

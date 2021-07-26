@@ -176,7 +176,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
  public:
   //! constructor where maximum cache size is fixed during init
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   explicit InputsIdLookup(size_t max_cache_size = 100)
       : max_cache_size_(max_cache_size){};
 

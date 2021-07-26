@@ -37,7 +37,7 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "expecttest==0.1.3" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest
 
 :: Only the CPU tests run coverage, which I know is not super clear: https://github.com/pytorch/pytorch/issues/56264
 if "%BUILD_ENVIRONMENT%" == "pytorch-win-vs2019-cpu-py3" (

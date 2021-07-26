@@ -316,12 +316,11 @@ static DimVector get_reduction_shape(
 static TensorIterator make_reduction(
     const Tensor& self,
     const Tensor& result,
-    c10::optional<IntArrayRef> dim_opt,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType in_dtype) {
-  IntArrayRef dim = dim_opt.value_or(IntArrayRef{});
   int64_t ndim = self.dim();
-  auto mask = at::native::make_dim_mask(dim, ndim);
+  auto mask = at::native::make_dim_mask(dims, ndim);
   auto viewed_result =
       at::native::review_reduce_result(result, ndim, mask, keepdim);
   if (self.scalar_type() == in_dtype) {
@@ -333,7 +332,7 @@ static TensorIterator make_reduction(
 static TensorIterator make_reduction_from_out_ty(
     const Tensor& self,
     const Tensor& result,
-    c10::optional<IntArrayRef> dim,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
@@ -345,7 +344,7 @@ static TensorIterator make_reduction_from_out_ty(
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
-  return make_reduction(self, result, dim, keepdim, in_dtype);
+  return make_reduction(self, result, dims, keepdim, in_dtype);
 }
 
 } // namespace meta

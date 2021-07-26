@@ -23,12 +23,14 @@ namespace cuda {
 // This information is implicitly in the computeAtMaps, but there's no isolated
 // container for this information that we can reuse. Would be nice to generate
 // such a structure and propagate it through lowering.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API GpuLower {
   class KernelIrMapper;
 
  public:
   GpuLower() = default;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit GpuLower(Fusion* fusion) : fusion_(fusion) {
     lower();
   }

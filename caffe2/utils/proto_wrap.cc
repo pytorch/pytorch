@@ -1,5 +1,4 @@
 #include "caffe2/utils/proto_wrap.h"
-#include "caffe2/core/common.h"
 
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/generated_message_util.h>

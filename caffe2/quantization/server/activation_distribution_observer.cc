@@ -17,7 +17,6 @@ OutputMinMaxObserver::OutputMinMaxObserver(OperatorBase* op)
 
 // A global table that collects min/max for each tensor name.
 // Useful in case there are multiple copies of the same network.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static map<string, pair<float, float>> min_max_map_;
 
 // NOLINTNEXTLINE(modernize-use-equals-default)

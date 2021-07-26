@@ -44,7 +44,7 @@ TORCH_META_FUNC(upsample_bilinear2d_backward) (
         " but got grad_output.size(", i, ") = ", grad_output.size(i));
   }
 
-  set_output(input_size, grad_output.options());
+  set_output(input_size, grad_output.options().memory_format(grad_output.suggest_memory_format()));
 }
 
 } // namespace meta
@@ -101,9 +101,7 @@ Tensor upsample_bilinear2d_backward(
   return at::upsample_bilinear2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_bilinear2d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_bilinear2d_backward_kernel);
 
 } // namespace native

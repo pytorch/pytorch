@@ -95,12 +95,14 @@ class IrParser {
   };
 
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     initRegistry();
   }
 
   std::unique_ptr<Fusion> parse() {
     auto fusion = std::make_unique<Fusion>();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     FusionGuard fg(fusion.get());
     auto block = graph_->block();
 

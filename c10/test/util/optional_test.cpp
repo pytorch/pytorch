@@ -56,7 +56,6 @@ static_assert(
 
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Empty) {
   typename TestFixture::optional empty;
 
@@ -67,7 +66,6 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_THROW(empty.value(), c10::bad_optional_access);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Initialized) {
   using optional = typename TestFixture::optional;
 

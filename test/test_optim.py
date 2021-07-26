@@ -318,8 +318,14 @@ class TestOptim(TestCase):
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
+            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
+            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
@@ -331,6 +337,8 @@ class TestOptim(TestCase):
             ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
             ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
+            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
         ]
 
         kIterations = 11
@@ -376,7 +384,7 @@ class TestOptim(TestCase):
                 res.append(model.parameters())
 
             for p1, p2 in zip(res[0], res[1]):
-                self.assertEqual(p1, p2)
+                self.assertEqual(p1, p2, atol=5e-5, rtol=0)
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -478,44 +486,69 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    def test_nadam(self):
+        for optimizer in [optim.NAdam, optim_mt.NAdam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, momentum_decay=6e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+            with self.assertRaisesRegex(ValueError, "Invalid momentum_decay value: -0.2"):
+                optimizer(None, lr=1e-2, momentum_decay=-0.2)
+
     def test_adagrad(self):
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1,
-                                               initial_accumulator_value=0.1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1),
-            [lambda opt: ReduceLROnPlateau(opt)]
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1),
-            [lambda opt: ReduceLROnPlateau(opt),
-             lambda opt: ExponentialLR(opt, gamma=0.99)]
-        )
-        with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
-            optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    [weight, bias], lr=1e-1, initial_accumulator_value=0.1
+                )
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1),
+                [lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-1),
+                [lambda opt: ReduceLROnPlateau(opt),
+                 lambda opt: ExponentialLR(opt, gamma=0.99)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
+                optimizer(None, lr=1e-2, lr_decay=-0.5)
 
     def test_adagrad_sparse(self):
-        self._test_rosenbrock_sparse(
-            lambda params: optim.Adagrad(params, lr=1e-1)
-        )
-        self._test_rosenbrock_sparse(
-            lambda params: optim.Adagrad(params, lr=0.1),
-            [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
-             lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
-        )
+        for optimizer in [optim.Adagrad, optim_mt.Adagrad]:
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=1e-1)
+            )
+            self._test_rosenbrock_sparse(
+                lambda params: optimizer(params, lr=0.1),
+                [lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
+                 lambda opt: ReduceLROnPlateau(opt, threshold=1e-4)]
+            )
 
     def test_adamax(self):
         for optimizer in [optim.Adamax, optim_mt.Adamax]:
@@ -532,6 +565,30 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
                 optimizer(None, lr=1e-2, betas=(0.0, 1.0))
+
+    def test_radam(self):
+        for optimizer in [optim.RAdam, optim_mt.RAdam]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                    lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_rmsprop(self):
         for optimizer in [optim.RMSprop, optim_mt.RMSprop]:

@@ -338,7 +338,9 @@ class NativeFunction:
             assert dispatch != {DispatchKey.CompositeImplicitAutograd: cpp.name(func)}, \
                 "unnecessary dispatch table for this function; just delete the dispatch " \
                 "key entirely"
-            assert dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
+            # if a function is a structured delegate, deleting the dispatch
+            # table is NOT semantics preserving
+            assert structured_delegate or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}, \
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} " \
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected " \
                 "name, then delete the dispatch table"
@@ -637,6 +639,15 @@ class BackendIndex:
         if f.func.name not in self.index:
             return None
         return self.index[f.func.name]
+
+    def native_function_class_name(self) -> Optional[str]:
+        if self.external:
+            return f'{str(self.dispatch_key)}NativeFunctions'
+        else:
+            # TODO: This discrepancy isn't required; we could also generated
+            # a class for in-tree kernels. It'll just require carefully
+            # updating every kernel definition + callsite of every in-tree aten kernel.
+            return None
 
 
 # The function schema is undoubtedly the most important data structure
@@ -1453,6 +1464,18 @@ class OperatorName:
             return f"{self.name}.{self.overload_name}"
         else:
             return f"{self.name}"
+
+    # NB: This must be synchronized with the naming scheme in
+    # aten/src/ATen/templates/Operators.h
+    # Given a function schema "aten::op.overload(...)",
+    # If there is no overload name, this returns f"{op}"
+    # If there is an overload name, this returns f"{op}_{overload}"
+    def unambiguous_name(self) -> str:
+        if self.overload_name:
+            return f"{self.name}_{self.overload_name}"
+        else:
+            return f"{self.name}"
+
 
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
     return f.func.kind() is not SchemaKind.functional and \

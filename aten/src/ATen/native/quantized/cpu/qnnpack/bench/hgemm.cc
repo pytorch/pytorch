@@ -38,7 +38,7 @@ class HGEMM : public benchmark::Fixture {
   inline HGEMM(uint32_t mr, uint32_t nr, uint32_t kr)
       : mr_(mr), nr_(nr), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     const uint_fast32_t seed =
         std::chrono::system_clock::now().time_since_epoch().count();
     auto rng = std::bind(
@@ -58,7 +58,7 @@ class HGEMM : public benchmark::Fixture {
     std::fill(c_.begin(), c_.end(), UINT16_C(0x7E00) /* NaN */);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -165,7 +165,7 @@ class HGEMM_Op : public HGEMM {
  public:
   inline HGEMM_Op() : HGEMM(MR, NR, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);

@@ -7,8 +7,8 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-This module provides similar functionality as ``torch.distributed.launch`` with the following
-additional functionalities:
+``torch.distributed.run`` provides a superset of the functionality as ``torch.distributed.launch``
+with the following additional functionalities:
 
 1. Worker failures are handled gracefully by restarting all workers.
 
@@ -16,7 +16,60 @@ additional functionalities:
 
 3. Number of nodes is allowed to change between minimum and maximum sizes (elasticity).
 
-**Usage:**
+
+
+Transitioning from torch.distributed.launch to torch.distributed.run
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+``torch.distributed.run`` supports the same arguments as ``torch.distributed.launch`` **except**
+for ``--use_env`` which is now deprecated. To migrate from ``torch.distributed.launch``
+to ``torch.distributed.run`` follow these steps:
+
+1.  If your training script is already reading ``local_rank`` from the ``LOCAL_RANK`` environment variable.
+    Then you need simply omit the ``--use_env`` flag, e.g.:
+
+    +--------------------------------------------------------------------+------------------------------------------------------+
+    |         ``torch.distributed.launch``                               |            ``torch.distributed.run``                 |
+    +====================================================================+======================================================+
+    |                                                                    |                                                      |
+    | .. code-block:: shell-session                                      | .. code-block:: shell-session                        |
+    |                                                                    |                                                      |
+    |    $ python -m torch.distributed.launch --use_env train_script.py  |    $ python -m torch.distributed.run train_script.py |
+    |                                                                    |                                                      |
+    +--------------------------------------------------------------------+------------------------------------------------------+
+
+2.  If your training script reads local rank from a ``--local_rank`` cmd argument.
+    Change your training script to read from the ``LOCAL_RANK`` environment variable as
+    demonstrated by the following code snippet:
+
+    +-------------------------------------------------------+----------------------------------------------------+
+    |         ``torch.distributed.launch``                  |            ``torch.distributed.run``               |
+    +=======================================================+====================================================+
+    |                                                       |                                                    |
+    | .. code-block:: python                                | .. code-block:: python                             |
+    |                                                       |                                                    |
+    |                                                       |                                                    |
+    |    import argparse                                    |     import os                                      |
+    |    parser = argparse.ArgumentParser()                 |     local_rank = int(os.environ["LOCAL_RANK"])     |
+    |    parser.add_argument("--local_rank", type=int)      |                                                    |
+    |    args = parser.parse_args()                         |                                                    |
+    |                                                       |                                                    |
+    |    local_rank = args.local_rank                       |                                                    |
+    |                                                       |                                                    |
+    +-------------------------------------------------------+----------------------------------------------------+
+
+The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torch.distributed.run``.
+To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torch.distributed.run``
+please refer to:
+
+* :ref:`elastic_train_script` for more information on authoring training scripts that are ``torch.distributed.run`` compliant.
+* the rest of this page for more information on the features of ``torch.distributed.run``.
+
+
+
+Usage
+~~~~~~
 
 1. Single-node multi-worker
 
@@ -188,8 +241,10 @@ launcher.
 
 **Important Notices:**
 
-1. All the items in the important notices section of ``torch.distributed.launch`` apply to this
-   module as well.
+1. This utility and multi-process distributed (single-node or
+   multi-node) GPU training currently only achieves the best performance using
+   the NCCL distributed backend. Thus NCCL backend is the recommended backend to
+   use for GPU training.
 
 2. The environment variables necessary to initialize a Torch process group are provided to you by
    this module, no need for you to pass ``RANK`` manually.  To initialize a process group in your
@@ -200,21 +255,41 @@ launcher.
  >>> import torch.distributed as dist
  >>> dist.init_process_group(backend="gloo|nccl")
 
-3. On failures or membership changes ALL surviving workers are killed immediately. Make sure to
+3. In your training program, you can either use regular distributed functions
+   or use :func:`torch.nn.parallel.DistributedDataParallel` module. If your
+   training program uses GPUs for training and you would like to use
+   :func:`torch.nn.parallel.DistributedDataParallel` module,
+   here is how to configure it.
+
+::
+
+    local_rank = int(os.environ["LOCAL_RANK"])
+    model = torch.nn.parallel.DistributedDataParallel(model,
+                                                      device_ids=[local_rank],
+                                                      output_device=local_rank)
+
+Please ensure that ``device_ids`` argument is set to be the only GPU device id
+that your code will be operating on. This is generally the local rank of the
+process. In other words, the ``device_ids`` needs to be ``[int(os.environ("LOCAL_RANK"))]``,
+and ``output_device`` needs to be ``int(os.environ("LOCAL_RANK"))`` in order to use this
+utility
+
+
+4. On failures or membership changes ALL surviving workers are killed immediately. Make sure to
    checkpoint your progress. The frequency of checkpoints should depend on your job's tolerance
    for lost work.
 
-4. This module only supports homogeneous ``LOCAL_WORLD_SIZE``. That is, it is assumed that all
+5. This module only supports homogeneous ``LOCAL_WORLD_SIZE``. That is, it is assumed that all
    nodes run the same number of local workers (per role).
 
-5. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assgined a
+6. ``RANK`` is NOT stable. Between restarts, the local workers on a node can be assgined a
    different range of ranks than before. NEVER hard code any assumptions about the stable-ness of
    ranks or some correlation between ``RANK`` and ``LOCAL_RANK``.
 
-6. When using elasticity (``min_size!=max_size``) DO NOT hard code assumptions about
+7. When using elasticity (``min_size!=max_size``) DO NOT hard code assumptions about
    ``WORLD_SIZE`` as the world size can change as nodes are allowed to leave and join.
 
-7. It is recommended for your script to have the following structure:
+8. It is recommended for your script to have the following structure:
 
 ::
 
@@ -240,11 +315,11 @@ from typing import Callable, List, Tuple, Union
 import torch
 from torch.distributed.argparse_util import check_env, env
 from torch.distributed.elastic.multiprocessing import Std
+from torch.distributed.elastic.multiprocessing.errors import record
 from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
-
 
 log = get_logger()
 
@@ -269,7 +344,7 @@ def get_args_parser() -> ArgumentParser:
         "--nproc_per_node",
         action=env,
         type=str,
-        default="auto",
+        default="1",
         help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
     )
 
@@ -322,7 +397,7 @@ def get_args_parser() -> ArgumentParser:
         "--max_restarts",
         action=env,
         type=int,
-        default=3,
+        default=0,
         help="Maximum number of worker group restarts before failing.",
     )
     parser.add_argument(
@@ -570,11 +645,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
                 cmd_args.append("-m")
             cmd_args.append(args.training_script)
         else:
-            if not use_env:
-                raise ValueError(
-                    "When using the '--no_python' flag,"
-                    " you must also set the '--use_env' flag."
-                )
             if args.module:
                 raise ValueError(
                     "Don't use both the '--no_python' flag"
@@ -582,10 +652,6 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
                 )
             cmd = args.training_script
     if not use_env:
-        log.warning(
-            "--use_env is deprecated and will be removed in future releases.\n"
-            " Please read local_rank from `os.environ('LOCAL_RANK')` instead."
-        )
         cmd_args.append(f"--local_rank={macros.local_rank}")
     cmd_args.extend(args.training_script_args)
 
@@ -625,14 +691,11 @@ def run(args):
     )(*cmd_args)
 
 
+@record
 def main(args=None):
     args = parse_args(args)
     run(args)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO, format="[%(levelname)s] %(asctime)s %(module)s: %(message)s"
-    )
-    log.info(f"Running torch.distributed.run with args: {sys.argv}")
     main()

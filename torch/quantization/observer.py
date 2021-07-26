@@ -13,22 +13,33 @@ from .utils import check_min_max_valid
 class _PartialWrapper(object):
     def __init__(self, p):
         self.p = p
+        self.callable_args = {}
 
     def __call__(self, *args, **keywords):
+        # call each arg in callable_args and add them partial, then run with keywords
+        # skip if arg_name in keywords so its possible to overwrite
+        for arg_name in self.callable_args:
+            if arg_name not in keywords:
+                keywords = {**keywords, **{arg_name: self.callable_args[arg_name]()}}
         return self.p(*args, **keywords)
 
     def __repr__(self):
-        return self.p.__repr__()
+        return self.p.__repr__() + self.callable_args.__repr__()
 
     def with_args(self, **kwargs):
         return _with_args(self, **kwargs)
+
+    def with_callable_args(self, **kwargs):
+        self.callable_args = {**self.callable_args, **kwargs}
+        return self
 
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
 
     This can be useful when there is a need to create classes with the same
-    constructor arguments, but different instances.
+    constructor arguments, but different instances. Can be used in conjunction with
+    _callable_args
 
     Example::
 
@@ -41,6 +52,28 @@ def _with_args(cls_or_self, **kwargs):
     """
     r = _PartialWrapper(partial(cls_or_self, **kwargs))
     return r
+
+def _with_callable_args(cls_or_self, **kwargs):
+    r"""Wrapper that allows creation of class factories args that need to be
+    called at construction time.
+
+    This can be useful when there is a need to create classes with the same
+    constructor arguments, but different instances and those arguments should only
+    be calculated at construction time. Can be used in conjunction with _with_args
+
+    Example::
+
+        >>> Foo.with_callable_args = classmethod(_with_callable_args)
+        >>> Foo.with_args = classmethod(_with_args)
+        >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
+        >>> foo_instance1 = foo_builder()
+        >>> wait 50
+        >>> foo_instance2 = foo_builder()
+        >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
+        False
+    """
+    r = _PartialWrapper(partial(cls_or_self))
+    return r.with_callable_args(**kwargs)
 
 
 ABC: Any = ABCMeta(str("ABC"), (object,), {})  # compatible with Python 2 *and* 3:
@@ -72,6 +105,7 @@ class ObserverBase(ABC, nn.Module):
         pass
 
     with_args = classmethod(_with_args)
+    with_callable_args = classmethod(_with_callable_args)
 
 
 class _ObserverBase(ObserverBase):
@@ -273,7 +307,7 @@ class _ObserverBase(ObserverBase):
             zero_points: Zero points tensor of shape (#channels,)
         """
         if not check_min_max_valid(min_val, max_val):
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0], device=min_val.device.type), torch.tensor([0], device=min_val.device.type)
 
         quant_min, quant_max = self._calculate_qmin_qmax()
         min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
@@ -309,7 +343,7 @@ class _ObserverBase(ObserverBase):
         else:
             scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
             scale = torch.max(scale, self.eps)
-            zero_point = quant_min - torch.round(min_val_neg / scale)
+            zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
 
         # For scalar values, cast them to Tensors of size 1 to keep the shape
@@ -328,6 +362,10 @@ class _ObserverBase(ObserverBase):
                 )
 
         return scale, zero_point
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        raise NotImplementedError("Cannot reset min/max values in the given observer.")
 
 
 class MinMaxObserver(_ObserverBase):
@@ -455,6 +493,11 @@ class MinMaxObserver(_ObserverBase):
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_val = torch.tensor(float("inf"))
+        self.max_val = torch.tensor(float("-inf"))
 
 class MovingAverageMinMaxObserver(MinMaxObserver):
     r"""Observer module for computing the quantization parameters based on the
@@ -533,8 +576,6 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             min_val_cur, max_val_cur = torch._aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -703,6 +744,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
             unexpected_keys,
             error_msgs,
         )
+
+    @torch.jit.export
+    def reset_min_max_vals(self):
+        """Resets the min/max values."""
+        self.min_vals = torch.tensor([])
+        self.max_vals = torch.tensor([])
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -1093,7 +1140,7 @@ class HistogramObserver(_ObserverBase):
                 "must run observer before calling calculate_qparams.\
                                     Returning default scale and zero point "
             )
-            return torch.tensor([1.0]), torch.tensor([0])
+            return torch.tensor([1.0], device=self.min_val.device.type), torch.tensor([0], device=self.min_val.device.type)
         assert self.bins == len(self.histogram), (
             "The number of bins in histogram should be equal to the number of bins "
             "supplied while making this observer"

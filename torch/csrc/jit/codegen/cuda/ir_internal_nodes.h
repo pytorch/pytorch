@@ -723,6 +723,7 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 //!
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   NamedScalar(std::string name, DataType dtype)
       : Val(ValType::NamedScalar, dtype), name_(name) {}
 

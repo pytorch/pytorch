@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -35,7 +35,6 @@ ScalarType check_allany_and_get_output_dtype(
     const char* name,
     const Tensor& self,
     const Tensor& result,
-    IntArrayRef dims,
     bool keepdim) {
   // Refer [all, any : uint8 compatibility]
   TORCH_CHECK(
@@ -72,7 +71,7 @@ void check_allany_for_meta(
     bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
   const auto& result = meta.maybe_get_output();
-  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, dim, keepdim);
+  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, keepdim);
   auto shape = get_reduction_shape(self, dim, keepdim);
   meta.set_output(shape, self.options().dtype(out_dtype));
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
@@ -95,8 +94,9 @@ void check_argmax_argmin(
   DimVector shape;
 
   if (dim.has_value()) {
-    native::zero_numel_check_dims(self, dim.value(), name);
-    shape = get_reduction_shape(self, dim.value(), keepdim);
+    auto _dim = maybe_wrap_dim(dim.value(), self.dim());
+    native::zero_numel_check_dims(self, _dim, name);
+    shape = get_reduction_shape(self, _dim, keepdim);
   } else {
     TORCH_CHECK_INDEX(
         self.numel() != 0,
@@ -120,35 +120,20 @@ TORCH_META_FUNC(argmin)
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sum_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nansum_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(std_var_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(prod_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(norm_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mean_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(and_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(or_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(min_values_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_values_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(argmax_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(argmin_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cumsum_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cumprod_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logcumsumexp_stub);
 
 Tensor _logcumsumexp_cpu(const Tensor& self, int64_t dim) {
@@ -279,10 +264,7 @@ Tensor& cumprod_out(const Tensor& self, int64_t dim, c10::optional<ScalarType> d
 }
 
 Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
-  /* Logically implements w.flip(dim).cumsum(dim).flip(dim) without copying. */
-  const auto w_cumsum = w.cumsum(dim);
-  const auto w_sum = w_cumsum.narrow(dim, -1, 1);
-  return w_sum - w_cumsum + w;
+  return w.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
@@ -377,7 +359,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.dim());
-  const int64_t dim_size = input.size(dim);
+  const int64_t dim_size = input.sizes()[dim];
   if (dim_size == 1) {
     return grad;
   }
@@ -709,13 +691,16 @@ void pre_check_gradient(const Tensor& self, c10::optional<int64_t> spacing_size,
   // Helper for gradient function to make sure input data satisfies prerequisites
   TORCH_CHECK(self.scalar_type() != ScalarType::Byte, "torch.gradient does not support uint8 input.");
   if (spacing_size.has_value() && !dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), "but got a list of length ", spacing_size.value());
+    TORCH_CHECK(spacing_size.value() == 1 || spacing_size.value() == self.dim(), "torch.gradient expected spacing to be unspecified, a scalar or a list of length ", self.dim(), " but got a list of length ", spacing_size.value());
   }
   if (spacing_size.has_value() && dim.has_value()) {
-    TORCH_CHECK(spacing_size.value() == dim.value().size(), "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
+    TORCH_CHECK(spacing_size.value() == static_cast<int64_t>(dim.value().size()),
+    "torch.gradient expected spacing to be unspecified, a scalar or it's spacing and dim arguments to have the same length, but got a spacing argument of length ", spacing_size.value(), " and a dim argument of length ", dim.value().size(), "." );
   }
-  // See discussion : https://github.com/pytorch/pytorch/issues/56036
-  TORCH_CHECK(edge_order == 1, "torch.gradient only supports edge_order=1 currently. To request support for more edge_orders please file an issue here : https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md");
+  TORCH_CHECK(edge_order == 1 || edge_order == 2, "torch.gradient only supports edge_order=1 and edge_order=2.");
+  for (const auto i : c10::irange(self.dim())) {
+    TORCH_CHECK(self.size(i) >= edge_order + 1, "torch.gradient expected each dimension size to be at least edge_order+1");
+  }
   if (dim.has_value()) {
     // The following function get called to check whether dim argument satisfies prerequisites.
     // The output of the function is not used for the computation of gradient.
@@ -732,6 +717,7 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
   for (const auto i : c10::irange(dim.size())) {
     TORCH_CHECK( coordinates[i].dim() == 1, "torch.gradient expected each element of spacing to have one dimension, but got an element with ", coordinates[i].dim(), " dimensions!");
     int64_t direction = maybe_wrap_dim(dim[i], self.dim());
+    Tensor prepend, append;
     std::vector<int64_t> shape(self.dim(),1);
     shape[ direction ] = -1;
 
@@ -742,9 +728,22 @@ std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, 
     auto b = ( (dx2-dx1) / (dx1*dx2)       ).reshape(shape);
     auto c = (    dx1    / (dx2*(dx1+dx2)) ).reshape(shape);
 
-    auto center  = a*at::slice(self, direction, 0, -2) + b*at::slice(self, direction , 1, -1) + c*at::slice(self, direction ,2);
-    auto prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
-    auto append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    auto center = a * at::slice(self, direction, 0, -2) + b * at::slice(self, direction , 1, -1) + c * at::slice(self, direction, 2);
+    if (edge_order == 1) {
+     prepend = (at::slice(self, direction, 1, 2  ) - at::slice(self, direction, 0, 1   )) / ax_dx[0]  ;
+     append  = (at::slice(self, direction, -1    ) - at::slice(self, direction, -2, -1 )) / ax_dx[-1] ;
+    } else if (edge_order == 2) {
+     a =-(2.0 * ax_dx[0] + ax_dx[1]) / (ax_dx[0] * (ax_dx[0] + ax_dx[1])) ;
+     b = (      ax_dx[0] + ax_dx[1]) / (ax_dx[0] * ax_dx[1])       ;
+     c = (     -ax_dx[0]           ) / (ax_dx[1] * (ax_dx[0] + ax_dx[1]));
+     prepend = a * at::slice(self, direction, 0, 1) + b * at::slice(self, direction, 1, 2) + c * at::slice(self, direction, 2, 3);
+
+     a = (    ax_dx[-1]            ) / (ax_dx[-2] * (ax_dx[-1] + ax_dx[-2]));
+     b =-(    ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * ax_dx[-2]);
+     c = (2 * ax_dx[-1] + ax_dx[-2]) / (ax_dx[-1] * (ax_dx[-1] + ax_dx[-2]));
+     append = a * at::slice(self, direction, -3, -2) + b * at::slice(self, direction, -2, -1) + c * at::slice(self, direction, -1);
+    }
+
     result.emplace_back(prepend_append_on_dim(center, prepend, append, direction));
   }
   return result;
@@ -755,9 +754,16 @@ std::vector<Tensor> gradient_helper_float(const Tensor& self, ArrayRef<Scalar> s
   for (const auto i : c10::irange(dim.size())) {
       int64_t direction = maybe_wrap_dim(dim[i], self.dim());
       auto ax_dx = spacing[i];
+      Tensor prepend, append;
       auto center  = (at::slice(self,direction, 2   ) - at::slice(self, direction, 0, -2 ) ) / ax_dx;
-      auto prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx  ;
-      auto append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      if (edge_order==1) {
+        prepend = (at::slice(self,direction, 1, 2) - at::slice(self, direction, 0, 1  ) ) / ax_dx;
+        append  = (at::slice(self,direction, -1  ) - at::slice(self, direction, -2, -1) ) / ax_dx ;
+      } else if (edge_order==2) {
+        prepend = (-1.5 * at::slice(self, direction, 0, 1) + 2 * at::slice(self, direction, 1, 2)   - 0.5 * at::slice(self, direction, 2, 3))/ ax_dx;
+        append = (0.5 * at::slice(self, direction, -3, -2) - 2 * at::slice(self, direction, -2, -1) + 1.5 * at::slice(self, direction, -1))  / ax_dx;
+      }
+
       result.emplace_back(prepend_append_on_dim(center/2, prepend, append, direction));
   }
   return result;
@@ -1103,6 +1109,14 @@ Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor
   return at::logsumexp_out(result, self, dimnames_to_positions(self, dims), keepdim);
 }
 
+// special_logsumexp, alias for logsumexp
+Tensor special_logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return self.logsumexp(dims, keepdim);
+}
+Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
+  return at::logsumexp_out(result, self, dims, keepdim);
+}
+
 static Tensor& norm_out(Tensor &result, const Tensor &self, const optional<Scalar>& opt_p,
                                IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
   auto p = opt_p.value_or(2.0).to<double>();
@@ -1226,7 +1240,7 @@ Tensor all(const Tensor& self) {
   Tensor result;
 
   auto out_dtype =
-      meta::check_allany_and_get_output_dtype("all", self, result, {}, false);
+      meta::check_allany_and_get_output_dtype("all", self, result, false);
   auto shape = meta::get_reduction_shape(self, {}, false);
 
   result = at::empty(shape, self.options().dtype(out_dtype));
@@ -1237,6 +1251,7 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
@@ -1258,7 +1273,7 @@ Tensor any(const Tensor& self) {
   Tensor result;
 
   auto out_dtype =
-      meta::check_allany_and_get_output_dtype("any", self, result, {}, false);
+      meta::check_allany_and_get_output_dtype("any", self, result, false);
   auto shape = meta::get_reduction_shape(self, {}, false);
 
   result = at::empty(shape, self.options().dtype(out_dtype));
@@ -1269,6 +1284,7 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  dim = maybe_wrap_dim(dim, self.dim());
   auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
   if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
@@ -1323,18 +1339,18 @@ void argmax_argmin_impl(
     Stub& stub) {
   c10::MaybeOwned<Tensor> in;
   DimVector dims;
-  int64_t wrapped_dim = 0;
+  int64_t _dim = 0;
 
   if (dim.has_value()) {
-    wrapped_dim = maybe_wrap_dim(dim.value(), self.dim());
+    _dim = maybe_wrap_dim(dim.value(), self.dim());
     auto sizes = self.sizes();
 
-    if (sizes[wrapped_dim] == 1) {
+    if (sizes[_dim] == 1) {
       result.fill_(0);
       return;
     }
 
-    dims = IntArrayRef(wrapped_dim);
+    dims = IntArrayRef(_dim);
     in = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
     in = c10::MaybeOwned<Tensor>::owned(self.reshape({-1}));

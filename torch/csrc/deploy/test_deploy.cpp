@@ -53,6 +53,15 @@ TEST(TorchpyTest, LoadLibrary) {
   model({});
 }
 
+TEST(TorchpyTest, InitTwice) {
+  {
+    torch::deploy::InterpreterManager m(2);
+  }
+  {
+    torch::deploy::InterpreterManager m(1);
+  }
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
@@ -85,6 +94,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(ninterp)) {
     outputs.push_back(model({input.alias()}).toTensor());
   }
@@ -124,6 +134,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(nthreads)) {
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
@@ -150,12 +161,15 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
   torch::deploy::InterpreterManager manager(3);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(manager.load_package("some garbage path"), c10::Error);
 
   torch::deploy::Package p = manager.load_package(path("SIMPLE", simple));
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(p.load_pickle("some other", "garbage path"), c10::Error);
 
   auto model = p.load_pickle("model", "model.pkl");
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(model(at::IValue("unexpected input")), c10::Error);
 }
 
@@ -188,6 +202,7 @@ TEST(TorchpyTest, TensorSharingNotAllowed) {
   auto obj = I0.global("torch", "empty")({I0.from_ivalue(2)});
   auto t = obj.toIValue().toTensor();
   // try to feed it to the other interpreter, should error
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(I1.global("torch", "sigmoid")({t}), c10::Error);
 }
 
@@ -198,6 +213,7 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto n : c10::irange(trials)) {
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
@@ -227,6 +243,7 @@ TEST(TorchpyTest, DisarmHook) {
   } // unload the old interpreter
   torch::deploy::InterpreterManager m(1);
   auto I = m.acquire_one();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(I.from_ivalue(t), c10::Error); // NOT a segfault
 }
 
@@ -238,3 +255,87 @@ TEST(TorchpyTest, RegisterModule) {
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
   }
 }
+
+TEST(TorchpyTest, FxModule) {
+  size_t nthreads = 3;
+  torch::deploy::InterpreterManager manager(nthreads);
+  torch::deploy::Package p = manager.load_package(path(
+      "SIMPLE_LEAF_FX", "torch/csrc/deploy/example/generated/simple_leaf_fx"));
+  auto model = p.load_pickle("model", "model.pkl");
+
+  std::vector<at::Tensor> outputs;
+  auto input = torch::ones({5, 10});
+  for (const auto i : c10::irange(nthreads)) {
+    outputs.push_back(model({input.alias()}).toTensor());
+  }
+
+  // reference model
+  auto ref_model = torch::jit::load(path(
+      "SIMPLE_LEAF_JIT",
+      "torch/csrc/deploy/example/generated/simple_leaf_jit"));
+
+  auto ref_output = ref_model.forward({input.alias()}).toTensor();
+
+  // Compare all to reference
+  for (const auto i : c10::irange(nthreads)) {
+    ASSERT_TRUE(ref_output.equal(outputs[i]));
+  }
+}
+
+#ifndef FBCODE_CAFFE2
+thread_local int in_another_module = 5;
+
+TEST(TorchpyTest, SharedLibraryLoad) {
+  torch::deploy::InterpreterManager manager(2);
+  auto no_args = at::ArrayRef<torch::deploy::Obj>();
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
+    I.global("test_deploy_python", "setup")({getenv("PATH")});
+    AT_ASSERT(I.global("libtest_deploy_lib", "check_initial_state")(no_args)
+                  .toIValue()
+                  .toBool());
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "simple_add")({5, 4})
+            .toIValue()
+            .toInt() == 9);
+    // I.global("numpy", "array"); // force numpy to load here so it is loaded
+    //                             // twice before we run the tests
+  }
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    // auto i =
+    //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
+    I.global("libtest_deploy_lib", "raise_and_catch_exception")({true});
+    try {
+      I.global("libtest_deploy_lib", "raise_exception")(no_args);
+      ASSERT_TRUE(false); // raise_exception did not throw?
+    } catch (std::exception& err) {
+      ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
+    }
+    in_another_module = 6;
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_in_another_module")(no_args)
+            .toIValue()
+            .toInt() == 6);
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar")(no_args).toIValue().toInt() ==
+        14);
+    {
+      std::thread foo([&] {
+        I.global("libtest_deploy_lib", "set_bar")({13});
+        ASSERT_TRUE(
+            I.global("libtest_deploy_lib", "get_bar")(no_args)
+                .toIValue()
+                .toInt() == 13);
+      });
+      foo.join();
+    }
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar_destructed")(no_args)
+            .toIValue()
+            .toInt() == 1);
+    I.global("libtest_deploy_lib", "set_bar")({12});
+  }
+}
+#endif

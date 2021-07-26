@@ -16,6 +16,7 @@ namespace cuda {
 //! Calculate Fusion IR expressions
 class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
 
   //! Returns the associated fusion object
