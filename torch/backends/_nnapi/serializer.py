@@ -35,7 +35,9 @@ class NNAPI_OperandCode(object):
     FLOAT16 = 10
     TENSOR_QUANT8_SYMM_PER_CHANNEL = 11
     TENSOR_QUANT16_ASYMM = 12
-
+    TENSOR_QUANT8_SYMM = 13
+    TENSOR_QUANT8_ASYMM_SIGNED = 14
+    MODEL = 15
 
 class NNAPI_OperationCode(object):
     ADD = 0
@@ -133,10 +135,13 @@ class NNAPI_OperationCode(object):
     UNIDIRECTIONAL_SEQUENCE_LSTM = 92
     UNIDIRECTIONAL_SEQUENCE_RNN = 93
     RESIZE_NEAREST_NEIGHBOR = 94
-
+    QUANTIZED_LSTM = 95
+    IF = 96
+    WHILE = 97
     ELU = 98
     HARD_SWISH = 99
-
+    FILL = 100
+    RANK = 101
 
 class NNAPI_FuseCode(object):
     FUSED_NONE = 0
