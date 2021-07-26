@@ -463,34 +463,49 @@ Tensor cross_entropy_loss_prob_target(
   const auto n_classes = self.size(1);
   TORCH_CHECK(
       !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
-      "weight tensor should be defined either for all ",
+      "cross_entropy: weight tensor should be defined either for all ",
       n_classes,
       " classes or no classes"
       " but got weight tensor of shape: ",
       weight.sizes());
 
   Tensor ret;
-  Tensor input = at::log_softmax(
-      self, 1, optTypeMetaToScalarType(self.options().dtype_opt()));
+  auto input = at::log_softmax(self, 1, self.scalar_type());
   if (weight.defined()) {
     // Expand weight to the correct number of dims for broadcasting with input / target
     auto weight_bc_shape = std::vector<int64_t>(input.dim(), 1);
     weight_bc_shape[1] = weight.size(0);
     Tensor weight_ = weight.view(weight_bc_shape);
 
-    ret = -(input * target * weight_).sum(1);
-    if (reduction == Reduction::Mean) {
-      // Compute weighted mean
-      ret = ret.sum() / (target * weight_).sum();
-    } else if (reduction == Reduction::Sum) {
-      ret = ret.sum();
+    switch (reduction) {
+      case Reduction::Mean:
+        // Note: The computation is as follows to maintain consistency between the hard label and one-hot
+        // soft label cases. TODO: Change this to the more correct form:
+        //ret = -(input * target * weight_).sum(1).mean();
+        ret = -(input * target * weight_).sum() / (target * weight_).sum();
+        break;
+      case Reduction::Sum:
+        ret = -(input * target * weight_).sum();
+        break;
+      case Reduction::None:
+        ret = -(input * target * weight_).sum(1);
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
-    ret = -(input * target).sum(1);
-    if (reduction == Reduction::Mean) {
-      ret = ret.mean();
-    } else if (reduction == Reduction::Sum) {
-      ret = ret.sum();
+    switch (reduction) {
+      case Reduction::Mean:
+        ret = -(input * target).sum(1).mean();
+        break;
+      case Reduction::Sum:
+        ret = -(input * target).sum();
+        break;
+      case Reduction::None:
+        ret = -(input * target).sum(1);
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   }
   return ret;
@@ -515,8 +530,7 @@ Tensor cross_entropy_loss(
     ret = cross_entropy_loss_prob_target(self, target, weight_, reduction);
   } else {
     ret = at::nll_loss_nd(
-        at::log_softmax(
-            self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
+        at::log_softmax(self, 1, self.scalar_type()),
         target,
         weight,
         reduction,

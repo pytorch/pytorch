@@ -2768,8 +2768,7 @@ def cross_entropy(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> Tensor:
-    r"""This criterion combines `log_softmax` and `nll_loss` in a single
-    function.
+    r"""This criterion computes the cross entropy loss between input and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
@@ -2807,8 +2806,15 @@ def cross_entropy(
 
     Examples::
 
+        >>> # Example of target with class indices
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> target = torch.randint(5, (3,), dtype=torch.int64)
+        >>> loss = F.cross_entropy(input, target)
+        >>> loss.backward()
+        >>>
+        >>> # Example of target with class probabilities
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).softmax(dim=1)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """

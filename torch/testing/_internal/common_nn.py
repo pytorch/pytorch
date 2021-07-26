@@ -4782,6 +4782,42 @@ criterion_tests = [
         check_bfloat16=False,
     ),
     dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3),
+        target_fn=lambda: torch.rand(5, 3).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='2d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3, 4),
+        target_fn=lambda: torch.rand(5, 3, 4).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='3d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
+        module_name='CrossEntropyLoss',
+        constructor_args_fn=lambda: (torch.rand(3),),
+        cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
+        input_size=(5, 3, 4, 2),
+        target_fn=lambda: torch.rand(5, 3, 4, 2).softmax(dim=1),
+        reference_fn=lambda i, t, m:
+            loss_reference_fns['CrossEntropyLoss'](i, t, reduction=get_reduction(m), weight=get_weight(m)),
+        check_sum_reduction=True,
+        desc='4d_prob_target_weights',
+        check_bfloat16=False,
+    ),
+    dict(
         module_name='PoissonNLLLoss',  # Default is log_input=True, full=False
         input_size=(2, 3, 4, 5),
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
