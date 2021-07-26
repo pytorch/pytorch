@@ -877,6 +877,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
+    "aten/src/ATen/native/cpu/PaddingKernel.cpp",
     "aten/src/ATen/native/cpu/PointwiseOpsKernel.cpp",
     "aten/src/ATen/native/cpu/PowKernel.cpp",
     "aten/src/ATen/native/cpu/RangeFactoriesKernel.cpp",
