@@ -11,7 +11,7 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <pybind11/pybind11.h>
 
-// NOTE See [Sharded File] comment in VariableType
+// NOTE: See [Sharded File] comment in VariableType
 
 namespace torch { namespace autograd { namespace generated {
 
