@@ -30,8 +30,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradOptions& lhs, const AdagradOptions& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdagradOptions() = default;
+  ~AdagradOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -44,8 +43,7 @@ public:
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(const AdagradParamState& lhs, const AdagradParamState& rhs);
-  // NOLINTNEXTLINE(modernize-use-override)
-  ~AdagradParamState() = default;
+  ~AdagradParamState() override = default;
 };
 
 class TORCH_API Adagrad : public Optimizer {
