@@ -163,7 +163,6 @@ TEST(Conv, DepthwiseConv2DDynamicShapes) {
 
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Conv, Conv2D) {
   te::KernelScope kernel_scope;
 

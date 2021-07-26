@@ -9,6 +9,10 @@ toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 from torch.quantization.quantize import is_activation_post_process
+from torch.quantization import (
+    ObserverBase,
+    FakeQuantizeBase,
+)
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -72,9 +76,9 @@ def get_node_first_input_and_output_type(
         assert node.op == 'call_module'
         assert isinstance(node.target, str)
         mod = getattr_from_fqn(gm, node.target)
-        if isinstance(mod, logger_cls):  # type: ignore[arg-type]
-            # A logger's input and output type is the output type of
-            # the preceding node.
+        if isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase)):  # type: ignore[arg-type]
+            # A logger or observer's input and output type is the output
+            # type of the preceding node.
             first_arg = node.args[0]
             assert isinstance(first_arg, Node)
             _prev_node_input_type, prev_node_output_type = \
@@ -350,11 +354,82 @@ def rekey_logger_info_on_node_name_of_model(
     return new_results
 
 
+def maybe_add_missing_fqns(results: NSResultsType) -> None:
+    """
+    If `fqn` entries are filled in for one of the models in `results`, copies
+    them over to any models which do not have them filled out.
+
+    A common use case benefitting from this is comparing a model prepared by
+    quantization to a quantized model. In this case, the model prepared by
+    quantization would have `fqn` entries, and the quantized model would not.
+    """
+
+    # Check in the first result to find any model with fqn entries defined.
+    model_name_with_fqns = None
+    for layer_name, result_type_to_results in results.items():
+        for result_type, model_name_to_results in \
+                result_type_to_results.items():
+            for model_name, model_results in model_name_to_results.items():
+                if len(model_results) > 0:
+                    if model_results[0]['fqn'] is not None:
+                        model_name_with_fqns = model_name
+                        break
+            break
+        break
+
+    if model_name_with_fqns:
+        for layer_name, result_type_to_results in results.items():
+            for result_type, model_name_to_results in \
+                    result_type_to_results.items():
+                ref_model_results = model_name_to_results[model_name_with_fqns]
+                for model_name, model_results in model_name_to_results.items():
+                    if model_name == model_name_with_fqns:
+                        continue
+                    for i in range(len(model_results)):
+                        fqn = ref_model_results[i]['fqn']
+                        model_results[i]['fqn'] = fqn
+
+def maybe_dequantize_first_two_tensor_args_and_handle_tuples(f):
+    def inner(*args, **kwargs):
+        a0, a1, *a_other = args
+
+        if (isinstance(a0, tuple) and isinstance(a1, tuple)) or \
+                (isinstance(a0, list) and isinstance(a1, list)):
+            results = []
+            for el0, el1 in zip(a0, a1):
+                new_args = (el0, el1, *a_other)
+                results.append(inner(*new_args, **kwargs))
+            return results
+
+        elif isinstance(a0, torch.Tensor) and isinstance(a1, torch.Tensor):
+            if a0.is_quantized:
+                a0 = a0.dequantize()
+            if a1.is_quantized:
+                a1 = a1.dequantize()
+
+        # for the purposes of this util, only handle floats
+        if a0.dtype != torch.float or a1.dtype != torch.float:
+            return None
+
+        new_args = (a0, a1, *a_other)
+        return f(*new_args, **kwargs)
+    return inner
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
 def compute_sqnr(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    if x.is_quantized:
-        x = x.dequantize()
-    if y.is_quantized:
-        y = y.dequantize()
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
     return 20 * torch.log10(Ps / Pn)
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    return torch.sqrt(((x - y) ** 2).sum() / (x ** 2).sum())
+
+@maybe_dequantize_first_two_tensor_args_and_handle_tuples
+def compute_cosine_similarity(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    # For convolutions, the shape of the quantized weight has one additional
+    # dimension compared to the shape of the fp32 weight. Match the shapes
+    # to enable cosine similarity comparison.
+    x = x.reshape(1, -1)
+    y = y.reshape(1, -1)
+    return torch.nn.functional.cosine_similarity(x, y)

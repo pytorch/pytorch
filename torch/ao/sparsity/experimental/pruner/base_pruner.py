@@ -6,10 +6,13 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import PruningParametrization, ActivationReconstruction
+from torch.nn.modules.container import ModuleDict, ModuleList
+
+from .parametrization import PruningParametrization, LinearActivationReconstruction, Conv2dActivationReconstruction
 
 SUPPORTED_MODULES = {
-    nn.Linear
+    nn.Linear,
+    nn.Conv2d
 }
 
 def _module_to_path(model, layer, prefix=''):
@@ -59,6 +62,8 @@ class BasePruner(abc.ABC):
 
         self.module_groups = []
         self.enable_mask_update = False
+        self.activation_handles = []
+        self.bias_handles = []
 
         self.model = model
         # If no config -- try getting all the supported layers
@@ -130,15 +135,23 @@ class BasePruner(abc.ABC):
                                                  param(module.mask),
                                                  unsafe=True)
 
-            module.register_forward_hook(
-                ActivationReconstruction(module.parametrizations.weight[0])
-            )
+            assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
+            assert isinstance(module.parametrizations.weight, ModuleList)
+            if isinstance(module, nn.Linear):
+                self.activation_handles.append(module.register_forward_hook(
+                    LinearActivationReconstruction(module.parametrizations.weight[0])
+                ))
+            elif isinstance(module, nn.Conv2d):
+                self.activation_handles.append(module.register_forward_hook(
+                    Conv2dActivationReconstruction(module.parametrizations.weight[0])
+                ))
+            else:
+                raise NotImplementedError("This module type is not supported yet.")
 
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))
                 module.bias = None
-            module.register_forward_hook(self.bias_hook)
-
+            self.bias_handles.append(module.register_forward_hook(self.bias_hook))
 
     def convert(self, use_path=False, *args, **kwargs):
         for config in self.module_groups:
