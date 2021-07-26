@@ -46,7 +46,7 @@ def skip_if_no_ninja(func):
     return wrapper
 
 
-if BACKEND == "gloo" or BACKEND == "nccl":
+if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "_internal_ucc":
 
     @unittest.skipIf(
         TEST_WITH_TSAN,

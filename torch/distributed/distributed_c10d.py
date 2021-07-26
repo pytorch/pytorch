@@ -35,6 +35,7 @@ from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
+_UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -381,6 +382,13 @@ def is_gloo_available():
     Checks if the Gloo backend is available.
     """
     return _GLOO_AVAILABLE
+
+
+def is_ucc_available():
+    """
+    Checks if the UCC backend is available.
+    """
+    return _UCC_AVAILABLE
 
 
 def is_initialized():

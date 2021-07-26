@@ -19,7 +19,7 @@ from torch.testing._internal.distributed.distributed_test import (
 
 BACKEND = os.environ["BACKEND"]
 
-if BACKEND == "gloo" or BACKEND == "nccl":
+if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "_internal_ucc":
 
     @unittest.skipIf(
         TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
