@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union
+from typing import Callable, List, Sequence, Tuple, Type, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (expectedFailure, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -46,7 +46,8 @@ class DecorateInfo(object):
     """Describes which test, or type of tests, should be wrapped in the given
        decorators when testing an operator. Any test that matches all provided
        arguments will be decorated. The decorators will only be applied if the
-       active_if argument is True."""
+       active_if argument is True.
+       """
 
     __slots__ = ['decorators', 'cls_name', 'test_name', 'device_type', 'dtypes', 'active_if']
 
@@ -72,13 +73,29 @@ class DecorateInfo(object):
 class SkipInfo(DecorateInfo):
     """Describes which test, or type of tests, should be skipped when testing
        an operator. Any test that matches all provided arguments will be skipped.
-       The skip will only be checked if the active_if argument is True."""
+       The skip will only be checked if the active_if argument is True.
+       """
 
     def __init__(self, cls_name=None, test_name=None, *,
                  device_type=None, dtypes=None, active_if=True):
         super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
+
+
+class FailureInfo(DecorateInfo):
+    """Describes which test, or type of tests, should fail when testing an
+    operator. Any test that matches all provided arguments will be asserted
+    that it fails. The skip will only be checked if the active_if argument
+    is True.
+    """
+
+    def __init__(self, cls_name=None, test_name=None, *,
+                 device_type=None, dtypes=None, active_if=True):
+        super().__init__(decorators=expectedFailure(device_type), cls_name=cls_name,
+                         test_name=test_name, device_type=device_type, dtypes=dtypes,
+                         active_if=active_if)
+
 
 class SampleInput(object):
     """Represents sample inputs to a function."""
@@ -454,11 +471,14 @@ class OpInfo(object):
                                             # if _NOTHING (default), the method variant will be autopopulated
                                             # if None, then the OpInfo specifies no method variant
 
-                 # the following metadata are test directives for skipping or
-                 # modifying tests and a pointer to the op's sample inputs function
-                 # this function lets the OpInfo generate valid inputs
-                 skips=tuple(),  # information about which tests to skip
-                 decorators=None,  # decorators to apply to generated tests
+                 # Accepts decorator functions to be applied to all tests or DecorateInfo objects to apply decorators
+                 # to the specified subset of tests.
+                 decorators: Sequence[Union[DecorateInfo, Callable]] = tuple(),
+                 # Specialized decorators for skipping a specific subset of the tests.
+                 skips: Sequence[SkipInfo] = tuple(),  # information about which tests to skip
+                 # Specialized decorators for asserting that a specific subset of the tests fail.
+                 fails: Sequence[FailureInfo] = tuple(),
+
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
@@ -584,8 +604,7 @@ class OpInfo(object):
         self.supports_out = supports_out
         self.safe_casts_outputs = safe_casts_outputs
 
-        self.skips = skips
-        self.decorators = decorators
+        self.decorators: Sequence[Union[DecorateInfo, Callable]] = (*decorators, *skips, *fails)
         self.sample_inputs_func = sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
@@ -701,6 +720,17 @@ class OpInfo(object):
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype)
                    for si in self.skips)
+
+    def get_decorators(self, test_class, test_name, device, dtype):
+        '''Returns the decorators targeting the given test.'''
+        result = []
+        for decorator in self.decorators:
+            if isinstance(decorator, DecorateInfo):
+                if decorator.is_active(test_class, test_name, device, dtype):
+                    result.extend(decorator.decorators)
+            else:
+                result.append(decorator)
+        return result
 
     def supported_dtypes(self, device_type):
         if device_type == 'cpu':
