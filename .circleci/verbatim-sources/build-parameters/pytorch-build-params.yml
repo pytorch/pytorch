@@ -89,6 +89,9 @@ pytorch_windows_params: &pytorch_windows_params
     python_version:
       type: string
       default: "3.8"
+    vs_version:
+      type: string
+      default: "16.8.6"
     vc_version:
       type: string
       default: "14.16"
@@ -106,6 +109,7 @@ pytorch_windows_params: &pytorch_windows_params
     SCCACHE_BUCKET: "ossci-compiler-cache"
     CUDA_VERSION: <<parameters.cuda_version>>
     PYTHON_VERSION: <<parameters.python_version>>
+    VS_VERSION: <<parameters.vs_version>>
     VC_VERSION: <<parameters.vc_version>>
     VC_YEAR: <<parameters.vc_year>>
     VC_PRODUCT: <<parameters.vc_product>>

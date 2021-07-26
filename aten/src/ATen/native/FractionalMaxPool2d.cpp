@@ -100,18 +100,17 @@ static std::vector<int> fractional_max_pool2d_generate_intervals(
 
 template <typename scalar_t>
 static void fractional_max_pool2d_contiguous(
-    scalar_t* input,
-    scalar_t* output,
-    int64_t* indices,
-    scalar_t* randomSamples,
-    int64_t numBatch, int64_t numPlanes,
-    int64_t inputW, int64_t inputH,
-    int64_t outputW, int64_t outputH,
-    int64_t poolSizeW, int64_t poolSizeH) {
+  scalar_t* input,
+  scalar_t* output,
+  int64_t* indices,
+  scalar_t* randomSamples,
+  int64_t numBatch, int64_t numPlanes,
+  int64_t inputW, int64_t inputH,
+  int64_t outputW, int64_t outputH,
+  int64_t poolSizeW, int64_t poolSizeH) {
 
   at::parallel_for(0, numBatch * numPlanes, 0, [&](int64_t begin, int64_t end) {
-    int64_t n;
-    int64_t c;
+    int64_t n{0}, c{0};
     data_index_init(begin, n, numBatch, c, numPlanes);
 
     for (int64_t i = begin; i < end; i++) {
@@ -140,7 +139,7 @@ static void fractional_max_pool2d_contiguous(
             for (int64_t iw = iw0; iw < iw0 + poolSizeW; iw++) {
               AT_ASSERT(iw >= 0 && iw < inputW);
 
-              int index = ih * inputW + iw;
+              int64_t index = ih * inputW + iw;
               scalar_t val = input_ptr[index];
               if (val > maxVal || std::isnan(val)) {
                 maxVal = val;
@@ -160,14 +159,14 @@ static void fractional_max_pool2d_contiguous(
 
 template <typename scalar_t>
 static void fractional_max_pool2d_channels_last(
-    scalar_t* input,
-    scalar_t* output,
-    int64_t* indices,
-    scalar_t* randomSamples,
-    int64_t numBatch, int64_t numPlanes,
-    int64_t inputW, int64_t inputH,
-    int64_t outputW, int64_t outputH,
-    int64_t poolSizeW, int64_t poolSizeH) {
+  scalar_t* input,
+  scalar_t* output,
+  int64_t* indices,
+  scalar_t* randomSamples,
+  int64_t numBatch, int64_t numPlanes,
+  int64_t inputW, int64_t inputH,
+  int64_t outputW, int64_t outputH,
+  int64_t poolSizeW, int64_t poolSizeH) {
 
   scalar_t alphaH = (outputH == 1) ? static_cast<scalar_t>(1)
       : static_cast<scalar_t>(inputH - poolSizeH) / static_cast<scalar_t>(outputH - 1);
@@ -176,9 +175,7 @@ static void fractional_max_pool2d_channels_last(
 
   int64_t stride_n = inputH * inputW * numPlanes;
   at::parallel_for(0, numBatch * outputH * outputW, 0, [&](int64_t begin, int64_t end) {
-    int64_t n = 0;
-    int64_t oh = 0;
-    int64_t ow = 0;
+    int64_t n{0}, oh{0}, ow{0};
     data_index_init(begin, n, numBatch, oh, outputH, ow, outputW);
 
     for (int64_t i = begin; i < end; i++) {
@@ -229,6 +226,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   int64_t planeDim = 0;
   int64_t heightDim = 1;
   int64_t widthDim = 2;
+
   int64_t outputH = output_size[0]; // output.size(heightDim)
   int64_t outputW = output_size[1]; // output.size(widthDim)
   int64_t poolSizeH = pool_size[0];
@@ -239,7 +237,6 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cpu) (
   auto input = input_.contiguous(memory_format);
 
   int64_t ndims = input.ndimension();
-
   if (ndims == 4) {
     numBatch = input.size(0);
     planeDim++;
