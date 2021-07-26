@@ -58,6 +58,8 @@ using at::ArrayRef;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
+// NOTE: See [Sharded File] comment in VariableType
+
 namespace torch { namespace autograd {
 
 // generated forward declarations start here

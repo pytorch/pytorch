@@ -1,20 +1,20 @@
-#include "torch/csrc/autograd/python_torch_functions.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/Dtype.h"
-#include "torch/csrc/DynamicTypes.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/out_types.h"
-#include "torch/csrc/utils/pybind.h"
-#include "torch/csrc/utils/pycfunction_helpers.h"
-#include "torch/csrc/utils/python_arg_parser.h"
-#include "torch/csrc/utils/tensor_layouts.h"
-#include "torch/csrc/utils/tensor_new.h"
-#include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/jit/frontend/tracer.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
-#include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/utils/cuda_lazy_init.h"
+#include <torch/csrc/autograd/python_torch_functions.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/Exceptions.h>
+#include <torch/csrc/utils/out_types.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_arg_parser.h>
+#include <torch/csrc/utils/tensor_layouts.h>
+#include <torch/csrc/utils/tensor_new.h>
+#include <torch/csrc/utils/tensor_numpy.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/utils/structseq.h>
+#include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
 
@@ -43,6 +43,10 @@ using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyObject* THPVariableFunctionsModule = nullptr;
+
 
 inline Tensor dispatch_arange(const Scalar& end, Tensor result) {
   pybind11::gil_scoped_release no_gil;
@@ -640,26 +644,27 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef torch_functions_manual[] = {
   {"arange", castPyCFunctionWithKeywords(THPVariable_arange),
-    METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"as_tensor", castPyCFunctionWithKeywords(THPVariable_as_tensor),
-    METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
-  {"frombuffer", castPyCFunctionWithKeywords(THPVariable_frombuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"logspace", castPyCFunctionWithKeywords(THPVariable_logspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"sparse_csr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"_sparse_csr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
-  {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+    METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"from_numpy", THPVariable_from_numpy, METH_STATIC | METH_O, nullptr},
+  {"frombuffer", castPyCFunctionWithKeywords(THPVariable_frombuffer), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"logspace", castPyCFunctionWithKeywords(THPVariable_logspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_coo_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_coo_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_coo_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_coo_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"sparse_csr_tensor", castPyCFunctionWithKeywords(THPVariable_sparse_csr_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sparse_csr_tensor_unsafe", castPyCFunctionWithKeywords(THPVariable__sparse_csr_tensor_unsafe), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
 };
 
 static PyObject * THPVariable_nonzero(PyObject* self, PyObject* args, PyObject* kwargs)
@@ -727,13 +732,13 @@ void gatherTorchFunctions(std::vector<PyMethodDef> &torch_functions) {
   gatherTorchFunctions_1(torch_functions);
   gatherTorchFunctions_2(torch_functions);
 
-  std::pair<const char *, const char *> aliases[]{
+  std::array<std::pair<const char *, const char *>, 4> aliases{{
     // Canonical function, alias name
-    {"spaddmm", "saddmm"},
+    {"sspaddmm", "saddmm"},
     {"mm", "spmm"},
     {"mm", "dsmm"},
     {"hspmm", "hsmm"}
-  };
+  }};
 
   for (const auto& alias : aliases) {
     auto it = std::find_if(torch_functions.begin(), torch_functions.end(),
@@ -749,53 +754,53 @@ void gatherTorchFunctions(std::vector<PyMethodDef> &torch_functions) {
     torch_functions.push_back(alias_def);
   }
 
-  torch_functions.push_back({NULL});
+  torch_functions.push_back({nullptr});
   torch_functions.shrink_to_fit();
 }
 
-static std::vector<PyMethodDef> torch_functions;
 static PyTypeObject THPVariableFunctions = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._VariableFunctionsClass",    /* tp_name */
   0,                                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
-  0,                                     /* tp_dealloc */
+  nullptr,                               /* tp_dealloc */
   0,                                     /* tp_vectorcall_offset */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
+  nullptr,                               /* tp_getattr */
+  nullptr,                               /* tp_setattr */
+  nullptr,                               /* tp_reserved */
+  nullptr,                               /* tp_repr */
+  nullptr,                               /* tp_as_number */
+  nullptr,                               /* tp_as_sequence */
+  nullptr,                               /* tp_as_mapping */
+  nullptr,                               /* tp_hash  */
+  nullptr,                               /* tp_call */
+  nullptr,                               /* tp_str */
+  nullptr,                               /* tp_getattro */
+  nullptr,                               /* tp_setattro */
+  nullptr,                               /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT,                    /* tp_flags */
-  NULL,                                  /* tp_doc */
-  0,                                     /* tp_traverse */
-  0,                                     /* tp_clear */
-  0,                                     /* tp_richcompare */
+  nullptr,                               /* tp_doc */
+  nullptr,                               /* tp_traverse */
+  nullptr,                               /* tp_clear */
+  nullptr,                               /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
-  0,                                     /* tp_members */
-  0,                                     /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
+  nullptr,                               /* tp_iter */
+  nullptr,                               /* tp_iternext */
+  nullptr,                               /* tp_methods */
+  nullptr,                               /* tp_members */
+  nullptr,                               /* tp_getset */
+  nullptr,                               /* tp_base */
+  nullptr,                               /* tp_dict */
+  nullptr,                               /* tp_descr_get */
+  nullptr,                               /* tp_descr_set */
   0,                                     /* tp_dictoffset */
-  0,                                     /* tp_init */
-  0,                                     /* tp_alloc */
-  0                                      /* tp_new */
+  nullptr,                               /* tp_init */
+  nullptr,                               /* tp_alloc */
+  nullptr                                /* tp_new */
 };
 
 void initTorchFunctions(PyObject *module) {
+  static std::vector<PyMethodDef> torch_functions;
   gatherTorchFunctions(torch_functions);
   THPVariableFunctions.tp_methods = torch_functions.data();
 
