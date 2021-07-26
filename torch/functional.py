@@ -1464,7 +1464,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
        ``L``, ``U``, and ``P`` can be derived using :func:`torch.lu_unpack`.
 
     .. warning::
-        The backward step for the LU factorization is stable only for inputs of full rank!
+        The gradients of this function will only be finite when :attr:`A` is full rank.
+        This is because the LU decomposition is just differentiable at full rank matrices.
+        Furthermore, if :attr:`A` is close to not being full rank,
+        the gradient will be numerically unstable as it depends on the computation of :math:`L^{-1}` and :math:`U^{-1}`.
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
