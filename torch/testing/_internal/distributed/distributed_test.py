@@ -3839,8 +3839,11 @@ class DistributedTest:
             torch.cuda.manual_seed(rank)
             models_to_test = [
                 (LargeNet(), torch.randn(1, 1000).cuda()),
-                (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
             ]
+            if HAS_TORCHVISION:
+                models_to_test.append(
+                    (torchvision.models.resnet50(), torch.randn(1, 3, 3, 1000).cuda())
+                )
             # Enable determinism in cudnn operators
             for (model, inp) in models_to_test:
                 with torch.backends.cudnn.flags(
