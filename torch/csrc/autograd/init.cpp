@@ -175,7 +175,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         return e.scope();
       })
       // device number, for CPU - process id
-      .def("device_index", &KinetoEvent::deviceIndex)
+      .def("device_index", [](const KinetoEvent& e) {
+        return e.deviceIndex();
+      })
       // for CUDA - stream id, for CPU - start thread id
       .def("device_resource_id", &KinetoEvent::deviceResourceId)
       // device type
@@ -192,11 +194,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("is_async", [](const KinetoEvent& e) {
         return e.isAsync();
       })
-      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs);
+      .def("cuda_elapsed_us", &KinetoEvent::cudaElapsedUs)
+      .def("nbytes", [](const KinetoEvent& e) {
+        return e.nBytes();
+      });
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
+    .def("trace_start_us", &ProfilerResult::trace_start_us)
     .def("events", &ProfilerResult::events)
-    .def("legacy_events", &ProfilerResult::legacy_events)
     .def("save", &ProfilerResult::save);
 
   m.def("_enable_profiler", enableProfiler);
@@ -257,6 +262,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   });
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
+  });
+  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+    torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
+  });
+  m.def("_reset_default_hooks", []() {
+    torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
