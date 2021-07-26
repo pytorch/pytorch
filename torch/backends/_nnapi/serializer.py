@@ -39,6 +39,7 @@ class NNAPI_OperandCode(object):
     TENSOR_QUANT8_ASYMM_SIGNED = 14
     MODEL = 15
 
+
 class NNAPI_OperationCode(object):
     ADD = 0
     AVERAGE_POOL_2D = 1
@@ -142,6 +143,7 @@ class NNAPI_OperationCode(object):
     HARD_SWISH = 99
     FILL = 100
     RANK = 101
+
 
 class NNAPI_FuseCode(object):
     FUSED_NONE = 0
