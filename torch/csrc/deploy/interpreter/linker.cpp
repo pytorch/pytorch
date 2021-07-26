@@ -31,19 +31,19 @@
 
 #include <dlfcn.h>
 #include <elf.h>
-#include <cerrno>
 #include <fcntl.h>
 #include <libgen.h>
-#include <climits>
 #include <link.h>
-#include <cstdint>
-#include <cstring>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <atomic>
+#include <cerrno>
 #include <cinttypes>
+#include <climits>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iostream>
 #include <sstream>
@@ -883,7 +883,10 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
           break;
         case PT_GNU_EH_FRAME:
           eh_frame_hdr_ = reinterpret_cast<EH_Frame_HDR*>(seg_start);
-          DEPLOY_CHECK(eh_frame_hdr_->eh_frame_ptr_enc == 0x1b, "unsupported eh_frame_pointer_enc {}", eh_frame_hdr_->eh_frame_ptr_enc);
+          DEPLOY_CHECK(
+              eh_frame_hdr_->eh_frame_ptr_enc == 0x1b,
+              "unsupported eh_frame_pointer_enc {}",
+              eh_frame_hdr_->eh_frame_ptr_enc);
           eh_frame_ =
               (void*)((int64_t)&eh_frame_hdr_->eh_frame_ptr + eh_frame_hdr_->eh_frame_ptr);
           break;
