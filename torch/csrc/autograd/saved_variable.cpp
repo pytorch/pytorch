@@ -51,7 +51,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     }
 
     if (get_default_hooks_()) {
-      save_metadata_(variable);
+      save_metadata(variable);
       register_hooks_(get_default_hooks_(), variable);
       return;
     }
@@ -70,14 +70,14 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
       return;
     }
 
-    save_metadata_(variable);
+    save_metadata(variable);
     // This copy is slightly more expensive.
     // Only do it if we actually need to.
     data_ = variable.tensor_data();
   }
 }
 
-void SavedVariable::save_metadata_(const Variable& data) {
+void SavedVariable::save_metadata(const Variable& data) {
   // Save output number, version counter and fw_grad if needed
 
   output_nr_ = data.output_nr();
@@ -98,7 +98,7 @@ void SavedVariable::save_metadata_(const Variable& data) {
   }
 }
 
-std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks_() {
+std::unique_ptr<SavedVariableHooks> SavedVariable::get_default_hooks() {
   return Engine::get_default_engine().get_default_saved_variable_hooks();
 }
 
@@ -218,7 +218,7 @@ void SavedVariable::register_hooks_(std::unique_ptr<SavedVariableHooks>&& hooks,
 
   // If we didn't save the original variable, we already have all we need to reconstruct it
   if (saved_original_) {
-    save_metadata_(data);
+    save_metadata(data);
   }
 
   at::NoGradGuard guard;
