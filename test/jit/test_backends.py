@@ -8,7 +8,6 @@ import torch
 import torch._C
 from torch.testing import FileCheck
 from torch.jit.mobile import _load_for_lite_interpreter
-from pathlib import Path
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
+    find_library_location,
 )
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -74,9 +74,8 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libjitbackend_test.so')
+        torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
@@ -492,9 +491,8 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libbackend_with_compiler.so')
+        torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
