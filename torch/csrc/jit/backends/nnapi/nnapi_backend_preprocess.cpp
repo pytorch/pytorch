@@ -41,18 +41,18 @@ c10::IValue preprocess(
   c10::IValue inp;
   std::string error = "";
   if (!method_compile_spec.contains("forward")) {
-    error = "compile_spec does not contain the \"forward\" key.";
+    error = R"(method_compile_spec does not contain the "forward" key.)";
   } else {
     auto innerDict = method_compile_spec.at("forward");
     if (!innerDict.isGenericDict() ||
         !innerDict.toGenericDict().contains("inputs")) {
       error =
-          "compile_spec does not contain a dictionary with an \"inputs\" key, under it's \"forward\" key.";
+          R"(method_compile_spec does not contain a dictionary with an "inputs" key, under it's "forward" key.)";
     } else {
       inp = innerDict.toGenericDict().at("inputs");
       if (!inp.isTensor() && !inp.isTensorList()) {
         error =
-            "compile_spec does not contain either a Tensor or TensorList, under it's \"inputs\" key.";
+            R"(method_compile_spec does not contain either a Tensor or TensorList, under it's "inputs" key.)";
       }
     }
   }
@@ -62,7 +62,7 @@ c10::IValue preprocess(
         "\nmethod_compile_spec should contain a Tensor or Tensor List which bundles input parameters:"
         " shape, dtype, quantization, and dimorder."
         "\nFor input shapes, use 0 for run/load time flexible input."
-        "\ncompile_spec must use the following format: "
+        "\nmethod_compile_spec must use the following format: "
         "{\"forward\": {\"inputs\": at::Tensor}} OR {\"forward\": {\"inputs\": c10::List<at::Tensor>}}");
   }
 
