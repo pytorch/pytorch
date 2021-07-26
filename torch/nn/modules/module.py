@@ -263,7 +263,7 @@ class Module:
         self._forward_hooks: Dict[int, Callable] = OrderedDict()
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
+        self._load_state_dict_pre_hooks: Dict[int, Tuple[Callable, bool]] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
