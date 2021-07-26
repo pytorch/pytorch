@@ -18,7 +18,6 @@ namespace caffe2 {
 
 // for quantized Add, the error shouldn't exceed 2 * scale
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ReLU) {
   auto XQ = q({1, 224, 224, 3});
   auto X = dq(*XQ);
@@ -43,7 +42,6 @@ TEST(Int8, ReLU) {
 
 // LeakyReLU isn't build in xplat, so this fails buck test
 // xplat/caffe2:caffe2_testAndroid
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DISABLED_LeakyReLU) {
   auto XQ = q({1, 224, 224, 3});
   auto X = dq(*XQ);
@@ -69,7 +67,6 @@ TEST(Int8, DISABLED_LeakyReLU) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Softmax) {
   auto XQ = q({1, 2, 1, 3});
   auto X = dq(*XQ);
@@ -95,7 +92,6 @@ TEST(Int8, Softmax) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Sigmoid) {
   auto XQ = q({1, 2, 1, 3});
   auto X = dq(*XQ);
@@ -121,7 +117,6 @@ TEST(Int8, Sigmoid) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(YQ.scale));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, MaxPool) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
@@ -151,7 +146,6 @@ TEST(Int8, MaxPool) {
   EXPECT_TENSOR_EQ(*YA, YE);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, AveragePool) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
@@ -181,7 +175,6 @@ TEST(Int8, AveragePool) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(XQ->scale));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ResizeNearest) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
@@ -214,7 +207,6 @@ TEST(Int8, ResizeNearest) {
   EXPECT_TENSOR_EQ(*YA, YE);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ChannelShuffle) {
   auto XQ = q({2, 25, 25, 32});
   auto X = dq(*XQ);
@@ -253,7 +245,6 @@ TEST(Int8, ChannelShuffle) {
   EXPECT_TENSOR_EQ(*YA, YE);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Concat) {
   auto XQ0 = q({2, 25, 25, 16});
   auto X0 = dq(*XQ0);
@@ -293,7 +284,6 @@ TEST(Int8, Concat) {
   EXPECT_TENSOR_EQ(*YA, YE);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Add) {
   auto XQ0 = q({1, 10, 10, 20});
   auto XQ1 = q({1, 10, 10, 20});
@@ -321,7 +311,6 @@ TEST(Int8, Add) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, addErrorTolerance(Y_scale));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, SumRelu) {
   auto XQ0 = q({1, 10, 10, 20});
   auto XQ1 = q({1, 10, 10, 20});
@@ -378,7 +367,6 @@ void biassetq(int8::Int8TensorCPU* dst, const std::vector<float>& vs) {
 }
 
 // Use TFLite test vectors to ensure compatibility.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Conv) {
   auto XQ = q({2, 2, 4, 1});
   XQ->scale = 0.5;
@@ -449,7 +437,6 @@ TEST(Int8, Conv) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Grouped1x1Conv) {
   auto XQ = q({1, 3, 2, 4});
   XQ->scale = 0.5;
@@ -516,7 +503,6 @@ TEST(Int8, Grouped1x1Conv) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Conv2) {
   auto XQ = q({1, 3, 6, 1});
   XQ->scale = 0.5;
@@ -573,7 +559,6 @@ TEST(Int8, Conv2) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv) {
   auto XQ = q({1, 3, 2, 2});
   XQ->scale = 0.5;
@@ -632,7 +617,6 @@ TEST(Int8, DepthwiseConv) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv3x3) {
   auto XQ = q({1, 3, 3, 3});
   XQ->scale = 0.5;
@@ -694,7 +678,6 @@ TEST(Int8, DepthwiseConv3x3) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DepthwiseConv5x5) {
   auto XQ = q({1, 5, 5, 1});
   XQ->scale = 0.5;
@@ -756,7 +739,6 @@ TEST(Int8, DepthwiseConv5x5) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, ConvTranspose) {
   auto XQ = q({1, 3, 6, 1});
   XQ->scale = 0.5;
@@ -809,7 +791,6 @@ TEST(Int8, ConvTranspose) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, FC) {
   auto XQ = q({2, 10});
   XQ->scale = 0.5;
@@ -861,7 +842,6 @@ TEST(Int8, FC) {
        std::vector<uint8_t>{151, 152, 153, 185, 186, 187}));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, GivenTensorFill) {
   vector<int64_t> shape = {1, 25, 25, 16};
   auto XQ = q(shape);
@@ -896,7 +876,6 @@ TEST(Int8, GivenTensorFill) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, GivenIntTensorFill) {
   vector<int64_t> shape = {32};
   auto XQ = biasq(shape, 1. / 255 * 1. / 255);
@@ -931,7 +910,6 @@ TEST(Int8, GivenIntTensorFill) {
   EXPECT_TENSOR_APPROX_EQ(*YA, YE, 1.0e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, QuantDeQuant) {
   vector<int64_t> shape = {1, 25, 25, 16};
   auto XQ = q(shape);
@@ -952,7 +930,6 @@ TEST(Int8, QuantDeQuant) {
   EXPECT_TENSOR_APPROX_EQ(*X, X_x, XQ->scale);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Reshape) {
   auto XQ = q({1, 25, 25, 16});
   auto xop = CreateOperatorDef(
@@ -972,7 +949,6 @@ TEST(Int8, Reshape) {
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Flatten) {
   auto XQ = q({1, 25, 25, 16});
   auto xop = CreateOperatorDef(
@@ -992,7 +968,6 @@ TEST(Int8, Flatten) {
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, Slice) {
   auto XQ = q({1, 25, 25, 16});
   auto X = dq(*XQ);
@@ -1028,7 +1003,6 @@ TEST(Int8, Slice) {
   EXPECT_EQ(YQ.zero_point, XQ->zero_point);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8, DISABLED_Transpose) {
   auto XQ = q({1, 50, 25, 16});
   auto xop = CreateOperatorDef(

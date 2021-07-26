@@ -1305,7 +1305,7 @@ std::vector<onnxBackendID> OnnxifiTransformer::getBackendId() {
   return backend_ids_;
 }
 
-NetDef OnnxifiTransformer::TransformViaC2(
+opt::CutResult OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
     const std::unordered_set<int>& blocklisted_ops,
@@ -1332,7 +1332,7 @@ NetDef OnnxifiTransformer::TransformViaC2(
       *pred_net, c2_supports, c2_converter, opts_.debug);
 }
 
-NetDef OnnxifiTransformer::TransformViaOnnx(
+opt::CutResult OnnxifiTransformer::TransformViaOnnx(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
@@ -1458,7 +1458,7 @@ void OnnxifiTransformer::transform(
       *pred_net, shape_hints_max_bs, weights, &new_blocklisted_ops);
 
   // Transform the net
-  NetDef net_opt = opts_.use_onnx ? TransformViaOnnx(
+  opt::CutResult cutResult = opts_.use_onnx ? TransformViaOnnx(
                                         ws,
                                         pred_net,
                                         weights,
@@ -1472,6 +1472,7 @@ void OnnxifiTransformer::transform(
                                         shape_hints_max_bs,
                                         opts_.shape_hints_per_bs);
 
+  auto net_opt = std::move(cutResult.net);
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
   net_opt.set_type(pred_net->type());
@@ -1481,6 +1482,9 @@ void OnnxifiTransformer::transform(
   addShapeToNet(*pred_net, shape_hints_max_bs);
   if (opts_.debug) {
     WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt", false);
+  }
+  if (opts_.verify_only_single_subnet && cutResult.numberOfSubnets > 1) {
+    CAFFE_THROW("Multiple Onnxifi ops were created: ", cutResult.numberOfSubnets, " subnets found");
   }
 }
 

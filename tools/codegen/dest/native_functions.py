@@ -16,8 +16,8 @@ def gen_unstructured(f: NativeFunction, backend_index: BackendIndex) -> Optional
     if "legacy::" in metadata.kernel:
         return None
     else:
-        prefix = '' if backend_index.external else 'TORCH_API '
-        return f"{prefix}{sig.decl(name=metadata.kernel)};"
+        prefix = 'static' if backend_index.external else 'TORCH_API'
+        return f"{prefix} {sig.decl(name=metadata.kernel)};"
 
 @with_native_function_and_index
 def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List[str]:
