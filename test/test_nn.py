@@ -13285,6 +13285,35 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyCPU
+    @dtypes(torch.float32, torch.complex64)
+    def test_ReflectionPad_nhwc_ndhwc(self, device, dtype):
+        def helper(mod, input_size, padding_size, memory_format):
+            input = torch.randn(input_size, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=memory_format).requires_grad_()
+            pad = mod(padding_size).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_pad = mod(padding_size).to(device)
+
+            out = pad(input)
+            ref_out = ref_pad(ref_input)
+
+            grad = torch.randn(out.size(), dtype=dtype, device=device).to(memory_format=memory_format)
+            ref_grad = grad.detach().clone().contiguous()
+
+            out.backward(grad)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(torch.allclose(out, ref_out))
+            self.assertTrue(torch.allclose(input.grad, ref_input.grad))
+
+        # test non-square padding size
+        helper(torch.nn.ReflectionPad2d, [2, 9, 10, 11], [1, 2, 2, 3], torch.channels_last)
+        helper(torch.nn.ReflectionPad3d, [2, 9, 9, 10, 11], [1, 2, 2, 3, 1, 2], torch.channels_last_3d)
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
     def test_MarginLoss_empty(self, device, dtype):

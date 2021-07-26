@@ -354,6 +354,160 @@ void replication_pad3d_backward_kernel_impl(
   }
 }
 
+void reflection_pad1d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef padding_size) {
+  if (input.is_quantized()) {
+    AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad1d", [&]() {
+      bool is_batch_mode = input.ndimension() == static_cast<int64_t>(3);
+      cpu_padding<scalar_t, ReflectionPadIndexr>(
+          output, input, padding_size[0], padding_size[1], /* p_top */ 0, /* p_bottom */ 0, /* p_front */ 0, /* p_back */ 0,
+          is_batch_mode);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad1d", [&] {
+      bool is_batch_mode = input.ndimension() == static_cast<int64_t>(3);
+      cpu_padding<scalar_t, ReflectionPadIndexr>(
+          output, input, padding_size[0], padding_size[1], /* p_top */ 0, /* p_bottom */ 0, /* p_front */ 0, /* p_back */ 0,
+          is_batch_mode);
+    });
+  }
+}
+
+void reflection_pad1d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    IntArrayRef padding_size) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad1d_backward", [&] {
+    bool is_batch_mode = grad_output.ndimension() == static_cast<int64_t>(3);
+    cpu_padding_backward<scalar_t, ReflectionPadIndexr>(
+        grad_input, grad_output, padding_size[0], padding_size[1], /* p_top */ 0, /* p_bottom */ 0, /* p_front */ 0, /* p_back */ 0,
+        is_batch_mode);
+  });
+}
+
+void reflection_pad2d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef padding_size) {
+  switch (input.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      if (input.is_quantized()) {
+        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d", [&]() {
+          bool is_batch_mode = input.ndimension() == static_cast<int64_t>(4);
+          cpu_padding<scalar_t, ReflectionPadIndexr>(
+              output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0,
+              is_batch_mode);
+        });
+      } else {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d", [&] {
+          bool is_batch_mode = input.ndimension() == static_cast<int64_t>(4);
+          cpu_padding<scalar_t, ReflectionPadIndexr>(
+              output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0,
+              is_batch_mode);
+        });
+      }
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      if (input.is_quantized()) {
+        AT_DISPATCH_QINT_TYPES(input.scalar_type(), "qreflection_pad2d_channels_last", [&]() {
+          cpu_padding_channels_last<scalar_t, ReflectionPadIndexr>(
+              output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0);
+        });
+      } else {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "reflection_pad2d_channels_last", [&] {
+          cpu_padding_channels_last<scalar_t, ReflectionPadIndexr>(
+              output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0);
+        });
+      }
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
+}
+
+void reflection_pad2d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    IntArrayRef padding_size) {
+  switch (grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward", [&] {
+        bool is_batch_mode = grad_output.ndimension() == static_cast<int64_t>(4);
+        cpu_padding_backward<scalar_t, ReflectionPadIndexr>(
+            grad_input, grad_output, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0,
+            is_batch_mode);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(grad_output.scalar_type(), "reflection_pad2d_backward_channels_last", [&] {
+        cpu_padding_backward_channels_last<scalar_t, ReflectionPadIndexr>(
+            grad_input, grad_output, padding_size[0], padding_size[1], padding_size[2], padding_size[3], /* p_front */ 0, /* p_back */ 0);
+      });
+      break;
+    }
+    default:
+        TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+  }
+}
+
+// ReplicationPad3d supports kHalf
+void reflection_pad3d_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    IntArrayRef padding_size) {
+  switch(input.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, input.scalar_type(), "reflection_pad3d", [&] {
+        bool is_batch_mode = input.ndimension() == static_cast<int64_t>(5);
+        cpu_padding<scalar_t, ReflectionPadIndexr>(
+            output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], padding_size[4], padding_size[5],
+            is_batch_mode);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, input.scalar_type(), "reflection_pad3d_channels_last", [&] {
+        cpu_padding_channels_last<scalar_t, ReflectionPadIndexr>(
+            output, input, padding_size[0], padding_size[1], padding_size[2], padding_size[3], padding_size[4], padding_size[5]);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
+}
+
+void reflection_pad3d_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    IntArrayRef padding_size) {
+  switch(grad_output.suggest_memory_format()) {
+    case at::MemoryFormat::Contiguous: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, grad_output.scalar_type(), "reflection_pad3d_backward", [&] {
+        bool is_batch_mode = grad_output.ndimension() == static_cast<int64_t>(5);
+        cpu_padding_backward<scalar_t, ReflectionPadIndexr>(
+            grad_input, grad_output, padding_size[0], padding_size[1], padding_size[2], padding_size[3], padding_size[4], padding_size[5],
+            is_batch_mode);
+      });
+      break;
+    }
+    case at::MemoryFormat::ChannelsLast3d: {
+      AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf, grad_output.scalar_type(), "reflection_pad3d_backward_channels_last", [&] {
+        cpu_padding_backward_channels_last<scalar_t, ReflectionPadIndexr>(
+            grad_input, grad_output, padding_size[0], padding_size[1], padding_size[2], padding_size[3], padding_size[4], padding_size[5]);
+      });
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+  }
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(replication_pad1d_kernel, &replication_pad1d_kernel_impl);
@@ -362,5 +516,12 @@ REGISTER_DISPATCH(replication_pad2d_kernel, &replication_pad2d_kernel_impl);
 REGISTER_DISPATCH(replication_pad2d_backward_kernel, &replication_pad2d_backward_kernel_impl);
 REGISTER_DISPATCH(replication_pad3d_kernel, &replication_pad3d_kernel_impl);
 REGISTER_DISPATCH(replication_pad3d_backward_kernel, &replication_pad3d_backward_kernel_impl);
+
+REGISTER_DISPATCH(reflection_pad1d_kernel, &reflection_pad1d_kernel_impl);
+REGISTER_DISPATCH(reflection_pad1d_backward_kernel, &reflection_pad1d_backward_kernel_impl);
+REGISTER_DISPATCH(reflection_pad2d_kernel, &reflection_pad2d_kernel_impl);
+REGISTER_DISPATCH(reflection_pad2d_backward_kernel, &reflection_pad2d_backward_kernel_impl);
+REGISTER_DISPATCH(reflection_pad3d_kernel, &reflection_pad3d_kernel_impl);
+REGISTER_DISPATCH(reflection_pad3d_backward_kernel, &reflection_pad3d_backward_kernel_impl);
 
 }} // at::native

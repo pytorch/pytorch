@@ -9,11 +9,17 @@ using padding_fn = void(*)(const Tensor& output, const Tensor& input, IntArrayRe
 DECLARE_DISPATCH(padding_fn, replication_pad1d_kernel);
 DECLARE_DISPATCH(padding_fn, replication_pad2d_kernel);
 DECLARE_DISPATCH(padding_fn, replication_pad3d_kernel);
+DECLARE_DISPATCH(padding_fn, reflection_pad1d_kernel);
+DECLARE_DISPATCH(padding_fn, reflection_pad2d_kernel);
+DECLARE_DISPATCH(padding_fn, reflection_pad3d_kernel);
 
 using padding_backward_fn = void(*)(const Tensor& grad_input, const Tensor& grad_output, IntArrayRef padding_size);
 DECLARE_DISPATCH(padding_backward_fn, replication_pad1d_backward_kernel);
 DECLARE_DISPATCH(padding_backward_fn, replication_pad2d_backward_kernel);
 DECLARE_DISPATCH(padding_backward_fn, replication_pad3d_backward_kernel);
+DECLARE_DISPATCH(padding_backward_fn, reflection_pad1d_backward_kernel);
+DECLARE_DISPATCH(padding_backward_fn, reflection_pad2d_backward_kernel);
+DECLARE_DISPATCH(padding_backward_fn, reflection_pad3d_backward_kernel);
 
 struct PaddingIndexr {
   int pad_start;
