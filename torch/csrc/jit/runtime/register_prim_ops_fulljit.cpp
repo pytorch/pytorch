@@ -126,16 +126,14 @@ RegisterOperators reg(
            size_t size = node->i(attr::size);
            auto device = at::kCPU;
            return [size, device](Stack* stack) {
-             auto aligned_size =
-                 MemoryPlanner::compute_aligned_tensor_size(size);
              at::DataPtr buffer =
-                 MemoryPlanner::allocate_buffer(aligned_size, device);
+                 MemoryPlanner::allocate_buffer(size, device);
              at::Tensor slab;
              uint8_t* start = static_cast<uint8_t*>(buffer.get());
              void* src = static_cast<void*>(start);
              slab.storage().set_data_ptr_noswap(
                  at::DataPtr(src, src, nullptr, device));
-             slab.storage().set_nbytes(aligned_size);
+             slab.storage().set_nbytes(size);
              push(stack, slab);
            };
          },

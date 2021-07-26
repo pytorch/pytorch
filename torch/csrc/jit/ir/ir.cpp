@@ -10,7 +10,6 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/python_print.h>
 
 #include <algorithm>
 #include <iostream>
