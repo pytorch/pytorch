@@ -21,8 +21,7 @@ from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx)
-from torch.autograd.profiler_util import (_format_time, EventList,
-                                     FunctionEvent, FunctionEventAvg)
+from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
