@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/sparse/SparseBlas.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
