@@ -97,6 +97,27 @@ class QuantizeHandler(ABC):
         """
         return True
 
+    def is_general_tensor_value_op(self) -> bool:
+        """
+        Returns True if the operator works for both floating point and
+        quantized input, and does some computation based on the input Tensor,
+        so we need to insert observer/fake_quant for the output of the
+        operator since the distribution of values is different for input and output
+        Tensors (for HistogramObserver)
+        while they share the same quantization parameters
+        Example: avgpool2d
+        """
+        return False
+
+    def is_general_tensor_shape_op(self) -> bool:
+        """ Similar to is_general_tensor_value_op, this is a check
+        for ops that works for both floating point and quantized input,
+        that only re-arranges the Tensor values or query some metadata about the Tensor
+        We don't insert observer/fake_quant for the output of these operators
+        Example: reshape, transpose, maxpool2d
+        """
+        return False
+
     def should_insert_observer_for_output(
         self,
         qconfig: Any,
@@ -268,6 +289,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         else:
             return False
 
+    def is_general_tensor_value_op(self) -> bool:
+        return self.num_tensor_args == 1
+
     def input_output_observed(self):
         # for x + y where x and y are scalars, we do not observe anything
         return self.num_tensor_args > 0
@@ -396,6 +420,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
+    def is_general_tensor_value_op(self) -> bool:
+        return True
+
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -1286,6 +1313,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     ) -> bool:
         return True
 
+    def is_general_tensor_value_op(self) -> bool:
+        return True
+
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -1384,7 +1414,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze')
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
-class TensorShapeOpQuantizeHandler(QuantizeHandler):
+class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     """ Operators that works on both float and quantized input
     if input is quantized, the output Tensor shares
     the same quantization parameter with input.
@@ -1393,6 +1423,9 @@ class TensorShapeOpQuantizeHandler(QuantizeHandler):
     e.g. size, and we do not insert extra observer/fake_quant
     for the output of the operator.
     """
+    def is_general_tensor_shape_op(self) -> bool:
+        return True
+
     def should_mark_output_quantized_from_input_quantized_status(
         self,
         qconfig: QConfigAny
