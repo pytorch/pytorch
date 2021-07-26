@@ -8,7 +8,6 @@ TORCH_API EventCreateFunction Event::event_creator_[MaxDeviceTypes];
 TORCH_API EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 TORCH_API EventWaitFunction
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     Event::event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 TORCH_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
@@ -17,17 +16,14 @@ TORCH_API EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
 TORCH_API EventQueryFunction Event::event_querier_[MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 TORCH_API EventErrorMessageFunction
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     Event::event_err_msg_getter_[MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 TORCH_API EventSetFinishedFunction
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     Event::event_finished_setter_[MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 TORCH_API EventResetFunction Event::event_resetter_[MaxDeviceTypes];
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 TORCH_API EventSetCallbackFunction
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     Event::event_callback_setter_[MaxDeviceTypes];
 
 namespace {
@@ -146,25 +142,16 @@ void EventResetCPU(Event* event) {
   wrapper->callbacks_.clear();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_CREATE_FUNCTION(CPU, EventCreateCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_RECORD_FUNCTION(CPU, EventRecordCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_WAIT_FUNCTION(CPU, CPU, EventWaitCPUCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_FINISH_FUNCTION(CPU, EventFinishCPU);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_QUERY_FUNCTION(CPU, EventQueryCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(CPU, EventErrorMessageCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_SET_FINISHED_FUNCTION(CPU, EventSetFinishedCPU);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_RESET_FUNCTION(CPU, EventResetCPU);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EVENT_SET_CALLBACK_FUNCTION(CPU, EventSetCallbackCPU);
 
 } // namespace caffe2

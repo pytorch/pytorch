@@ -89,14 +89,12 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPLegacyVariableType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._LegacyVariableBase",              /* tp_name */
   0,                                           /* tp_basicsize */
   0,                                           /* tp_itemsize */
   nullptr,                                     /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */

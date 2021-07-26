@@ -422,7 +422,13 @@ class ExceptionWrapper(object):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
             raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+        try:
+            exception = self.exc_type(msg)
+        except TypeError:
+            # If the exception takes multiple arguments, don't try to
+            # instantiate since we don't know how to
+            raise RuntimeError(msg) from None
+        raise exception
 
 
 def _get_available_device_type():
