@@ -1647,11 +1647,13 @@ bool Reducer::rebuild_buckets() {
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(kDefaultFirstBucketBytes);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  rebuilt_bucket_indices = compute_bucket_assignment_by_size(
-      rebuilt_params_,
-      bucket_size_limits,
-      expect_sparse_gradients_[0],
-      rebuilt_param_indices_);
+  std::vector<size_t> per_bucket_size_limits;
+  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+      compute_bucket_assignment_by_size(
+          rebuilt_params_,
+          bucket_size_limits,
+          expect_sparse_gradients_[0],
+          rebuilt_param_indices_);
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // Broadcast the newly rebuilt bucket indices from rank 0 in default.
@@ -1884,7 +1886,8 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
@@ -1896,7 +1899,10 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       (tensors.size() == expect_sparse_gradient.size()));
   TORCH_INTERNAL_ASSERT(tensors.size() > 0);
 
-  std::vector<std::vector<size_t>> result;
+  std::vector<std::tuple<std::vector<size_t>, size_t>> result;
+  // Sparse tensors go in their own bucket, so they do not have an enforced size
+  // limit.
+  size_t kNoSizeLimit = 0;
   result.reserve(tensors.size());
 
   // Keep iterator into the size_limit vector by tensor type and device.
@@ -1928,7 +1934,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
-      result.push_back({tensor_index});
+          result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
       continue;
     }
 
@@ -1946,7 +1952,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     const auto bucket_size_limit = *bucket_size_limit_iterator;
     bucket.size_limit = bucket_size_limit;
     if (bucket.size >= bucket_size_limit) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
       bucket = BucketAccumulator();
 
       // Advance to the next bucket size limit for this type/device.
@@ -1961,7 +1967,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   for (auto& it : buckets) {
     auto& bucket = it.second;
     if (!bucket.indices.empty()) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
     }
   }
 
@@ -1976,14 +1982,26 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     std::sort(
         result.begin(),
         result.end(),
-        [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
-          const auto amin = std::min_element(a.begin(), a.end());
-          const auto bmin = std::min_element(b.begin(), b.end());
+        [](const std::tuple<std::vector<size_t>, size_t>& a, const std::tuple<std::vector<size_t>, size_t>& b) {
+          auto indices_a = std::get<0>(a);
+          auto indices_b = std::get<0>(b);
+          const auto amin = std::min_element(indices_a.begin(), indices_a.end());
+          const auto bmin = std::min_element(indices_b.begin(), indices_b.end());
           return *amin < *bmin;
         });
   }
 
-  return result;
+  // Return bucket indices and size limits as separate entries in tuple, as some
+  // APIs only need to consume bucket indices.
+  std::vector<std::vector<size_t>> bucket_indices;
+  bucket_indices.reserve(result.size());
+  std::vector<size_t> per_bucket_size_limits;
+  per_bucket_size_limits.reserve(result.size());
+  for (const auto & tup : result) {
+    bucket_indices.emplace_back(std::get<0>(tup));
+    per_bucket_size_limits.emplace_back(std::get<1>(tup));
+  }
+  return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
 
 // Verifies corresponding params in replica 0 have the same sizes/strides
