@@ -727,9 +727,9 @@ namespace {
 } // namespace
 
   Tensor& adaptive_avg_pool2d_out_cuda(
-    Tensor& output,
     const Tensor& input,
-    IntArrayRef output_size)
+    IntArrayRef output_size,
+    Tensor& output)
   {
     adaptive_avg_pool2d_out_cuda_template(
       output, input, output_size);

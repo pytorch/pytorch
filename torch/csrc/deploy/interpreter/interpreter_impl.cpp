@@ -3,16 +3,14 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <torch/csrc/deploy/interpreter/interpreter_impl.h>
-#include <iostream>
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <assert.h>
 #include <pybind11/embed.h>
 #include <pybind11/functional.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
-#include <stdio.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+
+#include <cassert>
+#include <cstdio>
 #include <iostream>
 #include <map>
 #include <thread>
@@ -108,12 +106,9 @@ FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
 extern "C" PyObject* initModule(void);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules[];
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern "C" struct _frozen _PyImport_FrozenModules_torch[];
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const char* startup = R"RAW(
 import sys
 import importlib.abc
