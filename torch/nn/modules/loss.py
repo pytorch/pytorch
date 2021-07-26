@@ -74,11 +74,10 @@ class L1Loss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then
-          :math:`(N, *)`, same shape as the input
+          :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -276,11 +275,10 @@ class PoissonNLLLoss(_Loss):
         >>> output.backward()
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`,
-          the same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(*)`,
+          the same shape as the input.
     """
     __constants__ = ['log_input', 'full', 'eps', 'reduction']
     log_input: bool
@@ -445,11 +443,10 @@ class KLDivLoss(_Loss):
         In the next major release, ``'mean'`` will be changed to be the same as ``'batchmean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(N, *)`,
-          the same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(*)`,
+          the same shape as the input.
 
     """
     __constants__ = ['reduction']
@@ -507,9 +504,8 @@ class MSELoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
 
     Examples::
 
@@ -907,9 +903,9 @@ class SmoothL1Loss(_Loss):
             The value must be non-negative. Default: 1.0
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional dimensions
-        - Target: :math:`(N, *)`; same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`; same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
     __constants__ = ['reduction']
 
@@ -967,9 +963,9 @@ class HuberLoss(_Loss):
             The value must be positive.  Default: 1.0
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means any number of additional dimensions
-        - Target: :math:`(N, *)`; same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`; same shape as the input
+        - Input: :math:`(*)` where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
     """
     __constants__ = ['reduction', 'delta']
 
