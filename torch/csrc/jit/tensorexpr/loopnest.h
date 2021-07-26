@@ -5,6 +5,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/operators/softmax.h>
 
 namespace torch {
@@ -49,7 +50,7 @@ Tensor* computeSoftmax(
   size_t softmax_dim =
       normalizeAndCheckIndex(c10::get<int64_t>(inputs[1]), rank);
   std::vector<DimArg> non_softmax_dims;
-  for (size_t i = 0; i < output_dims.size(); ++i) {
+  for (const auto i : c10::irange(output_dims.size())) {
     if (i != softmax_dim) {
       non_softmax_dims.push_back(output_dims[i]);
     }
@@ -77,7 +78,7 @@ Tensor* computeSoftmax(
   // Remove the index corresponding to the softmax dimension.
   auto remove_softmax_dim_index = [&](const ParameterList& indices) {
     std::vector<ExprHandle> new_indices;
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       if (i != softmax_dim) {
         new_indices.push_back(indices[i]);
       }
@@ -87,7 +88,7 @@ Tensor* computeSoftmax(
 
   auto convert_indices_to_expr_handle = [&](const ParameterList& indices) {
     std::vector<ExprHandle> new_indices(indices.size());
-    for (size_t i = 0; i < indices.size(); ++i) {
+    for (const auto i : c10::irange(indices.size())) {
       new_indices[i] = indices[i];
     }
     return new_indices;
