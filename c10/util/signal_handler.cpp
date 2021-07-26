@@ -1,6 +1,5 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/signal_handler.h>
-#include <fmt/format.h>
 
 #if defined(C10_SUPPORTS_SIGNAL_HANDLER)
 
@@ -8,6 +7,7 @@
 #include <cxxabi.h>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <fmt/format.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
