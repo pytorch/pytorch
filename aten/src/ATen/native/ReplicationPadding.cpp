@@ -229,7 +229,7 @@ TORCH_META_FUNC(replication_pad3d_backward) (
 
 } // namespace meta
 
-namespace native { 
+namespace native {
 
 TORCH_IMPL_FUNC(replication_pad1d_out_cpu) (
   const Tensor& input, IntArrayRef paddingSize, const Tensor& output
