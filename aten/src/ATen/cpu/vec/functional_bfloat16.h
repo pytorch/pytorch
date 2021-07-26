@@ -3,7 +3,7 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/functional_base.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace vec {
 
@@ -15,26 +15,26 @@ template <> struct VecScalarType<BFloat16> { using type = float; };
 template <typename scalar_t>
 using vec_scalar_t = typename VecScalarType<scalar_t>::type;
 
-// Note that we already have specializes member of Vectorized<scalar_t> for BFloat16
-// so the following function would run smoothly:
+// Note that we already have specialized member of Vectorized<scalar_t> for BFloat16
+// so the following functions would run smoothly:
 //   using Vec = Vectorized<BFloat16>;
 //   Vec one = Vec(BFloat16(1));
 //   vec::map([](Vec x) { return one / (one + x.exp()); }, y_ptr, x_ptr, N);
 //
-// Why we still need to specializes "funtional"?
+// Then why we still need to specialize "funtional"?
 //   If we do specialization at Vectorized<> level, the above example would need 3 pairs of
-// conversion of bf16->fp32/fp32->bf16, each for ".exp()", "+" and "/".
+//   conversion of bf16->fp32/fp32->bf16, each for ".exp()", "+" and "/".
 //   If we do specialization at vec::map<>() level, we have only 1 pair of conversion
-// of bf16->fp32/fp32->bf16, for the input and output BFloat16 vector only.
+//   of bf16->fp32/fp32->bf16, for the input and output BFloat16 vector only.
 //
-// The following BFloat16 functionalities will only do data type conversion for input
-// and output vector (reduce functionalities will only convert the final scalar back to bf16).
+// The following BFloat16 functionality will only do data type conversion for input
+// and output vector (reduce functionality will only convert the final scalar back to bf16).
 // Compared to Vectorized<> specialization,
 //   1. better performance since we have less data type conversion;
 //   2. less rounding error since immediate results are kept in fp32;
 //   3. accumulation done on data type of fp32.
 //
-//  If you plan to extend this file, make sure add unit test at
+//  If you plan to extend this file, please ensure adding unit tests at
 //    aten/src/ATen/test/vec_test_all_types.cpp
 //
 template <typename scalar_t = BFloat16, typename Op>

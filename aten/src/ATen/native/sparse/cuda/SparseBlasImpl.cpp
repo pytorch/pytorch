@@ -12,8 +12,8 @@
 namespace at {
 namespace native {
 namespace sparse {
-namespace cuda {
 namespace impl {
+namespace cuda {
 
 namespace {
 
@@ -41,7 +41,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
 
 } // anonymous namespace
 
-void addmm_out_sparse_csr_dense_cuda_impl(
+void addmm_out_sparse_csr(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
@@ -94,7 +94,7 @@ void addmm_out_sparse_csr_dense_cuda_impl(
       kHalf,
       kBFloat16,
       result.scalar_type(),
-      "addmm_out_sparse_csr_dense_impl_cuda",
+      "addmm_out_sparse_csr_impl_cuda",
       [&] {
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
@@ -149,7 +149,7 @@ void addmm_out_sparse_csr_dense_cuda_impl(
   * `result` - [in] Tensor storing dense vector y of size m.
                [out] result of the operation.
 */
-void addmv_out_sparse_csr_cuda_impl(
+void addmv_out_sparse_csr(
     const at::sparse_csr::SparseCsrTensor& mat,
     const Tensor& vec,
     const Scalar& beta,
@@ -225,8 +225,8 @@ void addmv_out_sparse_csr_cuda_impl(
 #endif
 }
 
-} // namespace impl
 } // namespace cuda
+} // namespace impl
 } // namespace sparse
 } // namespace native
 } // namespace at
