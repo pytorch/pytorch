@@ -270,7 +270,6 @@ class BinaryElementwiseWithArgsGradientOp<
   BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>> functor_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     DivGradient,
     BinaryElementwiseGradientOp<
@@ -294,7 +293,6 @@ class GetDivGradient final : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Div, GetDivGradient);
 
 } // namespace caffe2

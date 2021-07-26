@@ -20,9 +20,10 @@ bool MutationRemover::hasSideEffectOrAlias(Value* v, AliasDb* aliasDb) {
       (v->node()->kind() == prim::Param);
 
   // if the output isn't contained or alias by the inputs to its node, it's
-  // unique
-  return unhandled_node || aliasDb->mayContainAlias(v->node()->inputs(), v) ||
-      (v->node()->kind() == prim::Param);
+  // unique. No need to check for alias if the node is a ListConstruct.
+  bool mayAliasInputs = (v->node()->kind() != prim::ListConstruct) &&
+      aliasDb->mayContainAlias(v->node()->inputs(), v);
+  return unhandled_node || mayAliasInputs || (v->node()->kind() == prim::Param);
 }
 
 Node* MutationRemover::createSpecialMappedOp(Node* n) {
