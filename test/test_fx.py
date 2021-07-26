@@ -14,7 +14,6 @@ import traceback
 import warnings
 import unittest
 from math import sqrt
-from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -40,7 +39,14 @@ if sys.version_info >= (3, 7):
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    find_library_location,
+    run_tests,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 from fx.named_tup import MyNamedTup
@@ -109,9 +115,8 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        torch.ops.load_library(str(lib_file_path))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
