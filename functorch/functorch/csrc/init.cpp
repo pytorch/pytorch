@@ -178,6 +178,51 @@ int64_t _vmap_decrement_nesting() {
   return layer.layerId();
 }
 
+static bool is_batchedtensor(const Tensor& tensor) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  return batched != nullptr;
+}
+
+static bool is_gradtrackingtensor(const Tensor& tensor) {
+  auto* wrapped = maybeGetTensorWrapper(tensor);
+  return wrapped != nullptr;
+}
+
+static Tensor get_unwrapped(const Tensor& tensor) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    return batched->value();
+  }
+  auto* wrapped = maybeGetTensorWrapper(tensor);
+  if (wrapped) {
+    return wrapped->value();
+  }
+  TORCH_CHECK(false, "No wrappers present!");
+}
+
+static int64_t maybe_get_level(const Tensor& tensor) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    return batched->bdims().back().level();
+  }
+  auto* wrapped = maybeGetTensorWrapper(tensor);
+  if (wrapped) {
+    if (wrapped->level()) {
+      return *wrapped->level();
+    }
+    // TODO: this is a weird special case...
+    return -2;
+  }
+  return -1;
+}
+
+static int64_t maybe_get_bdim(const Tensor& tensor) {
+  auto* batched = maybeGetBatchedImpl(tensor);
+  if (batched) {
+    return batched->bdims().back().dim();
+  }
+  return -1;
+}
 
 } // namespace functorch
 }
@@ -204,4 +249,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       py::return_value_policy::copy); // not sure if needed - cargo cult
   m.def("removePythonKey", &at::functorch::removePythonKey);
   m.def("hasPythonKey", &at::functorch::hasPythonKey);
+
+  // various debugging things. Maybe we should offer these as first-class APIs
+  // on Tensors?
+  m.def("is_batchedtensor", &at::functorch::is_batchedtensor);
+  m.def("is_gradtrackingtensor", &at::functorch::is_gradtrackingtensor);
+  m.def("get_unwrapped", &at::functorch::get_unwrapped);
+  m.def("maybe_get_level", &at::functorch::maybe_get_level);
+  m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
 }

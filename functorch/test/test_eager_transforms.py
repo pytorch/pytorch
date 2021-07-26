@@ -8,15 +8,13 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import textwrap
 import unittest
-import functools
-import itertools
 import warnings
 import math
 from typing import Callable, Type
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, onlyOnCPUAndCUDA, onlyCPU
-import types
+    skipCUDAIfNoMagma, onlyCPU
 from functools import partial
 
 import functorch
@@ -469,6 +467,23 @@ class TestGradTransform(TestCase):
 
         x = torch.tensor(3.14, device=device)
         functorch.grad(foo)(x)
+
+    @onlyCPU
+    def test_tensor_print(self, device):
+        x = torch.tensor(3.14, device=device)
+        buf = None
+
+        def foo(x):
+            nonlocal buf
+            buf = repr(x)
+            return x
+
+        grad(grad(foo))(x)
+        expected = textwrap.dedent("""\
+            GradTrackingTensor(lvl=3, value=\\
+              GradTrackingTensor(lvl=2, value=\\
+                tensor(3.1400)))""")
+        self.assertEqual(buf, expected)
 
 
 class TestVmapOfGrad(TestCase):
