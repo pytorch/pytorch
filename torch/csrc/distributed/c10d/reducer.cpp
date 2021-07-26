@@ -1,3 +1,4 @@
+#include "c10d/Utils.hpp"
 #include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
 
@@ -1246,6 +1247,11 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
+      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+        const auto param_name = param_names_.find(it.second)->second;
+        LOG(INFO) << "Parameter " << param_name << " at index " << it.second
+                  << " is marked as unused.";
+      }
       unused_parameters_.push_back(it.second);
     }
   }
