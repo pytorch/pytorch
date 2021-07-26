@@ -13,17 +13,18 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
+from ..qconfig import QConfigAny
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
     get_flattened_qconfig_dict,
-    QConfigAny,
 )
 
 from .quantization_patterns import (
     QuantizeHandler,
     CatQuantizeHandler,
     CopyNodeQuantizeHandler,
+    TensorShapeOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -548,9 +549,10 @@ def maybe_insert_output_observer_for_node(
     is_standalone_module = qhandler is not None and \
         isinstance(qhandler, StandaloneModuleQuantizeHandler)
 
+    dtype = node_name_to_target_dtype[node.name]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, model.training)
+            qconfig, model.training) and dtype not in (torch.bool, None, torch.float)
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -692,7 +694,7 @@ def maybe_propagate_dtype_for_node(
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if isinstance(qhandler, CopyNodeQuantizeHandler):
+    if isinstance(qhandler, TensorShapeOpQuantizeHandler):
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
@@ -720,13 +722,13 @@ def propagate_dtypes_for_known_nodes(
             maybe_propagate_dtype_for_node(
                 cur_node, torch.bool, node_name_to_target_dtype, matches)
 
-def adjust_observers_for_cat(
+def make_input_output_share_observers(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
 ) -> None:
     """
-    Ensures that for quantized `torch.cat` nodes, we share an observer
+    Ensures that we share an observer
     for all input arguments as well as the output argument. In detail, given
     a graph of
 
@@ -740,14 +742,21 @@ def adjust_observers_for_cat(
     """
     # find the observer module to use
     first_arg = node.args[0]
-    assert isinstance(first_arg, (list, tuple))
-    first_arg_arg = first_arg[0]
+    if isinstance(first_arg, (list, tuple)):
+        first_arg_arg = first_arg[0]
+    elif isinstance(first_arg, Node):
+        first_arg_arg = first_arg
+    else:
+        return
 
     # if we have a graph such as
     #   observed_node -> non_observed_node -> cat
     # we need to navigate up to the first observer
     iteration_guard = 0
     while not is_activation_post_process_node(first_arg_arg, modules):
+        # did not find an activation_post_process for the op
+        if first_arg_arg.op == "placeholder":
+            return
         first_arg_arg = first_arg_arg.args[0]
         iteration_guard += 1
         if iteration_guard > 10000:
@@ -758,19 +767,20 @@ def adjust_observers_for_cat(
     assert isinstance(target_to_use, str)
     obs_mod_to_use = modules[target_to_use]
 
-    # set all other input observer nodes to use that module
-    for input_idx, input_arg in enumerate(first_arg):
-        if input_idx == 0:
-            continue
-        iteration_guard = 0
-        while not is_activation_post_process_node(input_arg, modules):
-            input_arg = input_arg.args[0]
-            iteration_guard += 1
-            if iteration_guard > 10000:
-                raise AssertionError('Unable to find observer of previous node')
+    if isinstance(first_arg, (list, tuple)):
+        # set all other input observer nodes to use that module
+        for input_idx, input_arg in enumerate(first_arg):
+            if input_idx == 0:
+                continue
+            iteration_guard = 0
+            while not is_activation_post_process_node(input_arg, modules):
+                input_arg = input_arg.args[0]
+                iteration_guard += 1
+                if iteration_guard > 10000:
+                    raise AssertionError('Unable to find observer of previous node')
 
-        parent_name, name = _parent_name(input_arg.target)
-        setattr(modules[parent_name], name, obs_mod_to_use)
+            parent_name, name = _parent_name(input_arg.target)
+            setattr(modules[parent_name], name, obs_mod_to_use)
 
     # set the output observer node to use that module
     for output_obs_node, _ in node.users.items():
@@ -918,7 +928,12 @@ def insert_observers_for_model(
                         (qhandler is not None and (
                             isinstance(qhandler, CopyNodeQuantizeHandler)
                         ))
-                    if is_last_node_of_pattern and (not is_like_copy_node):
+
+                    is_tensor_shape_op_node = \
+                        (qhandler is not None and (
+                            isinstance(qhandler, TensorShapeOpQuantizeHandler)))
+
+                    if is_last_node_of_pattern and not is_tensor_shape_op_node:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -948,8 +963,8 @@ def insert_observers_for_model(
                             # for quantized cat nodes only, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if isinstance(qhandler, CatQuantizeHandler):
-                                adjust_observers_for_cat(node, model, modules)
+                            if isinstance(qhandler, CatQuantizeHandler) or is_like_copy_node:
+                                make_input_output_share_observers(node, model, modules)
 
                             if isinstance(qhandler, CustomModuleQuantizeHandler):
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)

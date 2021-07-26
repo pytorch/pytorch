@@ -1700,7 +1700,9 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
-  find_package(AVX) # checks AVX and AVX2
+  # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
+  # cached results will be used so no extra overhead.
+  find_package(AVX)
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to
