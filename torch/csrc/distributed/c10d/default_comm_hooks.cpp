@@ -36,12 +36,10 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   return allreduce_fut->then(decompress, allreduce_fut->elementType());
 }
 
-c10::intrusive_ptr<c10::ivalue::Future> _AllReduceCommHookWithDivFactor::
+c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::
     runHook(GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
-  // Apply the division first to avoid overflow, especially for FP16.
-  tensors[0] /= state_.div_factor;
-  return state_.pg->allreduce(tensors)->getFuture();
+  return state_->allreduce(tensors)->getFuture();
 }
 
 } // namespace c10d
