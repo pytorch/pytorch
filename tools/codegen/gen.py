@@ -858,13 +858,18 @@ class FileManager:
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],
             num_shards: int,
-            base_env: Dict[str, Any] = {},
+            base_env: Optional[Dict[str, Any]] = None,
     ) -> None:
-        everything: Dict[str, Any] = {**base_env, 'shard_id': 'Everything'}
-        shards: List[Dict[str, Any]] = [
-            {**base_env, 'shard_id': f'_{i}'} for i in range(num_shards)]
 
-        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]):
+        everything: Dict[str, Any] = {'shard_id': 'Everything'}
+        shards: List[Dict[str, Any]] = [{'shard_id': f'_{i}'} for i in range(num_shards)]
+
+        if base_env is not None:
+            everything.update(base_env)
+            for shard in shards:
+                shard.update(base_env)
+
+        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
                 if k in into:
                     assert isinstance(into[k], list)
