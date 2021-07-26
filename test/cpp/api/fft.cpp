@@ -32,7 +32,6 @@ torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
 // NOTE: Visual Studio and ROCm builds don't understand complex literals
 //   as of August 2020
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, fft) {
   auto t = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::fft(t);
@@ -40,7 +39,6 @@ TEST(FFTTest, fft) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, fft_real) {
   auto t = torch::randn(128, torch::kDouble);
   auto actual = torch::fft::fft(t);
@@ -48,7 +46,6 @@ TEST(FFTTest, fft_real) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, fft_pad) {
   auto t = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::fft(t, 200);
@@ -60,7 +57,6 @@ TEST(FFTTest, fft_pad) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, fft_norm) {
   auto t = torch::randn(128, torch::kComplexDouble);
   // NOLINTNEXTLINE(bugprone-argument-comment)
@@ -74,7 +70,6 @@ TEST(FFTTest, fft_norm) {
   ASSERT_TRUE(torch::allclose(unnorm / std::sqrt(128), ortho_norm));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, ifft) {
   auto T = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::ifft(T);
@@ -82,7 +77,6 @@ TEST(FFTTest, ifft) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, fft_ifft) {
   auto t = torch::randn(77, torch::kComplexDouble);
   auto T = torch::fft::fft(t);
@@ -95,7 +89,6 @@ TEST(FFTTest, fft_ifft) {
   ASSERT_TRUE(torch::allclose(t, t_round_trip));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, rfft) {
   auto t = torch::randn(129, torch::kDouble);
   auto actual = torch::fft::rfft(t);
@@ -103,7 +96,6 @@ TEST(FFTTest, rfft) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, rfft_irfft) {
   auto t = torch::randn(128, torch::kDouble);
   auto T = torch::fft::rfft(t);
@@ -116,7 +108,6 @@ TEST(FFTTest, rfft_irfft) {
   ASSERT_TRUE(torch::allclose(t, t_round_trip));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, ihfft) {
   auto T = torch::randn(129, torch::kDouble);
   auto actual = torch::fft::ihfft(T);
@@ -124,7 +115,6 @@ TEST(FFTTest, ihfft) {
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FFTTest, hfft_ihfft) {
   auto t = torch::randn(64, torch::kComplexDouble);
   t[0] = .5; // Must be purely real to satisfy hermitian symmetry
