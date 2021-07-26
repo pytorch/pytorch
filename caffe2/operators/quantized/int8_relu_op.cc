@@ -14,11 +14,9 @@ OpSchema::Cost CostInferenceForRelu(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Relu, int8::Int8ReluOp);
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Relu)
     .NumInputs(1)
     .NumOutputs(1)
