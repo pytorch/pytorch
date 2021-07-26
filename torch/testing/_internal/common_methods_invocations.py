@@ -1238,7 +1238,7 @@ def sample_inputs_binary_pwise(
 
     shapes = [
         ((), scalar),
-        ((S), scalar),
+        ((S,), scalar),
         ((S, 1), (S,)),
         ((M, S), scalar),
         ((S, M, S), (M, S)),
@@ -1292,10 +1292,10 @@ def sample_inputs_add_sub(
         python_scalars=python_scalars,
         **op_kwargs,
     )
-
-    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
-    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
-    sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs={"alpha": alpha, **op_kwargs}, broadcasts_input=False))
+    #
+    # lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
+    # rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
+    # sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs={"alpha": alpha, **op_kwargs}, broadcasts_input=False))
 
     return sample_inputs
 
