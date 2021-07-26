@@ -89,61 +89,71 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
-    @ops(binary_ufuncs)
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     def test_broadcasting(self, device, dtype, op):
-        for sample in op.sample_inputs(device, dtype):
-            a = sample.input
-            b, *other_args = sample.args
-            if isinstance(b, torch.Tensor):
-                expected = torch.broadcast_shapes(a.shape, b.shape)
-            else:
-                expected = a.shape
+        for shape_lhs, shape_rhs in (
+            ((1,), ()),
+            ((2,), ()),
+            ((1,), (2,)),
+            ((2,), (2,)),
+            ((2, 1), (2,)),
+            ((1, 2), (2,)),
+            ((3, 2), (2,)),
+            ((3, 2), (3, 2)),
+            ((1, 3, 2), (2,)),
+            ((1, 3, 2), (3, 2)),
+            ((3, 1, 2), (3, 2)),
+            ((1, 3, 2), (1, 3, 2)),
+            ((2, 3, 2), ()),
+            ((2, 3, 2), (2, 3, 2)),
+            ((3, 1, 2), (1, 3, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
 
-            actual = op(a, b, *other_args, **sample.kwargs).shape
+            actual = op(lhs, rhs).shape
+            expected = torch.broadcast_shapes(shape_lhs, shape_rhs)
 
             msg = (
-                f"For {device} / {dtype}, torch.{op.name} broadcasts inputs of shapes {a.shape} and {b.shape} "
-                f"incorrectly: {actual} != {expected}"
+                f"On {device}, torch.{op.name} broadcasts inputs of shapes {shape_lhs} and {shape_rhs} incorrectly: "
+                f"{actual} != {expected}"
             )
-            torch.testing.assert_close(actual, expected, msg=msg)
+            self.assertEqual(actual, expected, msg=msg)
 
-    @ops(binary_ufuncs)
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     def test_broadcast_python_scalar(self, device, dtype, op):
-        for shape in ((), (1,), (2,), (1, 2, 3)):
-            a = torch.ones(shape, device=device, dtype=dtype)
-            b_tensor = torch.ones((), device=device, dtype=dtype)
-            b_python = b_tensor.item()
+        for shape_lhs in ((), (1,), (2,), (1, 2, 3),):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs_tensor = make_tensor((), device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
+            rhs_python = rhs_tensor.item()
 
-            actual = op(a, b_python)
-            expected = op(a, b_tensor)
+            actual = op(lhs, rhs_python)
+            expected = op(lhs, rhs_tensor)
 
-            torch.testing.assert_close(
-                actual,
-                expected,
-                check_device=False,
-                check_dtype=False,
-                msg=f"For {device} / {dtype}, torch.{op.name} broadcasts Python scalars different than 0d tensors.",
+            self.assertEqual(
+                actual.shape,
+                expected.shape,
+                msg=f"On {device}, torch.{op.name} broadcasts Python scalars different than 0d tensors.",
             )
 
-    @ops(binary_ufuncs)
+    @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
     def test_not_broadcastable(self, device, dtype, op):
-        shapes = [
-            ((2,), (3,)),
-            ((3, 1), (2, 1)),
-            ((1, 3, 2), (3,)),
-            ((3, 1, 2), (2, 1, 2)),
-        ]
-        for shape_a, shape_b in shapes:
-            a = torch.ones(shape_a, device=device, dtype=dtype)
-            b = torch.ones(shape_b, device=device, dtype=dtype)
+        for shape_lhs, shape_rhs in (
+                ((2,), (3,)),
+                ((3, 1), (2, 1)),
+                ((1, 3, 2), (3,)),
+                ((3, 1, 2), (2, 1, 2)),
+        ):
+            lhs = make_tensor(shape_lhs, device=device, dtype=dtype, **op.lhs_make_tensor_kwargs)
+            rhs = make_tensor(shape_rhs, device=device, dtype=dtype, **op.rhs_make_tensor_kwargs)
 
             try:
-                broadcasted_shape = op(a, b).shape
+                broadcasted_shape = op(lhs, rhs).shape
             except RuntimeError:
                 continue
 
             msg = (
-                f"For {device} / {dtype}, torch.{op.name} broadcasts inputs shapes {a.shape} and {b.shape} into "
+                f"On {device}, torch.{op.name} broadcasts inputs shapes {shape_lhs} and {shape_rhs} into "
                 f"{broadcasted_shape}, although they are not broadcastable."
             )
             raise AssertionError(msg)

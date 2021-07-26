@@ -1212,44 +1212,92 @@ class BinaryUfuncInfo(OpInfo):
     (https://numpy.org/doc/stable/reference/ufuncs.html) for more details
     about the concept of ufuncs.
     """
-    pass
+    def __init__(self, name, *, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None, **kwargs):
+        super().__init__(name, **kwargs)
+
+        if lhs_make_tensor_kwargs is None:
+            lhs_make_tensor_kwargs = {}
+        self.lhs_make_tensor_kwargs = lhs_make_tensor_kwargs
+
+        if rhs_make_tensor_kwargs is None:
+            rhs_make_tensor_kwargs = {}
+        self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
 
 def sample_inputs_binary_pwise(
-        op_info, device, dtype, requires_grad, op_kwargs=None, lhs_make_tensor_kwargs=None, **rhs_make_tensor_kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    python_scalars=False,
+    **op_kwargs,
 ):
-    if op_kwargs is None:
-        op_kwargs = {}
-    if lhs_make_tensor_kwargs is None:
-        lhs_make_tensor_kwargs = {}
+    scalar = make_tensor((), device=device, dtype=dtype, **op_info.rhs_make_tensor_kwargs)
+    if python_scalars:
+        scalar = scalar.item()  # type: ignore[assignment]
 
     shapes = [
-        ((1,), ()),
-        ((S,), ()),
-        ((1,), (S,)),
-        ((S,), (S,)),
+        ((), scalar),
+        ((S), scalar),
         ((S, 1), (S,)),
-        ((1, S), (S,)),
-        ((M, S), (S,)),
-        ((M, S), (M, S)),
-        ((1, M, S), (S,)),
-        ((1, M, S), (M, S)),
-        ((M, 1, S), (M, S)),
-        ((1, M, S), (1, M, S)),
-        ((S, M, S), ()),
+        ((M, S), scalar),
+        ((S, M, S), (M, S)),
         ((S, M, S), (S, M, S)),
+        ((M, 1, S), (M, S)),
         ((M, 1, S), (1, M, S)),
     ]
 
-    return [
-        SampleInput(
-            make_tensor(shape_a, device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs),
-            args=(make_tensor(shape_b, device=device, dtype=dtype, **rhs_make_tensor_kwargs),),
-            kwargs=op_kwargs,
-            broadcasts_input=torch.broadcast_shapes(shape_a, shape_b) != shape_a,
+    sample_inputs = []
+    for shape_lhs, shape_rhs_or_scalar in shapes:
+        lhs = make_tensor(
+            shape_lhs,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            **op_info.lhs_make_tensor_kwargs,
         )
-        for shape_a, shape_b in shapes
-    ]
+        if isinstance(shape_rhs_or_scalar, tuple):
+            # shape
+            rhs = make_tensor(
+                shape_rhs_or_scalar,
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+                **op_info.rhs_make_tensor_kwargs,
+            )
+            broadcasts_input = torch.broadcast_shapes(shape_lhs, shape_rhs_or_scalar) != shape_lhs
+        else:
+            # scalar
+            rhs = shape_rhs_or_scalar  # type: ignore[assignment]
+            broadcasts_input = False
+
+        sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=op_kwargs, broadcasts_input=broadcasts_input))
+    return sample_inputs
+
+
+def sample_inputs_add_sub(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    python_scalars=False,
+    alpha=1.0,
+    **op_kwargs,
+):
+    sample_inputs = sample_inputs_binary_pwise(
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        python_scalars=python_scalars,
+        **op_kwargs,
+    )
+
+    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
+    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
+    sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs={"alpha": alpha, **op_kwargs}, broadcasts_input=False))
+
+    return sample_inputs
 
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
@@ -4883,7 +4931,7 @@ op_db: List[OpInfo] = [
                     ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, op_kwargs=dict(alpha=2)),
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2.0),
                     supports_inplace_autograd=False,
                     supports_forward_ad=True),
     BinaryUfuncInfo('mul',
@@ -4898,7 +4946,7 @@ op_db: List[OpInfo] = [
                     aliases=('subtract',),
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, op_kwargs=dict(alpha=2)),
+                    sample_inputs_func=partial(sample_inputs_add_sub, alpha=2.0),
                     supports_inplace_autograd=False),
     OpInfo('addmm',
            # This addmm OpInfo is for when alpha and beta are not both equal to 1.
@@ -5437,39 +5485,39 @@ op_db: List[OpInfo] = [
                     aliases=('divide',),
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True),
+                    sample_inputs_func=sample_inputs_binary_pwise,
                     supports_forward_ad=True,
-                    assert_autodiffed=True),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(
-                        sample_inputs_binary_pwise, op_kwargs=dict(rounding_mode="trunc"), exclude_zero=True
-                    ),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc"),
                     supports_forward_ad=True,
                     skips=(
                         # Reference: https://github.com/pytorch/pytorch/issues/59174
                         SkipInfo('TestJit', 'test_variant_consistency_jit'),
                     ),
-                    assert_autodiffed=True),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(
-                        sample_inputs_binary_pwise, op_kwargs=dict(rounding_mode="floor"), exclude_zero=True
-                    ),
+                    sample_inputs_func=partial(sample_inputs_binary_pwise, rounding_mode="trunc"),
                     supports_forward_ad=True,
                     skips=(
                         # Reference: https://github.com/pytorch/pytorch/issues/59174
                         SkipInfo('TestJit', 'test_variant_consistency_jit'),
                     ),
-                    assert_autodiffed=True),
+                    assert_autodiffed=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True)),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -5715,8 +5763,9 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     BinaryUfuncInfo('floor_divide',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
-                    sample_inputs_func=partial(sample_inputs_binary_pwise, exclude_zero=True),
+                    sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     ),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
@@ -7501,7 +7550,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool),
            supports_autograd=False,
            safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_binary_pwise),
+           sample_inputs_func=sample_inputs_zeta),
     # OpInfo entry to verify the gradient formula of `other`/`q`
     OpInfo('special.zeta',
            op=lambda q, x, **kwargs: torch.special.zeta(x, q, **kwargs),
