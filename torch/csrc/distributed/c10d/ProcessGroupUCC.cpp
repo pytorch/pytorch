@@ -138,6 +138,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
   }
+  ucp_worker_progress(UCPContext::get()->worker);
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
 }
 
@@ -167,6 +168,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     // not be invoked.
     return c10::make_intrusive<ProcessGroupUCC::ImmediatelyCompletedWork>();
   }
+  ucp_worker_progress(UCPContext::get()->worker);
   return c10::make_intrusive<ProcessGroupUCC::WorkUCP>(request);
 }
 

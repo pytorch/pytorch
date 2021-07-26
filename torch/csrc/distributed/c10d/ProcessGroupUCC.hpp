@@ -10,47 +10,26 @@ namespace c10d {
 
 constexpr const char* UCC_BACKEND_NAME = "_internal_ucc";
 
-// ProcessGroupUCC implements UCC bindings for c10d.
+// ProcessGroupUCC implements UCC & UCX bindings for c10d. UCC is used for
+// collective operations, and UCX is used for P2P operations.
 //
-// The UCC binding is not published to the user directly, but it provided
+// The UCC & UCX binding is not published to the user directly, but it provided
 // a process group called `_internal_ucc`. The `_internal_ucc` is only for
-// testing purposes, and for users who really knows what they are doing.
+// testing purposes, and for power users who really knows what they are doing.
 //
 // All functions of the class are expected to be called in the same order
 // across all processes in the process group.  This is the only way that we
 // can guarantee to match up the same calls among all processes.
 //
-// ************* TODO: edit below *************
+// Links:
+// ucx: https://github.com/openucx/ucx
+// ucc: https://github.com/openucx/ucc
+// Original torch_ucc: https://github.com/facebookresearch/torch_ucc
 //
-// All NCCL functions provided by this class are asynchronous functions. More
-// specifically, each NCCL call is scheduled on a separate CUDA stream that is
-// different from the current CUDA stream. This is for the purpose of
-// achieving potentially concurrency and better performance. As a result,
-// it is the callers' responsibility to make sure that the CUDA stream their
-// code works on needs to wait for the NCCL operation from
-// this class.
-//
-// This can be done by calling:
-//
-// either WorkNCCL::wait() or WorkNCCL::synchronize(), both achieves the same
-// functionality and are synonyms.
-//
-// Also note that WorkNCCL::finishedGPUExecution() is a helper function only
-// provided by ProcessGroupNCCL to check if the NCCL operation of WorkNCCL has
-// finished execution on the GPU (not just scheduled).
-//
-// Example on using the NCCL process group
-//
-//   ProcessGroupNCCL pg(store, rank, size);
-//   std::shared_ptr<WorkNCCL> work = pg.allreduce(tensors);
-//
-//   // At this point, NCCL kernel has already by queued successfully
-//   // Now, let current stream wait for the NCCL to finish, this function is
-//   // async operation as well
-//
-//   work->wait()
-//
-//   // Now continue on other work in the current stream.
+// *****************************************************************************
+// This ProcessGroup is still under development, and there are some know issues:
+// - Only send and recv are supported.
+// - It is fake async: UCP worker are progressed only when checking status.
 class TORCH_API ProcessGroupUCC final : public ProcessGroup {
 public:
   class WorkUCP : public ProcessGroup::Work {
@@ -58,12 +37,18 @@ public:
   public:
     WorkUCP(ucs_status_ptr_t ptr) : finished(reinterpret_cast<bool *>(ptr)) {}
     ~WorkUCP() { ucp_request_free(finished); }
-    bool isCompleted() override { return *finished; };
-    bool isSuccess() const override { return *finished; };
+    bool isCompleted() override {
+      // TODO: progress worker in a side thread for true async
+      ucp_worker_progress(UCPContext::get()->worker);
+      return *finished;
+    };
+    bool isSuccess() const override {
+      // TODO: progress worker in a side thread for true async
+      ucp_worker_progress(UCPContext::get()->worker);
+      return *finished;
+    };
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override {
-      while(!isCompleted()) {
-        ucp_worker_progress(UCPContext::get()->worker);
-      }
+      while(!isCompleted());
       return true;
     };
   };
