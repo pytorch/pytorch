@@ -44,10 +44,19 @@ auto PyFunctionPreHook::operator()(const variable_list& values) -> variable_list
   THPObjectPtr value(THPVariable_Wrap(values.at(value_idx)));
   if (!value) throw python_error();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *key, *hook;
-  Py_ssize_t pos = 0;
-  while (PyDict_Next(dict, &pos, &key, &hook)) {
+  // Note: [Extend Hook Lifetime]
+  // Hold a reference to hooks till we iterate over them.
+  // This is to handle the case when hook calls `handle.remove` inside it
+  // and it's refcount goes to `0`, Python is free to GC it.
+  // We hold onto a stale pointer and subsequent call to
+  // `check_single_result`, which tries to fetch the `hook`'s name segfaults.
+  // So, we use `PyDict_Values` which returns a new reference to the values
+  // i.e. we hold the reference to the hooks till we have iterated over them.
+  // Reference: https://github.com/pytorch/pytorch/issues/58354
+  auto hooks = THPObjectPtr{PyDict_Values(dict)};
+  const auto len = PyList_Size(hooks);
+  for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(hook, value.get(), nullptr));
     if (!res) throw python_error();
     if (res == Py_None) continue;
@@ -81,10 +90,11 @@ auto PyFunctionPostHook::operator()(
   THPObjectPtr outputs(wrap_variables(_outputs));
   THPObjectPtr inputs(wrap_variables(_inputs));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *key, *hook;
-  Py_ssize_t pos = 0;
-  while (PyDict_Next(dict, &pos, &key, &hook)) {
+  // See Note: [Extend Hook Lifetime]
+  auto hooks = THPObjectPtr{PyDict_Values(dict)};
+  const auto len = PyList_Size(hooks);
+  for (Py_ssize_t idx = 0; idx < len; ++idx) {
+    const auto hook = PyList_GetItem(hooks, idx);
     THPObjectPtr res(PyObject_CallFunctionObjArgs(
         hook, outputs.get(), inputs.get(), nullptr));
     if (!res) throw python_error();
