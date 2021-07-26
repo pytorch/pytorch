@@ -11,8 +11,6 @@ from torch import Tensor, device, dtype
 from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
-from inspect import signature
-
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
@@ -117,7 +115,8 @@ def register_module_backward_hook(
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
-    This function is deprecated in favor of :meth:`nn.module.register_module_full_backward_hook`
+    This function is deprecated in favor of
+    :func:`torch.nn.modules.module.register_module_full_backward_hook`
     and the behavior of this function will change in future versions.
 
     Returns:
@@ -1270,14 +1269,20 @@ class Module:
                 destination = hook_result
         return destination
 
-    def _register_load_state_dict_pre_hook(self, hook):
+    def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
         `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
         `error_msgs`, before loading `state_dict` into `self`. These arguments
         are exactly the same as those of `_load_from_state_dict`.
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict.
+            with_module (bool, optional): Whether or not to pass the module
+                instance to the hook.
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
-        self._load_state_dict_pre_hooks[handle.id] = hook
+        self._load_state_dict_pre_hooks[handle.id] = (hook, with_module)
         return handle
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -1313,9 +1318,8 @@ class Module:
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
         """
-        for hook in self._load_state_dict_pre_hooks.values():
-            n_params = len(signature(hook).parameters)
-            if n_params == 8:
+        for hook, with_module in self._load_state_dict_pre_hooks.values():
+            if with_module:
                 # Pass in module instance as well.
                 hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, self)
             else:
