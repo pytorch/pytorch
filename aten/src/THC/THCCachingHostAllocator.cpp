@@ -174,6 +174,8 @@ struct HostAllocator
 
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
+        // ignore and clear the error if not ready
+        cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         return err;
@@ -274,7 +276,6 @@ static void THCCachingHostDeleter(void* ptr) {
 
 struct THCCachingHostAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
-    THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
     return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};

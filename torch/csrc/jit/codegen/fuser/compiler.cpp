@@ -61,9 +61,7 @@ const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> next_kernel_id{0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int debug_fusion{-1};
 
 size_t nCompiledKernels() {
