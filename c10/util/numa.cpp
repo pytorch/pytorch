@@ -1,6 +1,5 @@
 #include <c10/util/numa.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_cpu_numa_enabled, false, "Use NUMA whenever possible.");
 
 #if defined(__linux__) && defined(C10_USE_NUMA) && !defined(C10_MOBILE)
