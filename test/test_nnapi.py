@@ -32,6 +32,14 @@ class TestNNAPI(TestCase):
         else:
             self.can_run_nnapi = False
 
+    # Created for easy override by subclasses (eg TestNnapiBackend)
+    def call_lowering_to_nnapi(self, traced_module, args):
+        return convert_model_to_nnapi(traced_module, args)
+
+    # Created for subclasses to set can_run_nnapi (eg TestNnapiBackend)
+    def set_can_run_nnapi(self, can_run):
+        self.can_run_nnapi = can_run
+
     def check(
         self,
         module,
@@ -49,7 +57,7 @@ class TestNNAPI(TestCase):
                 args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
-            nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
+            nnapi_module = self.call_lowering_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
                 return
