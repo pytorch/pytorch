@@ -202,7 +202,11 @@ Interpreter::Interpreter(InterpreterManager* manager)
 
   write_tmp_lib(dst, lib_start, lib_end);
   fclose(dst);
-  handle_ = dlopen(library_name, RTLD_LOCAL | RTLD_LAZY);
+  int flags = RTLD_LOCAL | RTLD_LAZY;
+#ifndef FBCODE_CAFFE2
+  flags |= RTLD_DEEPBIND;
+#endif
+  handle_ = dlopen(library_name, flags);
   if (!handle_) {
     throw std::runtime_error(dlerror());
   }
@@ -212,17 +216,27 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // for the debugger to see it.
   unlink(library_name_.c_str());
 
+#ifndef FBCODE_CAFFE2
+  auto deploy_set_self_ptr = (void (*)(void*))dlsym(handle_, "deploy_set_self");
+  AT_ASSERT(deploy_set_self_ptr);
+  deploy_set_self_ptr(handle_);
+#endif
+
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
-  assert(new_interpreter_impl);
+  AT_ASSERT(new_interpreter_impl);
   pImpl_ = std::unique_ptr<InterpreterImpl>(
-      // NOLINTNEXTLINE(modernize-redundant-void-arg)
-      ((InterpreterImpl * (*)(void)) new_interpreter_impl)());
+      ((InterpreterImpl * (*)()) new_interpreter_impl)());
 }
 
 Interpreter::~Interpreter() {
   if (handle_) {
     // ensure python uninitialization runs before we dlclose the library
     pImpl_.reset();
+#ifndef FBCODE_CAFFE2
+    auto deploy_flush_python_libs =
+        (void (*)())dlsym(handle_, "deploy_flush_python_libs");
+    deploy_flush_python_libs();
+#endif
     dlclose(handle_);
   }
 }
