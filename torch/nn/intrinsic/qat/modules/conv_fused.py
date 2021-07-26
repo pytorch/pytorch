@@ -236,7 +236,12 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         modules.append(conv)
 
         if cls._FLOAT_BN_MODULE:
-            bn = cls._FLOAT_BN_MODULE(self.bn.num_features, self.bn.eps, self.bn.momentum, self.bn.affine, self.bn.track_running_stats)
+            bn = cls._FLOAT_BN_MODULE(
+                self.bn.num_features,
+                self.bn.eps,
+                self.bn.momentum,
+                self.bn.affine,
+                self.bn.track_running_stats)
             bn.weight = Parameter(self.bn.weight)
             bn.bias = None
             if self.bn.bias is not None:
