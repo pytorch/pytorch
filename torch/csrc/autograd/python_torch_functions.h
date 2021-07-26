@@ -5,7 +5,7 @@
 
 namespace torch { namespace autograd {
 
-static PyObject* THPVariableFunctionsModule = NULL;
+extern PyObject* THPVariableFunctionsModule;
 
 // Wrapper converts a raised TypeError into returning NotImplemented
 // Used to implement binary arithmetic operators
