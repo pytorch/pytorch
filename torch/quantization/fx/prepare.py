@@ -22,10 +22,6 @@ from .qconfig_utils import (
 
 from .quantization_patterns import (
     QuantizeHandler,
-    CatQuantizeHandler,
-    CopyNodeQuantizeHandler,
-    BinaryOpQuantizeHandler,
-    TensorShapeOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -687,15 +683,16 @@ def maybe_propagate_dtype_for_node(
     matches: Dict[str, MatchResult],
 ) -> None:
     """
-    Assigns `target_dtype` to `node`. If `node` is matched to an instance
-    of `CopyNodeQuantizeHandler`, also call this function recursively on
+    Assigns `target_dtype` to `node`. If `node` is a general tensor shape op
+    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
+    also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype[node.name] = target_dtype
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if isinstance(qhandler, TensorShapeOpQuantizeHandler):
+    if qhandler.is_general_tensor_shape_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
@@ -955,17 +952,13 @@ def insert_observers_for_model(
                         node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
-                    # TODO: add is_like_copy_node method in quantizehandler
-                    is_like_copy_node = \
-                        (qhandler is not None and (
-                            isinstance(qhandler, CopyNodeQuantizeHandler)
-                        ) or isinstance(qhandler, BinaryOpQuantizeHandler) and qhandler.num_tensor_args == 1)
+                    is_general_tensor_value_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_value_op())
 
-                    is_tensor_shape_op_node = \
-                        (qhandler is not None and (
-                            isinstance(qhandler, TensorShapeOpQuantizeHandler)))
+                    is_general_tensor_shape_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_shape_op())
 
-                    if is_last_node_of_pattern and not is_tensor_shape_op_node:
+                    if is_last_node_of_pattern and not is_general_tensor_shape_op:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -992,10 +985,10 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            # for quantized cat nodes only, we modify the graph
+                            # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if isinstance(qhandler, CatQuantizeHandler) or is_like_copy_node:
+                            if is_general_tensor_value_op:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
