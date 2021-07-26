@@ -92,6 +92,7 @@ _SKIP_PYTHON_BINDINGS = [
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_reshape_alias',
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
@@ -162,6 +163,8 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
     create_python_bindings(
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
+    # NOTE: num_shards here must be synced with gatherTorchFunctions in
+    #       torch/csrc/autograd/python_torch_functions_manual.cpp
     functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
     create_python_bindings_sharded(
         fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp',
@@ -230,6 +233,7 @@ def create_python_bindings_sharded(
 ) -> None:
     """Generates Python bindings to ATen functions"""
     grouped = group_filter_overloads(pairs, pred)
+
     def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
         return str(kv[0])
 
