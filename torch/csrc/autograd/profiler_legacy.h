@@ -392,6 +392,11 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
+std::string getNvtxStr(
+    const at::StringView& name,
+    int64_t sequence_nr,
+    const std::vector<std::vector<int64_t>>& shapes);
+
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
   CPU, // CPU-only profiling
@@ -543,7 +548,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
   void pushRange(
       const at::RecordFunction& fn,
       const bool record_cuda,
-      const char* msg = "",
       std::vector<std::vector<int64_t>>&& shapes = {});
 
   void popRange(const at::RecordFunction& fn, const bool record_cuda);
@@ -568,12 +572,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
   bool memoryProfilingEnabled() const override;
 
  protected:
-  std::string getNvtxStr(
-      const at::StringView& name,
-      const char* msg,
-      int64_t sequence_nr,
-      const std::vector<std::vector<int64_t>>& shapes) const;
-
   RangeEventList& getEventList(int64_t thread_id = -1);
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
