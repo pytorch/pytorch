@@ -226,9 +226,9 @@ class profile(object):
     def export_chrome_trace(self, path):
         self._check_finish()
         if kineto_available():
-            self.kineto_results.save(path)
+            self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
-            return self.function_events.export_chrome_trace(path)
+            return self.function_events.export_chrome_trace(path)  # type: ignore[union-attr]
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
