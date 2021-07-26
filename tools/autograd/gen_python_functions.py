@@ -233,12 +233,12 @@ def create_python_bindings_sharded(
     fm.write_sharded(
         filename,
         grouped.items(),
-        base_env = {
+        base_env={
             'generated_comment':
             '@' + f'generated from {fm.template_dir}/{filename}',
         },
-        key_fn = lambda kv: str(kv[0]),
-        env_callable = lambda kv: {
+        key_fn=lambda kv: str(kv[0]),
+        env_callable=lambda kv: {
             'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
             'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
             'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
