@@ -223,7 +223,6 @@ std::vector<DimArg> get_vars(
   return vars;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     add,
     [](const std::vector<Tensor*>& inputs,
@@ -247,7 +246,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     sub,
     [](const std::vector<Tensor*>& inputs,
@@ -271,7 +269,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     neg,
     [](const std::vector<Tensor*>& inputs,
@@ -294,7 +291,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     mul,
     [](const std::vector<Tensor*>& inputs,
@@ -320,7 +316,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     div,
     [](const std::vector<Tensor*>& inputs,
@@ -348,7 +343,6 @@ REGISTER_METHOD(
       return {inputs[0]->shape};
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     sum,
     [](const std::vector<Tensor*>& inputs,
@@ -376,7 +370,6 @@ REGISTER_METHOD(
     [](const std::vector<VTensor*>& inputs)
         -> std::vector<std::vector<std::string>> { return {{}}; });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_METHOD(
     broadcast,
     [](const std::vector<Tensor*>& inputs,

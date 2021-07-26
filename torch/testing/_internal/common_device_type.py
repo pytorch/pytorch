@@ -790,7 +790,7 @@ class ops(_TestParametrizer):
 
 # Decorator that generates two set of tests with layout=torch.strided and layout=specified_layout.
 # All keyword arguments are used only for the specified layout, so they have no effect on the original test.
-class enableLayout(_TestParametrizer):
+class addLayout(_TestParametrizer):
     def __init__(self, layout: torch.layout, *,
                  dtypes: Optional[Sequence[torch.dtype]] = None,
                  dtypes_cpu: Optional[Sequence[torch.dtype]] = None,
@@ -800,7 +800,7 @@ class enableLayout(_TestParametrizer):
         if not isinstance(layout, torch.layout):
             raise RuntimeError(f"Expected to get torch.layout as layout, but got {type(layout)} instead.")
         if layout == torch.strided:
-            raise RuntimeError(f"This test parametrization is not intended to be used with torch.strided layout.")
+            raise RuntimeError("This test parametrization is not intended to be used with torch.strided layout.")
         self.layout = layout
         self.dtypes = set(dtypes) if dtypes is not None else None
         self.dtypes_cpu = set(dtypes_cpu) if dtypes_cpu is not None else None
@@ -810,9 +810,7 @@ class enableLayout(_TestParametrizer):
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function with boolean sparse_csr flag. """
-        # if self.layout == torch.strided generate only one set of tests
-        maybe_layout = (self.layout,) if self.layout != torch.strided else tuple()
-        for layout in (torch.strided, *maybe_layout):
+        for layout in (torch.strided, self.layout):
             # get dtypes specified with @dtypes, @dtypesIfCPU, @dtypesIfCUDA
             dtypes = set(device_cls._get_dtypes(test))
 
@@ -854,7 +852,7 @@ class enableLayout(_TestParametrizer):
 
                 yield (test_wrapper, test_name, param_kwargs)
 
-enableSparseCSR = partial(enableLayout, torch.sparse_csr)
+addLayoutSparseCSR = partial(addLayout, torch.sparse_csr)
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
