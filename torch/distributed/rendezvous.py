@@ -187,7 +187,8 @@ def _env_rendezvous_handler(url: str, timeout: timedelta = default_pg_timeout, *
     use_torchelastic_store = os.environ.get("TORCHELASTIC_USE_AGENT_STORE", None)
 
     if use_torchelastic_store == str(True):
-        worker_process_prefix = "/worker"
+        attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
+        worker_process_prefix = f"/worker/attempt_{attempt}"
         # When TORCHELASTIC_USE_AGENT_STORE is set up, the worker process is assumed
         # to be invoked by the torchelastic agent. Torchelastic agent creates a tcp daemon thread
         # on the GROUP_RANK=0, as a result all user worker processes should create store with: daemon=False

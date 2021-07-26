@@ -137,18 +137,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-// TODO: Implement `nansum` similar to the stable `sum`
-// implementation in cpu/SumKernel.cpp
-static void nansum_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Half){
-    binary_kernel_reduce(iter, NanSumOps<float, c10::Half>{}, float{0});
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nansum_cpu", [&] {
-    binary_kernel_reduce(iter, NanSumOps<scalar_t, scalar_t>{}, scalar_t{0});
-  });
-  }
-}
-
 static void mean_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&] {
     scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
@@ -407,33 +395,18 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native
