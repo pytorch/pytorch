@@ -4,17 +4,14 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HeatmapMaxKeypoint,
     HeatmapMaxKeypointOp<float, CPUContext>);
 
 // Input: heatmaps [size x size], boxes [x0, y0, x1, y1]
 // Output: keypoints (#rois, 4, #keypoints)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HeatmapMaxKeypoint).NumInputs(2).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HeatmapMaxKeypoint);
 } // namespace
 

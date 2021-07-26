@@ -337,11 +337,11 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
 
   void visit(const Let* v) override;
 
-#define STMT_ON_STACK(Op)                    \
-  virtual void visit(const Op* v) override { \
-    stmtStack_.push_front(v);                \
-    IRVisitor::visit(v);                     \
-    stmtStack_.pop_front();                  \
+#define STMT_ON_STACK(Op)            \
+  void visit(const Op* v) override { \
+    stmtStack_.push_front(v);        \
+    IRVisitor::visit(v);             \
+    stmtStack_.pop_front();          \
   }
 
   STMT_ON_STACK(AtomicAdd);
