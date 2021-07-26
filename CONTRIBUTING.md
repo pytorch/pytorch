@@ -401,6 +401,13 @@ make flake8
 make mypy
 
 make cmakelint
+
+make clang-tidy
+```
+
+To run a lint only on changes, add the `CHANGED_ONLY` option:
+```bash
+make <name of lint> CHANGED_ONLY=--changed-only
 ```
 
 ### Running `mypy`
@@ -1092,7 +1099,7 @@ We provide custom built binaries which have additional checks enabled. You can i
 ```bash
 python3 -m tools.linter.install.clang_tidy
 ```
-We currently only support Linux and MacOS (x86) machines.
+We currently only support Linux and MacOS (x86).
 
 2. Install clang-tidy driver script dependencies
 ```bash
