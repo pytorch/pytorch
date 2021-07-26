@@ -62,8 +62,8 @@ c10::IValue preprocess(
         "\nmethod_compile_spec should contain a Tensor or Tensor List which bundles input parameters:"
         " shape, dtype, quantization, and dimorder."
         "\nFor input shapes, use 0 for run/load time flexible input."
-        "\nmethod_compile_spec must use the following format: "
-        "{\"forward\": {\"inputs\": at::Tensor}} OR {\"forward\": {\"inputs\": c10::List<at::Tensor>}}");
+        "\nmethod_compile_spec must use the following format:"
+        "\n{\"forward\": {\"inputs\": at::Tensor}} OR {\"forward\": {\"inputs\": c10::List<at::Tensor>}}");
   }
 
   // Convert input to a Tensor or a python list of Tensors
