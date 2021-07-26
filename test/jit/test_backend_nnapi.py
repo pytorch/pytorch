@@ -87,7 +87,7 @@ method_compile_spec must use the following format:
         # No dictionary under the forward key
         compile_spec = {"forward": 1}
         with self.assertRaisesRegex(RuntimeError,
-                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, " \
+                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, "
                                     "under it's \"forward\" key."
                                     + errorMsgTail):
             torch._C._jit_to_backend("nnapi", traced, compile_spec)
@@ -95,7 +95,7 @@ method_compile_spec must use the following format:
         # No inputs key (in the dictionary under the forward key)
         compile_spec = {"forward": {"not inputs": args}}
         with self.assertRaisesRegex(RuntimeError,
-                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, " \
+                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, "
                                     "under it's \"forward\" key."
                                     + errorMsgTail):
             torch._C._jit_to_backend("nnapi", traced, compile_spec)
