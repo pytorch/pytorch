@@ -12,7 +12,7 @@ def set_save_on_cpu(save_on_cpu):
         return
 
     def pack_hook(tensor):
-        storage = torch.empty(tensor.size(), pin_memory=torch.cuda.is_available())
+        storage = torch.empty(tensor.size(), dtpe=tensor.dtype, pin_memory=torch.cuda.is_available())
         storage.copy_(tensor)
         return (tensor.device, storage)
 
