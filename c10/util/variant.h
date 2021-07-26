@@ -933,7 +933,7 @@ namespace c10 {
 
 class bad_variant_access : public std::exception {
  public:
-  virtual const char* what() const noexcept override {
+  const char* what() const noexcept override {
     return "bad_variant_access";
   }
 };
