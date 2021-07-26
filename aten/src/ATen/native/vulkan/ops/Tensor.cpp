@@ -1,4 +1,5 @@
 #include <ATen/native/vulkan/ops/Tensor.h>
+#include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/accumulate.h>
 
 namespace at {
@@ -790,7 +791,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
       },
       VK_KERNEL(nchw_to_image),
       extents,
-      view_.context_->gpu().adapter->local_work_group_size(),
+      adaptive_work_group_size(extents),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
@@ -848,7 +849,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
       },
       VK_KERNEL(image_to_nchw),
       view_.extents(),
-      view_.context_->gpu().adapter->local_work_group_size(),
+      adaptive_work_group_size(view_.extents()),
       image,
       buffer,
       view_.context_->resource().pool.uniform(block).object);
