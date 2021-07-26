@@ -1173,8 +1173,8 @@ def main() -> None:
     cpu_fm.write_sharded(
         'Operators.cpp',
         native_functions,
-        key_fn = lambda fn: fn.func.name.unambiguous_name(),
-        env_callable = lambda fn: {
+        key_fn=lambda fn: fn.func.name.unambiguous_name(),
+        env_callable=lambda fn: {
             'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
         num_shards=5
     )

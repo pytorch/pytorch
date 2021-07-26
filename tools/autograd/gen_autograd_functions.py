@@ -333,11 +333,11 @@ def gen_autograd_functions_python(
     fm.write_sharded(
         'python_functions.cpp',
         infos,
-        key_fn = lambda info: info.name,
-        base_env = {
+        key_fn=lambda info: info.name,
+        base_env={
             'generated_comment': f'@generated from {fm.template_dir}/python_functions.cpp',
         },
-        env_callable = lambda info: {
+        env_callable=lambda info: {
             'py_function_initializers': [process_function(info, PY_FUNCTION_DEFINITION)],
             'py_function_props_and_getters': [process_function(info, PY_FUNCTION_PROPS_AND_GETTERS)],
         },
