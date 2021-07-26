@@ -6635,32 +6635,9 @@ Example::
 
 add_docstr(torch.mvlgamma,
            r"""
-mvlgamma(input, p) -> Tensor
+mvlgamma(input, p, *, out=None) -> Tensor
 
-Computes the `multivariate log-gamma function
-<https://en.wikipedia.org/wiki/Multivariate_gamma_function>`_) with dimension
-:math:`p` element-wise, given by
-
-.. math::
-    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
-
-where :math:`C = \log(\pi) \times \frac{p (p - 1)}{4}` and :math:`\Gamma(\cdot)` is the Gamma function.
-
-All elements must be greater than :math:`\frac{p - 1}{2}`, otherwise an error would be thrown.
-
-Args:
-    input (Tensor): the tensor to compute the multivariate log-gamma function
-    p (int): the number of dimensions
-
-Example::
-
-    >>> a = torch.empty(2, 3).uniform_(1, 2)
-    >>> a
-    tensor([[1.6835, 1.8474, 1.1929],
-            [1.0475, 1.7162, 1.4180]])
-    >>> torch.mvlgamma(a, 2)
-    tensor([[0.3928, 0.4007, 0.7586],
-            [1.0311, 0.3901, 0.5049]])
+Alias for :func:`torch.special.multigammaln`.
 """)
 
 add_docstr(torch.movedim, r"""
@@ -8032,6 +8009,13 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
+.. note::
+    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
+    is equivalent to Python's modulus operation, and different from Python's
+    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
+    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
+    the IEEE remainder.
+
 Args:
     input (Tensor or Scalar): the dividend
     other (Tensor or Scalar): the divisor
@@ -8958,8 +8942,8 @@ svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
 matrices :attr:`input`. The singular value decomposition is represented as a
-namedtuple `(U, S, V)`, such that :attr:`input` `= U diag(S) Vᴴ`.
-where `Vᴴ` is the transpose of `V` for real inputs,
+namedtuple `(U, S, V)`, such that :attr:`input` :math:`= U \text{diag}(S) V^{\text{H}}`.
+where :math:`V^{\text{H}}` is the transpose of `V` for real inputs,
 and the conjugate transpose of `V` for complex inputs.
 If :attr:`input` is a batch of matrices, then `U`, `S`, and `V` are also
 batched with the same batch dimensions as :attr:`input`.
@@ -9003,9 +8987,9 @@ always be real-valued, even if :attr:`input` is complex.
                default value for both is `True`, so the default behavior is
                effectively the opposite.
              * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns
-               `Vᴴ`.
+               `Vh`, that is, :math:`V^{\text{H}}`.
              * If :attr:`compute_uv` is `False`, :func:`torch.svd` returns zero-filled
-               tensors for `U` and `Vᴴ`, whereas :func:`torch.linalg.svd` returns
+               tensors for `U` and `Vh`, whereas :func:`torch.linalg.svd` returns
                empty tensors.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,

@@ -23,7 +23,6 @@ namespace jit {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto workerInfo =
     torch::class_<dist_rpc::WorkerInfo>("dist_rpc", "WorkerInfo")
         .def(torch::init<std::string, int64_t>());
@@ -174,7 +173,6 @@ void prepare_and_call_rpc_op(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_rpc_ops(
     {Operator(
          fmt::format(

@@ -37,7 +37,6 @@ struct TensorInfo<T, 0> {
 };
 )");
 #else
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto type_declarations_template = CodeTemplate(R"(
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
@@ -170,7 +169,6 @@ constexpr auto rand_init = R"(
   Philox rnd(seed, idx, offset);
 )";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 

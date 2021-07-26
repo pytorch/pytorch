@@ -33,6 +33,7 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: "windows.4xlarge"
     defaults:
       run:
