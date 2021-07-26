@@ -163,8 +163,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
     functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
-    create_python_bindings(
-        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
+    create_python_bindings_sharded(
+        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp',
+        method=False, num_shards=3)
 
     create_python_bindings(
         fm, functions, is_py_nn_function, 'torch.nn', 'python_nn_functions.cpp', method=False)
@@ -177,6 +178,16 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
+
+def group_filter_overloads(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool]
+) -> Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]:
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        if pred(pair.function):
+            grouped[pair.function.func.name.name].append(pair)
+    return grouped
 
 def create_python_bindings(
     fm: FileManager,
@@ -192,10 +203,7 @@ def create_python_bindings(
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
-    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
-    for pair in pairs:
-        if pred(pair.function):
-            grouped[pair.function.func.name.name].append(pair)
+    grouped = group_filter_overloads(pairs, pred)
 
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
@@ -209,6 +217,34 @@ def create_python_bindings(
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
     })
+
+def create_python_bindings_sharded(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    module: Optional[str],
+    filename: str,
+    *,
+    method: bool,
+    num_shards: int
+) -> None:
+    """Generates Python bindings to ATen functions"""
+    grouped = group_filter_overloads(pairs, pred)
+    fm.write_sharded(
+        filename,
+        grouped.items(),
+        base_env = {
+            'generated_comment':
+            '@' + f'generated from {fm.template_dir}/{filename}',
+        },
+        key_fn = lambda kv: str(kv[0]),
+        env_callable = lambda kv: {
+            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
+            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
+            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
+        },
+        num_shards=num_shards
+    )
 
 def load_signatures(
     native_functions: List[NativeFunction],
