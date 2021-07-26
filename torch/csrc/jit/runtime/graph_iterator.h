@@ -9,7 +9,7 @@ class DepthFirstGraphNodeIterator {
 
  public:
   // Constructor.
-  DepthFirstGraphNodeIterator(std::shared_ptr<Graph>& graph)
+  explicit DepthFirstGraphNodeIterator(std::shared_ptr<Graph>& graph)
       : current_(*(graph->block()->nodes().begin())) {}
 
   // Moves up and to the next node (may move up recursively).
@@ -67,6 +67,7 @@ class DepthFirstGraphNodeIterator {
         }
       } else {
         // If then block then move to the else block if it is not empty.
+        TORCH_INTERNAL_ASSERT(parent_block == then_block);
         bool else_block_empty =
             else_block->nodes().begin() == else_block->nodes().end();
 
@@ -99,9 +100,6 @@ class DepthFirstGraphNodeIterator {
     if (current_ == nullptr) {
       return;
     }
-
-    auto block = current_->owningBlock();
-    auto previous = current_;
 
     // Increment to the next node in the current block.
     current_ = current_->next();
