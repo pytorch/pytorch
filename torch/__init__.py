@@ -26,7 +26,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
-    from .version import __version__ as __version__
+    from .torch_version import __version__ as __version__
+
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING

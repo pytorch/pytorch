@@ -5,7 +5,6 @@
 
 namespace at {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool NamesMode_enabled = true;
 
 bool NamesMode::is_enabled() {

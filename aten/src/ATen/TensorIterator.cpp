@@ -799,6 +799,38 @@ void TensorIteratorBase::build_borrowing_binary_float_op(const Tensor& out, cons
         .add_input(b));
 }
 
+void TensorIteratorBase::build_comparison_op(const Tensor& out, const Tensor& a,
+    const Tensor& b) {
+  TensorIteratorConfig config;
+
+  config.set_check_mem_overlap(true);
+  config.add_owned_output(out);
+  config.add_owned_input(a);
+  config.add_owned_input(b);
+  config.allow_cpu_scalars(true);
+  config.promote_inputs_to_common_dtype(true);
+
+  // When 'out' isn't defined (e.g. for the functional operator 'a == b'), we
+  // want the output to be bool. Otherwise (e.g. 'torch.eq(a, b, out=c)') we
+  // don't coerce the output.
+  if (!out.defined()) {
+    config.declare_static_dtype_and_device(kBool, a.device());
+  }
+
+  // Note [special-case bool outputs]
+  // We explicitly don't call `cast_common_dtype_to_outputs` when the output tensor
+  // has `bool` dtype. This is a performance optimization: the functional
+  // version of all comparison/logical ops uses a bool output tensor, and we'd like to
+  // avoid creating a temporary copy of the output.
+  // However, note that all kernels using this TensorIterator will need to special-case when
+  // the output tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
+  if (out.defined() && out.scalar_type() != kBool) {
+    config.cast_common_dtype_to_outputs(true);
+  }
+
+  build(config);
+}
+
 // This cannot be a function because TensorIteratorConfig is not
 // copyable or movable, so it can't be returned from the function.
 #define BINARY_OP_CONFIG()                              \
@@ -875,33 +907,9 @@ TensorIterator TensorIterator::binary_float_op(Tensor& out, const Tensor& a, con
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     const Tensor& b) {
-  // Note [special-case bool outputs]
-  // We explicitly don't call `cast_common_dtype_to_outputs` when the output tensor
-  // has `bool` dtype. This is a performance optimization: the functional
-  // version of all comparison/logical ops uses a bool output tensor, and we'd like to
-  // avoid creating a temporary copy of the output.
-  // However, note that all kernels using this TensorIterator will need to special-case when
-  // the output tensor has bool dtype, and provide a lambda of type (scalar_t, scalar_t -> bool).
-  if (out.scalar_type() == kBool) {
-    return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_owned_output(out)
-    .add_owned_input(a)
-    .add_owned_input(b)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .build();
-  } else {
-    return TensorIteratorConfig()
-    .set_check_mem_overlap(true)
-    .add_owned_output(out)
-    .add_owned_input(a)
-    .add_owned_input(b)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .build();
-  }
+  TensorIterator iter;
+  iter.build_comparison_op(out, a, b);
+  return iter;
 }
 
 TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
