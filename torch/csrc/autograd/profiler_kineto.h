@@ -45,6 +45,7 @@ struct KinetoObserverContext : public at::ObserverContext {
   c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;
+  int64_t debug_handle;
 };
 
 struct TORCH_API KinetoEvent {
@@ -178,6 +179,11 @@ struct TORCH_API KinetoEvent {
     return *this;
   }
 
+  KinetoEvent& debugHandle(int64_t debug_handle) {
+    debug_handle_ = debug_handle;
+    return *this;
+  }
+
   // Kineto fields
 
   KinetoEvent& activity(const libkineto::TraceActivity& activity);
@@ -223,6 +229,10 @@ struct TORCH_API KinetoEvent {
     return nbytes_;
   }
 
+  int64_t debugHandle() const {
+    return debug_handle_;
+  }
+
   c10::DeviceType deviceType() const;
 
   int64_t cudaElapsedUs() const;
@@ -250,6 +260,7 @@ struct TORCH_API KinetoEvent {
   int64_t device_resource_id_ = 0;
   int64_t nbytes_ = 0;
   bool is_async_{false};
+  int64_t debug_handle_{-1};
 
   CUDAEventStub cuda_event_start_ = nullptr;
   CUDAEventStub cuda_event_end_ = nullptr;

@@ -1,3 +1,5 @@
+#include "ATen/record_function.h"
+#include "torch/csrc/autograd/profiler_kineto.h"
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -2466,6 +2468,41 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   opts = torch::autograd::profiler::ProfilerDisableOptions(true, false);
   // NOLINTNEXTLINE(performance-move-const-arg)
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
+}
+
+TEST(RecordDebugHandles, Basic) {
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  {
+    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    float x{5.9999}, y{2.1212};
+    float z = x / y;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  size_t my_events{0};
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+      my_events++;
+    } else if (e.name() == "not_my_function") {
+      ASSERT_EQ(e.debugHandle(), -1);
+      my_events++;
+    }
+  }
+  ASSERT_EQ(my_events, 2);
 }
 
 TEST(IValueKWargsTest, Basic) {

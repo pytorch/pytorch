@@ -86,7 +86,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .sequenceNr(ctx->sequenceNr)
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope)
-          .setAsync(fn.isAsync());
+          .setAsync(fn.isAsync())
+          .debugHandle(ctx->debug_handle);
       if (ctx->shapes && !ctx->shapes->empty()) {
         kineto_events_.back().shapes(*ctx->shapes);
       }
@@ -238,6 +239,7 @@ void pushProfilingCallbacks() {
           auto ctx_ptr = std::make_unique<KinetoObserverContext>();
           ctx_ptr->correlationId = corr_id;
           ctx_ptr->startThreadId = at::RecordFunction::currentThreadId();
+          ctx_ptr->debug_handle = fn.debugHandle();
 
           if (config.report_input_shapes) {
             ctx_ptr->shapes = inputSizes(fn);
