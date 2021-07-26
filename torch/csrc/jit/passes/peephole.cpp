@@ -40,12 +40,7 @@ struct PeepholeOptimizeImpl {
   // The intent for this optimization pass is to catch all of the small, easy to
   // catch peephole optimizations you might be interested in doing.
   //
-  // Right now, it does:
-  //    - Eliminate no-op 'expand' nodes
-  //    - Simply x.t().t() to x
-  //
   // TODO: Decide what kind of fixed point strategy we will have
-  //
   bool optimizeBlock(Block* block) {
     bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
@@ -62,6 +57,9 @@ struct PeepholeOptimizeImpl {
       // canonicalize those
       if (node->matches(
               "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)")) {
+        // Eliminate no-op _grad_sum_to_size.
+        // TODO: this doesn't work with Scalar-Tensor ops! We should
+        // canonicalize those
         if (node->input(1)->mustBeNone()) {
           GRAPH_UPDATE(
               getHeader(node),
@@ -139,7 +137,7 @@ struct PeepholeOptimizeImpl {
         if (input_node->kind() == prim::NumToTensor) {
           GRAPH_UPDATE(
               getHeader(node),
-              " (x.NumToTensor().TensorToNum() == x.NumToTensor()) is replaced with ",
+              " (x.NumToTensor() == x) is replaced with ",
               node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
           changed = true;
@@ -197,6 +195,10 @@ struct PeepholeOptimizeImpl {
               IValue ival(*ptt->sizes()[norm_index]);
               auto const_sizes_val = node->owningGraph()->insertConstant(ival);
               node->output()->replaceAllUsesWith(const_sizes_val);
+              GRAPH_UPDATE(
+                  getHeader(node),
+                  " (x.size(dim)) is replaced with constant ",
+                  const_sizes_val->debugName());
               changed = true;
             }
           }
@@ -211,6 +213,10 @@ struct PeepholeOptimizeImpl {
           IValue ival(at::isFloatingType(dtype));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x.is_floating_point()) is replaced with ",
+              new_constant->debugName());
           changed = true;
         }
       } else if (
@@ -223,6 +229,11 @@ struct PeepholeOptimizeImpl {
           IValue ival(at::isComplexType(dtype));
           auto new_constant = node->owningGraph()->insertConstant(ival);
           node->output()->replaceAllUsesWith(new_constant);
+          GRAPH_UPDATE(
+              getHeader(node),
+              " (x.is_complex()) is replaced with ",
+              new_constant->debugName());
+          changed = true;
         }
       } else if (
           node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
@@ -362,25 +373,13 @@ bool FuseAddMM(Block* block) {
             "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             /*const_inputs=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
-      // This optimization has been disabled at the moment, because it's not
-      // helpful at all until we will be able to represent torch.addmm(a, b,
-      // c, out=a). That's because addmm dispatches internally to gemm, which
-      // computes:
-      //   C = beta * C + alpha * A @ B
-      // but aten::addmm(a, b, c, 1, 1) is really:
-      //   D = beta * C + alpha * A @ B
-      // and because it works out of place on C, we're only trading off an
-      // explicit add for a copy inside the addmm function. Note that it
-      // doesn't even result in fewer reads, because mm won't even load C
-      // (because beta
-      // == 0 for it).
       if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
         for (const auto mm_side : c10::irange(2)) {
           // Add will accept tensors of mismatched scalar types, as long as
-          // one of them is a scalar. Addmm will throw in that case, so we can
-          // only perform this fusion if we're sure that it is correct, and
-          // for that we need the add_mat_type. An alternative would be to
+          // one of them is a scalar, but addmm will throw in that case, so we
+          // can only perform this fusion if we're sure that it is correct,
+          // and for that we need the add_mat_type. An alternative would be to
           // insert a type_as conditional on the tensor shape being a scalar,
           // but that might add overhead, and make analysis harder.
           auto add_mat_type =
@@ -415,9 +414,8 @@ bool FuseAddMM(Block* block) {
             }
 
             // We insert the type_as if we're sure that the added element is a
-            // scalar, and we either don't know what is the type of the
-            // scalar, or know the type, and know that it's
-            // mismatched.
+            // scalar, and we either don't know the type of the scalar, or
+            // know that it's mismatched.
             if (add_mat_type->sizes().size() &&
                 *add_mat_type->sizes().size() == 0 &&
                 !mustBeEqual(add_mat_type->scalarType(), mat_scalar_type)) {
@@ -468,14 +466,25 @@ bool FuseAddMM(Block* block) {
 }
 
 // FuseAddMM is a separate pass from peephole optimize because it is currently
-// only done as an optimization for onnx.
-// as it is today, fusing add + mm has no benefit within PyTorch running ATen
-// ops. However, we rely on seeing the fused version of addmm for ONNX export,
-// since after ONNX translation we would see redundant Gemm ops with sub-optimal
-// inputs. This flag is exposed so that ONNX export can pass `true` to get the
-// fused behavior, but normal JIT peephole optimization is left alone.
+// used for exporting to ONNX.
+// Today, fusing add + MM has no benefit within PyTorch running ATen
+// ops. However, we rely on seeing the fused version of AddMM for ONNX export,
+// since otherwise after ONNX translation we would see redundant Gemm ops with
+// sub-optimal inputs.
+// It won't be helpful for ATen until we're able to represent
+//   torch.addmm(a, b, c, out=a).
+// That's because addmm dispatches internally to gemm, which computes:
+//   C = beta * C + alpha * A @ B
+// but aten::addmm(a, b, c, 1, 1) is really:
+//   D = beta * C + alpha * A @ B
+// and because it works out of place on C, we're only trading off an
+// explicit add for a copy inside the addmm function. Note that it
+// doesn't even result in fewer reads, because mm won't even load C
+// (because beta == 0 for it).
 bool FuseAddMM(const std::shared_ptr<Graph>& graph) {
-  return FuseAddMM(graph->block());
+  bool changed = FuseAddMM(graph->block());
+  GRAPH_DUMP("After FuseAddMM: ", graph);
+  return changed;
 }
 
 bool PeepholeOptimize(

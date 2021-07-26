@@ -23,7 +23,6 @@ namespace jit {
 namespace fuser {
 
 // Template for computing the offset into the tensor to access a value
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto dim_calc = CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
