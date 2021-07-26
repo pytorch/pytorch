@@ -57,5 +57,5 @@ Tensor& addmv_out_sparse_csr_cuda(const Tensor &self, const Tensor &mat, const T
   return result;
 }
 
-}
-}
+} // namespace native
+} // namespace at
