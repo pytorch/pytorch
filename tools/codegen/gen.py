@@ -1,5 +1,5 @@
 import os
-from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar
+from typing import List, Dict, Optional, Tuple, Set, Callable, Any, Union, Sequence, TypeVar, Iterable
 from typing_extensions import Literal
 import yaml
 from collections import OrderedDict, defaultdict, namedtuple
@@ -859,18 +859,23 @@ class FileManager:
     def write_sharded(
             self,
             filename: str,
-            items: List[T],
+            items: Iterable[T],
             *,
             key_fn: Callable[[T], str],
             env_callable: Callable[[T], Dict[str, List[str]]],
             num_shards: int,
-            base_env: Dict[str, Any] = {},
+            base_env: Optional[Dict[str, Any]] = None,
     ) -> None:
-        everything: Dict[str, Any] = {**base_env, 'shard_id': 'Everything'}
-        shards: List[Dict[str, Any]] = [
-            {**base_env, 'shard_id': f'_{i}'} for i in range(num_shards)]
 
-        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]):
+        everything: Dict[str, Any] = {'shard_id': 'Everything'}
+        shards: List[Dict[str, Any]] = [{'shard_id': f'_{i}'} for i in range(num_shards)]
+
+        if base_env is not None:
+            everything.update(base_env)
+            for shard in shards:
+                shard.update(base_env)
+
+        def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
                 if k in into:
                     assert isinstance(into[k], list)
@@ -1171,10 +1176,13 @@ def main() -> None:
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
+    def key_func(fn: NativeFunction) -> str:
+        return fn.func.name.unambiguous_name()
+
     cpu_fm.write_sharded(
         'Operators.cpp',
         native_functions,
-        key_fn=lambda fn: fn.func.name.unambiguous_name(),
+        key_fn=key_func,
         env_callable=lambda fn: {
             'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
         num_shards=5
