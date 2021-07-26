@@ -8,7 +8,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 from torch._six import string_classes
 
-autocast = functools.partial(torch.autocast, device_type='cuda')
+autocast = functools.partial(torch.autocast, device_type='cuda', fast_dtype=torch.float16)
 
 # Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
 # may be falsely detected as "Iterables."
