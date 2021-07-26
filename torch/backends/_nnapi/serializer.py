@@ -134,6 +134,9 @@ class NNAPI_OperationCode(object):
     UNIDIRECTIONAL_SEQUENCE_RNN = 93
     RESIZE_NEAREST_NEIGHBOR = 94
 
+    ELU = 98
+    HARD_SWISH = 99
+
 
 class NNAPI_FuseCode(object):
     FUSED_NONE = 0
@@ -797,6 +800,10 @@ class _NnapiSerializer(object):
             self.add_conv2d(node),
         "aten::log_softmax": lambda self, node:
             self.add_log_softmax(node),
+        "aten::elu": lambda self, node:
+            self.add_elu(node),
+        "aten::hardswish": lambda self, node:
+            self.add_pointwise_simple_unary_op(node, NNAPI_OperationCode.HARD_SWISH),
         "quantized::linear": lambda self, node:
             self.add_qlinear(node),
         "quantized::conv2d": lambda self, node:
@@ -1736,7 +1743,6 @@ class _NnapiSerializer(object):
             _,
         ) = node.inputs()
 
-
         _, weight_tensor = self.get_constant_value(jit_weight, "TensorType")
         _, transpose = self.get_constant_value(jit_transpose)
         bias_id, bias_oper = self.get_optional_bias(jit_bias, weight_tensor, transpose)
@@ -1779,6 +1785,22 @@ class _NnapiSerializer(object):
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
 
+    def add_elu(self, node):
+        assert node.inputsSize() == 4
+        assert node.outputsSize() == 1
+
+        _, alpha = self.get_constant_value(node.inputsAt(1), "FloatType")
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+        out_shape = input_oper.shape
+
+        inputs = [None] * 2
+        inputs[0] = input_id
+        # specifying 1 as the alpha
+        inputs[1] = self.add_immediate_float_scalar(alpha)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+        self.add_operation(NNAPI_OperationCode.ELU, inputs, outputs)
 
     def add_qconv2d(self, node, fuse_code):
         assert node.inputsSize() == 4

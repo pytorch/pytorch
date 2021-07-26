@@ -308,6 +308,15 @@ class TestNNAPI(TestCase):
         with self.assertRaisesRegex(Exception, "hardtanh with args"):
             self.check(torch.nn.Hardtanh(0.0, 5.0), inp)
 
+    def test_elu(self):
+        inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
+        self.check(torch.nn.ELU(), inp)
+        self.check(torch.nn.ELU(0.5), inp)
+
+    def test_hardswish(self):
+        inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
+        self.check(torch.nn.Hardswish(), inp)
+
     def test_softmax(self):
         inp = torch.tensor([[-2.0, -0.5], [0.5, 2.0]])
         self.check(torch.nn.Softmax(), inp)
@@ -539,7 +548,6 @@ class TestNNAPI(TestCase):
                     atol_rtol=atol_rtol,
                     limit=limit
                 )
-
 
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()
