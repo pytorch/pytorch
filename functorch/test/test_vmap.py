@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import functools
 import itertools
+import textwrap
 import warnings
 import unittest
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
@@ -945,6 +946,22 @@ class TestVmapAPI(TestCase):
         out = vmap(vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
         expected = torch.mv(y, torch.ones(2)).view(3, 1, 1) + x
         self.assertEqual(out, expected)
+
+    def test_tensor_print(self):
+        x = torch.tensor([[3.14]])
+        buf = None
+
+        def foo(x):
+            nonlocal buf
+            buf = repr(x)
+            return x
+
+        vmap(vmap(foo))(x)
+        expected = textwrap.dedent("""\
+            BatchedTensor(lvl=3, bdim=0, value=\\
+              BatchedTensor(lvl=2, bdim=0, value=\\
+                tensor([[3.1400]])))""")
+        self.assertEqual(buf, expected)
 
 
 def slice_inputs(inputs, bdims, i):
