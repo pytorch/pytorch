@@ -485,7 +485,7 @@ if(MSVC)
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS CMAKE_STATIC_LINKER_FLAGS
       CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
-    string(APPEND ${flag_var} " /ignore:4049 /ignore:4217")
+    string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
   # Try harder
