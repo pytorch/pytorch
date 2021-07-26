@@ -367,6 +367,97 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
+  wheel-test:
+    needs: [calculate-docker-image, build, ciflow_should_run]
+    runs-on: linux.2xlarge
+    env:
+      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      JOB_BASE_NAME: pytorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-test
+    steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # deep clone, to allow sharding to use git rev-list
+          submodules: recursive
+      - name: Pull docker image
+        run: |
+          docker pull "${DOCKER_IMAGE}"
+      - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
+        name: Download PyTorch Build Artifacts
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+      - name: Unzip artifacts
+        run: |
+          # Unzip artifacts and remore build folder to fail any tests depending on it
+          unzip -o artifacts.zip && rm -rf build/
+      - name: Output disk space left
+        run: |
+          sudo df -H
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Test PyTorch
+        run: |
+          docker run \
+            -e BUILD_ENVIRONMENT \
+            -e JOB_BASE_NAME \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --tty \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}" \
+            sh -c 'sudo chown -R jenkins . && pip install dist/*.whl && .jenkins/pytorch/wheel-test.sh'
+      - name: Chown workspace
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Zip test reports for upload
+        if: always()
+        run: |
+          # Remove any previous test reports if they exist
+          rm -f test-reports-*.zip
+          zip -r "test-reports-wheel.zip" test -i '*.xml'
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Test Reports
+        if: always()
+        with:
+          name: test-reports-wheel
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - uses: seemethere/upload-artifact-s3@9d7ceb0ab39c2c88d93ef7792b27425b27d59162
+        name: Store PyTorch Test Reports on S3
+        if: always()
+        with:
+          name: test-reports-wheel
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            test-reports-*.zip
+      - name: Clean up docker images
+        if: always()
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          # Prune all of the docker images
+          docker system prune -af
+
 
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
@@ -375,7 +466,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, ciflow_should_run]
+    needs: [generate-test-matrix, test, wheel-test, ciflow_should_run]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
