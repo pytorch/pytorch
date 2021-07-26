@@ -6,19 +6,19 @@ import torch.distributed.algorithms.model_averaging.utils as utils
 
 class PeriodicModelAverager:
     r"""
-    Averages parameters periodically or during the warm-up stage.
+    Averages parameters periodically after the warm-up stage.
 
-    This can be used for running `post-local SDG <https://arxiv.org/abs/1808.07217>`_,
+    This can be used for running `post-local SGD <https://arxiv.org/abs/1808.07217>`_,
     by running :class:`~torch.nn.DistributedDataParallel` (DDP)
     using the subgroups created by :meth:`~torch.distributed.new_subgroups`.
 
     Args:
-        module (torch.nn.Module): The module where its parameters will be averaged.
+        params (Iterator[torch.nn.Parameter]): The model parameters to be averaged.
         period (int): The number of steps per model averaging.
                       Usually the period should be greater than ``1`` to reduce the communication cost.
                       Otherwise, only DDP needs to be used.
         warmup_steps (int): The number of warm-up steps. During this stage,
-                            ``period`` is viewed as 1, and the parameters are averaged at every step.
+                            model averaging is skipped.
         process_group: The process group to be used for all-reduce.
                        If ``None``, the default process group, which
                        is created by :func:`torch.distributed.init_process_group`,
@@ -28,21 +28,25 @@ class PeriodicModelAverager:
 
         >>>  import torch
         >>>  import torch.distributed as dist
+        >>>  import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
         >>>  import torch.distributed.algorithms.model_averaging.averagers as averagers
         >>>  import torch.nn as nn
         >>>
         >>>  dist.init_process_group("nccl", rank=rank, world_size=16)
         >>>  torch.cuda.set_device(rank)
         >>>  module = nn.Linear(1, 1, bias=False).to(rank)
-        >>>  subgroup, subgroups = dist.new_subgroups()
-        >>>  # Gradients are averaged by each intra-node subgroup during the backward pass.
         >>>  model = nn.parallel.DistributedDataParallel(
-        >>>     module, device_ids=[rank], output_device=rank, process_group=subgroup
+        >>>     module, device_ids=[rank], output_device=rank
         >>>  )
+        >>>  # Register a post-localSGD communication hook.
+        >>>  subgroup, subgroups = dist.new_subgroups()
+        >>>  state = PostLocalSGDState(subgroup=subgroup, start_localSGD_iter=100)
+        >>>  model.register_comm_hook(state, post_localSGD_hook)
         >>>
-        >>>  # In the first 100 steps, run model averaging every step.
+        >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
         >>>  # After 100 steps, run model averaging every 4 steps.
-        >>>  averager = averagers.PeriodicModelAverager(model, warmup_steps=100, period=4)
+        >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
+        >>>  averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=100, period=4)
         >>>  for step in range(0, 20):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)
@@ -58,12 +62,12 @@ class PeriodicModelAverager:
 
     def __init__(
         self,
-        module,
+        params,
         period,
         warmup_steps=0,
         process_group=None,
     ):
-        self.module = module
+        self.params = list(params)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
@@ -84,10 +88,13 @@ class PeriodicModelAverager:
 
     def average_parameters(self):
         r"""
-        Averages parameters if ``step`` is less than ``warmup_steps``,
-        or it can be divided by ``period``, where ``step`` is increased by 1
+        Averages parameters if ``step`` is no less than ``warmup_steps``
+        and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
         """
-        if self.step < self.warmup_steps or self.step % self.period == 0:
-            utils.average_parameters(self.module, self.process_group)
+        if (
+            self.step >= self.warmup_steps
+            and (self.step - self.warmup_steps) % self.period == 0
+        ):
+            utils.average_parameters(iter(self.params), self.process_group)
         self.step += 1
