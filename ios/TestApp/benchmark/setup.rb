@@ -64,8 +64,16 @@ targets.each do |target|
 end
 puts "Linking static libraries..."
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a']
+system_libs = ['Accelerate']
 targets.each do |target|
     target.frameworks_build_phases.clear
+    for lib in system_libs do
+        path = "System/Library/Frameworks/#{lib}.framework"
+        libref = project.frameworks_group.new_file(path)
+        libref.name = "#{lib}.framework"
+        libref.source_tree = 'SDKROOT'
+        target.frameworks_build_phases.add_file_reference(libref)
+    end
     for lib in libs do
         path = "#{install_path}/lib/#{lib}"
         if File.exist?(path)

@@ -49,8 +49,18 @@ target.build_configurations.each do |config|
     config.build_settings['DEVELOPMENT_TEAM']       = dev_team_id
 end
 
-# link static libraries
+# link system libraries
 target.frameworks_build_phases.clear
+system_libs = ['Accelerate']
+for lib in system_libs do
+    path = "System/Library/Frameworks/#{lib}.framework"
+    libref = project.frameworks_group.new_file(path)
+    libref.name = "#{lib}.framework"
+    libref.source_tree = 'SDKROOT'
+    target.frameworks_build_phases.add_file_reference(libref)
+end
+
+# link static libraries
 libs = ['libc10.a', 'libclog.a', 'libpthreadpool.a', 'libXNNPACK.a', 'libeigen_blas.a', 'libcpuinfo.a', 'libpytorch_qnnpack.a', 'libtorch_cpu.a', 'libtorch.a', 'libkineto.a']
 for lib in libs do
     path = "#{install_path}/lib/#{lib}"
@@ -59,6 +69,7 @@ for lib in libs do
         target.frameworks_build_phases.add_file_reference(libref)
     end
 end
+
 project.save
 
 sdk = nil
