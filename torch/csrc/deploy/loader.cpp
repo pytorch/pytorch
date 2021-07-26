@@ -213,6 +213,7 @@ struct GnuHash {
 // loader. it is passed a pointer to where the EH_FRAME section was loaded,
 // which appears to include frame information relative to that address.
 extern "C" void __register_frame(void*);
+extern "C" void __deregister_frame(void*);
 
 // Memory maps a file into the address space read-only, and manages the lifetime
 // of the mapping. Used in the loader to read in initial image, and to inspect
@@ -1176,6 +1177,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     read_dynamic_section();
     relocate();
     __register_frame(eh_frame_);
+    eh_frame_registered_ = true;
     register_debug_info();
     initialize();
   }
@@ -1184,6 +1186,9 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     // std::cout << "LINKER IS UNLOADING: " << name_ << "\n";
     if (initialized_) {
       finalize();
+    }
+    if (eh_frame_registered_) {
+      __deregister_frame(eh_frame_);
     }
     if (mapped_library_) {
       munmap(mapped_library_, mapped_size_);
@@ -1247,6 +1252,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   int argc_ = 0;
   const char** argv_ = nullptr;
   bool initialized_ = false;
+  bool eh_frame_registered_ = false;
 
   pthread_key_t tls_key_ = 0;
   void* tls_initalization_image_ = nullptr;
