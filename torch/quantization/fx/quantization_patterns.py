@@ -1282,7 +1282,26 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantized_graph.node_copy(node, load_arg(quantized=None))
+        if is_reference:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            # when there is no activation_post_process following the CopyNode, it means
+            # that the CopyNode is configured with a qconfig that doesnot require
+            # observation, e.g. dynamic_qconfig
+            if activation_post_process is None:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                args = load_arg(quantized=[torch.quint8])(node.args)
+                args = list(load_arg(quantized=torch.float)(node.args))
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out,
+                    activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+        else:
+            return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self,

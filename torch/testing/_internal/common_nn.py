@@ -3201,6 +3201,13 @@ new_module_tests = [
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5),
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
@@ -3216,6 +3223,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
         constructor_args=((3, None),),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, c10::nullopt})',
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
@@ -3227,6 +3242,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
