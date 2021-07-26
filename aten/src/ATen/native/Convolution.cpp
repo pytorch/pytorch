@@ -23,7 +23,6 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
