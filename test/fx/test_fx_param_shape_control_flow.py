@@ -91,6 +91,11 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         tracer = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph = tracer.trace(mm_only_mod)
 
+        # verify the graph module calculates the same result
+        graph_mod_mm = torch.fx.GraphModule(mm_only_mod, traced_graph)
+        torch.testing.assert_allclose(graph_mod_mm(x), torch.mm(x, mm_only_mod.get_mul_matrix()))
+
+
         # Make a new module with different parameter shape to go down the different
         # code path
         x = torch.randn(10, 15)
@@ -99,12 +104,17 @@ class TestConstParamShapeInControlFlow(unittest.TestCase):
         tracer2 = torch.fx.Tracer(param_shapes_constant=True)
         traced_graph2 = tracer2.trace(relu_mod)
 
-        graph1_node_names = [n.name for n in traced_graph.nodes]
-        graph2_node_names = [n.name for n in traced_graph2.nodes]
+        # verify the graph module calculates the same result
+        graph_mod_relu = torch.fx.GraphModule(relu_mod, traced_graph2)
+        torch.testing.assert_allclose(graph_mod_relu(x), torch.relu(torch.mm(x, relu_mod.get_mul_matrix())))
+
+
+        graph1_node_targets = [n.target for n in traced_graph.nodes]
+        graph2_node_targets = [n.target for n in traced_graph2.nodes]
 
         # the second graph has an exta relu function call node
-        assert 'mm' in graph1_node_names and 'mm' in graph2_node_names
-        assert 'relu' not in graph1_node_names and 'relu' in graph2_node_names
+        assert torch.mm in graph1_node_targets and torch.mm in graph2_node_targets
+        assert torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
 
     def test_param_shape_const(self):
         mymod = MyModuleParamShape(in_channels=5)
