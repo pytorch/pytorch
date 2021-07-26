@@ -17,7 +17,6 @@ namespace autograd {
 namespace generated {
 namespace details {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern const char* kCudnnDoubleBackwardMsg;
 
 // A simple way to imperatively compute index ranges for slots

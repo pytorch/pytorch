@@ -13,7 +13,7 @@ class PeriodicModelAverager:
     using the subgroups created by :meth:`~torch.distributed.new_subgroups`.
 
     Args:
-        module (torch.nn.Module): The module where its parameters will be averaged.
+        params (Iterator[torch.nn.Parameter]): The model parameters to be averaged.
         period (int): The number of steps per model averaging.
                       Usually the period should be greater than ``1`` to reduce the communication cost.
                       Otherwise, only DDP needs to be used.
@@ -46,7 +46,7 @@ class PeriodicModelAverager:
         >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
         >>>  # After 100 steps, run model averaging every 4 steps.
         >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
-        >>>  averager = averagers.PeriodicModelAverager(model, warmup_steps=100, period=4)
+        >>>  averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=100, period=4)
         >>>  for step in range(0, 20):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)
@@ -62,12 +62,12 @@ class PeriodicModelAverager:
 
     def __init__(
         self,
-        module,
+        params,
         period,
         warmup_steps=0,
         process_group=None,
     ):
-        self.module = module
+        self.params = list(params)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
@@ -92,6 +92,9 @@ class PeriodicModelAverager:
         and it can be divided by ``period``, where ``step`` is increased by 1
         at each iteration in the training loop.
         """
-        if self.step >= self.warmup_steps and (self.step - self.warmup_steps) % self.period == 0:
-            utils.average_parameters(self.module, self.process_group)
+        if (
+            self.step >= self.warmup_steps
+            and (self.step - self.warmup_steps) % self.period == 0
+        ):
+            utils.average_parameters(iter(self.params), self.process_group)
         self.step += 1
