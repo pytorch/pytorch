@@ -97,7 +97,7 @@ class TestNamedTupleAPI(TestCase):
                input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]),
                torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
             op(operators=['_lu_with_info'],
-               input=(), names=('LU', 'pivs', 'infos'), hasout=False),
+               input=(), names=('LU', 'pivots', 'info'), hasout=False),
         ]
 
         def get_func(f):
