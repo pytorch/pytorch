@@ -242,10 +242,10 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 self.bn.momentum,
                 self.bn.affine,
                 self.bn.track_running_stats)
-            bn.weight = Parameter(self.bn.weight)
+            bn.weight = Parameter(self.bn.weight.detach())
             bn.bias = None
             if self.bn.bias is not None:
-                bn.bias = Parameter(self.bn.bias)
+                bn.bias = Parameter(self.bn.bias.detach())
             modules.append(bn)
 
         if cls._FLOAT_RELU_MODULE:
