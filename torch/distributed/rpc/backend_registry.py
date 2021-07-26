@@ -27,14 +27,9 @@ _backend_type_doc = """
     :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
 """
 
-# Create a placeholder which includes PROCESS_GROUP BackendType
-# which is deprecated. The backend type will still be available, but
-# will throw an error when the user tries to use it in init_rpc
-placeholder_backend_types = dict(PROCESS_GROUP=None)
-
 # Create an enum type, `BackendType`, with empty members.
 # Can't handle Function Enum API (mypy bug #9079)
-BackendType = enum.Enum(value="BackendType", names=placeholder_backend_types)  # type: ignore[misc]
+BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
 # Unable to assign a function a method (mypy bug #2427)
 BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 BackendType.__doc__ = _backend_type_doc
@@ -87,6 +82,14 @@ def register_backend(
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 
+# Create a placeholder for PROCESS_GROUP BackendType
+# which is deprecated. The backend type can be accessed, but
+# will throw an error when the user tries to use it in init_rpc
+register_backend(
+    "PROCESS_GROUP",
+    lambda *args: None,
+    lambda *args: None,
+)
 
 def construct_rpc_backend_options(
     backend,
@@ -98,7 +101,6 @@ def construct_rpc_backend_options(
     return backend.value.construct_rpc_backend_options_handler(
         rpc_timeout, init_method, **kwargs
     )
-
 
 def init_backend(backend, *args, **kwargs):
     return backend.value.init_backend_handler(*args, **kwargs)
