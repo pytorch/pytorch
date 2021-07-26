@@ -692,7 +692,7 @@ def maybe_propagate_dtype_for_node(
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if qhandler.is_general_tensor_shape_op():
+    if qhandler is not None and qhandler.is_general_tensor_shape_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
