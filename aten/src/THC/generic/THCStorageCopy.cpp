@@ -2,30 +2,18 @@
 #define THC_GENERIC_FILE "THC/generic/THCStorageCopy.cpp"
 #else
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
+#include <c10/cuda/CUDAFunctions.h>
 
 void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *src)
 {
   THArgCheck(self->nbytes() == src->nbytes(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(
-      THCStorage_(data)(state, self),
+  at::cuda::memcpy_and_sync(THCStorage_(data)(state, self),
       THStorage_(data)(src),
       self->nbytes(),
       cudaMemcpyHostToDevice,
-      stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(
-      THCStorage_(data)(state, self),
-      THStorage_(data)(src),
-      self->nbytes(),
-      cudaMemcpyHostToDevice,
-      stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+      stream);
+
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPY(TYPEC)                                 \
@@ -61,22 +49,12 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
 {
   THArgCheck(self->nbytes() == src->nbytes(), 2, "size does not match");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-#if HIP_VERSION >= 301
-  THCudaCheck(hipMemcpyWithStream(
+  at::cuda::memcpy_and_sync(
       THStorage_(data)(self),
       THCStorage_(data)(state, src),
       self->nbytes(),
       cudaMemcpyDeviceToHost,
-      stream));
-#else
-  THCudaCheck(cudaMemcpyAsync(
-      THStorage_(data)(self),
-      THCStorage_(data)(state, src),
-      self->nbytes(),
-      cudaMemcpyDeviceToHost,
-      stream));
-  THCudaCheck(cudaStreamSynchronize(stream));
-#endif
+      stream);
 }
 
 #define TH_CUDA_STORAGE_IMPLEMENT_COPYTO(TYPEC)                               \

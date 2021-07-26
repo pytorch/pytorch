@@ -11,6 +11,8 @@ class DiGraph:
         # Nested dict of node -> successor node -> nothing.
         # (didn't implement edge data)
         self._succ = {}
+        # Nested dict of node -> predecessor node -> nothing.
+        self._pred = {}
 
     def add_node(self, n, **kwargs):
         """Add a node to the graph.
@@ -22,6 +24,7 @@ class DiGraph:
         if n not in self._node:
             self._node[n] = kwargs
             self._succ[n] = {}
+            self._pred[n] = {}
         else:
             self._node[n].update(kwargs)
 
@@ -34,17 +37,27 @@ class DiGraph:
         if u not in self._node:
             self._node[u] = {}
             self._succ[u] = {}
+            self._pred[u] = {}
         if v not in self._node:
             self._node[v] = {}
             self._succ[v] = {}
+            self._pred[v] = {}
 
         # add the edge
         self._succ[u][v] = True
+        self._pred[v][u] = True
 
     def successors(self, n):
         """Returns an iterator over successor nodes of n."""
         try:
             return iter(self._succ[n])
+        except KeyError as e:
+            raise ValueError(f"The node {n} is not in the digraph.") from e
+
+    def predecessors(self, n):
+        """Returns an iterator over predecessors nodes of n."""
+        try:
+            return iter(self._pred[n])
         except KeyError as e:
             raise ValueError(f"The node {n} is not in the digraph.") from e
 
