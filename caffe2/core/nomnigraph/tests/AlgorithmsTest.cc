@@ -2,7 +2,6 @@
 
 #include <gtest/gtest.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DominatorTree, Test1) {
   nom::Graph<std::string> graph;
   auto r = graph.createNode(std::string("r"));
@@ -59,7 +58,6 @@ TEST(DominatorTree, Test1) {
 
 // https://www.seas.harvard.edu/courses/cs252/2011sp/slides/Lec04-SSA.pdf
 // using example on page 24
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DominatorTree, Test2) {
   nom::Graph<std::string> graph;
   auto entry = graph.createNode(std::string("entry"));
@@ -99,7 +97,6 @@ TEST(DominatorTree, Test2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Subgraph, InduceEdges) {
   auto g = createGraph();
   auto sg = decltype(g)::SubgraphType();
@@ -114,7 +111,6 @@ TEST(Subgraph, InduceEdges) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Subgraph, InduceEdgesCycle) {
   auto g = createGraphWithCycle();
   auto sg = decltype(g)::SubgraphType();

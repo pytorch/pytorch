@@ -126,9 +126,6 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
 
-        # XXX Disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
-        if package_format == "conda":
-            self.props["gpu_versions"] = filter(lambda x: x != "cuda113", self.find_prop("gpu_versions"))
 
     def get_children(self):
         if self.find_prop("os_name") == "linux":

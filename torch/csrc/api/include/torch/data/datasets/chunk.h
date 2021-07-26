@@ -339,8 +339,7 @@ class ChunkDataset final
         running_preloaders_(0),
         load_checkpoint_(false) {}
 
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~ChunkDataset() {
+   ~ChunkDataset() override {
     // stop batch buffer first.
     if (batch_buffer_) {
       batch_buffer_->stop();
