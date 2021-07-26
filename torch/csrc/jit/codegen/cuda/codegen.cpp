@@ -17,7 +17,6 @@ namespace codegen {
 namespace {
 
 class CudaKernelGenerator : private OptInConstDispatch {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static constexpr char* kTab = "  ";
 
  public:
