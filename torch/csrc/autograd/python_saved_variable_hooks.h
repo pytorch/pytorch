@@ -28,7 +28,6 @@ struct PyDefaultSavedVariableHooks {
   static void reset_hooks();
   static std::unique_ptr<SavedVariableHooks> get_hooks();
 
-
 private:
   static PyObject* pack_hook_;
   static PyObject* unpack_hook_;
