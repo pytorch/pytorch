@@ -104,6 +104,76 @@ void mv<c10::complex<double>>(MKL_SPARSE_MV_ARGTYPES(c10::complex<double>)) {
       reinterpret_cast<MKL_Complex16*>(y)));
 }
 
+template <>
+void trsv<float>(MKL_SPARSE_TRSV_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_trsv(operation, alpha, A, descr, x, y));
+}
+template <>
+void trsv<double>(MKL_SPARSE_TRSV_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_trsv(operation, alpha, A, descr, x, y));
+}
+template <>
+void trsv<c10::complex<float>>(MKL_SPARSE_TRSV_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_trsv(
+      operation,
+      reinterpret_cast<const MKL_Complex8&>(alpha),
+      A,
+      descr,
+      reinterpret_cast<const MKL_Complex8*>(x),
+      reinterpret_cast<MKL_Complex8*>(y)));
+}
+template <>
+void trsv<c10::complex<double>>(
+    MKL_SPARSE_TRSV_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_trsv(
+      operation,
+      reinterpret_cast<const MKL_Complex16&>(alpha),
+      A,
+      descr,
+      reinterpret_cast<const MKL_Complex16*>(x),
+      reinterpret_cast<MKL_Complex16*>(y)));
+}
+
+template <>
+void trsm<float>(MKL_SPARSE_TRSM_ARGTYPES(float)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_trsm(
+      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy));
+}
+template <>
+void trsm<double>(MKL_SPARSE_TRSM_ARGTYPES(double)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_trsm(
+      operation, alpha, A, descr, layout, x, columns, ldx, y, ldy));
+}
+template <>
+void trsm<c10::complex<float>>(MKL_SPARSE_TRSM_ARGTYPES(c10::complex<float>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_c_trsm(
+      operation,
+      reinterpret_cast<const MKL_Complex8&>(alpha),
+      A,
+      descr,
+      layout,
+      reinterpret_cast<const MKL_Complex8*>(x),
+      columns,
+      ldx,
+      reinterpret_cast<MKL_Complex8*>(y),
+      ldy));
+}
+template <>
+void trsm<c10::complex<double>>(
+    MKL_SPARSE_TRSM_ARGTYPES(c10::complex<double>)) {
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_z_trsm(
+      operation,
+      reinterpret_cast<const MKL_Complex16&>(alpha),
+      A,
+      descr,
+      layout,
+      reinterpret_cast<const MKL_Complex16*>(x),
+      columns,
+      ldx,
+      reinterpret_cast<MKL_Complex16*>(y),
+      ldy));
+}
+
 } // namespace sparse
 } // namespace mkl
 } // namespace at

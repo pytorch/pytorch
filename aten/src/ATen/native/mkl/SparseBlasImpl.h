@@ -15,6 +15,14 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result);
 
+void triangular_solve_out_sparse_csr(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular);
+
 } // namespace mkl
 } // namespace impl
 } // namespace sparse
