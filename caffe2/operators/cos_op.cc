@@ -24,11 +24,9 @@ bool CosGradientFunctor<CPUContext>::Forward(
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     Cos,
     UnaryElementwiseOp<TensorTypes<float>, CPUContext, CosFunctor<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     CosGradient,
     BinaryElementwiseOp<
@@ -36,7 +34,6 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         CosGradientFunctor<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Cos)
     .NumInputs(1)
     .NumOutputs(1)
@@ -91,7 +88,6 @@ Y: [0.7765203  0.71949923 0.5946774  0.99990135 0.9929724 ]
         "Y",
         "*(type: Tensor`<float>`)* Output tensor calculated as the cosine of the input tensor, element-wise.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CosGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 
 namespace {
@@ -109,7 +105,6 @@ class GetCosGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Cos, GetCosGradient);
 
 } // namespace caffe2

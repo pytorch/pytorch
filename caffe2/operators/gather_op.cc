@@ -1,10 +1,8 @@
 #include "gather_op.h"
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Gather, GatherOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Gather)
     .NumInputs(2)
     .NumOutputs(1)
@@ -148,7 +146,6 @@ class GetGatherGradient : public GradientMakerBase {
         std::vector<Argument>{axisArg});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Gather, GetGatherGradient);
 
 } // namespace caffe2
