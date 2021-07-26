@@ -2,45 +2,30 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GivenTensorFill, GivenTensorFillOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GivenTensorDoubleFill,
     GivenTensorFillOp<double, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GivenTensorBoolFill, GivenTensorFillOp<bool, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GivenTensorInt16Fill,
     GivenTensorFillOp<int16_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GivenTensorIntFill, GivenTensorFillOp<int, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GivenTensorInt64Fill,
     GivenTensorFillOp<int64_t, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GivenTensorStringFill,
     GivenTensorFillOp<std::string, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorDoubleFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorBoolFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorInt16Fill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorIntFill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorInt64Fill);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorStringFill);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -115,7 +100,6 @@ Out:
         "Output tensor with desired dimension filled with specified data. If the shape argument is set, this is the shape specified, and if the *input* exists and *input_as_shape=True*, it is the shape specified by the *input* tensor.")
     .TensorInferenceFunction(FillerTensorInference<>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorDoubleFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -139,7 +123,6 @@ OPERATOR_SCHEMA(GivenTensorDoubleFill)
     .TensorInferenceFunction(
         FillerTensorInference<TensorProto_DataType_DOUBLE>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorBoolFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -162,7 +145,6 @@ OPERATOR_SCHEMA(GivenTensorBoolFill)
         "1D tensor containing the desired output shape. First input must be in CPU context.")
     .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_BOOL>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorInt16Fill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -185,7 +167,6 @@ OPERATOR_SCHEMA(GivenTensorInt16Fill)
         "1D tensor containing the desired output shape. First input must be in CPU context.")
     .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT16>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorIntFill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -208,7 +189,6 @@ OPERATOR_SCHEMA(GivenTensorIntFill)
         "1D tensor containing the desired output shape. First input must be in CPU context.")
     .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT32>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorInt64Fill)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -231,7 +211,6 @@ OPERATOR_SCHEMA(GivenTensorInt64Fill)
         "1D tensor containing the desired output shape. First input must be in CPU context.")
     .TensorInferenceFunction(FillerTensorInference<TensorProto_DataType_INT64>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorStringFill)
     .NumInputs(0, 1)
     .NumOutputs(1)

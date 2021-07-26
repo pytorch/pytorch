@@ -40,8 +40,7 @@ class InstanceNormImpl : public torch::nn::NormImplBase<D, Derived, InstanceNorm
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm1dImpl : public InstanceNormImpl<1, InstanceNorm1dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<1, InstanceNorm1dImpl>::InstanceNormImpl;
@@ -70,8 +69,7 @@ TORCH_MODULE(InstanceNorm1d);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm2dImpl : public InstanceNormImpl<2, InstanceNorm2dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<2, InstanceNorm2dImpl>::InstanceNormImpl;
@@ -100,8 +98,7 @@ TORCH_MODULE(InstanceNorm2d);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API InstanceNorm3dImpl : public InstanceNormImpl<3, InstanceNorm3dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using InstanceNormImpl<3, InstanceNorm3dImpl>::InstanceNormImpl;
