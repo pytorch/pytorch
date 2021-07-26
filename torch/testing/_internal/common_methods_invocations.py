@@ -1409,13 +1409,22 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_attn(self, device, dtype, requires_grad=False, **kwargs):
         samples = []
-        shapes = [(2,2), (3,3), (2,3), (10,10), (100,100)]
+        shapes = [(2, 2), (3, 3), (2, 3), (10, 10), (100, 100)]
         for shape in shapes:
             q_tensor = make_tensor(shape, device, dtype, low=None, high=None,
                                 requires_grad=requires_grad)
             k_tensor = make_tensor(shape, device, dtype, low=None, high=None,
                                 requires_grad=requires_grad)
             v_tensor = make_tensor(shape, device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+            samples.append(SampleInput(q_tensor, args=(k_tensor, v_tensor)))
+        diff_shapes = [(3, 2, 5, 2, 5, 6), (6, 3, 7, 3, 7, 8)]
+        for q_1, q_2, k_1, k_2, v_1, v_2 in diff_shapes:  # q_2 == k_2 and k_1 == v_1
+            q_tensor = make_tensor((q_1, q_2), device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+            k_tensor = make_tensor((k_1, k_2), device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+            v_tensor = make_tensor((v_1, v_2), device, dtype, low=None, high=None,
                                 requires_grad=requires_grad)
             samples.append(SampleInput(q_tensor, args=(k_tensor, v_tensor)))
         return samples
@@ -4932,8 +4941,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_forward_ad=True),
     OpInfo('attn',
-           dtypes=floating_and_complex_types_and(torch.bfloat16),
-           backward_dtypes=floating_and_complex_types(),
+           dtypes=floating_types_and(torch.bfloat16),
+           backward_dtypes=(torch.float64,),
            supports_out=False,
            sample_inputs_func=sample_attn),
     OpInfo('mul',

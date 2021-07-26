@@ -257,6 +257,11 @@ Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 
+Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Tensor& grad_out);
+std::tuple <Tensor, Tensor> attn_backward_qk(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& output,
+                                             const Tensor& tanh_output, const Tensor& grad_out, const Tensor& grad_tanh_out);
+
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
