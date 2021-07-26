@@ -35,12 +35,7 @@ __all__ = [
     "integral_types",
     "integral_types_and",
     "make_non_contiguous",
-    "rand_like",
-    "randn_like",
 ]
-
-rand_like = torch.rand_like
-randn_like = torch.randn_like
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.

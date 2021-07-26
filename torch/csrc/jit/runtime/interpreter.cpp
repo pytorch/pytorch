@@ -88,7 +88,6 @@ inline int64_t getDistAutogradContextId() {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local InterpreterStateImpl* tls_int_state_ptr_ = nullptr;
 struct TLSCurrentInterpreterGuard {
   TLSCurrentInterpreterGuard(InterpreterStateImpl* state) {
@@ -777,6 +776,15 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
  public:
+  // One way to avoid overhead of forming string would be to return
+  // a vector of frame.function, i.e. CodeImpl*
+  // This is not exactly clean as it will expose, internal details of
+  // interpreter. But this way we hold onto graph/node and Function and
+  // we can create module hierarchy string for each event in autograd
+  // profiler at the end, when consolidating events.
+  // At the moment overhead does not seem exhorbitantly large.
+  // Another option would be return vector of (string, InlinedCallstackPtrs)
+  // string would contain function name and typename of self
   std::string moduleHierarchy() const {
     std::string module_hierarchy("TOP");
     for (size_t i = 0; i < frames.size(); ++i) {

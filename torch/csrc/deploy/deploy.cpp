@@ -48,10 +48,8 @@ extern "C" TORCH_API void register_embedded_interpreter_cuda(
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 extern "C" __attribute__((
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __weak__)) char _binary_libtorch_deployinterpreter_so_start[];
 extern "C"
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     __attribute__((__weak__)) char _binary_libtorch_deployinterpreter_so_end[];
 #endif
 
@@ -272,6 +270,24 @@ void LoadBalancer::free(int where) {
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   __atomic_fetch_sub(&uses_[8 * where], 1ULL, __ATOMIC_SEQ_CST);
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
+}
+
+void PythonMethodWrapper::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  auto session = model_.acquire_session();
+  auto iArgumentNames =
+      session
+          .global("GetArgumentNamesModule", "getArgumentNames")(
+              {session.from_movable(model_)})
+          .toIValue();
+  TORCH_INTERNAL_ASSERT(iArgumentNames.isList());
+  auto argumentNames = iArgumentNames.toListRef();
+
+  argumentNamesOut.reserve(argumentNames.size());
+  for (auto& argumentName : argumentNames) {
+    TORCH_INTERNAL_ASSERT(argumentName.isString());
+    argumentNamesOut.push_back(argumentName.toStringRef());
+  }
 }
 
 } // namespace deploy

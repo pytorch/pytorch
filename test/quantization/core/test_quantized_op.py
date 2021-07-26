@@ -2310,6 +2310,20 @@ class TestQuantizedOps(TestCase):
         result = torch.ops.quantized.linear_dynamic(X, w_packed)
         self.assertEqual(result.shape, (0, 2))
 
+    @override_qengines
+    def test_linear_bias_unpack(self):
+        """
+        Verifies the correctness of bias() and unpack() API for LinearPackedParamBase.
+        """
+        bias_float = torch.ones(2, dtype=torch.float)
+        w = torch.randn((2, 2), dtype=torch.float)
+        qw = torch.quantize_per_tensor(w, scale=1.0, zero_point=0, dtype=torch.qint8)
+        w_packed = torch.ops.quantized.linear_prepack(qw, bias_float)
+        # test bias()
+        self.assertEqual(w_packed.bias(), bias_float)
+        # test unpack()
+        self.assertEqual(w_packed.unpack()[0], qw)
+
     def test_advanced_indexing(self):
         """
         Verifies that the x[:, [0], :, :] syntax works for quantized tensors.
