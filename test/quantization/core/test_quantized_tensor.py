@@ -377,8 +377,14 @@ class TestQuantizedTensor(TestCase):
             dqr_cuda = torch.quantize_per_channel(r.to(device), scales.to(
                 device), zero_points.to(device), axis, dtype)
             dqr_cuda = dqr_cuda.to('cpu')
+
             self.assertEqual('cuda', dqr.device.type)
+            self.assertEqual('cuda', dqr.q_per_channel_scales().device.type)
+            self.assertEqual('cuda', dqr.q_per_channel_zero_points().device.type)
+
             self.assertEqual('cpu', dqr_cuda.device.type)
+            self.assertEqual('cpu', dqr_cuda.q_per_channel_scales().device.type)
+            self.assertEqual('cpu', dqr_cuda.q_per_channel_zero_points().device.type)
 
     @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
     def test_compare_per_tensor_device_numerics(self):

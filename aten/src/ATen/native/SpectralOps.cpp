@@ -208,10 +208,9 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 
   if (shape) {
     // Has shape, may have dim
-    TORCH_CHECK(!dim || dim->size() == shape->size(),
+    TORCH_CHECK(!dim || dim->size() == static_cast<int64_t>(shape->size()),
                 "When given, dim and shape arguments must have the same length");
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(shape->size() <= input_dim,
+    TORCH_CHECK(static_cast<int64_t>(shape->size()) <= input_dim,
                 "Got shape with ", shape->size(), " values but input tensor "
                 "only has ", input_dim, " dimensions.");
     const int64_t transform_ndim = shape->size();
@@ -761,8 +760,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 static Tensor as_complex(const Tensor& self) {
   const bool can_view_as_complex = [&]{
     auto strides = self.strides();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t i = 0; i + 1 < strides.size(); ++i) {
+    for (const auto i : c10::irange(static_cast<int64_t>(strides.size()) - 1)) {
       if (strides[i] % 2 != 0) {
         return false;
       }
@@ -987,7 +985,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
   const auto iter_strides = iter.strides(0);
   const auto iter_sizes = iter.shape();
-  const auto ndim = iter_strides.size() + dim.size();
+  const auto ndim = static_cast<int64_t>(iter_strides.size() + dim.size());
   DimVector in_strides(ndim), signal_half_sizes(ndim);
   // Take coalesced batch dimensions from TensorIterator
   std::copy(iter_strides.begin(), iter_strides.end(), in_strides.begin());
@@ -1036,9 +1034,7 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
   DimVector mirror_dims;
   mirror_dims.reserve(dim.size() - 1);
   for (const auto i : c10::irange(ndim)) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    if (dim_permute[i] >= iter_strides.size() &&  // Not a batch dimension
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+    if (dim_permute[i] >= static_cast<int64_t>(iter_strides.size()) &&  // Not a batch dimension
         dim_permute[i] != ndim - 1) {  // Not the last dim, which is mirrored separately with negative strides
       mirror_dims.push_back(i);
     }
@@ -1051,7 +1047,6 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
       mirror_dims, signal_half_sizes, in_strides, in_data, out_strides, out_data);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
 }} // at::native
