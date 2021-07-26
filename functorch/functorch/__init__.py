@@ -6,6 +6,7 @@
 
 import torch
 import functools
+import textwrap
 from . import _C
 
 from ._src.vmap import vmap
@@ -56,3 +57,29 @@ def _backward(*args, **kwargs):
 
 
 setattr(torch.Tensor, 'backward', _backward)
+
+
+# Monkeypatch tensor printing in pytorch
+_old_str = torch._tensor_str._str
+
+
+@functools.wraps(_old_str)
+def _functorch_str(tensor):
+    level = _C.maybe_get_level(tensor)
+    if level == -1:
+        return _old_str(tensor)
+
+    value = _C.get_unwrapped(tensor)
+    value_repr = repr(value)
+    value_repr = textwrap.indent(value_repr, '  ')
+    if _C.is_batchedtensor(tensor):
+        bdim = _C.maybe_get_bdim(tensor)
+        assert bdim != -1
+        return f'BatchedTensor(lvl={level}, bdim={bdim}, value=\\\n{value_repr})'
+    if _C.is_gradtrackingtensor(tensor):
+        return f'GradTrackingTensor(lvl={level}, value=\\\n{value_repr})'
+
+    raise ValueError("We don't know how to print this, please file us an issue")
+
+
+torch._tensor_str._str = _functorch_str
