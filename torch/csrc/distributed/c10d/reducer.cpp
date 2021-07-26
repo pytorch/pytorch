@@ -38,7 +38,12 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
+C10_DEFINE_TYPED_REGISTRY( // NOLINT
+    TimerRegistry,
+    c10::DeviceType,
+    Timer,
+    std::unique_ptr,
+    c10::Device);
 
 namespace {
 
@@ -391,8 +396,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         if (comm_hook_ == nullptr) {
-          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          auto wrapped =
+              at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over
+          // all the input parameters.
           at::mul_out(bucket_view, grad, wrapped);
         } else {
           bucket_view.copy_(grad);
@@ -440,7 +447,8 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
     // If no DDP comm hook is registered,
-    // the allreduce only sums up the value, and a separate division is required.
+    // the allreduce only sums up the value, and a separate division is
+    // required.
     if (comm_hook_ == nullptr) {
       replica.contents.div_(div_factor_);
     }
@@ -458,14 +466,13 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
-      i,
-      return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
+        i,
+        return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
                             : bucket.replicas[0].contents,
-      bucket.replicas[0].offsets,
-      bucket.replicas[0].lengths,
-      bucket.replicas[0].sizes_vec,
-      variables_for_bucket
-    );
+        bucket.replicas[0].offsets,
+        bucket.replicas[0].lengths,
+        bucket.replicas[0].sizes_vec,
+        variables_for_bucket);
   }
   return gradBuckets;
 }
@@ -874,7 +881,7 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   if (has_rebuilt_bucket_ &&
       cached_variables_for_bucket_.find(bucket_index) !=
           cached_variables_for_bucket_.end()) {
-     return cached_variables_for_bucket_[bucket_index];
+    return cached_variables_for_bucket_[bucket_index];
   }
   std::vector<at::Tensor> variables_for_bucket;
   variables_for_bucket.reserve(bucket.variable_indices.size());
@@ -1454,15 +1461,13 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    for (const auto i : c10::irange(future_result.size())) {
-      auto& replica = bucket.replicas[i];
-      if (bucket.expect_sparse_gradient) {
-        replica.contents.copy_(future_result[i]);
-      } else {
-        // Reinitialize only `bucket_views_out` with the future_result by
-        // following the same logic in `initialize_buckets`.
-        populate_bucket_views_out(replica, future_result[i]);
-      }
+    auto& replica = bucket.replicas[0];
+    if (bucket.expect_sparse_gradient) {
+      replica.contents.copy_(future_result);
+    } else {
+      // Reinitialize only `bucket_views_out` with the future_result by
+      // following the same logic in `initialize_buckets`.
+      populate_bucket_views_out(replica, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass

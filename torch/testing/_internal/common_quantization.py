@@ -732,6 +732,13 @@ class QuantizationTestCase(TestCase):
                                         values_0.shape == values_1.shape,
                                         f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
                                         f"have a shape mismatch at idx {idx}.")
+                                elif isinstance(values_0, list):
+                                    values_0 = values_0[0]
+                                    values_1 = values_1[0]
+                                    self.assertTrue(
+                                        values_0.shape == values_1.shape,
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
                                 else:
                                     assert isinstance(values_0, tuple), \
                                         f"unhandled type {type(values_0)}"
@@ -1685,7 +1692,7 @@ class ModelForFusion(nn.Module):
         x = self.sub1(x)
         x = self.dequant(x)
         x = self.sub2(x)
-        x = x.reshape(-1, 36).contiguous()
+        x = x.view(-1, 36).contiguous()
         x = self.fc(x)
         y = self.conv2(y)
         y = self.relu2(y)
