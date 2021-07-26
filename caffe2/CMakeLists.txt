@@ -664,6 +664,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/sequential.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/data/samplers/stream.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/enum.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/imethod.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/serialize.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/init.cpp
@@ -721,44 +722,43 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 endif()
 
-# NOTE [ Linking AVX and non-AVX files ]
+# NOTE [ Linking AVX-n and non-AVX-n files ]
 #
-# Regardless of the CPU capabilities, we build some files with AVX and AVX2
+# Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
 # instruction set. If the host CPU doesn't support those, we simply ignore their
 # functions at runtime during dispatch.
 #
 # We must make sure that those files are at the end of the input list when
 # linking the torch_cpu library. Otherwise, the following error scenario might
 # occur:
-# 1. A non-AVX and an AVX file both call a function defined with the `inline`
+# 1. A non-AVX2 and an AVX2 file both call a function defined with the `inline`
 #    keyword
 # 2. The compiler decides not to inline this function
 # 3. Two different versions of the machine code are generated for this function:
-#    one without AVX instructions and one with AVX.
-# 4. When linking, the AVX version is found earlier in the input object files,
+#    one without AVX2 instructions and one with AVX2.
+# 4. When linking, the AVX2 version is found earlier in the input object files,
 #    so the linker makes the entire library use it, even in code not guarded by
 #    the dispatcher.
-# 5. A CPU without AVX support executes this function, encounters an AVX
+# 5. A CPU without AVX2 support executes this function, encounters an AVX2
 #    instruction and crashes.
 #
 # Thus we organize the input files in the following order:
-# 1. All files with no AVX support
-# 2. All files with AVX support (conveniently, they all have names ending with
-#    'AVX.cpp')
-# 3. All files with AVX2 support ('*AVX2.cpp')
+# 1. All files with no AVX-n support
+# 2. All files with AVX2 support ('*AVX2.cpp')
+# 3. All files with AVX512 support ('*AVX512.cpp')
 set(Caffe2_CPU_SRCS_NON_AVX)
-set(Caffe2_CPU_SRCS_AVX)
 set(Caffe2_CPU_SRCS_AVX2)
+set(Caffe2_CPU_SRCS_AVX512)
 foreach(input_filename ${Caffe2_CPU_SRCS})
-  if(${input_filename} MATCHES "AVX\\.cpp")
-    list(APPEND Caffe2_CPU_SRCS_AVX ${input_filename})
-  elseif(${input_filename} MATCHES "AVX2\\.cpp")
+  if(${input_filename} MATCHES "AVX2\\.cpp")
     list(APPEND Caffe2_CPU_SRCS_AVX2 ${input_filename})
+  elseif(${input_filename} MATCHES "AVX512\\.cpp")
+    list(APPEND Caffe2_CPU_SRCS_AVX512 ${input_filename})
   else()
     list(APPEND Caffe2_CPU_SRCS_NON_AVX ${input_filename})
   endif()
 endforeach(input_filename)
-set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX} ${Caffe2_CPU_SRCS_AVX2})
+set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_CPU_SRCS_AVX512})
 
 # ==========================================================
 # END formerly-libtorch sources

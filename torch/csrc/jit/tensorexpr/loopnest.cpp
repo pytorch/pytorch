@@ -897,14 +897,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 
   std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
       findLoadOrStoreUses(stmt);
-  // Insert allocations and frees for temporary buffers in the innermost
-  // possible scope.
+  // Insert allocations and frees for temporary buffers at global scope.
   for (const Buf* buf : intermediate_bufs) {
-    Stmt* alloc = new Allocate(buf);
-    Stmt* free = new Free(buf);
-    Block* alloc_block = findLowestContainingBlock(uses.at(buf));
-    alloc_block->prepend_stmt(alloc);
-    alloc_block->append_stmt(free);
+    b->prepend_stmt(new Allocate(buf));
+    b->append_stmt(new Free(buf));
   }
 
   return b;
@@ -1519,10 +1515,28 @@ std::vector<For*> LoopNest::distributeLoop(For* loop) {
   return distributeLoop(loop, stmtsInBlock);
 }
 
+std::vector<For*> LoopNest::distributeLoopAndParents(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoop(loop);
+  if (parentLoop) {
+    return distributeLoopAndParents(parentLoop);
+  }
+  return result;
+}
+
 std::vector<For*> LoopNest::distributeLoopOverInnerLoops(For* loop) {
   auto loops = NodeFinder<For>::find(loop);
   std::unordered_set<Stmt*> loopsSet(loops.begin(), loops.end());
   return distributeLoop(loop, loopsSet);
+}
+
+std::vector<For*> LoopNest::distributeLoopAndParentsOverInnerLoops(For* loop) {
+  auto parentLoop = getParentLoop(loop);
+  auto result = distributeLoopOverInnerLoops(loop);
+  if (parentLoop) {
+    return distributeLoopAndParentsOverInnerLoops(parentLoop);
+  }
+  return result;
 }
 
 bool areEqual(const Expr* expr1, const Expr* expr2) {
@@ -1956,7 +1970,7 @@ std::vector<For*> LoopNest::reorder(
   // Reorder the loops according to the permutation.
   std::vector<For*> result(loops.size());
   for (size_t i = 0; i < loops.size(); ++i) {
-    result[permutation[i]] = loops[i];
+    result[i] = loops[permutation[i]];
   }
 
   // Remove the bodies from all the loops.
@@ -2239,11 +2253,6 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   auto writes = WritesToBuf::find(stmt, buf);
   auto reads = StmtsReadingBuf::find(stmt, buf);
 
-  // All buffers must be read and written at least once.
-  // Is this a valid assumption? TODO
-  TORCH_INTERNAL_ASSERT(!writes.empty());
-  TORCH_INTERNAL_ASSERT(!reads.empty());
-
   // Find the parent common to all the buffer accesses.
   const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
   TORCH_INTERNAL_ASSERT(parent);
@@ -2328,6 +2337,12 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
     if (l->buf() == buf) {
       l->set_indices(get_new_indices(l->indices()));
     }
+  }
+}
+
+void LoopNest::compressAllBuffers(Stmt* stmt) {
+  for (auto buf : BufFinder::find(stmt)) {
+    compressBuffer(const_cast<Buf*>(buf), stmt);
   }
 }
 
