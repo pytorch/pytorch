@@ -59,7 +59,16 @@ class Conv2d(nn.Conv2d):
         return qat_conv
 
     def to_float(self):
-        conv = torch.nn.Conv2d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
+        conv = torch.nn.Conv2d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
         conv.weight = torch.nn.Parameter(self.weight)
         conv.bias = None
         if self.bias is not None:
@@ -153,7 +162,16 @@ class Conv3d(nn.Conv3d):
         return qat_conv
 
     def to_float(self):
-        conv = torch.nn.Conv3d(self.in_channels, self.out_channels, self.kernel_size, self.stride, self.padding, self.dilation, self.groups, self.bias is not None, self.padding_mode)
+        conv = torch.nn.Conv3d(
+            self.in_channels,
+            self.out_channels,
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+            self.bias is not None,
+            self.padding_mode)
         conv.weight = torch.nn.Parameter(self.weight)
         conv.bias = None
         if self.bias is not None:
