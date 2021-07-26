@@ -56,13 +56,13 @@
 #include <c10/util/Optional.h>
 
 #include <fmt/format.h>
-#include <linker.h>
+#include <torch/csrc/deploy/loader.h>
 
 namespace torch {
 namespace deploy {
 
 #define DEPLOY_ERROR(msg_fmt, ...) \
-  throw DeployLinkerError(fmt::format(msg_fmt, ##__VA_ARGS__))
+  throw DeployLoaderError(fmt::format(msg_fmt, ##__VA_ARGS__))
 
 #define DEPLOY_CHECK(cond, fmt, ...)  \
   if (!(cond)) {                      \

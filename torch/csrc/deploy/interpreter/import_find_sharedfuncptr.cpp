@@ -1,4 +1,4 @@
-#include <torch/csrc/deploy/interpreter/linker.h>
+#include <torch/csrc/deploy/loader.h>
 #include <vector>
 
 using torch::deploy::CustomLibrary;
