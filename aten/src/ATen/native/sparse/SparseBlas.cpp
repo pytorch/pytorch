@@ -1,13 +1,11 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/sparse/SparseBlas.h>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 
 #include <c10/util/MaybeOwned.h>
 
 namespace at {
 namespace native {
-
-DEFINE_DISPATCH(addmv_out_sparse_csr_stub);
 
 Tensor& addmv_out_sparse_csr(
     const Tensor& self,
@@ -50,7 +48,7 @@ Tensor& addmv_out_sparse_csr(
     }
   }
 
-  addmv_out_sparse_csr_stub(self.device().type(), mat, vec, beta, alpha, result);
+  sparse::impl::cpu::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
   return result;
 }
 

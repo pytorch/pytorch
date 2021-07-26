@@ -1,12 +1,12 @@
 #include <ATen/Config.h>
-#include <ATen/Tensor.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
-#include <ATen/native/sparse/SparseBlas.h>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 
 namespace at {
 namespace native {
-
-namespace {
+namespace sparse {
+namespace impl {
+namespace cpu {
 
 /*
   Computes a sparse matrix-dense vector product defined as
@@ -18,7 +18,7 @@ namespace {
   * `result` - [in] Tensor storing dense vector y of size m.
                [out] result of the operation.
 */
-void addmv_out_sparse_csr_cpu_impl(
+void addmv_out_sparse_csr(
     const Tensor& mat,
     const Tensor& vec,
     const Scalar& beta,
@@ -34,12 +34,8 @@ void addmv_out_sparse_csr_cpu_impl(
 #endif
 }
 
-} // anonymous namespace
-
-REGISTER_ARCH_DISPATCH(addmv_out_sparse_csr_stub, DEFAULT, &addmv_out_sparse_csr_cpu_impl);
-REGISTER_AVX_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
-REGISTER_AVX2_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
-REGISTER_VSX_DISPATCH(addmv_out_sparse_csr_stub, &addmv_out_sparse_csr_cpu_impl);
-
+} // namespace cpu
+} // namespace impl
+} // namespace sparse
 } // namespace native
 } // namespace at

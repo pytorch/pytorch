@@ -3,12 +3,16 @@ from torch.nn import Module
 from .observer import MovingAverageMinMaxObserver, HistogramObserver, MovingAveragePerChannelMinMaxObserver, _with_args
 import re
 from abc import ABC, abstractmethod
+from typing import Any, Tuple
 
 def _is_per_channel(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_channel_symmetric, torch.per_channel_affine]
 
 def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_tensor_affine]
+
+def _is_symmetric_quant(qscheme: 'torch.qscheme') -> bool:
+    return qscheme in [torch.per_tensor_symmetric, torch.per_channel_symmetric]
 
 class FakeQuantizeBase(ABC, Module):
     r""" Base fake quantize module
@@ -244,6 +248,75 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
                    self.scale, self.zero_point, self.dtype,
                    self.quant_min, self.quant_max, self.qscheme)
 
+class FusedMovingAvgObsFakeQuantize(FakeQuantize):
+    r"""Fused module that is used to observe the input tensor (compute min/max), compute
+    scale/zero_point and fake_quantize the tensor.
+    This module uses calculation similar MovingAverageMinMaxObserver for the inputs,
+    to compute the min/max values in order to compute the scale/zero_point.
+    The qscheme input in the observer is used to differentiate between symmetric/affine
+    quantization scheme.
+
+    The output of this module is given by
+    x_out = (clamp(round(x/scale + zero_point), quant_min, quant_max)-zero_point)*scale
+
+    Similar to :class:`~torch.quantization.FakeQuantize`, and accepts the same attributes as the
+    base class.
+
+    """
+
+    def __init__(
+        self,
+        observer: Any = MovingAverageMinMaxObserver,
+        quant_min: int = 0,
+        quant_max: int = 255,
+        **observer_kwargs: Any
+    ) -> None:
+        super().__init__(observer, quant_min, quant_max, **observer_kwargs)
+        assert isinstance(
+            self.activation_post_process, MovingAverageMinMaxObserver
+        ), "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
+        self.quant_min: int = quant_min
+        self.quant_max: int = quant_max
+        self.register_buffer("fake_quant_enabled", torch.tensor([0], dtype=torch.long))
+        self.register_buffer("observer_enabled", torch.tensor([0], dtype=torch.long))
+        self.is_symmetric_quant = _is_symmetric_quant(self.activation_post_process.qscheme)
+
+    @torch.jit.export
+    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.activation_post_process.calculate_qparams()
+
+    @torch.jit.export
+    def extra_repr(self) -> str:
+        return (
+            "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
+            "dtype={}, quant_min={}, quant_max={}, qscheme={}".format(
+                self.fake_quant_enabled,
+                self.observer_enabled,
+                self.scale,
+                self.zero_point,
+                self.dtype,
+                self.quant_min,
+                self.quant_max,
+                self.qscheme,
+            )
+        )
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        return torch.fused_moving_avg_obs_fake_quant(
+            X,
+            self.observer_enabled,
+            self.fake_quant_enabled,
+            self.activation_post_process.min_val,
+            self.activation_post_process.max_val,
+            self.scale,
+            self.zero_point,
+            self.activation_post_process.averaging_constant,
+            self.quant_min,
+            self.quant_max,
+            self.ch_axis,
+            self.is_per_channel,
+            self.is_symmetric_quant,
+        )
 
 default_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=0, quant_max=255,
                                             dtype=torch.quint8, qscheme=torch.per_tensor_affine, reduce_range=True)
