@@ -1,11 +1,10 @@
 import itertools
-from typing import Optional, List, Sequence, Union, Dict
+from typing import List, Sequence, Union, Dict
 
 from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe
 from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  TensorOptionsArguments)
