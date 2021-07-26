@@ -1,5 +1,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 
+#include <sstream>
+
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
@@ -69,6 +71,24 @@ c10::DispatchKey dispatch_key(c10::DeviceType device_type) {
   }
 }
 
+c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args, std::vector<c10::List<at::Tensor>> tlist_args) {
+  // Decide what device to move the output tensor(s) to.
+  // The current convention is that we use the first tensor arg to pick the device
+  // Barring that, we take the first tensor from a TensorList arg.
+  if (t_args.size() > 0) {
+    return t_args[0].device();
+  } else {
+    // We need to loop through all of the (potentially multiple) TensorList arguments
+    // In case, e.g. the first one is empty but the second is not.
+    for (auto& tens_list : tlist_args) {
+      for (const auto i : c10::irange(tens_list.size())) {
+        return tens_list.get(i).device();
+      }
+    }
+  }
+  return c10::nullopt;
+}
+
 }  // namespace
 
 void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
@@ -80,6 +100,8 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
 
   std::vector<at::Tensor> tensor_args;
   std::vector<int> tensor_args_indices;
+
+  std::vector<c10::List<at::Tensor>> tensorlist_args;
 
   // Step 1: Convert all non-eager tensor inputs into eager tensors and put them
   // on the stack at the correct indices.
@@ -96,6 +118,7 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
       auto eager_ivalue = c10::IValue(c10::List<at::Tensor>(
           to_eager(ivalue.toTensorList().vec(), device_type)));
       (*stack)[arguments_begin + idx] = std::move(eager_ivalue);
+      tensorlist_args.push_back(ivalue.toTensorList());
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to
@@ -175,25 +198,34 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
                       "mutable alias: ",
                       schema_returns[idx]);
         } else {
+          c10::optional<c10::Device> tgt_device = compute_target_device(tensor_args, tensorlist_args);
           if (alias_info.has_value() && !alias_info.value().isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and
             // not creating a view.
             // If this operator is needed, the backend should provide a kernel
             // for it.
             // See Note [Eager Fallback Does Not Handle View Operators]
-            auto tgt_device = tensor_args[0].device();
+            std::stringstream dev_str;
+            if (tgt_device) {
+                dev_str << *tgt_device;
+            } else {
+                dev_str << "<none>";
+            }
             TORCH_WARN(false, "The operator ", op.schema().operator_name(),
                        " appears to be a view operator, ",
                        "but it has no implementation for the backend \"",
-                       tgt_device, "\". View operators don't support ",
+                       dev_str.str(), "\". View operators don't support ",
                        "falling back to run on the eager, since the tensor's "
                        "storage cannot be shared across devices.");
           }
           // Case (2): copy case. Copy the eager output tensor to the original
           // device.
-          auto tgt_device = tensor_args[0].device();
-          (*stack)[returns_begin + idx] =
-              c10::IValue(returns[idx].toTensor().to(tgt_device));
+
+          // We technically  might not have a target device, e.g. if you call torch.cat() with an empty list
+          // In that case, we shouldn't have any tensors to schlep across devices anyway.
+          if (tgt_device) {
+              (*stack)[returns_begin + idx] = c10::IValue(returns[idx].toTensor().to(*tgt_device));
+          }
         }
       }
     }
