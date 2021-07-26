@@ -34,9 +34,7 @@ TORCH_META_FUNC2(pow, Scalar) (const Scalar& base, const Tensor& exp) {
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pow_tensor_tensor_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
 TORCH_IMPL_FUNC(pow_Tensor_Tensor_out) (const Tensor& base, const Tensor& exp, const Tensor& out) {
