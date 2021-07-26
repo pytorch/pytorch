@@ -67,7 +67,6 @@ struct TORCH_API TransportRegistration {
   std::string address;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct TORCH_API ChannelRegistration {
@@ -75,7 +74,6 @@ struct TORCH_API ChannelRegistration {
   int64_t priority;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
@@ -220,6 +218,17 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
 
+ protected:
+  // TensorPipe write function that could be used to write response
+  // messages by server, and write request messages by client. This
+  // is a protected method since it is overwritten by FaultyTensorPipeAgent
+  virtual void pipeWrite(
+      const std::shared_ptr<tensorpipe::Pipe>&,
+      c10::intrusive_ptr<Message> message,
+      std::vector<c10::Device>&& devices,
+      std::vector<c10::Stream> streams,
+      std::function<void(const tensorpipe::Error&)>) noexcept;
+
  private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
@@ -238,15 +247,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
           std::vector<c10::Stream>)>) noexcept;
-
-  // TensorPipe write function that could be used to write response
-  // messages by server, and write request messages by client.
-  void pipeWrite(
-      const std::shared_ptr<tensorpipe::Pipe>&,
-      c10::intrusive_ptr<Message> message,
-      std::vector<c10::Device>&& devices,
-      std::vector<c10::Stream> streams,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(

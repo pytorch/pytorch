@@ -19,7 +19,6 @@ torch::detail::enable_if_module_t<T, bool> f(T&& m) {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, AllOf) {
   ASSERT_TRUE(torch::all_of<>::value);
   ASSERT_TRUE(torch::all_of<true>::value);
@@ -29,7 +28,6 @@ TEST(TestStatic, AllOf) {
   ASSERT_FALSE((torch::all_of<true, true, false>::value));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, AnyOf) {
   ASSERT_FALSE(torch::any_of<>::value);
   ASSERT_TRUE(bool((torch::any_of<true>::value)));
@@ -37,7 +35,6 @@ TEST(TestStatic, AnyOf) {
   ASSERT_FALSE(bool((torch::any_of<false>::value)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, EnableIfModule) {
   ASSERT_TRUE(f(torch::nn::LinearImpl(1, 2)));
   ASSERT_FALSE(f(5));
@@ -86,7 +83,6 @@ void assert_has_expected_type() {
   ASSERT_TRUE(is_expected_type) << Module().name();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, ReturnTypeOfForward) {
   assert_has_expected_type<A, int>();
   assert_has_expected_type<B, std::string, torch::Tensor>();
@@ -95,7 +91,6 @@ TEST(TestStatic, ReturnTypeOfForward) {
   assert_has_expected_type<E, void>();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestStatic, Apply) {
   std::vector<int> v;
   torch::apply([&v](int x) { v.push_back(x); }, 1, 2, 3, 4, 5);

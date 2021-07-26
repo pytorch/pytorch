@@ -223,26 +223,11 @@ Value* CloneValueFromListConstruct(
   c10::optional<at::ScalarType> scalar_type = c10::nullopt;
   if (elem->cast<IntType>()) {
     scalar_type = at::kLong;
-
-    auto lc_node = v->node();
-    // ListConstruct Int[] output case, we need to transform to ONNX
-    // Concat to ensure the output is a single tensor(dynamic) type in
-    // order to be consumed as inputs
-    std::vector<Value*> unsqueezed;
-    for (auto* input : lc_node->inputs()) {
-      auto new_input = n_graph->addInput();
-      new_input->copyMetadata(input);
-      Node* unsqueezed_node = createONNXUnsqueeze(
-          n_graph.get(), n_graph->return_node(), new_input, 0, opset_version);
-      unsqueezed.emplace_back(unsqueezed_node->output());
+    if (isValidToTransformToONNXConcatNode(v->node())) {
+      auto concat_node = transformToONNXConcatNode(
+          n_graph.get(), v->node(), true, opset_version);
+      return concat_node->output();
     }
-    Node* concat_node =
-        n_graph->insertNode(n_graph->create(::c10::onnx::Concat, 1));
-    concat_node->i_(attr::axis, 0);
-    for (auto v : unsqueezed) {
-      concat_node->addInput(v);
-    }
-    return concat_node->output();
   } else if (elem->cast<FloatType>()) {
     scalar_type = at::kFloat;
   } else if (elem->cast<BoolType>()) {
@@ -487,9 +472,8 @@ std::vector<int64_t> ComputeShapeFromReshape(
 c10::optional<::c10::SymbolicShape> ComputeShapeFromExpand(
     const std::vector<::c10::ShapeSymbol>& input_shape,
     const std::vector<int64_t>& reshape) {
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (auto it = reshape.begin(); it != reshape.end(); ++it) {
-    if (*it < 0) {
+  for (const auto& it : reshape) {
+    if (it < 0) {
       return c10::nullopt;
     }
   }
@@ -530,9 +514,8 @@ c10::optional<::c10::SymbolicShape> ComputeShapeFromTile(
   TORCH_INTERNAL_ASSERT(
       input_shape.size() == reshape.size(),
       "ONNX Tile input shapes do not match.");
-  // NOLINTNEXTLINE(modernize-loop-convert)
-  for (auto it = reshape.begin(); it != reshape.end(); ++it) {
-    if (*it < 0) {
+  for (const auto& it : reshape) {
+    if (it < 0) {
       return c10::nullopt;
     }
   }
@@ -1442,11 +1425,10 @@ void ONNXShapeTypeInference(
       const char shape_err[] = "ShapeInferenceError";
       // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
       const char type_err[] = "TypeInferenceError";
-      // NOLINTNEXTLINE(modernize-use-nullptr)
-      if ((strstr(ex.what(), shape_err) == NULL) &&
-          // NOLINTNEXTLINE(modernize-use-nullptr)
-          (strstr(ex.what(), type_err) == NULL))
+      if ((strstr(ex.what(), shape_err) == nullptr) &&
+          (strstr(ex.what(), type_err) == nullptr)) {
         throw;
+      }
     }
     GRAPH_DEBUG(
         "ONNX graph after shape inference: ", prettyPrint(*model_proto));

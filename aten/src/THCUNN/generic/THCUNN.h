@@ -5,23 +5,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
 
-TORCH_CUDA_CU_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* output,
-    THCTensor* is_target,
-    int64_t reduction);
-
-TORCH_CUDA_CU_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    THCTensor* is_target,
-    int64_t reduction);
-
 TORCH_CUDA_CU_API void THNN_(MultiMarginCriterion_updateOutput)(
     THCState* state,
     THCTensor* input,

@@ -163,7 +163,6 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
@@ -219,7 +218,8 @@ void Method::run(Stack& stack) {
   function_->run(stack);
 }
 
-IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs) {
+IValue Method::operator()(std::vector<IValue> stack, const Kwargs& kwargs)
+    const {
   stack.insert(stack.begin(), owner()._ivalue()); // self
   RECORD_TORCHSCRIPT_FUNCTION(name(), stack);
   return (*function_)(std::move(stack), kwargs);
@@ -234,6 +234,15 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
 
   function_->getSchema().checkAndNormalizeInputs(stack, kwargs);
   return function_->runAsync(stack, std::move(taskLauncher));
+}
+
+void Method::setArgumentNames(
+    std::vector<std::string>& argumentNamesOut) const {
+  TORCH_INTERNAL_ASSERT(function_);
+  argumentNamesOut.reserve(function_->getSchema().arguments().size());
+  for (auto& argument : function_->getSchema().arguments()) {
+    argumentNamesOut.push_back(argument.name());
+  }
 }
 
 IValue Module::operator()(std::vector<IValue> inputs) {
@@ -476,7 +485,7 @@ Module freeze(
     c10::optional<std::vector<std::string>> preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
-      module.is_training(),
+      !module.hasattr("training") || !module.is_training(),
       "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
 
   Module out_mod = freeze_module(
