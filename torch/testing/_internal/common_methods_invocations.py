@@ -1230,8 +1230,12 @@ def sample_inputs_binary_pwise(
     dtype,
     requires_grad,
     python_scalars=False,
-    **op_kwargs,
+    op_kwargs=None,
+    **kwargs,
 ):
+    if op_kwargs is None:
+        op_kwargs = {}
+
     scalar = make_tensor((), device=device, dtype=dtype, **op_info.rhs_make_tensor_kwargs)
     if python_scalars:
         scalar = scalar.item()  # type: ignore[assignment]
@@ -1282,20 +1286,25 @@ def sample_inputs_add_sub(
     requires_grad,
     python_scalars=False,
     alpha=1.0,
-    **op_kwargs,
+    op_kwargs=None,
+    **kwargs,
 ):
+    if op_kwargs is None:
+        op_kwargs = {}
+
     sample_inputs = sample_inputs_binary_pwise(
         op_info,
         device,
         dtype,
         requires_grad,
         python_scalars=python_scalars,
-        **op_kwargs,
+        op_kwargs=op_kwargs,
+        **kwargs,
     )
-    #
-    # lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
-    # rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
-    # sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs={"alpha": alpha, **op_kwargs}, broadcasts_input=False))
+
+    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.lhs_make_tensor_kwargs)
+    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **op_info.rhs_make_tensor_kwargs)
+    sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=dict(op_kwargs, alpha=alpha), broadcasts_input=False))
 
     return sample_inputs
 
