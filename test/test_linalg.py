@@ -2753,7 +2753,7 @@ class TestLinalg(TestCase):
             # check if u, s, v is a SVD
             u, s, v = u[..., :q], s[..., :q], v[..., :q]
             A = u.matmul(s.diag_embed()).matmul(v.transpose(-2, -1))
-            self.assertEqual(A, a)
+            self.assertEqual(A, a, rtol=1e-7, atol=2e-7)
 
             # check if svd_lowrank produces same singular values as torch.svd
             U, S, V = torch.svd(a)
@@ -2811,8 +2811,11 @@ class TestLinalg(TestCase):
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
-        cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
-        device_tensor = cpu_tensor.to(device=device)
+        # To have accurate tests and less false positives on different CPUs and GPUs,
+        # we use double or complex double accuracy for CPU reference.
+        cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
+        cpu_tensor = torch.randn(shape, device='cpu', dtype=cpu_dtype)
+        device_tensor = cpu_tensor.to(device=device, dtype=dtype)
         if col_maj:
             cpu_tensor = cpu_tensor.t()
             device_tensor = device_tensor.t()
@@ -2826,7 +2829,7 @@ class TestLinalg(TestCase):
         #   then the corresponding column of the V has to be changed.
         # Thus here we only compare result[..., :m].abs() from CPU and device.
         for x, y in zip(cpu_result, device_result):
-            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
+            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), exact_dtype=False)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -6028,6 +6031,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     m2 = torch.randn(k, m, device=device).to(dtype)
                     self._test_addmm_addmv(torch.addmm, M, m1, m2)
 
+                    m1 = torch.randn(n, k + 1, device=device).to(dtype)
+                    m2 = torch.randn(k, m, device=device).to(dtype)
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.addmm(M, m1, m2))
+                    self.assertRaisesRegex(RuntimeError, f"{n}x{k + 1}.*{k}x{m}", lambda: torch.mm(m1, m2))
+
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
@@ -7915,6 +7923,10 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         c = torch.tensordot(a, b).cpu()
         cn = torch.from_numpy(np.tensordot(a.cpu().numpy(), b.cpu().numpy()))
         self.assertEqual(c, cn)
+
+        a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
+        an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
+        self.assertEqual(a, an)
 
 
 instantiate_device_type_tests(TestLinalg, globals())

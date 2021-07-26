@@ -211,7 +211,6 @@ struct map_to_size {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_sametype) {
   auto sizes =
       map_types_to_values<typelist<int64_t, bool, uint32_t>>(map_to_size());
@@ -227,7 +226,6 @@ struct map_make_shared {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_differenttypes) {
   auto shared_ptrs =
       map_types_to_values<typelist<int, double>>(map_make_shared());
@@ -256,7 +254,6 @@ struct mapper_call_func {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_members) {
   auto result =
       map_types_to_values<typelist<Class1, Class2>>(mapper_call_func());
@@ -272,7 +269,6 @@ struct mapper_call_nonexistent_function {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TypeListTest, MapTypesToValues_empty) {
   auto result =
       map_types_to_values<typelist<>>(mapper_call_nonexistent_function());
