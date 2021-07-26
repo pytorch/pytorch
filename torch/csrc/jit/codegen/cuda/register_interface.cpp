@@ -28,7 +28,6 @@ class RegisterInterface {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static RegisterInterface register_interface_;
 } // namespace
 
