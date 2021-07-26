@@ -230,6 +230,18 @@ def create_python_bindings_sharded(
 ) -> None:
     """Generates Python bindings to ATen functions"""
     grouped = group_filter_overloads(pairs, pred)
+    def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
+        return str(kv[0])
+
+    def env_func(
+        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
+    ) -> Dict[str, List[str]]:
+        return {
+            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
+            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
+            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
+        }
+
     fm.write_sharded(
         filename,
         grouped.items(),
@@ -237,12 +249,8 @@ def create_python_bindings_sharded(
             'generated_comment':
             '@' + f'generated from {fm.template_dir}/{filename}',
         },
-        key_fn=lambda kv: str(kv[0]),
-        env_callable=lambda kv: {
-            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
-            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
-            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
-        },
+        key_fn=key_func,
+        env_callable=env_func,
         num_shards=num_shards
     )
 
