@@ -9,7 +9,6 @@
 
 using TestGraph = nom::Graph<TestClass>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, CreateNodeAndEdge) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -19,7 +18,6 @@ TEST(Basic, CreateNodeAndEdge) {
   EXPECT_TRUE(g.hasNode(n2));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, DeleteNode) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -30,7 +28,6 @@ TEST(Basic, DeleteNode) {
   EXPECT_FALSE(g.hasNode(n1));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, DeleteEdge) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -39,7 +36,6 @@ TEST(Basic, DeleteEdge) {
   g.deleteEdge(e);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, ReplaceEdges) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -94,7 +90,6 @@ TEST(Basic, ReplaceEdges) {
   EXPECT_TRUE(g.hasEdge(n2, n3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, HasNode) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -132,7 +127,6 @@ TEST(Basic, HasNode) {
   EXPECT_TRUE(g.hasNode(n5));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, Moves) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -155,7 +149,6 @@ TEST(Basic, Moves) {
   EXPECT_EQ(g2.getMutableEdges().size(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, MoveSubgraph) {
   TestGraph g;
   auto n1 = createTestNode(g);
@@ -184,7 +177,6 @@ TEST(Basic, MoveSubgraph) {
   EXPECT_EQ(g2.getMutableEdges().size(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Basic, DotGenerator) {
   TestGraph g;
   auto n1 = createTestNode(g);

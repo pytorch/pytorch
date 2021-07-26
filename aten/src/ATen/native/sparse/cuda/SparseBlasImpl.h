@@ -7,25 +7,33 @@
 namespace at {
 namespace native {
 namespace sparse {
-namespace cuda {
 namespace impl {
+namespace cuda {
 
-void addmm_out_sparse_csr_dense_cuda_impl(
+void addmm_out_sparse_csr(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result);
 
-void addmv_out_sparse_csr_cuda_impl(
+void addmv_out_sparse_csr(
     const at::sparse_csr::SparseCsrTensor& mat,
     const Tensor& vec,
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result);
 
-}
+void triangular_solve_out_sparse_csr(
+    const at::sparse_csr::SparseCsrTensor& A,
+    const Tensor& B,
+    const Tensor& X,
+    bool upper,
+    bool transpose,
+    bool unitriangular);
+
 } // namespace cuda
+} // namespace impl
 } // namespace sparse
 } // namespace native
 } // namespace at

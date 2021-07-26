@@ -28,13 +28,10 @@ class NetSimpleRefCountTestOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(NetSimpleRefCountTest, NetSimpleRefCountTestOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(NetSimpleRefCountTest).NumInputs(1).NumOutputs(1);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NetSimpleRefCountTest, TestCorrectness) {
   Workspace ws;
   *(ws.CreateBlob("a")->GetMutable<int32_t>()) = 1;

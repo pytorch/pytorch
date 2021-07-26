@@ -98,7 +98,7 @@ Tensor& addmm_out_sparse_csr_dense_cuda(
             c10::nullopt /* pin_memory */));
   }
 
-  sparse::cuda::impl::addmm_out_sparse_csr_dense_cuda_impl(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
   return result;
 }
 

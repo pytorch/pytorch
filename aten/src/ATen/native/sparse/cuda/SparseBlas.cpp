@@ -48,14 +48,39 @@ Tensor& addmv_out_sparse_csr_cuda(const Tensor &self, const Tensor &mat, const T
   // addmm works fine
   if (vec.scalar_type() == kHalf || vec.scalar_type() == kBFloat16) {
     result.unsqueeze_(-1);
-    sparse::cuda::impl::addmm_out_sparse_csr_dense_cuda_impl(mat, vec.unsqueeze(-1), beta, alpha, result);
+    sparse::impl::cuda::addmm_out_sparse_csr(mat, vec.unsqueeze(-1), beta, alpha, result);
     result.squeeze_(-1);
     return result;
   }
 
-  sparse::cuda::impl::addmv_out_sparse_csr_cuda_impl(mat, vec, beta, alpha, result);
+  sparse::impl::cuda::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
   return result;
 }
 
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `B` - dense Tensor of size m × nrhs.
+  * `A` - sparse Tensor of size m × m.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `X` - dense Tensor of size m × nrhs.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+*/
+std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
+    const Tensor& B,
+    const Tensor& A,
+    bool upper,
+    bool transpose,
+    bool unitriangular,
+    Tensor& X,
+    Tensor& clone_A) {
+  sparse::impl::cuda::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+  return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
-}
+
+} // namespace native
+} // namespace at
