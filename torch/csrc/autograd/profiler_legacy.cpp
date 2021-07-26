@@ -211,14 +211,13 @@ void ProfilerThreadLocalState::setOrAddRemoteProfiledEvents(
 void ProfilerThreadLocalState::pushRange(
     const at::RecordFunction& fn,
     const bool record_cuda,
-    const char* msg,
     std::vector<std::vector<int64_t>>&& shapes) {
   if (config_.state == ProfilerState::Disabled) {
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
     cuda_stubs()->nvtxRangePushA(getNvtxStr(
-        fn.name(), msg, fn.seqNr(), shapes).c_str());
+        fn.name(), fn.seqNr(), shapes).c_str());
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
@@ -295,11 +294,10 @@ bool ProfilerThreadLocalState::memoryProfilingEnabled() const {
   return config_.profile_memory;
 }
 
-std::string ProfilerThreadLocalState::getNvtxStr(
+std::string getNvtxStr(
     const at::StringView& name,
-    const char* msg,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) const {
+    const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #ifdef __HIP_PLATFORM_HCC__
@@ -307,15 +305,13 @@ std::string ProfilerThreadLocalState::getNvtxStr(
 #endif
     if (sequence_nr >= 0) {
 #ifdef __HIP_PLATFORM_HCC__
-      s << msg << sequence_nr;
+      s << ", seq = " << sequence_nr;
 #else
-      s << name.str() << msg << sequence_nr;
+      s << name.str() << ", seq = " << sequence_nr;
 #endif
     } else if (sequence_nr == -1) {
-#ifdef __HIP_PLATFORM_HCC__
-      s << msg;
-#else
-      s << name.str() << msg;
+#ifndef __HIP_PLATFORM_HCC__
+      s << name.str();
 #endif
     }
     if (shapes.size() > 0) {
@@ -443,12 +439,11 @@ void pushProfilingCallbacksLegacy() {
           record_cuda = false;
         }
 
-        auto* msg = (fn.seqNr() >= 0) ? ", seq = " : "";
         if (state_ptr->config().report_input_shapes) {
           auto sizes = inputSizes(fn);
-          state_ptr->pushRange(fn, record_cuda, msg, std::move(sizes));
+          state_ptr->pushRange(fn, record_cuda, std::move(sizes));
         } else {
-          state_ptr->pushRange(fn, record_cuda, msg);
+          state_ptr->pushRange(fn, record_cuda);
         }
 
         return nullptr;

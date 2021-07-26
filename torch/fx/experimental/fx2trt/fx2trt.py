@@ -104,7 +104,12 @@ class TRTModule(torch.nn.Module):
         for i, output_name in enumerate(self.output_names):
             idx: int = self.engine.get_binding_index(output_name)
             dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-            shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
+
+            if self.engine.has_implicit_batch_dimension:
+                shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
+            else:
+                shape = tuple(self.engine.get_binding_shape(idx))
+
             device = torch_device_from_trt(self.engine.get_location(idx))
             output = torch.empty(size=shape, dtype=dtype, device=device)
             outputs.append(output)
@@ -141,11 +146,12 @@ def tensorrt_converter(key):
 class InputTensorSpec(NamedTuple):
     shape : torch.Size
     dtype : torch.dtype
+    device : torch.device = torch.device("cpu")
     has_batch_dim : bool = True
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
-        return cls(tensor.shape, tensor.dtype)
+        return cls(tensor.shape, tensor.dtype, tensor.device)
 
     @classmethod
     def from_tensors(cls, tensors: Iterable[torch.Tensor]):
@@ -153,17 +159,23 @@ class InputTensorSpec(NamedTuple):
 
 
 class BaseTRTInterpreter(torch.fx.Interpreter):
-    def __init__(self, module : torch.fx.GraphModule, input_specs : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
+    def __init__(
+        self,
+        module : torch.fx.GraphModule,
+        input_specs : List[InputTensorSpec],
+        explicit_batch_dimension : bool = False,
+        logger_level=trt.Logger.WARNING
+    ):
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
-        # TODO: explicit batching
-        # EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-        # self.network = self.builder.create_network(EXPLICIT_BATCH)
-
-        self.network = self.builder.create_network()
+        if explicit_batch_dimension:
+            EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+            self.network = self.builder.create_network(EXPLICIT_BATCH)
+        else:
+            self.network = self.builder.create_network()
 
         self.input_specs_iter = iter(input_specs)
         self._cur_node_name: Optional[str] = None
@@ -211,9 +223,12 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
-        shape, dtype, has_batch_dim = next(self.input_specs_iter)
-        if has_batch_dim:
-            shape = shape[1:]
+        shape, dtype, _, has_batch_dim = next(self.input_specs_iter)
+        if self.network.has_implicit_batch_dimension:
+            if has_batch_dim:
+                shape = shape[1:]
+        else:
+            assert has_batch_dim, "It's required to specify batch dimension when it's explicit in TensorRT network."
         return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
 
     def call_module(self, target, args, kwargs):
