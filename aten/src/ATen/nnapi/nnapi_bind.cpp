@@ -11,9 +11,7 @@ namespace torch {
 namespace nnapi {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* nnapi;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* check_nnapi;
 
 void load_platform_library() {
@@ -204,7 +202,6 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
 };
 
 #ifndef __APPLE__
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto register_NnapiCompilation = [](){
   try {
     return torch::jit::class_<NnapiCompilation>("_nnapi", "Compilation")

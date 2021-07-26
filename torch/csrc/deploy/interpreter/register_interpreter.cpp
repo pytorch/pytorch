@@ -19,7 +19,6 @@ extern char LIB_END;
 // when libembedded_interpreter.so is opened, we need to register its local
 // symbols with torchdeploy
 __attribute__((constructor)) static void libconstructor() {
-
 #ifdef EMBEDDED_INTERP_CUDA
   register_embedded_interpreter_cuda(&LIB_START, &LIB_END);
 #else
