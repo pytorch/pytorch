@@ -629,7 +629,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * override is for `intrusive_ptr_target` and is used to implement weak
    * tensors.
    */
-  virtual void release_resources() override;
+  void release_resources() override;
 
   /**
    * Return the DispatchKeySet corresponding to this Tensor, specifying
