@@ -31,8 +31,8 @@ The dlpack shares the tensors memory.
 Note that each dlpack can only be consumed once.
 """)
 
-# TODO: add a typing.Protocol to be able to tell Mypy that only objects with 
-#         __dlpack__ and __dlpack_device__ methods are accepted.
+# TODO: add a typing.Protocol to be able to tell Mypy that only objects with
+# __dlpack__ and __dlpack_device__ methods are accepted.
 def from_dlpack(ext_tensor: Any) -> torch.Tensor:
     """from_dlpack(ext_tensor) -> Tensor
 
