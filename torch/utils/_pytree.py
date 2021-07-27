@@ -58,10 +58,10 @@ def _tuple_unflatten(values: List[Any], context: Context) -> Tuple[Any, ...]:
     return tuple(values)
 
 def _namedtuple_flatten(d: NamedTuple) -> Tuple[List[Any], Context]:
-    return list(tuple(d)), type(d)
+    return list(d), type(d)
 
 def _namedtuple_unflatten(values: List[Any], context: Context) -> NamedTuple:
-    return context(*values)
+    return cast(NamedTuple, context(*values))
 
 _register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 _register_pytree_node(list, _list_flatten, _list_unflatten)

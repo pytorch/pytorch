@@ -66,7 +66,7 @@ class SimpleTest(torch.nn.Module):
 def a_non_torch_leaf(a, b):
     return a + b
 
-# used in test_pytree. It's all the way out here because picking a GraphModule
+# used in test_pytree. It's all the way out here because pickling a GraphModule
 # that uses Point errors out if Point is local to the function
 Point = namedtuple('Point', ['x', 'y'])
 
