@@ -356,23 +356,6 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
         def test_function_with_tensor(self):
             for start_method in self._start_methods:
                 pc = start_processes(
-                    name="sleep",
-                    entrypoint=time.sleep,
-                    args={0: (1,)},
-                    envs={0: {}},
-                    log_dir=self.log_dir(),
-                    start_method="fork",
-                )
-
-                pids = pc.pids()
-                pc.close()
-                self.assert_pids_noexist(pids)
-                self.assertTrue(pc._stderr_tail.stopped())
-                self.assertTrue(pc._stdout_tail.stopped())
-
-        def test_function_with_tensor(self):
-            for start_method in self._start_methods:
-                pc = start_processes(
                     name="dummy_compute",
                     entrypoint=dummy_compute,
                     args={},
