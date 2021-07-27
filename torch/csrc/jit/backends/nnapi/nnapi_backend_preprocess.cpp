@@ -21,7 +21,7 @@ namespace py = pybind11;
 // Example input Tensor:
 // torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
 //
-// In the future, preprocess will accept a dedicated object, NnapiArg
+// In the future, preprocess will accept a dedicated object
 c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
@@ -36,9 +36,39 @@ c10::IValue preprocess(
       py::module::import("torch.jit._recursive").attr("wrap_cpp_module")(mod);
   out.attr("eval")();
 
+  // Test that method_compile_spec contains the necessary keys and
+  // Tensor/TensorList input
+  c10::IValue inp;
+  std::string error = "";
+  if (!method_compile_spec.contains("forward")) {
+    error = R"(method_compile_spec does not contain the "forward" key.)";
+  } else {
+    auto innerDict = method_compile_spec.at("forward");
+    if (!innerDict.isGenericDict() ||
+        !innerDict.toGenericDict().contains("inputs")) {
+      error =
+          R"(method_compile_spec does not contain a dictionary with an "inputs" key, under it's "forward" key.)";
+    } else {
+      inp = innerDict.toGenericDict().at("inputs");
+      if (!inp.isTensor() && !inp.isTensorList()) {
+        error =
+            R"(method_compile_spec does not contain either a Tensor or TensorList, under it's "inputs" key.)";
+      }
+    }
+  }
+  if (error.size() != 0) {
+    throw std::runtime_error(
+        error +
+        "\nmethod_compile_spec should contain a Tensor or Tensor List which bundles input parameters:"
+        " shape, dtype, quantization, and dimorder."
+        "\nFor input shapes, use 0 for run/load time flexible input."
+        "\nmethod_compile_spec must use the following format:"
+        "\n{\"forward\": {\"inputs\": at::Tensor}} OR {\"forward\": {\"inputs\": c10::List<at::Tensor>}}");
+  }
+
   // Convert input to a Tensor or a python list of Tensors
-  auto inp = method_compile_spec.at("forward").toGenericDict().at("inputs");
   py::object nnapi_pyModel;
+
   if (inp.isTensor()) {
     nnapi_pyModel = pyMethod(out, inp.toTensor());
   } else {
