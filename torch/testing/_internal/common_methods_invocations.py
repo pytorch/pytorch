@@ -4547,6 +4547,22 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    def make_tensor_(shape):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    sample_inputs = [
+        SampleInput(make_tensor_(shape), args=(make_tensor_(shape),)) for shape in ((), (S,), (M, S), (L, M, S))
+    ]
+    sample_inputs.extend(
+        [
+            SampleInput(make_tensor_((S,)), args=(make_tensor_((S,)),), kwargs=dict(reduction=reduction))
+            for reduction in ("mean", "sum", "none")
+        ]
+    )
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4801,6 +4817,16 @@ def reference_mvlgamma(x, d):
         return scipy.special.multigammaln(x, d).astype(np.float16)
 
     return scipy.special.multigammaln(x, d)
+
+_LOSS_REDUCERS = {
+    "mean": np.mean,
+    "sum": np.sum,
+    "none": lambda x: x,
+}
+
+def reference_mse_loss(input, target, reduction="mean"):
+    se = (input - target) ** 2
+    return _LOSS_REDUCERS[reduction](se)
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -7875,6 +7901,14 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+      "nn.functional.mse_loss",
+      ref=reference_mse_loss,
+      sample_inputs_func=sample_inputs_mse_loss,
+      supports_out=False,
+      dtypes=floating_types_and(torch.float16),
+      backward_dtypesIfCPU=floating_types(),
+    ),
 ]
 
 # Common operator groupings
