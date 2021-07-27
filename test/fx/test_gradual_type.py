@@ -90,15 +90,21 @@ class AnnotationsTest(unittest.TestCase):
     def test_broadcasting1(self):
         t1 = TensorType((1, 2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
+        t3 = TensorType(())
+        t4 = TensorType((4, 1))
+        t5 = TensorType((4, 4, 4))
+        # todo switch all code to use list instead of tuple
+        t6 = TensorType([1])
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
+        assert broadcast_types(t3, t4) == (t4, t4)
+        assert broadcast_types(t5, t6) == (t5, t5)
 
     @skipIfNoUnification
     def test_broadcasting2(self):
         t1 = TensorType((2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
 
-        with self.assertRaises(TypeError):
-            broadcast_types(t1, t2)
+        assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
 
     @skipIfNoUnification
     def test_broadcasting3(self):

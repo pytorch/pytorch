@@ -49,27 +49,27 @@ def broadcast_types(t1, t2):
         new_t1 = list(t1.__args__)
         new_t2 = list(t2.__args__)
 
-        if abs(s1 - s2) > 1 or s1 == 0 or s2 == 0:
-            raise TypeError(f'Cannot broadcast the tensors {t1} and {t2}')
-
+        # here, we make our tensors the same length
         if s1 > s2:
-            new_t2.insert(0, t1.__args__[0])
+            for i in range(s1 - s2):
+                new_t2.insert(0, 1)
 
         elif s2 > s1:
-            new_t1.insert(0, t2.__args__[0])
+            for i in range(s2 - s1):
+                new_t1.insert(0, 1)
 
         for i, (x, y) in enumerate(zip(new_t1, new_t2)):
             if x == 1:
                 new_t1[i] = y
             elif y == 1:
                 new_t2[i] = x
-            else:
-                continue
 
-        if tuple(new_t1) != t1.__args__ and tuple(new_t2) != t2.__args__:
-            raise TypeError('In-place operations cannot not change shape')
+        (t1, t2) = TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
 
-        return TensorType(tuple(new_t1)), TensorType(tuple(new_t2))
+        if not is_consistent(t1, t2):
+            raise TypeError
+
+        return (t1, t2)
     else:
         raise TypeError(f'Cannot broadcast types {t1} and {t2}')
 
