@@ -16,7 +16,7 @@ from tools.codegen.api.types import (Binding, CppSignatureGroup, NamedCType, Bas
 from tools.codegen.api import cpp
 from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type, SchemaKind
+from tools.codegen.model import FunctionSchema, NativeFunction, Variant, Type
 from tools.codegen.utils import IDENT_REGEX, split_name_params, YamlLoader
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
@@ -240,7 +240,6 @@ def postprocess_forward_derivatives(
             if Variant.function in f.variants:
                 fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
             else:
-                assert f.func.kind() is not SchemaKind.inplace
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
