@@ -202,7 +202,6 @@ void runConv(
 
 constexpr size_t kIters = 20;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {
     int channel = 2;

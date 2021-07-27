@@ -43,12 +43,9 @@ static OpSchema::Cost CostInferenceForAdagrad(
   return c;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Adagrad, AdagradOp<CPUContext>);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Adagrad, SIMD, AdagradOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Adagrad)
     .NumInputs(4)
     .NumOutputs(2, 4)
@@ -113,12 +110,9 @@ static OpSchema::Cost CostInferenceForSparseAdagrad(
   return c;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseAdagrad, SparseAdagradOp);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(SparseAdagrad, SIMD, SparseAdagradOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseAdagrad)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5)
@@ -188,15 +182,12 @@ static OpSchema::Cost CostInferenceForRowWiseSparseAdagrad(
   return c;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RowWiseSparseAdagrad, RowWiseSparseAdagradOp<CPUContext>);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     RowWiseSparseAdagrad,
     SIMD,
     RowWiseSparseAdagradOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RowWiseSparseAdagrad)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     .NumInputs(5, 6)
@@ -233,10 +224,7 @@ also be a 1D tensor indexing into the rows of param.
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         CostInferenceForRowWiseSparseAdagrad));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Adagrad);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SparseAdagrad);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdagrad);
 } // namespace caffe2
