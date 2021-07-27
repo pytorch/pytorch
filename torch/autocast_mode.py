@@ -123,26 +123,26 @@ class autocast(object):
     (see :ref:`Working with Multiple GPUs<amp-multigpu>`).
 
     Args:
+        device_type(string, required):  Whether to use 'cuda' or 'cpu' device
         enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
         fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
-        device_type(string, optional):  Whether to use 'cuda' or 'cpu' device
+        
     """
-    def __init__(self, enabled=True, **kwargs):
-        if not torch.cuda.is_available():
-            self.device = 'cpu'
+    def __init__(self, device_type, enabled=True, **kwargs):
+        self.device = device_type
+        if self.device == 'cuda':
+            self.fast_dtype = torch.get_autocast_gpu_dtype()
+        elif self.device == 'cpu':
             self.fast_dtype = torch.get_autocast_cpu_dtype()
         else:
-            self.device = 'cuda'
-            self.fast_dtype = torch.get_autocast_gpu_dtype()
+            raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+        if not torch.cuda.is_available() and self.device == 'cuda':
+            warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
+            enabled = False
         for key, value in kwargs.items():
             if key == 'fast_dtype':
                 self.fast_dtype = value
-            elif key == 'device_type':
-                if not torch.cuda.is_available() and value == 'cuda':
-                    warnings.warn('User provided device_type of \'cuda\', but CUDA is not available. Disabling')
-                    enabled = False
-                self.device = value
-            if not (key == 'fast_dtype' or key == 'device_type'):
+            if not (key == 'fast_dtype'):
                 raise RuntimeError('Unrecognized optional argument supplied to autocast context manager: ' + str(key))
 
         if self.device == 'cpu':
@@ -152,9 +152,10 @@ class autocast(object):
                 error_message += 'CPU Autocast only supports dtype of torch.bfloat16 currently.'
                 warnings.warn(error_message)
                 enabled = False
-                dtype = torch.bfloat16
-        elif self.device != 'cuda':
-            raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
+        if self.device == 'cuda':
+            if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
+                warnings.warning('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
+                self.fast_dtype = torch.float16
         self._enabled = enabled
 
     def __enter__(self):

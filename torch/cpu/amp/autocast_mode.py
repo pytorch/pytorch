@@ -1,4 +1,5 @@
 import torch
-import functools
 
-autocast = functools.partial(torch.autocast, device_type='cpu', fast_dtype=torch.bfloat16)
+class autocast(torch.autocast):
+    def __init__(self, enabled=True, fast_dtype=torch.float16):
+          super().__init__("cpu", enabled=enabled, fast_dtype=fast_dtype)
