@@ -7906,8 +7906,9 @@ op_db: List[OpInfo] = [
         ref=reference_mse_loss,
         sample_inputs_func=sample_inputs_mse_loss,
         supports_out=False,
-        dtypes=floating_types_and(torch.float16),
+        dtypesIfCPU=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
     ),
 ]
 
