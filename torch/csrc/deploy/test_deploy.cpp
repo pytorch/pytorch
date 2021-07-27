@@ -53,6 +53,11 @@ TEST(TorchpyTest, LoadLibrary) {
   model({});
 }
 
+TEST(TorchpyTest, InitTwice) {
+  { torch::deploy::InterpreterManager m(2); }
+  { torch::deploy::InterpreterManager m(1); }
+}
+
 TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(path("SIMPLE", simple), path("SIMPLE_JIT", simple_jit));
 }
@@ -272,3 +277,61 @@ TEST(TorchpyTest, FxModule) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
 }
+
+#ifndef FBCODE_CAFFE2
+thread_local int in_another_module = 5;
+
+TEST(TorchpyTest, SharedLibraryLoad) {
+  torch::deploy::InterpreterManager manager(2);
+  auto no_args = at::ArrayRef<torch::deploy::Obj>();
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
+    I.global("test_deploy_python", "setup")({getenv("PATH")});
+    AT_ASSERT(I.global("libtest_deploy_lib", "check_initial_state")(no_args)
+                  .toIValue()
+                  .toBool());
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "simple_add")({5, 4})
+            .toIValue()
+            .toInt() == 9);
+    // I.global("numpy", "array"); // force numpy to load here so it is loaded
+    //                             // twice before we run the tests
+  }
+  for (auto& interp : manager.all_instances()) {
+    auto I = interp.acquire_session();
+    // auto i =
+    //     I.global("test_deploy_python", "numpy_test")({1}).toIValue().toInt();
+    I.global("libtest_deploy_lib", "raise_and_catch_exception")({true});
+    try {
+      I.global("libtest_deploy_lib", "raise_exception")(no_args);
+      ASSERT_TRUE(false); // raise_exception did not throw?
+    } catch (std::exception& err) {
+      ASSERT_TRUE(std::string(err.what()).find("yet") != std::string::npos);
+    }
+    in_another_module = 6;
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_in_another_module")(no_args)
+            .toIValue()
+            .toInt() == 6);
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar")(no_args).toIValue().toInt() ==
+        14);
+    {
+      std::thread foo([&] {
+        I.global("libtest_deploy_lib", "set_bar")({13});
+        ASSERT_TRUE(
+            I.global("libtest_deploy_lib", "get_bar")(no_args)
+                .toIValue()
+                .toInt() == 13);
+      });
+      foo.join();
+    }
+    ASSERT_TRUE(
+        I.global("libtest_deploy_lib", "get_bar_destructed")(no_args)
+            .toIValue()
+            .toInt() == 1);
+    I.global("libtest_deploy_lib", "set_bar")({12});
+  }
+}
+#endif
