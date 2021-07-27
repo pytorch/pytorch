@@ -638,7 +638,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
             qhandler_cls_quant_op_same_signature = [
                 qp.FixedQParamsOpQuantizeHandler,
                 qp.CopyNodeQuantizeHandler,
-                qp.TensorShapeOpQuantizeHandler,
+                qp.GeneralTensorShapeOpQuantizeHandler,
             ]
 
             if qhandler_cls == qp.BinaryOpQuantizeHandler:
@@ -1559,7 +1559,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                 qhandler_cls in (
                     qp.FixedQParamsOpQuantizeHandler,
                     qp.CopyNodeQuantizeHandler,
-                    qp.TensorShapeOpQuantizeHandler,
+                    qp.GeneralTensorShapeOpQuantizeHandler,
                 )
             ):
                 if (
