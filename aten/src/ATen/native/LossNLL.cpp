@@ -479,10 +479,7 @@ Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        // Note: The computation is as follows to maintain consistency between the hard label and one-hot
-        // soft label cases. TODO: Change this to the more correct form:
-        //ret = -(input * target * weight_).sum(1).mean();
-        ret = -(input * target * weight_).sum() / (target * weight_).sum();
+        ret = -(input * target * weight_).sum(1).mean();
         break;
       case Reduction::Sum:
         ret = -(input * target * weight_).sum();

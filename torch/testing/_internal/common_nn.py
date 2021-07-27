@@ -4001,8 +4001,7 @@ def cross_entropy_loss_prob_target_reference(input, target, weight=None, reducti
 
     output = -(input * target * weight).sum(dim=1)
     if reduction == 'mean':
-        total_weight = (weight * target).sum()
-        return output.sum() / total_weight
+        return output.mean()
     elif reduction == 'sum':
         return output.sum()
     return output

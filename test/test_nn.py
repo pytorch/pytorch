@@ -16795,15 +16795,33 @@ class TestNNDeviceType(NNTestCase):
             target_one_hot = target_one_hot.permute(0, -1, *range(1, target_one_hot.dim() - 1))
 
             for reduction, w in product(['none', 'mean', 'sum'], [None, weight]):
+                # Skip this case for now because soft and hard label CE are not consistent
+                # in the way they apply class weights (see issue #61309).
+                if reduction == 'mean' and weight is not None:
+                    continue
+
                 # Ensure loss computed with class indices matches loss
                 # computed with one-hot class probs.
                 m = torch.nn.CrossEntropyLoss(weight=w, reduction=reduction)
                 output = m(input, target)
                 output_one_hot = m(input, target_one_hot)
-                output_ref = loss_reference_fns['CrossEntropyLoss'](
-                    input, target_one_hot, reduction=reduction, weight=w)
                 self.assertEqual(output, output_one_hot)
-                self.assertEqual(output_one_hot, output_ref)
+
+    def test_cross_entropy_loss_index_target_unit_weights(self, device):
+        # Test with k-dimensional loss.
+        for k in range(5):
+            N, C = 5, 4
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
+
+            for reduction in ['none', 'mean', 'sum']:
+                # Ensure result with unit weights is equivalent to result without weights.
+                m = torch.nn.CrossEntropyLoss(reduction=reduction)
+                m_unit = torch.nn.CrossEntropyLoss(weight=torch.ones(C), reduction=reduction)
+                output = m(input, target)
+                output_unit = m_unit(input, target)
+                self.assertEqual(output, output_unit)
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
