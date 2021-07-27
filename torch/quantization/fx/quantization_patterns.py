@@ -536,6 +536,9 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.conv_node.args[0])
                 args = load_arg(quantized=torch.float)(self.conv_node.args)
+                # Get the float linear and attach weight_activation_post_process
+                # lowering pass can call weight_activation_post_process.calculate_qparams
+                # to get scale and zero_point for weight
                 if isinstance(
                         self.conv,
                         (torch.nn.qat.Conv2d,
@@ -547,9 +550,17 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                          torch.nn.intrinsic.qat.ConvBnReLU3d,
                          torch.nn.intrinsic.qat.ConvReLU3d)):
                     float_conv = self.conv.to_float()
+                    float_conv.weight_activation_post_process = self.conv.weight_fake_quant
                     # change qat conv to conv
                     parent_name, name = _parent_name(self.conv_node.target)
                     setattr(modules[parent_name], name, float_conv)
+                else:
+                    float_conv = self.conv
+                    if isinstance(self.conv, torch.nn.intrinsic._FusedModule):
+                        float_conv.float_conv = self.conv[0]
+                    float_conv.weight_activation_post_process = qconfig.weight()
+                    # run weight observer
+                    float_conv.weight_activation_post_process(float_conv.weight)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
@@ -749,11 +760,23 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.linear_node.args[0])
                 args = load_arg(quantized=torch.float)(self.linear_node.args)
+                # Get the float linear and attach weight_activation_post_process
+                # lowering pass can call weight_activation_post_process.calculate_qparams
+                # to get scale and zero_point for weight
                 if isinstance(self.linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
                     float_linear = self.linear.to_float()
+                    float_linear.weight_activation_post_process = self.linear.weight_fake_quant
                     # change qat linear to linear
                     parent_name, name = _parent_name(self.linear_node.target)
                     setattr(modules[parent_name], name, float_linear)
+                else:
+                    float_linear = self.linear
+                    if isinstance(self.linear, torch.nn.intrinsic.LinearReLU):
+                        float_linear = self.linear[0]
+                    float_linear.weight_activation_post_process = qconfig.weight()
+                    # run weight observer
+                    float_linear.weight_activation_post_process(float_linear.weight)
+
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
