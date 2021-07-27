@@ -9415,6 +9415,7 @@
   structured: True
   dispatch:
     CPU: slow_conv_transpose2d_structured_cpu
+    CUDA: slow_conv_transpose2d_structured_cuda
 
 - func: slow_conv_transpose2d(Tensor self, Tensor weight, int[2] kernel_size, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int[2] dilation=1) -> Tensor
   python_module: nn
