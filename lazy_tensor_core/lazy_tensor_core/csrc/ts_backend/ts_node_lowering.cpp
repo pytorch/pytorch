@@ -359,7 +359,7 @@ class TSNodeLowering : public NodeLowering {
     lazy_tensors::Shape output_shape = operands[0].shape();
     size_t cat_dimension_size = 0;
     for (const ir::Output& operand : operands) {
-      cat_dimension_size += output_shape.dimensions(node->dim());
+      cat_dimension_size += operand.shape().dimensions(node->dim());
     }
     output_shape.set_dimensions(node->dim(), cat_dimension_size);
     return output_shape;

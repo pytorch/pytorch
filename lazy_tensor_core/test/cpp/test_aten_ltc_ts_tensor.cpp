@@ -3674,6 +3674,7 @@ TEST_F(AtenLtcTsTensorTest, TestCat) {
       torch::Tensor xla_b = CopyToDevice(b, device);
       torch::Tensor xla_c = CopyToDevice(c, device);
       torch::Tensor xla_d = torch::cat({xla_a, xla_b, xla_c}, dim);
+      EXPECT_TRUE(d.sizes() == xla_d.sizes() && d.dtype() == xla_d.dtype());
       AllClose(d, xla_d);
     });
   }
