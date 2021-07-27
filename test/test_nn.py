@@ -11895,6 +11895,7 @@ add_test(NewModuleTest(
         nn.MaxPool1d(2, return_indices=True),
         nn.MaxUnpool1d(2)),
     input_size=(1, 4),
+    reference_fn=single_batch_reference_fn,
     fullname='MaxUnpool1d_net_no_batch_dim',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
