@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/block_reduce.cuh>
