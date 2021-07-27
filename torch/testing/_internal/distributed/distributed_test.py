@@ -1736,6 +1736,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_sum(self):
             group, group_id, rank = self._init_global_test()
             self._test_reduce_helper(
@@ -1749,6 +1750,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_no_gpu
         def test_reduce_sum_cuda(self):
             group, group_id, rank = self._init_global_test()
@@ -1768,6 +1770,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_product(self):
             group, group_id, rank = self._init_global_test()
             self._test_reduce_helper(
@@ -1781,6 +1784,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_min(self):
             group, group_id, rank = self._init_global_test()
             self._test_reduce_helper(
@@ -1788,6 +1792,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_max(self):
             group, group_id, rank = self._init_global_test()
             self._test_reduce_helper(
@@ -1795,6 +1800,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_small_worldsize
         def test_reduce_group_sum(self):
             group, group_id, rank = self._init_group_test()
@@ -1809,6 +1815,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_small_worldsize
         def test_reduce_group_product(self):
             group, group_id, rank = self._init_group_test()
@@ -1823,6 +1830,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_small_worldsize
         def test_reduce_group_min(self):
             group, group_id, rank = self._init_group_test()
@@ -1831,6 +1839,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_small_worldsize
         def test_reduce_group_max(self):
             group, group_id, rank = self._init_group_test()
@@ -1839,6 +1848,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(
@@ -1852,6 +1862,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(
@@ -1865,6 +1876,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(
@@ -1872,6 +1884,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_reduce_helper(
@@ -1921,6 +1934,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         def test_reduce_sum_twice(self):
             group, group_id, rank = self._init_global_test()
             self._test_reduce_twice_helper(
@@ -1934,6 +1948,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND != "nccl", "Only Nccl supports CUDA reduce")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support reduce")
         @skip_if_no_gpu
         def test_reduce_sum_cuda_twice(self):
             group, group_id, rank = self._init_global_test()
@@ -2109,6 +2124,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_sum(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2122,6 +2138,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_sum_async(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2179,6 +2196,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_sum_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2193,6 +2211,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_complex_unsupported_ops(self):
             unsupported_ops = [
                 dist.ReduceOp.MAX,
@@ -2234,6 +2253,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_product(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2247,6 +2267,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_min(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2254,6 +2275,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_max(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_reduce_helper(
@@ -2262,6 +2284,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_group_sum(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_helper(
@@ -2276,6 +2299,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_group_product(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_helper(
@@ -2290,6 +2314,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_group_min(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_helper(
@@ -2298,6 +2323,7 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_group_max(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_reduce_helper(
@@ -2305,6 +2331,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_full_group_sum(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_helper(
@@ -2318,6 +2345,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_full_group_product(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_helper(
@@ -2331,6 +2359,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_full_group_min(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_helper(
@@ -2338,6 +2367,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_full_group_max(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_reduce_helper(
@@ -2411,6 +2441,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         def test_all_reduce_coalesced_max_complex_unsupported(self):
             group, group_id, rank = self._init_global_test()
             with self.assertRaisesRegex(RuntimeError, "all_reduce does not support"):
@@ -2614,6 +2645,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support scatter")
         def test_scatter_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -2637,22 +2669,26 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support scatter")
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support scatter")
         def test_scatter_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support scatter")
         @skip_if_small_worldsize
         def test_scatter_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_scatter_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support scatter")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support scatter")
         def test_scatter_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_scatter_helper(group, group_id, rank)
@@ -2682,6 +2718,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support gather")
         def test_gather_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -2705,17 +2742,20 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support gather")
         def test_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_gather_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support gather")
         @skip_if_small_worldsize
         def test_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_gather_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support gather")
         def test_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_gather_helper(group, group_id, rank)
@@ -2753,6 +2793,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather")
         def test_all_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_helper(group, group_id, rank)
@@ -2766,6 +2807,7 @@ class DistributedTest:
             self._test_all_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather")
         def test_all_gather_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_helper(group, group_id, rank, dtype=torch.cfloat)
@@ -2782,11 +2824,13 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather")
         def test_all_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_gather_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather")
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
@@ -2863,6 +2907,7 @@ class DistributedTest:
             BACKEND == "nccl", "all_gather_coalesced does not support NCCL"
         )
         @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather_coalesced")
         def test_all_gather_coalesced_simple(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_coalesced_helper(group, group_id, rank)
@@ -2871,6 +2916,7 @@ class DistributedTest:
             BACKEND == "nccl", "all_gather_coalesced does not support NCCL"
         )
         @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather_coalesced")
         def test_all_gather_coalesced_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_all_gather_coalesced_helper(
@@ -2882,6 +2928,7 @@ class DistributedTest:
             BACKEND == "nccl", "all_gather_coalesced does not support NCCL"
         )
         @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather_coalesced")
         def test_all_gather_coalesced_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_all_gather_coalesced_helper(group, group_id, rank)
@@ -2890,6 +2937,7 @@ class DistributedTest:
             BACKEND == "nccl", "all_gather_coalesced does not support NCCL"
         )
         @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather_coalesced")
         def test_all_gather_coalesced_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_coalesced_helper(group, group_id, rank)
@@ -2898,6 +2946,7 @@ class DistributedTest:
             BACKEND == "nccl", "all_gather_coalesced does not support NCCL"
         )
         @unittest.skipIf(BACKEND == "mpi", "all_gather_coalesced does not support MPI")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_gather_coalesced")
         def test_all_gather_coalesced_with_empty(self):
             group, group_id, rank = self._init_global_test()
             input_tensors = [
@@ -3263,6 +3312,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3271,6 +3321,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_group_cuda(self):
             group, group_id, rank = self._init_group_test()
             rank_to_GPU = self._init_multigpu_helper()
@@ -3279,23 +3330,27 @@ class DistributedTest:
         @skip_if_small_worldsize
         @skip_if_no_gpu
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_full_group_cuda(self):
             group, group_id, rank = self._init_full_group_test()
             rank_to_GPU = self._init_multigpu_helper()
             self._test_barrier_helper(group, group_id, rank, True, rank_to_GPU)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier(self):
             group, group_id, rank = self._init_global_test()
             self._test_barrier_helper(group, group_id, rank)
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_barrier_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "NCCL does not support CPU barrier")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_barrier_helper(group, group_id, rank)
@@ -3316,6 +3371,7 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @unittest.skipIf(BACKEND == "nccl", "NCCL broadcast multigpu skipped")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support broadcast")
         @skip_if_no_gpu
         def test_broadcast_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3356,6 +3412,7 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3373,6 +3430,7 @@ class DistributedTest:
 
         @unittest.skipIf(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @unittest.skipIf(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support all_reduce")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
@@ -3710,10 +3768,12 @@ class DistributedTest:
             return model_DDP
 
         @unittest.skipIf(BACKEND == "nccl", "nccl does not support DDP on CPU models")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support DDP")
         def test_DistributedDataParallelCPU(self):
             self._test_DistributedDataParallelCPU()
 
         @unittest.skipIf(BACKEND == "nccl", "nccl does not support DDP on CPU models")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support DDP")
         def test_DistributedDataParallelCPU_grad_is_view(self):
             self._test_DistributedDataParallelCPU(gradient_as_bucket_view=True)
 
@@ -4825,6 +4885,7 @@ class DistributedTest:
             return model_DDP
 
         @unittest.skipIf(BACKEND == "nccl", "nccl does not support DDP on CPU models")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support DDP")
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
@@ -4968,6 +5029,7 @@ class DistributedTest:
             )
 
         @unittest.skipIf(BACKEND == "nccl", "nccl does not support DDP on CPU models")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "ucc does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             model_DDP._set_static_graph()
