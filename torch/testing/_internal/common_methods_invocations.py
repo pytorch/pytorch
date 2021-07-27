@@ -4818,15 +4818,15 @@ def reference_mvlgamma(x, d):
 
     return scipy.special.multigammaln(x, d)
 
-_LOSS_REDUCERS = {
-    "mean": np.mean,
-    "sum": np.sum,
-    "none": lambda x: x,
-}
 
 def reference_mse_loss(input, target, reduction="mean"):
     se = (input - target) ** 2
-    return _LOSS_REDUCERS[reduction](se)
+    if reduction == "mean":
+        return np.mean(se)
+    elif reduction == "sum":
+        return np.sum(se)
+    else:  # reduction == "none"
+        return se
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -7902,12 +7902,12 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
     OpInfo(
-      "nn.functional.mse_loss",
-      ref=reference_mse_loss,
-      sample_inputs_func=sample_inputs_mse_loss,
-      supports_out=False,
-      dtypes=floating_types_and(torch.float16),
-      backward_dtypesIfCPU=floating_types(),
+        "nn.functional.mse_loss",
+        ref=reference_mse_loss,
+        sample_inputs_func=sample_inputs_mse_loss,
+        supports_out=False,
+        dtypes=floating_types_and(torch.float16),
+        backward_dtypesIfCPU=floating_types(),
     ),
 ]
 
