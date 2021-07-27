@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <deque>
 #include <exception>
@@ -311,6 +312,10 @@ struct TORCH_API Engine {
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return std::make_unique<AnomalyMetadata>();
+  }
+
+  virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
+    return nullptr;
   }
 
   // We pass cpu_ready_queue to evaluate_function, so that it knows

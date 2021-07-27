@@ -1,13 +1,13 @@
-#include "ATen/core/Tensor.h"
-#include "c10/core/TensorOptions.h"
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 
+#include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -218,9 +218,10 @@ TORCH_META_FUNC(slow_conv_transpose2d)
   int64_t batch_size = input_.size(0);
 
   // Resize output
+  TensorOptions options(input.options());
   set_output(
       {batch_size, n_output_plane, output_height, output_width},
-      TensorOptions(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+      options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 } // namespace meta
 
@@ -818,8 +819,7 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
       ones);
  }
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
-    const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
