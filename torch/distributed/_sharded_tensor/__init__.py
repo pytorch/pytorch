@@ -58,7 +58,7 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     """
     _recurse_update_dict(module, destination, prefix)
 
-def pre_load_state_dict_hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, module):
+def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """
