@@ -94,6 +94,7 @@ class CIWorkflow:
     cuda_version: str = ''
     docker_image_base: str = ''
     enable_doc_jobs: bool = False
+    enable_wheel_test: bool = False
     exclude_test: bool = False
     is_libtorch: bool = False
     is_scheduled: str = ''
@@ -196,6 +197,7 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         on_pull_request=True,
         enable_doc_jobs=True,
+        enable_wheel_test=True,
         num_test_shards=2,
     ),
     # CIWorkflow(

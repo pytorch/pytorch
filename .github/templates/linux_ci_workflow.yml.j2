@@ -389,6 +389,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
+{%- if enable_wheel_test %}
   wheel-test:
     needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
@@ -422,8 +423,8 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Unzip artifacts
         run: |
-          # Unzip artifacts and remore build folder to fail any tests depending on it
-          unzip -o artifacts.zip && rm -rf build/
+          # Unzip wheel packagage only
+          unzip -o artifacts.zip 'dist/*whl' -d .
       - name: Output disk space left
         run: |
           sudo df -H
@@ -479,6 +480,7 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+{% endif %}
 {% endblock %}
 {%- endif -%}
 {%- if not is_libtorch %}
@@ -490,7 +492,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, wheel-test, !{{ ciflow_config.root_job_name }}]
+    needs: [generate-test-matrix, test, {%if enable_wheel_test -%}wheel-test, {% endif -%} !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

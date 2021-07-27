@@ -359,7 +359,6 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
-
   wheel-test:
     needs: [calculate-docker-image, build, ]
     runs-on: linux.2xlarge
@@ -393,8 +392,8 @@ jobs:
           name: ${{ env.BUILD_ENVIRONMENT }}
       - name: Unzip artifacts
         run: |
-          # Unzip artifacts and remore build folder to fail any tests depending on it
-          unzip -o artifacts.zip && rm -rf build/
+          # Unzip wheel packagage only
+          unzip -o artifacts.zip 'dist/*whl' -d .
       - name: Output disk space left
         run: |
           sudo df -H
@@ -450,6 +449,7 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
           # Prune all of the docker images
           docker system prune -af
+
 
 
   # this is a separate step from test because the log files from test are too
