@@ -230,7 +230,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             self.bias is not None,
             self.padding_mode)
         conv.weight = torch.nn.Parameter(self.weight.detach())
-        conv.bias = None
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
         modules.append(conv)
@@ -243,8 +242,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 self.bn.affine,
                 self.bn.track_running_stats)
             bn.weight = Parameter(self.bn.weight.detach())
-            bn.bias = None
-            if self.bn.bias is not None:
+            if self.affine:
                 bn.bias = Parameter(self.bn.bias.detach())
             modules.append(bn)
 
