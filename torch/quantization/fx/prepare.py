@@ -22,9 +22,6 @@ from .qconfig_utils import (
 
 from .quantization_patterns import (
     QuantizeHandler,
-    CatQuantizeHandler,
-    CopyNodeQuantizeHandler,
-    TensorShapeOpQuantizeHandler,
     CustomModuleQuantizeHandler,
     StandaloneModuleQuantizeHandler,
 )
@@ -686,15 +683,16 @@ def maybe_propagate_dtype_for_node(
     matches: Dict[str, MatchResult],
 ) -> None:
     """
-    Assigns `target_dtype` to `node`. If `node` is matched to an instance
-    of `CopyNodeQuantizeHandler`, also call this function recursively on
+    Assigns `target_dtype` to `node`. If `node` is a general tensor shape op
+    (see GeneralTensorShapeOpQuantizeHandler in quantization_patterns.py for more details)
+    also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
     node_name_to_target_dtype[node.name] = target_dtype
     # if this is a copy node, propagate to first arg
     root_node, matched_nodes, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
-    if isinstance(qhandler, TensorShapeOpQuantizeHandler):
+    if qhandler is not None and qhandler.is_general_tensor_shape_op():
         prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
@@ -722,32 +720,42 @@ def propagate_dtypes_for_known_nodes(
             maybe_propagate_dtype_for_node(
                 cur_node, torch.bool, node_name_to_target_dtype, matches)
 
-def make_input_output_share_observers(
+def maybe_make_input_output_share_observers(
     node: Node,
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
-) -> None:
+) -> bool:
     """
     Ensures that we share an observer
     for all input arguments as well as the output argument. In detail, given
     a graph of
 
-      x0 -> obs0 -> cat -> x2
+      x0 -> obs0 -> op -> x2
                   /
       x1 -> obs1 /
 
     where node obs0 points to observer instance observer0,
     obs1 points to observer1 and obs2 points to observer2, we make nodes obs1
     and ob2 point to observer0.
+    Returns: whether the operation succeeded or not
     """
-    # find the observer module to use
-    first_arg = node.args[0]
+    first_arg = None
+    # find the first non-Tensor arg
+    for i in range(len(node.args)):
+        if isinstance(node.args[i], (Node, list, tuple)):
+            first_arg = node.args[i]
+            break
+
+    # if there is no non-Tensor arg, return directly
+    if first_arg is None:
+        return False
+
     if isinstance(first_arg, (list, tuple)):
         first_arg_arg = first_arg[0]
     elif isinstance(first_arg, Node):
         first_arg_arg = first_arg
     else:
-        return
+        return False
 
     # if we have a graph such as
     #   observed_node -> non_observed_node -> cat
@@ -756,8 +764,17 @@ def make_input_output_share_observers(
     while not is_activation_post_process_node(first_arg_arg, modules):
         # did not find an activation_post_process for the op
         if first_arg_arg.op == "placeholder":
-            return
-        first_arg_arg = first_arg_arg.args[0]
+            return False
+        # trace back the args until we found the first Tensor/Node
+        trace_back_node = None
+        for i in range(len(first_arg_arg.args)):
+            trace_back_node = first_arg_arg.args[i]
+            if isinstance(trace_back_node, Node):
+                break
+        if trace_back_node is None:
+            return False
+        first_arg_arg = trace_back_node
+
         iteration_guard += 1
         if iteration_guard > 10000:
             raise AssertionError('Unable to find observer of previous node')
@@ -789,6 +806,17 @@ def make_input_output_share_observers(
         setattr(modules[parent_name], name, obs_mod_to_use)
 
     # TODO(future PR): delete the orphaned observer modules
+    return True
+
+def remove_output_observer(
+        node: Node,
+        model: torch.nn.Module,
+        modules: Dict[str, torch.nn.Module]):
+    items = list(node.users.items())
+    for output_obs_node, _ in items:
+        assert is_activation_post_process_node(output_obs_node, modules)
+        output_obs_node.replace_all_uses_with(node)
+        model.graph.erase_node(output_obs_node)
 
 def swap_custom_module_to_observed(
         node: Node,
@@ -924,16 +952,13 @@ def insert_observers_for_model(
                         node_name_to_target_dtype)
 
                     is_last_node_of_pattern = root_node is node
-                    is_like_copy_node = \
-                        (qhandler is not None and (
-                            isinstance(qhandler, CopyNodeQuantizeHandler)
-                        ))
+                    is_general_tensor_value_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_value_op())
 
-                    is_tensor_shape_op_node = \
-                        (qhandler is not None and (
-                            isinstance(qhandler, TensorShapeOpQuantizeHandler)))
+                    is_general_tensor_shape_op = \
+                        (qhandler is not None and qhandler.is_general_tensor_shape_op())
 
-                    if is_last_node_of_pattern and not is_tensor_shape_op_node:
+                    if is_last_node_of_pattern and not is_general_tensor_shape_op:
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
@@ -960,11 +985,12 @@ def insert_observers_for_model(
                                     continue
                                 user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            # for quantized cat nodes only, we modify the graph
+                            # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if isinstance(qhandler, CatQuantizeHandler) or is_like_copy_node:
-                                make_input_output_share_observers(node, model, modules)
+                            if is_general_tensor_value_op:
+                                if not maybe_make_input_output_share_observers(node, model, modules):
+                                    remove_output_observer(node, model, modules)
 
                             if isinstance(qhandler, CustomModuleQuantizeHandler):
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config_dict)
