@@ -790,6 +790,45 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
+    def test_batched_tangent_fwd_ad(self):
+        from torch.autograd.functional import jacobian
+        import torch.autograd.forward_ad as fwAD
+        from torch._vmap_internals import _vmap
+
+        def reference(func, flattened_input, original_shape):
+            # Helper to make sure functional.jacobian returns a 2D Jacobian
+            def fn(input):
+                input = input.view(original_shape)
+                return torch.flatten(func(input))
+            return jacobian(fn, flattened_input)
+
+        def run_test(func, input):
+            # Stacked one-hot vectors so that we can get each col of the Jacobian
+            grad = torch.eye(input.numel(), dtype=torch.double).reshape(input.numel(), *input.shape)
+
+            def jvp(grad):
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(input, grad)
+                    dual_out = func(dual)
+                    _, tangent = fwAD.unpack_dual(dual_out)
+                # We want to return 2-D Jacobian
+                return tangent.view(-1)
+            # Transpose here because the batched dimension is prepended and we batched over
+            # a dimension with size of outputs.numel().
+            jac = _vmap(jvp)(grad).transpose(0, 1)
+            self.assertEqual(jac, reference(func, input.flatten(), input.shape))
+
+        a = torch.rand(2, 3, requires_grad=True, dtype=torch.double)
+        b = torch.rand(5, requires_grad=True, dtype=torch.double)
+        c = torch.rand(5, requires_grad=True, dtype=torch.double)
+        d = torch.rand(3, 4, requires_grad=True, dtype=torch.double)
+
+        run_test(torch.sin, a)  # element-wise, has batching rule
+        run_test(lambda x: torch.mean(x, dim=0), a)  # reduction, batched fallback
+        run_test(lambda x: torch.dot(x, b), c)  # matmul-like, has batching rule
+        run_test(lambda x: torch.matmul(x, d), a)  # matmul-like operator
+        run_test(lambda x: x.view(-1), a)  # view op
+
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
