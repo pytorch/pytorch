@@ -85,6 +85,7 @@ TESTS = [
     'test_nn',
     'test_ops',
     'test_optim',
+    'test_functional_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_set_default_mobile_cpu_allocator',
