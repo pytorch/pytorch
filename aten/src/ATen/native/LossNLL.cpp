@@ -5,6 +5,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/SmallBuffer.h>
 
 namespace at {
 namespace meta {
@@ -473,7 +474,8 @@ Tensor cross_entropy_loss_prob_target(
   auto input = at::log_softmax(self, 1, self.scalar_type());
   if (weight.defined()) {
     // Expand weight to the correct number of dims for broadcasting with input / target
-    auto weight_bc_shape = std::vector<int64_t>(input.dim(), 1);
+    auto weight_bc_shape = SmallBuffer<int64_t, 5>(input.dim());
+    std::fill(weight_bc_shape.begin(), weight_bc_shape.end(), 1);
     weight_bc_shape[1] = weight.size(0);
     Tensor weight_ = weight.view(weight_bc_shape);
 
