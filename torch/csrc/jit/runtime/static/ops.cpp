@@ -365,7 +365,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
     } else {
       auto in1_s = p_node->Input(1).toOptional<at::Scalar>();
       auto in2_s = p_node->Input(2).toOptional<at::Scalar>();
-      at::native::clamp_out(in0_t, in1_s, in2_s, out_t);
+      at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
     }
   };
 });
@@ -405,23 +405,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
     at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
-  };
-});
-REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
-  if (!n->matches(
-          torch::schema("aten::cat(Tensor[] tensors, int dim=0) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    const auto in0_tl = p_node->Input(0).toTensorVector();
-    const auto in1_i = p_node->Input(1).toInt();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = create_empty_from(in0_tl[0]);
-    }
-    auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::native::_cat_out_cpu(in0_tl, in1_i, out_t);
   };
 });
 

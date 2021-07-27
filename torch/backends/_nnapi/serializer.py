@@ -472,14 +472,14 @@ class _NnapiSerializer(object):
                 raise Exception("Flexible size is not supported for this operand.")
         return op_id, oper
 
-    def get_tensor_operand_or_constant(self, jitval, dim_value=DimOrder.PRESUMED_CONTIGUOUS):
+    def get_tensor_operand_or_constant(self, jitval, dim_order=DimOrder.PRESUMED_CONTIGUOUS):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
             _, value = self.get_constant_value(jitval, "TensorType")
             # assume constants are contiguous
-            if dim_value == DimOrder.CHANNELS_LAST:
-                value.permute(0, 2, 3, 1)
-            operand_id = self.add_tensor_operand_for_weight(value, dim_value)
+            if dim_order == DimOrder.CHANNELS_LAST:
+                value = value.permute(0, 2, 3, 1).flatten().reshape(value.shape)
+            operand_id = self.add_tensor_operand_for_weight(value, dim_order)
         return (operand_id, self.operands[operand_id])
 
     def get_tensor_operand_for_weight(self, jitval):
@@ -540,8 +540,8 @@ class _NnapiSerializer(object):
         self.flexible_shape_computation_lines.append(f"{flex_name(op_id, dim)} = {expr}")
 
     def transpose_to_nhwc(self, in_id, oper):
-        if oper.dim_order != DimOrder.UNKNOWN_CONSTANT and oper.shape[2:] != (1, 1):
-            raise Exception("Automatic transpose only supported for constants or H,W == 1,1")
+        if oper.shape[2:] != (1, 1):
+            raise Exception("Automatic transpose only supported for H,W == 1,1")
 
         out_oper = oper._replace(dim_order=DimOrder.CHANNELS_LAST)
 
@@ -946,9 +946,12 @@ class _NnapiSerializer(object):
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
 
-        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+        # channels last with channels == 1 or (height & width both 1)
+        is_trivial_flatten = len(in_oper.shape) == 4 and (
+            in_oper.shape[1] == 1 or (in_oper.shape[2] == 1 and in_oper.shape[3] == 1))
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_flatten:
             raise Exception(
-                "Currently, reshape is not supported on NHWC tensors")
+                "Currently, flatten is not supported on NHWC tensors unless C=1 or H=W=1")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
@@ -968,7 +971,7 @@ class _NnapiSerializer(object):
         if non_flattened_dims.count(0) > 1:
             raise Exception("Only 1 dim can be flexible")
 
-        out_oper = in_oper._replace(shape=out_shape)
+        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(out_shape):
@@ -1237,10 +1240,10 @@ class _NnapiSerializer(object):
         assert node.inputsAt(1).type().kind() == "TensorType"
 
         if self.has_operand_for_jitval(node.inputsAt(0)):
-            in0_id, in0_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(0))
+            in0_id, in0_oper = self.get_tensor_operand_by_jitval(node.inputsAt(0))
             in1_id, in1_oper = self.get_tensor_operand_or_constant(node.inputsAt(1), in0_oper.dim_order)
         elif self.has_operand_for_jitval(node.inputsAt(1)):
-            in1_id, in1_oper = self.get_tensor_operand_by_jitval_fixed_size(node.inputsAt(1))
+            in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
             in0_id, in0_oper = self.get_tensor_operand_or_constant(node.inputsAt(0), in1_oper.dim_order)
         else:
             raise Exception("Can't add two constants")
