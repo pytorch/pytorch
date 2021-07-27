@@ -9,7 +9,7 @@ from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, br
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
 from torch.fx.passes.shape_prop import ShapeProp
-
+from torch.fx.experimental.unification import Var
 
 try:
     from torchvision.models import resnet50
@@ -19,12 +19,12 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-try:
-    from unification import Var
-    HAS_UNIFICATION = True
-except ImportError:
-    HAS_UNIFICATION = False
-skipIfNoUnification = unittest.skipIf(not HAS_UNIFICATION, "no unification")
+# try:
+#     from unification import Var
+#     HAS_UNIFICATION = True
+# except ImportError:
+#     HAS_UNIFICATION = False
+# skipIfNoUnification = unittest.skipIf(not HAS_UNIFICATION, "no unification")
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -86,7 +86,6 @@ class AnnotationsTest(unittest.TestCase):
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), TensorType((1, 2, 3, 5))))
         self.assertFalse(is_more_precise(TensorType((1, 2, 3)), int))
 
-    @skipIfNoUnification
     def test_broadcasting1(self):
         t1 = TensorType((1, 2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
@@ -99,20 +98,17 @@ class AnnotationsTest(unittest.TestCase):
         assert broadcast_types(t3, t4) == (t4, t4)
         assert broadcast_types(t5, t6) == (t5, t5)
 
-    @skipIfNoUnification
     def test_broadcasting2(self):
         t1 = TensorType((2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
 
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
 
-    @skipIfNoUnification
     def test_broadcasting3(self):
         t1 = TensorType((1, 2, 3, Dyn))
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
 
-@skipIfNoUnification
 class TypeCheckerTest(unittest.TestCase):
 
     def test_type_check_add_with_broadcast(self):
@@ -821,7 +817,6 @@ class TypeCheckerTest(unittest.TestCase):
                     assert is_consistent(n.type, TensorType(b.size()))
 
     @skipIfNoTorchVision
-    @skipIfNoUnification
     def test_resnet50(self):
         gm_run = symbolic_trace(resnet50())
         sample_input = torch.randn(1, 3, 224, 224)
@@ -865,7 +860,6 @@ class TypeCheckerTest(unittest.TestCase):
         assert (len(batch_sizes) == 1)
 
 
-    @skipIfNoUnification
     def test_type_check_batch_norm_symbolic(self):
         class BasicBlock(torch.nn.Module):
 
@@ -899,7 +893,6 @@ class TypeCheckerTest(unittest.TestCase):
         for n in graph.nodes:
             assert n.type == next(my_types)
 
-    @skipIfNoUnification
     def test_symbolic_add_with_broadcast(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
@@ -928,7 +921,6 @@ class TypeCheckerTest(unittest.TestCase):
             assert n.type == next(expected_iter)
 
 
-    @skipIfNoUnification
     def test_symbolic_add_with_broadcast_2(self):
         class M(torch.nn.Module):
             def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
