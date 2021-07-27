@@ -721,6 +721,7 @@
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
+  inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
@@ -1211,6 +1212,7 @@
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
+  result: solve_jvp(input_p, input_t, other_t, result)
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
