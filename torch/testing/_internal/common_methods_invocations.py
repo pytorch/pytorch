@@ -3640,7 +3640,6 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = (
-        ((), (0, )),
         ((S, ), (0, )),
         ((S, S), (0, )),
         ((S, S), (1, )),
