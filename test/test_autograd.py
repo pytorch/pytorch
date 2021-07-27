@@ -20,9 +20,8 @@ import torch
 from torch import nn
 from torch._six import inf, nan
 from torch.autograd.function import once_differentiable
-from torch.autograd.profiler import (profile, format_time, EventList,
-                                     FunctionEvent, FunctionEventAvg,
-                                     record_function, emit_nvtx)
+from torch.autograd.profiler import (profile, record_function, emit_nvtx)
+from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -3214,7 +3213,7 @@ class TestAutograd(TestCase):
         total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
         print(
             "Total time based on python measurements: ",
-            format_time(total_time_us)
+            _format_time(total_time_us)
         )
         print(
             "CPU time measurement python side overhead: {:.2f}%".format(

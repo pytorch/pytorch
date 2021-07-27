@@ -21,6 +21,7 @@ namespace distributed {
 namespace rpc {
 
 using namespace torch::distributed::autograd;
+using namespace torch::autograd::profiler;
 
 // When request message has autograd info, processMessage() will set up valid
 // current context id properly. This struct is used to clean up current context
@@ -82,7 +83,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Initialize thread-local profiler state from process-global
             // profiler state.
-            ::torch::autograd::profiler::enableProfilerLegacy(
+            enableProfilerLegacy(
                 serverProcessGlobalProfilerStateStackEntryPtr->statePtr()
                     ->config());
           }
@@ -94,8 +95,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
           // work doesn't affect RPC trip time.
           if (serverProcessGlobalProfilerStateStackEntryPtr) {
             // Restore thread-local profiler state.
-            ::torch::autograd::profiler::thread_event_lists event_lists =
-                ::torch::autograd::profiler::disableProfilerLegacy();
+            thread_event_lists event_lists = disableProfilerLegacy();
             // Put thread_local event_lists into the process-global profiler
             // state.
             profiler::processglobal::pushResultRecursive(
@@ -406,12 +406,22 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
+  // Only the legacy profiling mode is supported in remote RPC profiling;
+  // Note: remote RPC profiling is deprecated and will be removed in future
+  // releases of PyTorch
+  if (profilingConfig.state == ProfilerState::KINETO ||
+      profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    profilingConfig = ProfilerConfig(
+        ProfilerState::CPU,
+        profilingConfig.report_input_shapes,
+        profilingConfig.profile_memory);
+  }
+
   // If requested with CUDA from caller but CUDA is not available on this
   // machine, fallback to CPU and log a warning instead of crashing.
-  if (profilingConfig.state == torch::autograd::profiler::ProfilerState::CUDA &&
-      !this->cudaAvailable()) {
-    profilingConfig = torch::autograd::profiler::ProfilerConfig(
-        torch::autograd::profiler::ProfilerState::CPU,
+  if (profilingConfig.state == ProfilerState::CUDA && !this->cudaAvailable()) {
+    profilingConfig = ProfilerConfig(
+        ProfilerState::CPU,
         profilingConfig.report_input_shapes,
         profilingConfig.profile_memory);
 
@@ -420,21 +430,19 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                  << "Falling back to CPU profiling only.";
   }
   TORCH_INTERNAL_ASSERT(
-      profilingConfig.state != torch::autograd::profiler::ProfilerState::CUDA ||
-          this->cudaAvailable(),
+      profilingConfig.state != ProfilerState::CUDA || this->cudaAvailable(),
       "Profiler state set to CUDA but CUDA not available.");
   const auto profilingKeyId = rpcWithProfilingReq.getProfilingId();
   // Enable the profiler with the config from the sender.
   // When enabling on the main thread, ensure profiler states are cleaned
   // up, but defer consolidation of all profiled events to the continuation
   // below.
-  torch::autograd::profiler::ProfilerDisableOptions requestThreadOptions(
+  ProfilerDisableOptions requestThreadOptions(
       true /* cleanup TLS state */, false /* consolidate events */);
   {
-    torch::autograd::profiler::TLSProfilerGuard g(
+    TLSLegacyProfilerGuard g(
         profilingConfig, c10::nullopt, requestThreadOptions);
-    TORCH_INTERNAL_ASSERT(
-        torch::autograd::profiler::profilerEnabled(),
+    TORCH_INTERNAL_ASSERT(profilerEnabled(),
         "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
@@ -446,20 +454,19 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
     auto responseFuture = wrappedRpcResponseFuture->then(
         at::wrapPropagateTLSState([profilingKeyId, profilingConfig](
                                       JitFuture& wrappedRpcResponseFuture) {
-          std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents;
+          std::vector<LegacyEvent> profiledEvents;
           // Defer consolidation of profiler events until async work has
           // completed (such as async UDF)
 
           TORCH_INTERNAL_ASSERT(
-              torch::autograd::profiler::profilerEnabled(),
+              profilerEnabled(),
               "Expected profiler to be enabled!");
 
           // On continuation thread, don't clean up profiler states, since
           // they will be cleaned up by main thread, and consolidate all
           // events so we obtain asynchronously run events.
-          torch::autograd::profiler::ProfilerDisableOptions opts(false, true);
-          auto event_lists =
-              torch::autograd::profiler::disableProfilerLegacy(opts);
+          ProfilerDisableOptions opts(false, true);
+          auto event_lists = disableProfilerLegacy(opts);
           if (wrappedRpcResponseFuture.hasError()) {
             // Propagate error
             // No need to propagate remote events in the case of an error.
