@@ -1584,10 +1584,14 @@ class DistributedDataParallelTest(
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         hook, hook_state = default.allreduce_hook, process_group
-
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
         opt_hook_state = default.OptimizerHookState(
             _FunctionalSGD,
-            1e-2,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
@@ -1609,7 +1613,12 @@ class DistributedDataParallelTest(
             gradient_as_bucket_view,
             hook_state
         )
-        sgd = torch.optim.SGD(gpu_model_allreduce.parameters(), lr=1e-2)
+        sgd = torch.optim.SGD(
+            gpu_model_allreduce.parameters(),
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay
+        )
         for _ in range(8):
             gpu_model_allreduce.zero_grad()
             self._run_and_verify_hook(gpu_model_allreduce, 8, 0.25 * torch.ones(2, 2))
