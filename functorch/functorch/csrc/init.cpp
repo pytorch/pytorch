@@ -11,7 +11,6 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/VmapTransforms.h>
-#include <functorch/csrc/PythonKey.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
 
@@ -242,14 +241,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
   m.def("are_transforms_active", &at::functorch::areTransformsActive);
-
-  m.def(
-      "addPythonKey",
-      &at::functorch::addPythonKey,
-      py::return_value_policy::copy); // not sure if needed - cargo cult
-  m.def("removePythonKey", &at::functorch::removePythonKey);
-  m.def("hasPythonKey", &at::functorch::hasPythonKey);
-
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
   m.def("is_batchedtensor", &at::functorch::is_batchedtensor);
