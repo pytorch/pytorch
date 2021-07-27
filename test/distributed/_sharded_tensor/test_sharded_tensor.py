@@ -539,7 +539,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         buffer.seek(0)
         state_dict_deser = torch.load(buffer)
         module_load.load_state_dict(state_dict_deser, strict=False)
-        module_load._register_state_dict_hook(state_dict_hook)
 
         # Verify after load.
         self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
