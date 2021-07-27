@@ -651,6 +651,7 @@ size_t EncoderBase::GetGraphProtoSizes(
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
     sizes += tensor_proto->ByteSizeLong();
+    free(tensor_proto);
   }
   return sizes;
 }

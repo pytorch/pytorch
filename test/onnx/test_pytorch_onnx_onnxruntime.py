@@ -351,7 +351,7 @@ class TestONNXRuntime(unittest.TestCase):
                                   keep_initializers_as_inputs=self.keep_initializers_as_inputs,
                                   dynamic_axes=dynamic_axes,
                                   input_names=input_names, output_names=output_names,
-                                  use_external_data_format=None)
+                                  use_external_data_format=use_external_data_format)
                 # compute onnxruntime output prediction
                 ort_sess_opt = onnxruntime.SessionOptions()
                 ort_sess_opt.graph_optimization_level = \
@@ -419,10 +419,10 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input):
                 return self.seq(input)
-            
+
         model = LargeModel()
         x = torch.tensor([2], dtype=torch.long)
-        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=None)
+        self.run_model_test_with_external_data(LargeModel(), x, use_external_data_format=True)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_largemodel_with_use_external_data_format_False(self):
@@ -440,7 +440,7 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input):
                 return self.seq(input)
-            
+
         model = LargeModel()
         x = torch.tensor([3], dtype=torch.long)
 
