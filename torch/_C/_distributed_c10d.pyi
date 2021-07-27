@@ -375,6 +375,15 @@ class ProcessGroupMPI(ProcessGroup):
     @staticmethod
     def create(ranks: List[int]) -> ProcessGroupMPI: ...
 
+class ProcessGroupUCC(ProcessGroup):
+    class Options: ...
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+    ): ...
+
 def _compute_bucket_assignment_by_size(
     tensors: List[Tensor],
     bucket_size: int,
