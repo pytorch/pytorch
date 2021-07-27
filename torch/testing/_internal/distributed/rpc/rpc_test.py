@@ -1310,7 +1310,7 @@ class RpcTest(RpcAgentTestFixture):
             return
         dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
-        with torch.autograd.profiler.profile(profile_memory=True) as p:
+        with _profile(profile_memory=True) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
@@ -1320,7 +1320,7 @@ class RpcTest(RpcAgentTestFixture):
         # only contain 0 (indicates no memory being profiled)
         self.assertNotEqual({0}, event_cpu_mem_usages)
         # No memory profiled if profile_memory=False
-        with torch.autograd.profiler.profile(profile_memory=False) as p:
+        with _profile(profile_memory=False) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
@@ -1948,7 +1948,6 @@ class RpcTest(RpcAgentTestFixture):
         num_sleep_seconds = 1
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
-            # with torch.autograd.profiler.profile() as pf:
             with _profile() as pf:
                 with torch.autograd.profiler.record_function("foo") as rf:
                     fut = rpc.rpc_async(
@@ -1964,7 +1963,6 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
-            # with torch.autograd.profiler.profile() as pf:
             with _profile() as pf:
                 key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
@@ -2464,7 +2462,6 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
 
-        # with torch.autograd.profiler.profile() as p:
         with _profile() as p:
             t = rref._get_type(blocking=blocking)
             if not blocking:
@@ -2479,7 +2476,6 @@ class RpcTest(RpcAgentTestFixture):
         def verify(fut):
             self.assertEqual(fut.value(), expected_type)
 
-        # with torch.autograd.profiler.profile() as p:
         with _profile() as p:
             for _ in range(10):
                 t = rref._get_type(blocking=blocking)
@@ -4128,7 +4124,7 @@ class CudaRpcTest(RpcAgentTestFixture):
         dst_worker_cuda_0 = worker_name(dst_cuda_0)
         dst_worker_cuda_1 = worker_name(dst_cuda_1)
 
-        with torch.autograd.profiler.profile(use_cuda=True) as p:
+        with _profile(use_cuda=True) as p:
             fut1 = rpc.rpc_async(dst_worker_cuda_0, udf_with_torch_ops, args=(0, ))
             fut2 = rpc.rpc_async(dst_worker_cuda_1, udf_with_torch_ops, args=(1, ))
             fut1.wait()
