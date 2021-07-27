@@ -82,7 +82,7 @@ void adam_compute_smart_decay(
     // Catchup = \sum_{i=1}^{k-1}\beta_1^i = \beta_1 \left(\frac{1-\beta_1^k}{1-\beta_1}\right)
     float catchup = 0.0;
     if (k > 1) {
-        catchup = m[i] * beta1 * (1 - powf(beta1, k)) / (1 - beta1);
+        catchup = m[i] * beta1 * (1 - powf(beta1, k-1)) / (1 - beta1);
     }
     float mi = nm[i] = m[i] * powf(beta1, k) + gi * (1 - beta1);
     float vi = nv[i] = v[i] * powf(beta2, k) + gi * gi * (1 - beta2);

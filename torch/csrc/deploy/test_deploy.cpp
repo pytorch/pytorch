@@ -54,12 +54,8 @@ TEST(TorchpyTest, LoadLibrary) {
 }
 
 TEST(TorchpyTest, InitTwice) {
-  {
-    torch::deploy::InterpreterManager m(2);
-  }
-  {
-    torch::deploy::InterpreterManager m(1);
-  }
+  { torch::deploy::InterpreterManager m(2); }
+  { torch::deploy::InterpreterManager m(1); }
 }
 
 TEST(TorchpyTest, SimpleModel) {
