@@ -56,6 +56,7 @@ except ImportError:
 HASH_REGEX = re.compile(r'-([a-f0-9]*)\.')
 
 MASTER_BRANCH = 'master'
+ENV_GITHUB_TOKEN = 'GITHUB_TOKEN'
 ENV_TORCH_HOME = 'TORCH_HOME'
 ENV_XDG_CACHE_HOME = 'XDG_CACHE_HOME'
 DEFAULT_CACHE_DIR = '~/.cache'
@@ -113,23 +114,32 @@ def _parse_repo_info(github):
     return repo_owner, repo_name, branch
 
 
+def _read_url(url):
+    with urlopen(url) as r:
+        return r.read().decode(r.headers.get_content_charset('utf-8'))
+
+
 def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
     # Use urlopen to avoid depending on local git.
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    token = os.environ.get(ENV_GITHUB_TOKEN)
+    if token is not None:
+        headers['Authorization'] = f'token {token}'
     for url_prefix in (
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/branches',
             f'https://api.github.com/repos/{repo_owner}/{repo_name}/tags'):
-        page = 1
+        page = 0
         while True:
-            url = url_prefix + '?per_page=100&page=' + str(page)
-            with urlopen(url) as r:
-                response = json.loads(r.read().decode(r.headers.get_content_charset('utf-8')))
-                if not response:
-                    continue
-                for br in response:
-                    if br['name'] == branch or br['commit']['sha'].startswith(branch):
-                        return
+            page += 1
+            url = f'{url_prefix}?per_page=100&page={page}'
+            response = json.loads(_read_url(Request(url, headers=headers)))
+            # Empty response means no more data to process
+            if not response:
+                break
+            for br in response:
+                if br['name'] == branch or br['commit']['sha'].startswith(branch):
+                    return
 
-        page += 1
     raise ValueError(f'Cannot find {branch} in https://github.com/{repo_owner}/{repo_name}. '
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 

@@ -99,7 +99,6 @@ struct RegisterCUDAMethods {
     registerCUDAMethods(&methods);
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCUDAMethods reg;
 
 } // namespaces
