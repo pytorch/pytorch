@@ -44,7 +44,7 @@ from .utils import (
     get_qconv_op,
 )
 
-from .qconfig_utils import QConfigAny
+from ..qconfig import QConfigAny
 
 from abc import ABC, abstractmethod
 import operator
@@ -96,6 +96,27 @@ class QuantizeHandler(ABC):
         be observed, and False it it should not be observed.
         """
         return True
+
+    def is_general_tensor_value_op(self) -> bool:
+        """
+        Returns True if the operator works for both floating point and
+        quantized input, and does some computation based on the input Tensor,
+        so we need to insert observer/fake_quant for the output of the
+        operator since the distribution of values is different for input and output
+        Tensors (for HistogramObserver)
+        while they share the same quantization parameters
+        Example: avgpool2d
+        """
+        return False
+
+    def is_general_tensor_shape_op(self) -> bool:
+        """ Similar to is_general_tensor_value_op, this is a check
+        for ops that works for both floating point and quantized input,
+        that only re-arranges the Tensor values or query some metadata about the Tensor
+        We don't insert observer/fake_quant for the output of these operators
+        Example: reshape, transpose, maxpool2d
+        """
+        return False
 
     def should_insert_observer_for_output(
         self,
@@ -182,6 +203,10 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
 }
 binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
     torch.bmm: binary_op_int8_dtypes,
+    operator.add: binary_op_int8_dtypes,
+    torch.add: binary_op_int8_dtypes,
+    operator.mul: binary_op_int8_dtypes,
+    torch.mul: binary_op_int8_dtypes,
 }
 
 
@@ -258,11 +283,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         prepare step.
         """
         if self.num_tensor_args == 1:
-            return activation_dtype(qconfig) == torch.float16
+            return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
             return True
         else:
             return False
+
+    def is_general_tensor_value_op(self) -> bool:
+        return self.num_tensor_args == 1
 
     def input_output_observed(self):
         # for x + y where x and y are scalars, we do not observe anything
@@ -288,10 +316,19 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
                 dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
-                args = load_arg(quantized=[torch.quint8, torch.qint8])(node.args)
-                args = load_arg(quantized=torch.float)(node.args)
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.binary_op_node.args)
+                args = load_arg(quantized=torch.float)(self.binary_op_node.args)
+                kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
+                op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
+
+                def modified_load_arg(n: Node):
+                    if n.name == self.binary_op_node.name:
+                        return op_out
+                    else:
+                        return load_arg(quantized=torch.float)(n)
+
+                if self.relu_node:
+                    op_out = quantized_graph.node_copy(self.relu_node, modified_load_arg)
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
@@ -383,6 +420,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
+    def is_general_tensor_value_op(self) -> bool:
+        return True
+
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -425,6 +465,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv2d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
 # just for error checks
+@register_quant_pattern((torch.nn.ReLU, torch.nn.Conv1d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
@@ -1227,8 +1268,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         else:
             return quantized_graph.node_copy(node, load_arg(quantized=None))
 
-
-# these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
@@ -1237,10 +1276,6 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
 @register_quant_pattern(torch.nn.Hardtanh)
-@register_quant_pattern(torch.nn.Identity)
-@register_quant_pattern(torch.nn.MaxPool1d)
-@register_quant_pattern(torch.nn.MaxPool2d)
-@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
 @register_quant_pattern(torch.adaptive_avg_pool1d)
@@ -1250,55 +1285,35 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
 @register_quant_pattern(torch.nn.functional.interpolate)
-@register_quant_pattern(torch.nn.functional.max_pool1d)
-@register_quant_pattern(torch.nn.functional.max_pool2d)
-@register_quant_pattern(torch.nn.functional.max_pool3d)
 @register_quant_pattern(torch.nn.functional.relu)
 @register_quant_pattern(torch.nn.functional.relu6)
 @register_quant_pattern(torch.avg_pool1d)
 @register_quant_pattern(torch._C._nn.avg_pool2d)
 @register_quant_pattern(torch._C._nn.avg_pool3d)
-@register_quant_pattern(torch.chunk)
 @register_quant_pattern(torch.clamp)
-@register_quant_pattern(torch.flatten)
-@register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
 @register_quant_pattern(torch.min)
-@register_quant_pattern(torch.repeat_interleave)
-@register_quant_pattern(torch.sort)
-@register_quant_pattern(torch.squeeze)
-@register_quant_pattern(torch.stack)
-@register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.floordiv)
-@register_quant_pattern(operator.getitem)
-@register_quant_pattern('chunk')
 @register_quant_pattern('clamp')
-@register_quant_pattern('contiguous')
-@register_quant_pattern('detach')
-@register_quant_pattern('detach_')
 @register_quant_pattern('mean')
-@register_quant_pattern('numel')
-@register_quant_pattern('permute')
 @register_quant_pattern('relu')
 @register_quant_pattern('relu_')
-@register_quant_pattern('repeat')
-@register_quant_pattern('repeat_interleave')
-@register_quant_pattern('reshape')
-@register_quant_pattern('resize_')
-@register_quant_pattern('shape')
-@register_quant_pattern('size')
-@register_quant_pattern('squeeze')
-@register_quant_pattern('squeeze_')
-@register_quant_pattern('transpose')
-@register_quant_pattern('unsqueeze')
-@register_quant_pattern('unsqueeze_')
-@register_quant_pattern('view')
 class CopyNodeQuantizeHandler(QuantizeHandler):
+    """ Operators that works on both float and quantized input
+    if input is quantized, the output Tensor shares
+    the same quantization parameter with input.
+    These ops will do computation on the input Tensor, e.g. average pool, so we will
+    insert extra observer/fake_quant for the output of these operators.
+    TODO: maybe rename this to TensorValueOpQuantizeHandler
+    """
     def should_mark_output_quantized_from_input_quantized_status(
         self,
         qconfig: QConfigAny
     ) -> bool:
+        return True
+
+    def is_general_tensor_value_op(self) -> bool:
         return True
 
     def convert(self,
@@ -1310,7 +1325,26 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantized_graph.node_copy(node, load_arg(quantized=None))
+        if is_reference:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            # when there is no activation_post_process following the CopyNode, it means
+            # that the CopyNode is configured with a qconfig that doesnot require
+            # observation, e.g. dynamic_qconfig
+            if activation_post_process is None:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                args = load_arg(quantized=[torch.quint8])(node.args)
+                args = list(load_arg(quantized=torch.float)(node.args))
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out,
+                    activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+        else:
+            return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self,
@@ -1344,6 +1378,69 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         # we can extend this
         # if there is a need, e.g. get the indexes of quantized inputs from some
         # module attribute like module._QUANTIZED_INPUT_INDEXES
+        return quantized_graph.node_copy(node, load_arg(quantized=None))
+
+@register_quant_pattern(torch.nn.MaxPool1d)
+@register_quant_pattern(torch.nn.MaxPool2d)
+@register_quant_pattern(torch.nn.MaxPool3d)
+@register_quant_pattern(torch.nn.Identity)
+@register_quant_pattern(torch.nn.functional.max_pool1d)
+@register_quant_pattern(torch.nn.functional.max_pool2d)
+@register_quant_pattern(torch.nn.functional.max_pool3d)
+@register_quant_pattern(torch.chunk)
+@register_quant_pattern(torch.flatten)
+@register_quant_pattern(torch.transpose)
+@register_quant_pattern(torch.repeat_interleave)
+@register_quant_pattern(torch.sort)
+@register_quant_pattern(torch.squeeze)
+@register_quant_pattern(torch.stack)
+@register_quant_pattern(torch.unsqueeze)
+@register_quant_pattern(operator.getitem)
+@register_quant_pattern('chunk')
+@register_quant_pattern('contiguous')
+@register_quant_pattern('detach')
+@register_quant_pattern('detach_')
+@register_quant_pattern('numel')
+@register_quant_pattern('permute')
+@register_quant_pattern('repeat')
+@register_quant_pattern('repeat_interleave')
+@register_quant_pattern('reshape')
+@register_quant_pattern('resize_')
+@register_quant_pattern('shape')
+@register_quant_pattern('size')
+@register_quant_pattern('squeeze')
+@register_quant_pattern('squeeze_')
+@register_quant_pattern('transpose')
+@register_quant_pattern('unsqueeze')
+@register_quant_pattern('unsqueeze_')
+@register_quant_pattern('view')
+class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
+    """ Operators that works on both float and quantized input
+    if input is quantized, the output Tensor shares
+    the same quantization parameter with input.
+    These ops only do rearrangement of Tensor values, for
+    example reshape, or just query the information about Tensor
+    e.g. size, and we do not insert extra observer/fake_quant
+    for the output of the operator.
+    """
+    def is_general_tensor_shape_op(self) -> bool:
+        return True
+
+    def should_mark_output_quantized_from_input_quantized_status(
+        self,
+        qconfig: QConfigAny
+    ) -> bool:
+        return True
+
+    def convert(self,
+                node: Node,
+                qconfig: QConfigAny,
+                modules: Dict[str, torch.nn.Module],
+                quantized_graph: Graph,
+                node_name_to_scope: Dict[str, Tuple[str, type]],
+                load_arg: Callable,
+                is_reference: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):

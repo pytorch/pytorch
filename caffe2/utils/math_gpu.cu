@@ -10,6 +10,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 

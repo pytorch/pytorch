@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallVector.h>

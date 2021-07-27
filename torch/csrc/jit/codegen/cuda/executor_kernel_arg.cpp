@@ -55,6 +55,7 @@ void KernelArgumentHolder::push(const IValue& val) {
       "Tried to push an arg to run in a fused kernel, expected a scalar but got, ",
       val);
   switch (val.toScalar().type()) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case c10::ScalarType::Double:
       arguments_.push_back(std::make_unique<FloatArg>((float)val.toDouble()));
       return;

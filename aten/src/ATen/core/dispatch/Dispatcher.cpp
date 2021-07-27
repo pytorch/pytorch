@@ -32,8 +32,7 @@ private:
 };
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-OpRegistrationListener::~OpRegistrationListener() {}
+OpRegistrationListener::~OpRegistrationListener()= default;
 
 Dispatcher::Dispatcher()
 : operators_()
@@ -42,8 +41,7 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-Dispatcher::~Dispatcher() {}
+Dispatcher::~Dispatcher() = default;
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;

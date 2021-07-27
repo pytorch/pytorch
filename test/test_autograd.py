@@ -1,12 +1,14 @@
 import gc
-import sys
 import io
 import math
+import os
 import random
+import sys
 import tempfile
-import time
 import threading
+import time
 import unittest
+import uuid
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
@@ -33,7 +35,6 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
-from torch.testing import randn_like
 from torch.testing._internal.common_methods_invocations import (
     unpack_variables,
     mask_not_all_zeros,
@@ -2789,15 +2790,6 @@ class TestAutograd(TestCase):
                               lambda a, b: torch.cat((a, b)),
                               True, f_args_variable, f_args_tensor, check_forward_ad=True)
 
-    def test_trapz(self):
-        f_args_variable = (torch.randn(2, 3, dtype=torch.double, requires_grad=True),
-                           torch.tensor([[1.0, 2.0, 5.5], [2.3, 0.5, 6.2]], dtype=torch.double, requires_grad=True))
-        f_args_tensor = deepcopy(unpack_variables(f_args_variable))
-        run_functional_checks(self, "test_trapz", "trapz",
-                              lambda y, x: torch.trapz(y, x),
-                              True, f_args_variable, f_args_tensor)
-
-
     def test_var_mean_differentiable(self):
         dim = [2, 4]
         keepdim = False
@@ -4669,12 +4661,17 @@ for shape in [(1,), ()]:
         out = torch.stack([a, b], dim=0)
         self.assertEqual(out.grad_fn._saved_tensors, (a, b))              # TensorList -> Tuple[Tensor]
         self.assertIsInstance(out.grad_fn._saved_tensors[0], torch.Tensor)
+        self.assertIsInstance(out.grad_fn._raw_saved_tensors[0], torch._C._autograd.SavedTensor)
         self.assertEqual(out.grad_fn._saved_dim, 0)                       # int64_t -> int
         self.assertIsInstance(out.grad_fn._saved_dim, int)
+
+        out.grad_fn._raw_saved_tensors[0].register_hooks(lambda x: x, lambda x: x)
 
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_tensors
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            out.grad_fn._raw_saved_tensors
         self.assertEqual(out.grad_fn._saved_dim, 0)
 
         a = torch.ones(2, 2, requires_grad=True)
@@ -4682,8 +4679,20 @@ for shape in [(1,), ()]:
         out = a[:, indices]
         self.assertEqual(out.grad_fn._saved_indices, (None, indices))     # c10::List<c10::optional<Tensor>> -> Tuple[Tensor?]
         self.assertIsInstance(out.grad_fn._saved_indices[1], torch.Tensor)
+        self.assertIsInstance(out.grad_fn._raw_saved_indices[1], torch._C._autograd.SavedTensor)
         self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
         self.assertIsInstance(out.grad_fn._saved_self_sizes[0], int)
+
+        out.grad_fn._raw_saved_indices[1].register_hooks(lambda x: x, lambda x: x)
+        with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
+            out.grad_fn._raw_saved_indices[0].register_hooks(lambda x: x, lambda x: x)
+
+        a = torch.ones(2, 2, requires_grad=True)
+        out = a * a
+        out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
+        out.sum().backward()
+        with self.assertRaisesRegex(RuntimeError, "after it has been freed"):
+            out.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
 
         a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, 4, mode="linear")
@@ -4757,6 +4766,60 @@ for shape in [(1,), ()]:
         out.sum().backward()
         with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
             out.grad_fn._saved_weight
+
+    def test_cant_create_saved_tensors(self):
+        with self.assertRaisesRegex(RuntimeError, "Trying to create a SavedTensor object from Python is forbidden"):
+            torch.autograd.SavedTensor()
+
+    def test_custom_function_saved_tensors(self):
+        def getFn(save=True):
+            class MyFn(Function):
+                @staticmethod
+                def forward(ctx, x):
+                    if save:
+                        ctx.save_for_backward(x, None)
+                    return x
+
+                @staticmethod
+                def backward(ctx, g):
+                    return g
+
+            return MyFn
+
+        a = torch.randn(5, requires_grad=True)
+
+        y = getFn(True).apply(a)
+
+        self.assertEqual((a, None), y.grad_fn.saved_tensors)
+        saved = y.grad_fn._raw_saved_tensors
+        self.assertIsInstance(saved[0], torch._C._autograd.SavedTensor)
+        # We can't tell the underlying tensor is None without unpacking it
+        self.assertIsInstance(saved[1], torch._C._autograd.SavedTensor)
+
+        # We catch that error when the user calls register_hooks on it
+        with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
+            saved[1].register_hooks(lambda x: x, lambda x: x)
+
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(lambda x: x)
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            saved[0].register_hooks(1, 1)
+        saved[0].register_hooks(lambda x: x, lambda x: x)
+        with self.assertRaisesRegex(RuntimeError, "already been set"):
+            saved[0].register_hooks(lambda x: x, lambda x: x)
+        y.sum().backward()
+
+        # Using a reference to the SavedTensor object after the
+        # saved variables have been released can lead to undefined behavior
+        del saved
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            y.grad_fn._raw_saved_tensors
+        with self.assertRaisesRegex(RuntimeError, "after they have already been freed"):
+            y.grad_fn.saved_tensors
+
+        y = getFn(False).apply(a)
+        self.assertEqual(y.grad_fn.saved_tensors, ())
+        self.assertEqual(y.grad_fn._raw_saved_tensors, ())
 
     def test_autograd_views_codegen(self):
         # This is not necessarily the absolute correct behavior, but this is the current
@@ -5624,6 +5687,255 @@ for shape in [(1,), ()]:
         self.assertEqual(b, b_unpacked)
         self.assertEqual(b._version, b_unpacked._version)
 
+    def test_saved_variable_packing_unpacking_saved_original_with_hooks(self):
+        # Tests that packing/unpacking a SavedVariable works correctly with user-defined hooks
+        # The saved_original / did_not_save_original distinction corresponds to the `save_original`
+        # attribute of `SavedVariable`.
+
+        def test(get_input, is_leaf):
+            a = get_input()
+            grad_fn = a.grad_fn
+            y = a * a
+            y.grad_fn._raw_saved_self.register_hooks(lambda x: 2 * x, lambda x: x / 2)
+            self.assertEqual(a, y.grad_fn._saved_self)
+            if not is_leaf:
+                self.assertIs(grad_fn, y.grad_fn._saved_self.grad_fn)
+                y.sum().backward()
+            else:
+                y.sum().backward()
+                self.assertEqual(2 * a, a.grad)
+
+            a = get_input()
+            grad_fn = a.grad_fn
+            y = a * a
+            y.grad_fn._raw_saved_self.register_hooks(lambda x: 2 * x, lambda x: x)
+            self.assertEqual(2 * a, y.grad_fn._saved_self)
+            if not is_leaf:
+                self.assertIs(grad_fn, y.grad_fn._saved_self.grad_fn)
+                y.sum().backward()
+            else:
+                y.sum().backward()
+                self.assertEqual(3 * a, a.grad)
+
+            # double backward
+            a = get_input()
+            grad_fn = a.grad_fn
+            y = a ** 3
+            y.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: x)
+            s = torch.sum(y)
+            g, = torch.autograd.grad(s, (a, ), create_graph=True)
+            if not is_leaf:
+                self.assertIs(grad_fn, y.grad_fn._saved_self.grad_fn)
+                g.sum().backward()
+            else:
+                g.sum().backward()
+                self.assertEqual(6 * a, a.grad)
+
+            a = get_input()
+            y = a * a
+            y.grad_fn._raw_saved_self.register_hooks(lambda x: x, lambda x: 1)
+            with self.assertRaisesRegex(TypeError, "Output of saved tensor unpack_hook expected to be a Tensor"):
+                print(y.grad_fn._saved_self)
+
+            a = get_input()
+            y = a * a
+            with self.assertRaisesRegex(TypeError, "missing 1 required positional argument"):
+                y.grad_fn._raw_saved_self.register_hooks(lambda x, b: x, lambda x: x)
+
+            a = get_input()
+            y = a * a
+            with self.assertRaisesRegex(TypeError, "missing 1 required positional argument"):
+                y.grad_fn._raw_saved_self.register_hooks(lambda x, b: (x, b), lambda x: x)
+
+            def inplace_double(x):
+                x *= 2
+                return x
+
+            a = get_input()
+            t = a * a
+
+            t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
+            y = t * 2
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "one of the variables needed for gradient computation has been modified by an inplace operation"):
+                y.sum().backward()
+
+        # leaf
+        test(lambda: torch.randn(5, requires_grad=True), True)
+
+        # not leaf, not output
+        test(lambda: (1 + torch.randn(5, requires_grad=True)), False)
+
+    def test_saved_variable_packing_unpacking_did_not_save_original_with_hooks(self):
+        # Tests that packing/unpacking a SavedVariable works correctly with user-defined hooks
+        # The saved_original / did_not_save_original distinction corresponds to the `save_original`
+        # attribute of `SavedVariable`.
+
+        a = torch.randn(5, requires_grad=True)
+        y = torch.exp(a)
+        y.grad_fn._raw_saved_result.register_hooks(lambda x: x, lambda x: x)
+        self.assertEqual(y, y.grad_fn._saved_result)
+        self.assertIs(y.grad_fn, y.grad_fn._saved_result.grad_fn)
+        y.sum().backward()
+        self.assertEqual(a.grad, y)
+
+    def test_saved_variable_packing_unpacking_saved_original_with_default_hooks(self):
+        # Tests that default hooks are properly registered, used and reset
+        # The saved_original / did_not_save_original distinction corresponds to the `save_original`
+        # attribute of `SavedVariable`.
+        # See also:
+        #  - test_saved_variable_packing_unpacking_saved_original_with_hooks
+
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(pack, lambda x: x)
+            a = torch.ones(5, requires_grad=True)
+
+            warnings.simplefilter('always')
+            with warnings.catch_warnings(record=True) as w:
+                y = a * a
+                # should raise two warnings from a being saved twice
+                self.assertEqual(len(w), 2)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+            self.assertEqual(a, y.grad_fn._saved_self)
+            self.assertEqual(a, y.grad_fn._saved_other)
+            y.sum().backward()
+            self.assertEqual(2 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x / 2)
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+            self.assertEqual(a, y.grad_fn._saved_self)
+            self.assertEqual(a, y.grad_fn._saved_other)
+            y.sum().backward()
+            self.assertEqual(2 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = a * a
+            self.assertEqual(2 * a, y.grad_fn._saved_self)
+            self.assertEqual(2 * a, y.grad_fn._saved_other)
+            y.sum().backward()
+            self.assertEqual(4 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        # Exited hooks correctly
+        a = torch.randn(5, requires_grad=True)
+        y = a * a
+        self.assertEqual(a, y.grad_fn._saved_self)
+        self.assertEqual(a, y.grad_fn._saved_other)
+        y.sum().backward()
+        self.assertEqual(2 * a, a.grad)
+
+    def test_saved_variable_packing_unpacking_did_not_save_original_with_default_hooks(self):
+        # See also test_saved_variable_packing_unpacking_did_not_save_original_with_hooks
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = torch.exp(a)
+            self.assertEqual(y, y.grad_fn._saved_result)
+            y.sum().backward()
+            self.assertEqual(a.grad, y)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+    def test_setting_default_saved_variable_hooks_twice_should_fail(self):
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Setting default hooks but they have already been set. "):
+                torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+                torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+    def test_saving_variable_to_disk(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            def pack(x):
+                name = os.path.join(tmp_dir, str(uuid.uuid4()))
+                torch.save(x, name)
+                return name
+
+            def unpack(name):
+                return torch.load(name)
+
+            try:
+                torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
+                a = torch.ones(5, requires_grad=True)
+                y = a * a
+                self.assertEqual(a, y.grad_fn._saved_self)
+
+                y.sum().backward()
+                self.assertEqual(2 * a, a.grad)
+            finally:
+                torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+    def test_default_saved_variable_hooks_double_backward(self):
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = a ** 3
+            s = torch.sum(y)
+            g, = torch.autograd.grad(s, (a, ), create_graph=True)
+            g.sum().backward()
+            self.assertEqual(6 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = a ** 3
+            s = torch.sum(y)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+        g, = torch.autograd.grad(s, (a, ), create_graph=True)
+        g.sum().backward()
+        # factor 2 because only a is saved once
+        self.assertEqual(6 * 2 * a, a.grad)
+
+        a = torch.randn(5, requires_grad=True)
+        y = a ** 3
+        s = torch.sum(y)
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+            g, = torch.autograd.grad(s, (a, ), create_graph=True)
+            g.sum().backward()
+            # factor 4 because pow_backward is grad * (exp * self.pow(exp - 1))
+            # so grad is saved and self (i.e. a) is saved
+            self.assertEqual(6 * 4 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(lambda x: 2 * x, lambda x: x)
+            a = torch.randn(5, requires_grad=True)
+            y = a ** 3
+            s = torch.sum(y)
+            g, = torch.autograd.grad(s, (a, ), create_graph=True)
+            g.sum().backward()
+            # combining the two above blocks: 2 * 4 = 8
+            # note that in that sense, a is saved twice
+            self.assertEqual(6 * 8 * a, a.grad)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -5684,7 +5996,7 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.Tensor) and output_variable.requires_grad and self_variable is not None:
-        output_variable.backward(randn_like(output_variable))
+        output_variable.backward(torch.randn_like(output_variable))
         test_case.assertEqualTypeString(self_variable, self_variable.grad)
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
@@ -8061,7 +8373,7 @@ class TestAutogradDeviceType(TestCase):
     @deviceCountAtLeast(1)
     @dtypes(torch.float, torch.double)
     def test_requires_grad_factory(self, devices, dtype):
-        fns = [torch.ones_like, torch.testing.randn_like]
+        fns = [torch.ones_like, torch.randn_like]
         x = torch.randn(2, 3, dtype=dtype, device=devices[0])
 
         for fn in fns:
@@ -8510,6 +8822,18 @@ class TestAutogradDeviceType(TestCase):
         _tensor_tensor_helper(y, x)
         _tensor_tensor_helper(x, x)
         _tensor_tensor_helper(y, y)
+
+    def test_copy_r_to_c(self, device):
+        out_c = torch.empty(3, 2, dtype=torch.cdouble, device=device)
+        inp_r = torch.randn(3, 2, dtype=torch.double, device=device,
+                            requires_grad=True)
+
+        def do_test():
+            out_c.copy_(inp_r)
+            out_c.sum().backward()
+            self.assertEqual(inp_r.grad, torch.ones_like(inp_r))
+
+        self.assertNotWarn(do_test)
 
 
 class TestAutogradInferenceMode(TestCase):
