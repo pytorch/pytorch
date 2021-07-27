@@ -70,7 +70,6 @@ class Conv2d(nn.Conv2d):
             self.bias is not None,
             self.padding_mode)
         conv.weight = torch.nn.Parameter(self.weight.detach())
-        conv.bias = None
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
         return conv
@@ -173,7 +172,6 @@ class Conv3d(nn.Conv3d):
             self.bias is not None,
             self.padding_mode)
         conv.weight = torch.nn.Parameter(self.weight.detach())
-        conv.bias = None
         if self.bias is not None:
             conv.bias = torch.nn.Parameter(self.bias.detach())
         return conv
