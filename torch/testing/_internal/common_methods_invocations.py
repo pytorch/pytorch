@@ -4547,6 +4547,16 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
+    def make_tensor_(shape, *, low, high):
+        return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
+
+    return [
+        SampleInput(make_tensor_((S,), low=0, high=10)),
+        SampleInput(make_tensor_((S,), low=0, high=5), kwargs=dict(num_classes=10)),
+        SampleInput(make_tensor_((L, M, S), low=0, high=10)),
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4801,6 +4811,16 @@ def reference_mvlgamma(x, d):
         return scipy.special.multigammaln(x, d).astype(np.float16)
 
     return scipy.special.multigammaln(x, d)
+
+
+def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
+    if num_classes == -1:
+        num_classes = int(np.amax(a) + 1)
+
+    idcs = a.reshape(-1) + np.arange(0, a.size, dtype=np.int64) * num_classes
+    one_hot = np.zeros((a.size, num_classes), dtype=a.dtype)
+    np.put(one_hot, idcs, 1)
+    return one_hot.reshape(*a.shape, -1)
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -7875,6 +7895,13 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+        "nn.functional.one_hot",
+        ref=reference_one_hot,
+        supports_out=False,
+        dtypes=_dispatch_dtypes((torch.int64,)),
+        sample_inputs_func=sample_inputs_one_hot,
+    )
 ]
 
 # Common operator groupings
