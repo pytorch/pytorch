@@ -7199,10 +7199,6 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
                        SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal'),
                    ),
                    sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1})),
     UnaryUfuncInfo('polygamma',
@@ -7219,13 +7215,7 @@ op_db: List[OpInfo] = [
                        # Redundant tests
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=TEST_WITH_ROCM),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=TEST_WITH_ROCM),),
+                       SkipInfo('TestCommon'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
@@ -7241,13 +7231,7 @@ op_db: List[OpInfo] = [
                        # Redundant tests
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=TEST_WITH_ROCM),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=TEST_WITH_ROCM),),
+                       SkipInfo('TestCommon'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3})),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
@@ -7264,13 +7248,7 @@ op_db: List[OpInfo] = [
                        # Redundant tests
                        SkipInfo('TestGradients'),
                        SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
-                       # Mismatch: https://github.com/pytorch/pytorch/issues/55357
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                active_if=TEST_WITH_ROCM),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                active_if=TEST_WITH_ROCM),),
+                       SkipInfo('TestCommon'),),
                    sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
     OpInfo('ravel',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
