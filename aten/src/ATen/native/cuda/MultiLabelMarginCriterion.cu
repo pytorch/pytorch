@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/macros/Macros.h>
 #include <ATen/cuda/CUDAContext.h>
