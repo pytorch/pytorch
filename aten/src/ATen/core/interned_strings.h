@@ -364,6 +364,8 @@ namespace c10 {
   _(aten, log_softmax)               \
   _(aten, special_log_softmax)       \
   _(aten, special_zeta)              \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \

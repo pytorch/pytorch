@@ -6,7 +6,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<PrintHandler> print_handler([](const std::string& str) {
   std::cout << str;
 });

@@ -150,6 +150,13 @@ name: Bazel Linux CI (!{{ build_environment }})
     needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     steps:
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
