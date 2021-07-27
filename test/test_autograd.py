@@ -5937,16 +5937,33 @@ for shape in [(1,), ()]:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
 
     def test_graph_save_on_cpu(self):
-        try:
-            torch.autograd.graph.set_save_on_cpu_hooks()
-            a = torch.randn(5, requires_grad=True)
-            y = a * a
-            self.assertEqual(a, y.grad_fn._saved_self)
-            self.assertEqual(a, y.grad_fn._saved_other)
-            y.sum().backward()
-            self.assertEqual(2 * a, a.grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
+        def test(get_input, cuda, pin_memory):
+            try:
+                torch.autograd.graph.set_save_on_cpu_hooks(pin_memory)
+                a = get_input()
+                if cuda:
+                    a.cuda()
+                y = a * a
+                self.assertEqual(a, y.grad_fn._saved_self)
+                self.assertEqual(a, y.grad_fn._saved_other)
+                self.assertEqual(a.dtype, y.grad_fn._saved_self.dtype)
+                self.assertEqual(a.layout, y.grad_fn._saved_self.layout)
+                if y.is_sparse:
+                    y = y.to_dense()
+                y.sum().backward()
+                self.assertEqual(2 * a, a.grad)
+            finally:
+                torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+        for cuda in [False] + ([True] if torch.cuda.is_available() else []):
+            for pin_memory in [True, False]:
+                # FloatTensor
+                test(lambda: torch.randn(5, requires_grad=True), cuda, pin_memory)
+                # DoubleTensor
+                test(lambda: torch.randn(5, requires_grad=True, dtype=torch.double), cuda, pin_memory)
+                # Sparse tensor
+                x = torch.sparse_coo_tensor(torch.tensor([[1, 1]]).long(), torch.tensor([1., 1.]), requires_grad=True)
+                test(lambda: x, cuda, pin_memory)
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_graph_save_on_cpu_cuda(self):
