@@ -371,14 +371,6 @@ static void digamma_kernel(TensorIteratorBase& iter) {
   });
 }
 
-static void trigamma_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "trigamma", [&]() {
-    cpu_kernel(
-        iter,
-        [=](scalar_t a) -> scalar_t { return trigamma(a); });
-  });
-}
-
 static void exp2_kernel(TensorIteratorBase& iter) {
   // Supports only floating types as std::exp2 doesn't have
   // complex overloads.
@@ -392,8 +384,6 @@ static void exp2_kernel(TensorIteratorBase& iter) {
 static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel(iter);
-  } else if (n == 1) {
-    trigamma_kernel(iter);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "polygamma", [&]() {
       cpu_kernel(
@@ -739,7 +729,6 @@ REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
 REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
-REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);
 REGISTER_DISPATCH(kaiser_window_stub, &CPU_CAPABILITY::kaiser_window_kernel);
 REGISTER_DISPATCH(special_entr_stub, &CPU_CAPABILITY::entr_kernel);

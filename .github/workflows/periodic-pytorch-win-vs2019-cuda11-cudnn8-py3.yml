@@ -22,6 +22,7 @@ env:
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
 
@@ -180,10 +181,13 @@ jobs:
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -214,6 +218,13 @@ jobs:
       fail-fast: false
     # TODO: Make this into a composite step
     steps:
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
