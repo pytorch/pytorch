@@ -236,43 +236,43 @@ inline void _vec_softmax(
             BFloat16* output_data =
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
-            Vec_bf16 max_m256_bf16 = Vec_bf16::loadu(input_data);
-            std::tuple<vec::Vectorized<float>, vec::Vectorized<float>> convert_result = convert_bfloat16_float(max_m256_bf16);
-            Vec max_m256_o1 = std::get<0>(convert_result);
-            Vec max_m256_o2 = std::get<1>(convert_result);
+            Vec_bf16 max_vec_bf16 = Vec_bf16::loadu(input_data);
+            std::tuple<vec::Vectorized<float>, vec::Vectorized<float>> convert_result = convert_bfloat16_float(max_vec_bf16);
+            Vec max_vec_o1 = std::get<0>(convert_result);
+            Vec max_vec_o2 = std::get<1>(convert_result);
             std::get<0>(convert_result).store(temp_vec_input_data);
             std::get<1>(convert_result).store(temp_vec_input_data + vectorized_step);
             for (int64_t d = 1; d < dim_size; d++) {
-              Vec_bf16 input_m256_bf16 = Vec_bf16::loadu(input_data + d * dim_stride);
-              convert_result = convert_bfloat16_float(input_m256_bf16);
-              max_m256_o1 = vec::maximum(max_m256_o1, std::get<0>(convert_result));
-              max_m256_o2 = vec::maximum(max_m256_o2, std::get<1>(convert_result));
+              Vec_bf16 input_vec_bf16 = Vec_bf16::loadu(input_data + d * dim_stride);
+              convert_result = convert_bfloat16_float(input_vec_bf16);
+              max_vec_o1 = vec::maximum(max_vec_o1, std::get<0>(convert_result));
+              max_vec_o2 = vec::maximum(max_vec_o2, std::get<1>(convert_result));
               std::get<0>(convert_result).store(temp_vec_input_data + d*vectorized_step*2);
               std::get<1>(convert_result).store(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
             }
             // Step2: Calculate sum
-            Vec sum_m256_o1 = Vec(0.0);
-            Vec sum_m256_o2 = Vec(0.0);
+            Vec sum_vec_o1 = Vec(0.0);
+            Vec sum_vec_o2 = Vec(0.0);
             for (int64_t d = 0; d < dim_size; d++) {
-              Vec output_m256_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2);
-              Vec output_m256_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
-              output_m256_o1 = output_m256_o1.exp();
-              output_m256_o2 = output_m256_o2.exp();
+              Vec output_vec_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2);
+              Vec output_vec_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
+              output_vec_o1 = output_vec_o1.exp();
+              output_vec_o2 = output_vec_o2.exp();
 
-              output_m256_o1.store(temp_vec_output_data + d*vectorized_step*2);
-              output_m256_o2.store(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
+              output_vec_o1.store(temp_vec_output_data + d*vectorized_step*2);
+              output_vec_o2.store(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
 
-              sum_m256_o1 = sum_m256_o1 + output_m256_o1;
-              sum_m256_o2 = sum_m256_o2 + output_m256_o2;
+              sum_vec_o1 = sum_vec_o1 + output_vec_o1;
+              sum_vec_o2 = sum_vec_o2 + output_vec_o2;
             }
             // Step3: Unify
             for (int64_t d = 0; d < dim_size; d++) {
-              Vec output_m256_o1 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2);
-              Vec output_m256_o2 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
-              output_m256_o1 = output_m256_o1/sum_m256_o1;
-              output_m256_o2 = output_m256_o2/sum_m256_o2;
-              Vec_bf16 output_m256_bf16 = convert_float_bfloat16(output_m256_o1, output_m256_o2);
-              output_m256_bf16.store(output_data + d * dim_stride);
+              Vec output_vec_o1 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2);
+              Vec output_vec_o2 = Vec::loadu(temp_vec_output_data + d*vectorized_step*2 + vectorized_step);
+              output_vec_o1 = output_vec_o1/sum_vec_o1;
+              output_vec_o2 = output_vec_o2/sum_vec_o2;
+              Vec_bf16 output_vec_bf16 = convert_float_bfloat16(output_vec_o1, output_vec_o2);
+              output_vec_bf16.store(output_data + d * dim_stride);
             }
             idx += vectorized_step;
           } else {
@@ -339,24 +339,24 @@ inline void _vec_softmax(
             scalar_t* output_data =
                 output_data_base + outer_idx * outer_stride + inner_idx;
             // Step 1: Get max Score
-            Vec max_m256 = Vec::loadu(input_data);
+            Vec max_vec = Vec::loadu(input_data);
             for (int64_t d = 1; d < dim_size; d++) {
-              Vec input_m256 = Vec::loadu(input_data + d * dim_stride);
-              max_m256 = vec::maximum(max_m256, input_m256);
+              Vec input_vec = Vec::loadu(input_data + d * dim_stride);
+              max_vec = vec::maximum(max_vec, input_vec);
             }
             // Step2: Calculate sum
-            Vec sum_m256 = Vec(0.0);
+            Vec sum_vec = Vec(0.0);
             for (int64_t d = 0; d < dim_size; d++) {
-              Vec output_m256 =
-                  (Vec::loadu(input_data + d * dim_stride) - max_m256).exp();
-              output_m256.store(output_data + d * dim_stride);
-              sum_m256 = sum_m256 + output_m256;
+              Vec output_vec =
+                  (Vec::loadu(input_data + d * dim_stride) - max_vec).exp();
+              output_vec.store(output_data + d * dim_stride);
+              sum_vec = sum_vec + output_vec;
             }
             // Step3: Unify
             for (int64_t d = 0; d < dim_size; d++) {
-              Vec output_m256 =
-                  Vec::loadu(output_data + d * dim_stride) / sum_m256;
-              output_m256.store(output_data + d * dim_stride);
+              Vec output_vec =
+                  Vec::loadu(output_data + d * dim_stride) / sum_vec;
+              output_vec.store(output_data + d * dim_stride);
             }
             idx += vectorized_step;
           } else {
