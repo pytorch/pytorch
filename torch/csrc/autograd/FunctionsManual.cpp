@@ -3537,7 +3537,7 @@ Tensor i1e_backward(
 // Let Z := L^{-1} P^T B X_grad^H U^{-1}, then
 // U_grad = [-U^{-1} Z]^H,
 // L_grad = [-Z L^{-1}]^H.
-// After inserting U_grad and L_grad into (!!!) we get the value of LU_grad.
+// After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
 Tensor lu_solve_backward_lu_data(
   const Tensor& grad,
