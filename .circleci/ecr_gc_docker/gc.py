@@ -9,7 +9,7 @@ import sys
 
 # TODO: See if this is actually still needed
 # Default list of legacy tags to keep
-IGNORE_TAGS = {
+PREFIX_IGNORE_TAGS = {
     "pytorch": [
         "256",
         "262",
@@ -205,7 +205,7 @@ stable_window = datetime.timedelta(days=args.keep_stable_days)
 unstable_window = datetime.timedelta(days=args.keep_unstable_days)
 now = datetime.datetime.now(pytz.UTC)
 # Combine inputted ignore_tags with legacy set
-ignore_tags = IGNORE_TAGS.get(args.filter_prefix, [None]).extend(args.ignore_tags.split(","))
+ignore_tags = PREFIX_IGNORE_TAGS.get(args.filter_prefix, []).extend(args.ignore_tags.split(","))
 
 
 def chunks(chunkable, n):
