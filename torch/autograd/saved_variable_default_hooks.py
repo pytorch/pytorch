@@ -15,7 +15,7 @@ def set_save_on_cpu_hooks(pin_memory=False):
             tensor.size(),
             dtype=tensor.dtype,
             layout=tensor.layout,
-            pin_memory=torch.cuda.is_available())
+            pin_memory=(torch.cuda.is_available() and not tensor.is_sparse)
         storage.copy_(tensor)
         return (tensor.device, storage)
 
