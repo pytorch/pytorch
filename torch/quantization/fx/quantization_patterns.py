@@ -728,11 +728,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     float_linear.weight_activation_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
-                        float_linear = self.linear[0]
+                        float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
-                    float_linear.weight_activation_post_process = qconfig.weight()
+                    float_linear.weight_activation_post_process = qconfig.weight()  # type: ignore[union-attr]
                     # Run weight observer
-                    float_linear.weight_activation_post_process(float_linear.weight)
+                    float_linear.weight_activation_post_process(float_linear.weight)  # type: ignore[operator]
 
                 op_out = quantized_graph.create_node(
                     'call_module',

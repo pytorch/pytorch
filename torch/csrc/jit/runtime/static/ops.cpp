@@ -1267,7 +1267,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
         : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::sub(in0_t, in1_t);
+      p_node->Output(0) = at::cpu::sub(in0_t, in1_t, alpha);
     } else {
       auto& out_t = p_node->Output(0).toTensor();
       fastResizeToZero(out_t);

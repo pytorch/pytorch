@@ -23,7 +23,8 @@ void testStaticRuntime(
     const std::string& source,
     const std::vector<c10::IValue>& args,
     const std::vector<c10::IValue>& args2 = {},
-    const bool use_allclose = false);
+    const bool use_allclose = false,
+    const bool use_equalnan = false);
 
 } // namespace test
 } // namespace jit
