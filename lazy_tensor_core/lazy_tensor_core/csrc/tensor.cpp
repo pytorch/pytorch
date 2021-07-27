@@ -441,7 +441,7 @@ void LazyTensor::Async::Wait() {
 }
 
 LazyTensor LazyTensor::Create(const at::Tensor& tensor, const Device& device) {
-  LTC_CHECK_NE(tensor.device().type(), at::kXLA);
+  LTC_CHECK_NE(tensor.device().type(), at::kLazy);
   LazyTensor xtensor(tensor, device);
   DeviceContextArena::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;

@@ -1,4 +1,4 @@
-backend: XLA
+backend: Lazy
 cpp_namespace: torch_lazy_tensors
 supported:
   - add.Tensor

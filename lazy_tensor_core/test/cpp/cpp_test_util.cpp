@@ -71,7 +71,7 @@ const std::unordered_set<std::string>* GetIgnoredCounters() {
 }
 
 at::Tensor ToCpuTensor(const at::Tensor& tensor) {
-  // tensor.to() implicitly triggers a sync if t.device=torch::kXLA.
+  // tensor.to() implicitly triggers a sync if t.device=torch::kLazy.
   return tensor.to(torch::kCPU);
 }
 
