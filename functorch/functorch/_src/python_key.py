@@ -13,52 +13,56 @@ import torch.utils._pytree as pytree
 from functorch._C import hasPythonKey, addPythonKey, removePythonKey
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
+import torch.fx._pytree as fx_pytree
 from .nnc_compile import nnc_compile
 
-class LoggingTensor(torch.Tensor):
+class PythonTensor(torch.Tensor):
     elem: torch.Tensor
 
     __slots__ = ['elem', 'proxy']
 
     @staticmethod
     def __new__(cls, elem, proxy):
-        # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
+        # The wrapping tensor (PythonTensor) is just a meta tensor, so it
         # doesn't hold any memory (meta tensor is generally the preferred type
         # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), True)
+        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        meta = elem.new_empty((0,))
+        meta.set_(meta.storage(), 0, elem.size(), elem.stride())
+        r = torch.Tensor._make_subclass(cls, meta, elem.requires_grad)
+
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         r.proxy = proxy
         return r
 
     def __repr__(self):
-        return f"LoggingTensor({self.elem})"
+        return f"PythonTensor({self.elem})"
 
     __torch_function__ = _disabled_torch_function_impl
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         def unwrap_proxy(e):
-            return e.proxy if isinstance(e, LoggingTensor) else e
+            return e.proxy if isinstance(e, PythonTensor) else e
 
         def unwrap_tensor(e):
-            return e.elem if isinstance(e, LoggingTensor) else e
+            return e.elem if isinstance(e, PythonTensor) else e
         aten_func = getattr(torch.ops.aten, func.__name__)
         proxy_args = pytree.tree_map(unwrap_proxy, args)
-        print(args)
         proxy_out = aten_func(*proxy_args)
         real_out = aten_func(*pytree.tree_map(unwrap_tensor, args))
 
-        def wrap_with_proxy(idx, e):
-            return LoggingTensor(e, proxy_out[idx]) if type(e) == torch.Tensor else e
+        def wrap_with_proxy(e, idx):
+            return PythonTensor(e, proxy_out[idx]) if type(e) == torch.Tensor else e
 
         if isinstance(real_out, tuple):
-            return tuple(tree_map(wrap_with_proxy, enumerate(real_out)))
+            return tuple([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
         elif isinstance(real_out, list):
-            return list(tree_map(wrap_with_proxy, enumerate(real_out)))
+            return list([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
         else:
-            return LoggingTensor(real_out, proxy_out) if type(real_out) ==  torch.Tensor else real_out
+            return PythonTensor(real_out, proxy_out) if type(real_out) ==  torch.Tensor else real_out
 
-class PythonTensor(object):
+class PythonTensor2(object):
     def __init__(self, out, proxy):
         if isinstance(out, torch.Tensor):
             self.value = torch.clone(out)
@@ -67,7 +71,7 @@ class PythonTensor(object):
         self.proxy = proxy
 
     def __repr__(self):
-        return f"PythonTensor({tuple(self.value.shape)})"
+        return f"PythonTensor2({tuple(self.value.shape)})"
 
     def tensor(self):
         return self.value
@@ -77,13 +81,13 @@ class PythonTensor(object):
         func = getattr(getattr(torch.ops, namespace), func_name)
         outs = kwargs['val']
         rets = []
-        proxy_args = map_aggregate(args, lambda i: i.proxy if isinstance(i, PythonTensor) else i)
+        proxy_args = map_aggregate(args, lambda i: i.proxy if isinstance(i, PythonTensor2) else i)
         out_proxy = func(*proxy_args)
         if len(outs) == 1 and isinstance(outs[0], torch.Tensor):
-            return [PythonTensor(outs[0], out_proxy)]
+            return [PythonTensor2(outs[0], out_proxy)]
         for idx, out in enumerate(outs):
             if isinstance(out, torch.Tensor):
-                rets.append(PythonTensor(out, out_proxy[idx]))
+                rets.append(PythonTensor2(out, out_proxy[idx]))
             else:
                 rets.append(out)
         return rets
@@ -102,7 +106,7 @@ class PythonKeyTracer(Tracer):
                 if attr_val is p:
                     if n not in parameter_proxy_cache:
                         proxy = self.create_proxy('get_attr', n, (), {})
-                        parameter_proxy_cache[n] = LoggingTensor(attr_val, proxy)
+                        parameter_proxy_cache[n] = PythonTensor(attr_val, proxy)
                     return parameter_proxy_cache[n]
             return attr_val.data
         return attr_val
@@ -121,7 +125,7 @@ def wrap_key(f, inps):
         assert(len(flat_args) == len(flat_inps))
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
-                flat_args[idx] = LoggingTensor(flat_inps[idx], arg)
+                flat_args[idx] = PythonTensor(flat_inps[idx], arg)
             else:
                 flat_args[idx] = flat_inps[idx]
 
@@ -129,7 +133,7 @@ def wrap_key(f, inps):
         out = f(*tree_args)
         flat_outs, out_spec = pytree.tree_flatten(out)
         for idx in range(len(flat_outs)):
-            if isinstance(flat_outs[idx], torch.Tensor) and isinstance(flat_outs[idx], LoggingTensor):
+            if isinstance(flat_outs[idx], torch.Tensor) and isinstance(flat_outs[idx], PythonTensor):
                 flat_outs[idx] = flat_outs[idx].proxy
         return pytree.tree_unflatten(flat_outs, out_spec)
 
