@@ -1,8 +1,14 @@
 from functools import wraps
+import io
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import _sharded_tensor
+from torch.distributed._sharded_tensor import (
+    load_with_process_group,
+    state_dict_hook,
+    pre_load_state_dict_hook,
+)
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
     EnumerableShardingSpec,
@@ -17,6 +23,26 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
 import unittest
+
+class MyShardedModel2(torch.nn.Module):
+    def __init__(self, spec=None, group=None):
+        super(MyShardedModel2, self).__init__()
+        if spec is not None:
+            self.sharded_tensor2 = _sharded_tensor.empty(spec, 10, 20, process_group=group)
+        else:
+            self.sharded_tensor2 = None
+        self.random_tensor2 = torch.nn.Parameter(torch.rand(2, 2))
+
+
+class MyShardedModel1(torch.nn.Module):
+    def __init__(self, spec=None, group=None):
+        super(MyShardedModel1, self).__init__()
+        if spec is not None:
+            self.sharded_tensor1 = _sharded_tensor.empty(spec, 10, 20, process_group=group)
+        else:
+            self.sharded_tensor1 = None
+        self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
+        self.submodule = MyShardedModel2(spec, group)
 
 class ShardedTensorTestBase(object):
 
@@ -59,6 +85,19 @@ class ShardedTensorTestBase(object):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
+
+    def verify_sharded_tensor(self, st1, st2):
+        st1_local_shards = st1.local_shards()
+        st2_local_shards = st2.local_shards()
+        self.assertEqual(len(st1_local_shards), len(st2_local_shards))
+        for i, st1_local_shard in enumerate(st1_local_shards):
+            self.assertEqual(st1_local_shard.tensor, st2_local_shards[i].tensor)
+            self.assertEqual(st1_local_shard.metadata, st2_local_shards[i].metadata)
+
+        self.assertEqual(st1.metadata(), st2.metadata())
+        self.assertEqual(st1.sharding_spec(), st2.sharding_spec())
+        self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
+
 
 def with_comms(func):
     @wraps(func)
@@ -161,7 +200,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual(f'rank:{rank}/cuda:{rank}', shard_metadata.placement)
 
             # Validate remote shards.
-            remote_shards = sharded_tensor.remote_shards
+            remote_shards = sharded_tensor.remote_shards()
             self.assertEqual(3, len(remote_shards))
 
             for rpc_rank, shards in remote_shards.items():
@@ -210,7 +249,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{shard_rank + 2}/cuda:{shard_rank + 2}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         if self.rank >= 2:
             self.assertEqual(1, len(remote_shards))
         else:
@@ -262,7 +301,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual(f'rank:{shard_rank + 1}/cuda:{shard_rank + 2}', shard_metadata.placement)
 
             # Validate remote shards.
-            remote_shards = sharded_tensor.remote_shards
+            remote_shards = sharded_tensor.remote_shards()
             if self.rank >= 2:
                 self.assertEqual(1, len(remote_shards))
             else:
@@ -313,7 +352,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{shard_idx % 4}/cuda:{shard_idx % 4}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         self.assertEqual(3, len(remote_shards))
         owners = {}
         for rpc_rank, shards in remote_shards.items():
@@ -404,13 +443,13 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(RuntimeError, 'RPC was not initialized'):
             st = _sharded_tensor.empty(spec, 10, 20)
-            st.remote_shards
+            st.remote_shards()
 
         self.init_rpc()
 
         # ShardedTensor was initialized before RPC.
         with self.assertRaisesRegex(RuntimeError, 'RPC was not initialized'):
-            st.remote_shards
+            st.remote_shards()
 
         spec = ChunkShardingSpec(dim=0, placements=["workerfoo/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Invalid worker name'):
@@ -471,6 +510,76 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual([shard_rank, 0], shard_metadata.shard_offsets)
             self.assertEqual([1, 20], shard_metadata.shard_lengths)
             self.assertEqual(f'rank:{shard_rank}/cuda:{shard_rank}', shard_metadata.placement)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_state_dict(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        m = MyShardedModel1(spec)
+
+        # Test save
+        m._register_state_dict_hook(state_dict_hook)
+        buffer = io.BytesIO()
+        torch.save(m.state_dict(), buffer)
+
+        # Test load.
+        module_load = MyShardedModel1()
+        module_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
+
+        buffer.seek(0)
+        state_dict_deser = torch.load(buffer)
+        module_load.load_state_dict(state_dict_deser, strict=False)
+        module_load._register_state_dict_hook(state_dict_hook)
+
+        # Verify after load.
+        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_state_dict_new_group(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
+            ],
+        )
+
+        pg = dist.new_group([2, 3])
+
+        m = MyShardedModel1(spec, pg)
+
+        # Test save
+        m._register_state_dict_hook(state_dict_hook)
+        buffer = io.BytesIO()
+        torch.save(m.state_dict(), buffer)
+
+        # Test load.
+        module_load = MyShardedModel1(spec=None, group=pg)
+        module_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
+
+        buffer.seek(0)
+        with load_with_process_group(pg):
+            state_dict_deser = torch.load(buffer)
+            module_load.load_state_dict(state_dict_deser, strict=False)
+
+        # Verify after load.
+        self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
+        self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
 
 @unittest.skipIf(
@@ -602,7 +711,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{rank}/cuda:{rank}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         self.assertEqual(3, len(remote_shards))
 
         for rpc_rank, shards in remote_shards.items():
@@ -728,7 +837,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{rank}/cuda:{rank}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         if self.rank <= 1:
             self.assertEqual(1, len(remote_shards))
         else:
@@ -785,7 +894,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
                 self.assertEqual(f'rank:{rank * 2}/cuda:{rank * 2 + 1}', shard_metadata.placement)
 
             # Validate remote shards.
-            remote_shards = sharded_tensor.remote_shards
+            remote_shards = sharded_tensor.remote_shards()
             if self.rank == 1 or self.rank == 3:
                 self.assertEqual(1, len(remote_shards))
             else:
@@ -855,7 +964,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'rank:{shard_rank % 2}/cuda:{shard_rank % 2}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         if self.rank <= 1:
             self.assertEqual(1, len(remote_shards))
         else:
@@ -920,7 +1029,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
             self.assertEqual(f'worker{rank}/cuda:{rank}', shard_metadata.placement)
 
         # Validate remote shards.
-        remote_shards = sharded_tensor.remote_shards
+        remote_shards = sharded_tensor.remote_shards()
         self.assertEqual(3, len(remote_shards))
 
         for rpc_rank, shards in remote_shards.items():
