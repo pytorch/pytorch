@@ -263,7 +263,7 @@ class Module:
         self._forward_hooks: Dict[int, Callable] = OrderedDict()
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_pre_hooks: Dict[int, Tuple[Callable, bool]] = OrderedDict()
+        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
         self._modules: Dict[str, Optional['Module']] = OrderedDict()
 
     forward: Callable[..., Any] = _forward_unimplemented
@@ -1275,14 +1275,19 @@ class Module:
         `error_msgs`, before loading `state_dict` into `self`. These arguments
         are exactly the same as those of `_load_from_state_dict`.
 
+        If ``with_module`` is ``True``, then the first argument to the hook is
+        an instance of the module.
+
         Arguments:
             hook (Callable): Callable hook that will be invoked before
                 loading the state dict.
             with_module (bool, optional): Whether or not to pass the module
-                instance to the hook.
+                instance to the hook as the first parameter.
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
-        self._load_state_dict_pre_hooks[handle.id] = (hook, with_module)
+        if with_module:
+            hook = functools.partial(hook, self)
+        self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
@@ -1318,13 +1323,8 @@ class Module:
                 list, and will be reported together in
                 :meth:`~torch.nn.Module.load_state_dict`
         """
-        for hook, with_module in self._load_state_dict_pre_hooks.values():
-            if with_module:
-                # Pass in module instance as well.
-                hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, self)
-            else:
-                # For BC purposes keep previous signature.
-                hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
+        for hook in self._load_state_dict_pre_hooks.values():
+            hook(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
 
         persistent_buffers = {k: v for k, v in self._buffers.items() if k not in self._non_persistent_buffers_set}
         local_name_params = itertools.chain(self._parameters.items(), persistent_buffers.items())
