@@ -10928,7 +10928,8 @@ used to specify arbitrary spacing along :attr:`dim`.
 
 For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
 and this function is that, :func:`torch.trapezoid` returns a value for each integration,
-where as this function returns a cumulative value for every spacing within the integration.
+where as this function returns a cumulative value for every spacing within the integration. This
+is analogous to how `.sum` returns a value and `.cumsum` returns a cumulative sum.
 
 Arguments:
     y (Tensor): Values to use when computing the trapezoidal rule.

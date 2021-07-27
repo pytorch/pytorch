@@ -125,7 +125,7 @@ Tensor cumulative_trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
 
 Tensor cumulative_trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     TORCH_CHECK(y.scalar_type() != kBool, "cumulative_trapezoid: received a bool input for `y`, but bool is not supported")
-    TORCH_CHECK(!(dx.isComplex() || dx.isBoolean()), "trapezoid: Currently, we only support dx as a real number.");
+    TORCH_CHECK(!(dx.isComplex() || dx.isBoolean()), "cumulative_trapezoid: Currently, we only support dx as a real number.");
 
     return do_cumulative_trapezoid(y, dx.toDouble(), dim);
 }

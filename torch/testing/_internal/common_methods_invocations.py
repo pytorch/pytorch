@@ -2541,6 +2541,8 @@ def sample_cumulative_trapezoid(op_info, device, dtype, requires_grad, **kwargs)
         ((2, 3), (2, 3), {'dim': 1}),
         ((6,), (6,), {}),
         ((6,), None, {}),
+        # When 'cumulative_trapezoid' is called with an empty input, it does not produce an output with requires_grad
+        # See Issue #{61619}
         # ((6,0), (6,0), {}),
         ((2, 3), (1, 3), {}),
         ((3, 3), (3, 3), {}),
@@ -7696,6 +7698,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_trapezoid),
     OpInfo('cumulative_trapezoid',
            dtypes=all_types_and_complex_and(),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
            supports_out=False,
            sample_inputs_func=sample_cumulative_trapezoid),
     OpInfo('unsqueeze',
