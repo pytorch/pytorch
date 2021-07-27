@@ -7,7 +7,6 @@
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
-#include <functorch/csrc/PythonKey.h>
 
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
@@ -159,10 +158,10 @@ TensorWrapper::TensorWrapper(
   // we should probably expose TensorImpl's storage_access_should_throw_.
   // We work around it by trying to figure out if the storage access
   // will throw or not. A possible alternative is to try-catch .storage().
-  bool python_tensor = hasPythonKey(value_);
+  // bool python_tensor = hasPythonKey(value_);
   auto* wrapped = maybeGetTensorWrapper(value_);
   auto* batched = maybeGetBatchedImpl(value_);
-  if (python_tensor || batched || (wrapped && wrapped->storage_access_should_throw())) {
+  if (batched || (wrapped && wrapped->storage_access_should_throw())) {
     hacky_storage_access_should_throw_ = true;
     set_storage_access_should_throw();
   } else {
