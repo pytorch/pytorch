@@ -10,7 +10,7 @@ import textwrap
 from . import _C
 
 from ._src.vmap import vmap
-from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev
+from ._src.eager_transforms import grad, grad_and_value, vjp, jacrev, vjpfull
 from ._src.make_functional import make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1
 from ._src.make_functional import (
     make_functional_with_buffers,
