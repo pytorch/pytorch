@@ -219,7 +219,6 @@ void THPPointer<THPGenerator>::free() {
 
 template class THPPointer<THPGenerator>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatBroadcastWarn = false;
 
 void setBackCompatBroadcastWarn(bool warn) {
@@ -230,7 +229,6 @@ bool getBackCompatBroadcastWarn() {
   return backCompatBroadcastWarn;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool backCompatKeepdimWarn = false;
 
 void setBackCompatKeepdimWarn(bool warn) {
