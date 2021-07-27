@@ -179,6 +179,8 @@ class TestPublicBindings(unittest.TestCase):
             "qscheme",
             "set_anomaly_enabled",
             "set_autocast_enabled",
+            'set_autocast_gpu_dtype',
+            'get_autocast_gpu_dtype',
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
