@@ -7095,64 +7095,92 @@ else:
                 _test_helper(x, op, unary=True)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_dlpack_capsule_conversion(self, device, dtype):
         # DLpack does not explicitly support bool (xref dmlc/dlpack#75)
-        # It does it through uint8 type
-        if dtype is torch.bool or 'xla' in device:
-            return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(to_dlpack(x))
         self.assertEqual(z, x)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_dlpack_protocol_conversion(self, device, dtype):
-        if dtype is torch.bool or 'xla' in device:
-            return
         x = make_tensor((5,), device, dtype, low=-9, high=9)
         z = from_dlpack(x)
         self.assertEqual(z, x)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyOnCPUAndCUDA
+    def test_dlpack_shared_storage(self, device):
+        x = make_tensor((5,), device, torch.float64, low=-9, high=9)
+        z = from_dlpack(to_dlpack(x))
+        z[0] = z[0] + 20.0
+        self.assertEqual(z, x)
+
+    @skipMeta
+    @onlyCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_streams(self, device, dtype):
-        if dtype is torch.bool or 'xla' in device:
-            return
         # Create a stream where the tensor will reside
-        if device == 'cuda':
-            x = make_tensor((5,), device, dtype, low=-9, high=9)
-            stream = torch.cuda.Stream()
-            with torch.cuda.stream(stream):
-                z = from_dlpack(x)
-            stream.synchronize()
-            self.assertEqual(z, x)
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # DLPack manages this synchronization for us, so we don't need to
+        # explicitly wait until x is populated
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            z = from_dlpack(x)
+        stream.synchronize()
+        self.assertEqual(z, x)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_dlpack_conversion_with_diff_streams(self, device, dtype):
-        if dtype is torch.bool or 'xla' in device:
-            return
-        if device == 'cuda':
-            from torch._C import _from_dlpack
-            x = make_tensor((5,), device, dtype, low=-9, high=9)
-            stream_a = torch.cuda.Stream()
-            stream_b = torch.cuda.Stream()
-            with torch.cuda.stream(stream_a):
-                z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
-                # sync in stream a forces the stream b work to be completed
-                stream_a.synchronize()
-            stream_b.synchronize()
-            self.assertEqual(z, x)
+        from torch._C import _from_dlpack
+        x = make_tensor((5,), device, dtype, low=-9, high=9)
+        stream_a = torch.cuda.Stream()
+        stream_b = torch.cuda.Stream()
+        # DLPack protocol helps establish a correct stream order
+        # (hence data dependency) at the exchange boundary.
+        # the `tensor.__dlpack__` method will insert a synchronization event
+        # in the current stream to make sure that it was correctly populated.
+        with torch.cuda.stream(stream_a):
+            z = _from_dlpack(x.__dlpack__(stream_b.cuda_stream))
+            stream_a.synchronize()
+        stream_b.synchronize()
+        self.assertEqual(z, x)
 
     @skipMeta
-    @dtypes(*torch.testing.get_all_dtypes())
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
-        if dtype is torch.bool or 'xla' in device:
-            return
         with self.assertRaises(TypeError):
             x = make_tensor((5,), device, dtype, low=-9, high=9)
             x.__dlpack__(stream=object())
+
+    @skipMeta
+    def test_dlpack_error_on_bool_tensor(self):
+        x = torch.tensor([True], dtype=torch.bool)
+        with self.assertRaises(RuntimeError):
+            to_dlpack(x)
+
+    # TODO: increase tests once NumPy supports the `__dlpack__` protocol
+
+    @skipMeta
+    def test_dlpack_export_requires_grad(self):
+        x = torch.zeros(10, dtype=torch.float32, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, r"require gradient"):
+            x.__dlpack__()
+
+    @skipMeta
+    def test_dlpack_export_is_conj(self):
+        x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
+        y = torch.conj(x)
+        with self.assertRaisesRegex(RuntimeError, r"conjugate bit"):
+            y.__dlpack__()
 
     @onlyCUDA
     @unittest.skipIf(PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property")

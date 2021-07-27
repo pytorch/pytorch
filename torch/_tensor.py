@@ -1056,11 +1056,12 @@ class Tensor(torch._C._TensorBase):
 
     def __dlpack__(self, stream=None):
         """
-        Creates a dlpack capsule of the current tensor to
+        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_ of the current tensor to
         be exported to other libraries.
 
         This function will be called from the `from_dlpack` method
-        of the consumer library.
+        of the library that will consume the capsule. `from_dlpack` passes the current
+        stream to this method as part of the specification.
 
         Args:
             stream (integer or None): A Python integer representing a pointer
@@ -1073,6 +1074,14 @@ class Tensor(torch._C._TensorBase):
         """
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack__, (self,), self, stream)
+
+        # Some semantics that can prevent tensors from being exported are
+        # when they require a gradient or they have their conjugate bit set
+        if self.requires_grad:
+            raise RuntimeError('Can\'t export tensors that require gradient, use tensor.detach()')
+        if self.is_conj():
+            raise RuntimeError('Can\'t export tensors with the conjugate bit set')
+
         if stream is not None and type(stream) is not int:
             # Stream pointers in CUDA/ROCm are uniquely numbered and can
             # be retrieved from their integer value.
@@ -1088,26 +1097,23 @@ class Tensor(torch._C._TensorBase):
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
-        class DLPackIds(enum.IntEnum):
-            cpu = 1
-            cpu_pinned = 3
-            cuda = 2
-            opencl = 4
-            vulkan = 7
-            rocm = 10
-
+        # Avoid circular import
+        from torch.utils.dlpack import DLDeviceType
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
         idx = self.device.index if self.device.index is not None else 0
         device_type = self.device.type
         if device_type == 'cuda' and torch.version.hip is not None:
-            device_type = 'rocm'
+            device_type = DLDeviceType.kDLROCM
         elif device_type == 'cpu' and self.is_pinned():
-            device_type = 'cpu_pinned'
-        try:
-            return (DLPackIds[device_type], idx)
-        except KeyError:
+            device_type = DLDeviceType.kDLCPUPinned
+        elif device_type == 'cuda':
+            device_type = DLDeviceType.kDLGPU
+        elif device_type == 'cpu':
+            device_type = DLDeviceType.kDLCPU
+        else:
             raise ValueError('Unknown device type {} for Dlpack'.format(device_type))
+        return (device_type, idx)
 
     __module__ = 'torch'
 
