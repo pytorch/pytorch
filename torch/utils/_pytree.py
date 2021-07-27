@@ -70,7 +70,7 @@ _register_pytree_node(namedtuple, _namedtuple_flatten, _namedtuple_unflatten)
 
 
 # h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
-def _is_namedtuple_instance(pytree: Any):
+def _is_namedtuple_instance(pytree: Any) -> bool:
     typ = type(pytree)
     bases = typ.__bases__
     if len(bases) != 1 or bases[0] != tuple:
@@ -80,7 +80,7 @@ def _is_namedtuple_instance(pytree: Any):
         return False
     return all(type(entry) == str for entry in fields)
 
-def _get_node_type(pytree: Any):
+def _get_node_type(pytree: Any) -> Any:
     if _is_namedtuple_instance(pytree):
         return namedtuple
     return type(pytree)
