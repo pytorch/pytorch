@@ -142,9 +142,6 @@ def process_for_nnapi(model, inputs, serializer=None):
     ]
     shape_compute_module.define("".join(real_shape_compute_lines))
 
-    for line in shape_compute_lines:
-        print(line)
-
     return (
         shape_compute_module,
         ser_model_tensor,

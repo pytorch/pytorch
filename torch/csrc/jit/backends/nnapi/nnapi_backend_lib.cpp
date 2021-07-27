@@ -3,6 +3,8 @@
 #include <ATen/nnapi/nnapi_bind.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+#include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 
@@ -11,7 +13,6 @@ namespace jit {
 
 // This file has no implementation yet, but the declarations are necessary to
 // register the backend properly and test preprocess
-// TODO T91991928: implement compile() and execute()
 class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
@@ -47,8 +48,12 @@ class NnapiBackend : public PyTorchBackendInterface {
   c10::impl::GenericList execute(
       c10::IValue handle,
       c10::impl::GenericList inputs) override {
+    c10::List<at::Tensor> tensorInp;
+    for (c10::IValue element: inputs) {
+      tensorInp.push_back(element.toTensor());
+    }
     if (comp_ == nullptr) {
-      init(handle, inputs);
+      init(handle, tensorInp);
     }
     TORCH_CHECK(comp_ != nullptr)
 
@@ -60,18 +65,17 @@ class NnapiBackend : public PyTorchBackendInterface {
     // Format inputs
     auto dict = handle.toGenericDict();
     auto inp_mem_fmts = dict.at("inp_mem_fmts").toIntList();
-    TORCH_CHECK(inputs.size() == inp_mem_fmts.size());
+    TORCH_CHECK(tensorInp.size() == inp_mem_fmts.size());
     std::vector<at::Tensor> fixed_inputs;
-    for (int i = 0; i < inputs.size(); i++) {
+    for (int i = 0; i < tensorInp.size(); i++) {
       int fmt = inp_mem_fmts[i];
-      c10::IValue curInp = inputs[i];
       // These constants match the values in DimOrder in serializer.py
       // TODO: See if it's possible to use those directly.
       if (fmt == 0) {
-        fixed_inputs.push_back(curInp.toTensor().contiguous());
+        fixed_inputs.push_back(tensorInp.get(i).contiguous());
       } else if (fmt == 1) {
         c10::IntArrayRef order = {0, 2, 3, 1};
-        fixed_inputs.push_back(curInp.toTensor().permute(order).contiguous());
+        fixed_inputs.push_back(tensorInp.get(i).permute(order).contiguous());
       } else {
         throw std::exception();
         std::cerr << "Invalid mem_fmt" << std::endl;
@@ -88,8 +92,7 @@ class NnapiBackend : public PyTorchBackendInterface {
       // These constants match the values in DimOrder in serializer.py
       if (fmt == 1) {
         c10::IntArrayRef order = {0, 3, 1, 2};
-        at::Tensor curOut = outputs[i];
-         outputs[i] = curOut.permute(order);
+        outputs[i] = outputs.get(i).permute(order);
       } else if (fmt != 0) {
         throw std::exception();
         std::cerr << "Invalid mem_fmt" << std::endl;
@@ -105,7 +108,7 @@ class NnapiBackend : public PyTorchBackendInterface {
   at::Tensor ser_model_;
   mobile::Module shape_compute_module_;
 
-  void init(c10::IValue handle, c10::impl::GenericList inputs) {
+  void init(c10::IValue handle, c10::List<at::Tensor> inputs) {
     auto dict = handle.toGenericDict();
     std::stringstream ss;
     auto shape_ptr = dict.at("shape_compute_module").toString();
@@ -114,7 +117,7 @@ class NnapiBackend : public PyTorchBackendInterface {
 
     TORCH_CHECK(comp_ == nullptr);
     auto weights = dict.at("weights").toTensorList();
-    out_templates_ = shape_compute_module_.run_method("prepare", ser_model_, weights).toTensorList();
+    out_templates_ = shape_compute_module_.run_method("prepare", ser_model_, inputs).toTensorList();
     comp_.reset(new torch::nnapi::bind::NnapiCompilation());
     comp_->init(ser_model_, weights.vec());
   }
