@@ -17993,7 +17993,7 @@ class TestStateDictHooks(TestCase):
             self.assertEqual(m_state_dict, state_dict)
             pass
 
-        def hook_with_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs, module):
+        def hook_with_module(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
             self.assertEqual(m_state_dict, state_dict)
             self.assertTrue(m_load is module)
             pass
@@ -18014,6 +18014,7 @@ class TestStateDictHooks(TestCase):
 
             def my_pre_load_hook_with_module(
                 self,
+                module,
                 state_dict,
                 prefix,
                 local_metadata,
@@ -18021,7 +18022,6 @@ class TestStateDictHooks(TestCase):
                 missing_keys,
                 unexpected_keys,
                 error_msgs,
-                module
             ):
                 assert [] == error_msgs
                 assert [] == unexpected_keys
