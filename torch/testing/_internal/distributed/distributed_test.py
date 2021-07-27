@@ -7329,22 +7329,12 @@ class DistributedTest:
                 bucket_size_limits = [
                     int(b) for b in logging_data["bucket_size_limits"].split(", ")
                 ]
-                if i < 2:
-                    # first_bucket_bytes is actually the last because we reverse
-                    # parameter bucket order.
-                    self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != len(bucket_size_limits) - 1:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
-                else:
-                    # TODO: rebuild buckets places first bucket at beginning, but
-                    # might be better to move it to end.
-                    self.assertEqual(
-                        bucket_size_limits[0], first_bucket_bytes_mb
-                    )
-                    for j, bucket_size in enumerate(bucket_size_limits):
-                        if j != 0:
-                            self.assertEqual(bucket_size, default_bucket_cap_mb)
+                # first_bucket_bytes is actually the last because we reverse
+                # parameter bucket order.
+                self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
+                for j, bucket_size in enumerate(bucket_size_limits):
+                    if j != len(bucket_size_limits) - 1:
+                        self.assertEqual(bucket_size, default_bucket_cap_mb)
 
         @skip_if_lt_x_gpu(2)
         @unittest.skipIf(
