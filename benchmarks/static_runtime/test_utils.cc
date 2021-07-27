@@ -1,6 +1,6 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
-#include "caffe2/benchmarks/static_runtime/test_utils.h"
+#include "test_utils.h"
 
 #include <ATen/core/ivalue.h>
 #include <gtest/gtest.h>
