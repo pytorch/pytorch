@@ -266,7 +266,7 @@ STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.
 // aten::{f.func}
 static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
   return c10::Dispatcher::singleton()
-      .findSchemaOrThrow("aten::{str(f.func.name)}", "{f.func.name.overload_name}")
+      .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
       .typed<{name}::schema>();
 }}
 """
