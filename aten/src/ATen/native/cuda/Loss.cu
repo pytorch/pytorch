@@ -598,7 +598,7 @@ TORCH_IMPL_FUNC(nll_loss_backward_out_cuda)
       self,
       target,
       total_weight,
-      weight_opt,
+      weight,
       reduction,
       ignore_index);
 }
