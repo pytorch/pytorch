@@ -7,6 +7,7 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdio.h>
 #include <chrono>
+#include <cstdio>
 
 namespace torch {
 namespace jit {

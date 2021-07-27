@@ -1,6 +1,6 @@
 import unittest
 
-from tools import mypy_wrapper
+from tools.linter import mypy_wrapper
 
 
 class TestMypyWrapper(unittest.TestCase):

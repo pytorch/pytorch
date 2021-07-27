@@ -119,6 +119,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       const std::vector<at::Tensor>& args);
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct GlobalBuffers {
     std::vector<at::Tensor> empty_buffers;
     std::vector<at::Tensor> zero_buffers;

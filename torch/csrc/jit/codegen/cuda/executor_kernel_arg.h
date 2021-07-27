@@ -52,8 +52,7 @@ struct TensorArgCodegen<T, 0, nvfuser_index_t> {
 };
 
 struct ArgAbstract {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  virtual ~ArgAbstract() {}
+  virtual ~ArgAbstract() = default;
   virtual void* arg() = 0;
 };
 
@@ -94,8 +93,6 @@ struct BoolArg : public ArgAbstract {
 };
 
 struct TensorArgAbstract : ArgAbstract {
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  virtual ~TensorArgAbstract(){};
   virtual void setSize(int i, int64_t size) = 0;
   virtual void setStride(int i, int64_t stride) = 0;
   virtual void setPointer(void* ptr) = 0;
@@ -103,6 +100,7 @@ struct TensorArgAbstract : ArgAbstract {
 
 // This should match the tensor used in the code generation (almost exactly)
 template <typename TENSOR_TYPE, typename nvfuser_index_t>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TensorArg : public TensorArgAbstract {
   TENSOR_TYPE instance_;
 

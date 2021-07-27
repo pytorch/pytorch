@@ -16,6 +16,7 @@ namespace cuda {
 namespace kir {
 
 //! Summary of interesting facts about the kernel
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KernelSummary {
   //! Count of WAR (write-after-read) hazard barriers
   int war_hazard_syncs_count = 0;
@@ -70,6 +71,7 @@ struct KernelSummary {
 //!  by a Fusion object. The goal is to have the Kernel object
 //!  own the Kernel IR nodes
 //!
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
  public:
   Kernel() = default;

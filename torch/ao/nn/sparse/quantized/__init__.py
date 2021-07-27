@@ -1,4 +1,4 @@
-from . import dynamic
+from torch.ao.nn.sparse.quantized import dynamic
 
 from .linear import Linear
 from .linear import LinearPackedParams

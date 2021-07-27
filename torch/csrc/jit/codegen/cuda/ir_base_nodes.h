@@ -233,8 +233,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   //! Returns true when other is a consumer of this
   bool isConsumerOf(const Val* other) const;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-explicit-virtual-functions,clang-diagnostic-inconsistent-missing-override,modernize-use-override)
-  virtual bool sameType(const Statement* other) {
+  bool sameType(const Statement* other) override {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();
   }

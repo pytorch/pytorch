@@ -6,13 +6,12 @@
 #import <ATen/native/metal/mpscnn/tests/MetalOpTestRunner.h>
 
 @implementation MetalOpTestRunner {
-  NSMutableDictionary *_tests;
+  NSMutableDictionary* _tests;
 }
 
-+ (instancetype)sharedInstance
-{
++ (instancetype)sharedInstance {
   static dispatch_once_t onceToken;
-  static MetalOpTestRunner *instance = nil;
+  static MetalOpTestRunner* instance = nil;
   dispatch_once(&onceToken, ^{
     instance = [MetalOpTestRunner new];
   });
@@ -29,9 +28,11 @@
 
 - (void)registerTests {
   _tests = [NSMutableDictionary dictionary];
-#define REG_TEST(arg1, arg2) _tests[@arg1] = ^BOOL(void){return arg2();}
+#define REG_TEST(arg1, arg2)    \
+  _tests[@arg1] = ^BOOL(void) { \
+    return arg2();              \
+  }
   REG_TEST("test_synchronization", test_synchronization);
-  REG_TEST("test_nchw_to_nc4_cpu", test_nchw_to_nc4_cpu);
   REG_TEST("test_copy_nchw_to_metal", test_copy_nchw_to_metal);
   REG_TEST("test_conv2d", test_conv2d);
   REG_TEST("test_depthwiseConv", test_depthwiseConv);
@@ -81,7 +82,7 @@
   REG_TEST("test_reflection_pad2d", test_reflection_pad2d);
 }
 
-- (NSDictionary *) tests {
+- (NSDictionary*)tests {
   return _tests;
 }
 

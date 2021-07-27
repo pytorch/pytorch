@@ -263,6 +263,7 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
   }
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
@@ -313,6 +314,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(ShiftOp*);
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
  public:
   std::unordered_map<Val*, Val*> mutations;

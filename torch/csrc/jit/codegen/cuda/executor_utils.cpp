@@ -92,6 +92,7 @@ bool validateKernelArgTensor(
   // Check the rank of the tensors.
   size_t arg_dim = arg.dim();
   // Note: This requires current Fusion to be active.
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t param_dim =
       TensorDomain::noReductions(param->as<TensorView>()->getRootDomain())
           .size();
@@ -633,6 +634,7 @@ NvrtcFunction nvrtcCompile(
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
 
   // lazily construct context if non-existing yet;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   CUcontext pctx = nullptr;
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
   if (!pctx) {
@@ -681,6 +683,7 @@ NvrtcFunction nvrtcCompile(
   const std::string compute = std::string("--gpu-architecture=") +
       (compile_to_sass ? "sm_" : "compute_") + std::to_string(major) +
       std::to_string(minor);
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
@@ -715,7 +718,9 @@ NvrtcFunction nvrtcCompile(
   const char* ptxas_opt_level = getenv("PYTORCH_NVFUSER_JIT_OPT_LEVEL");
   std::string jit_opt_level = "-O";
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<CUjit_option> options;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<void*> option_vals;
   std::vector<char> info_log;
   unsigned int log_size = 8196;
@@ -805,6 +810,7 @@ NvrtcFunction nvrtcCompile(
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t logsize;
       at::globalContext().getNVRTC().nvrtcGetProgramLogSize(program, &logsize);
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<char> log(logsize);
       at::globalContext().getNVRTC().nvrtcGetProgramLog(program, log.data());
 
@@ -828,6 +834,7 @@ NvrtcFunction nvrtcCompile(
       program, func_name.c_str(), &lowered_kernel_name);
 
   size_t ptx_size = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<char> ptx;
 
   {

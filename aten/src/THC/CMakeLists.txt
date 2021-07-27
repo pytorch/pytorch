@@ -5,27 +5,6 @@ PARENT_SCOPE)
 
 configure_file(THCGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h")
 
-set(extra_src)
-# loop over all types
-foreach(THC_TYPE Byte Char Short Int Long Half Float Double)
-   # loop over files which need to be split between types (because of long compile times)
-   foreach(THC_FILE TensorMathPointwise)
-      if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
-         file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu"
-           "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerate${THC_TYPE}Type.h>\n")
-      endif()
-      list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}${THC_TYPE}.cu")
-   endforeach()
-endforeach()
-
-foreach(THC_FILE TensorMathPointwise)
-   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
-      file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu"
-        "#include <THC/THC${THC_FILE}.cuh>\n#include <THC/THCTensor.hpp>\n\n#include <THC/generic/THC${THC_FILE}.cu>\n#include <THC/THCGenerateBoolType.h>\n")
-   endif()
-   list(APPEND extra_src "${CMAKE_CURRENT_SOURCE_DIR}/generated/THC${THC_FILE}Bool.cu")
-endforeach()
-
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCCachingHostAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCGeneral.cpp
@@ -43,7 +22,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
-  ${extra_src}
   PARENT_SCOPE)
 
 install(FILES
@@ -88,7 +66,6 @@ install(FILES
           THCIntegerDivider.cuh
           THCNumerics.cuh
           THCTensorInfo.cuh
-          THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
           THCTensorMathMagma.h
           THCThrustAllocator.cuh
@@ -116,8 +93,6 @@ install(FILES
           generic/THCTensorMathMagma.cpp
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
-          generic/THCTensorMathPointwise.h
-          generic/THCTensorMathPointwise.cu
           generic/THCTensorScatterGather.h
           generic/THCTensorScatterGather.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")

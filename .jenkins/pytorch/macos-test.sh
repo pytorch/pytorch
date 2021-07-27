@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 export PYTORCH_TEST_SKIP_NOARCH=1
 
 conda install -y six
-pip install -q hypothesis "librosa>=0.6.2" "numba<=0.49.1" psutil
+pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" psutil
 
 # TODO move this to docker
 pip install unittest-xml-reporting pytest
@@ -158,7 +158,6 @@ test_jit_hooks() {
   popd
   assert_git_not_dirty
 }
-
 
 if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
