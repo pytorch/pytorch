@@ -303,13 +303,9 @@ Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional
   return at::log_softmax(input, dim, dtype);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);
