@@ -90,11 +90,11 @@ class TestNNAPI(TestCase):
     def test_prelu(self):
         arg = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
         single_a = torch.nn.PReLU()
-        # self.check(single_a, arg)
+        self.check(single_a, arg)
         multi_a = torch.nn.PReLU(4)
         with torch.no_grad():
             multi_a.weight.copy_(torch.tensor([.1, .2, .3, .4]))
-        # self.check(multi_a, nhwc(arg))
+        self.check(multi_a, nhwc(arg))
 
         # Test flexible size
         self.check(
@@ -162,11 +162,29 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
+        # flex inputs
         self.check(
             torch.nn.Flatten(),
             torch.randn(4, 2, 1, 3, 7),
             convert_args=[torch.zeros(0, 2, 1, 3, 7)]
         )
+
+        # channels last
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 1, 4, 7))
+        )
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 3, 1, 1))
+        )
+
+        # Exceptions
+        with self.assertRaisesRegex(Exception, "not supported on NHWC"):
+            self.check(
+                torch.nn.Flatten(),
+                nhwc(torch.randn(1, 3, 4, 4))
+            )
         with self.assertRaisesRegex(Exception, "Flattening flexible dims is not supported yet"):
             self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
         with self.assertRaisesRegex(Exception, "Only 1 dim"):
