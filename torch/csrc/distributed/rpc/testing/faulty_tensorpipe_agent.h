@@ -67,7 +67,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
  protected:
   // This function checks the messageTypesToFail_ to determine whether to use
   // the faulty send or not.
-  bool shouldFailMessage(MessageType type) const;
+  virtual bool shouldFailMessage(MessageType type) const;
 
  private:
   // This function parses the list of strings passed in by the python tests and

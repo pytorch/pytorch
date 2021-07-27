@@ -466,6 +466,18 @@ Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t di
   }
 }
 
+Tensor solve_jvp(
+    const Tensor& input_primal,
+    const Tensor& input_tangent,
+    const Tensor& other_tangent,
+    const Tensor& result) {
+  bool vector_case = at::native::linalg_solve_is_vector_rhs(input_tangent, other_tangent);
+  if (vector_case) {
+    return at::linalg_solve(input_primal, other_tangent - at::matmul(input_tangent, result.unsqueeze(-1)).squeeze(-1));
+  }
+  return at::linalg_solve(input_primal, other_tangent - at::matmul(input_tangent, result));
+}
+
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return at::linalg_solve(A.conj().transpose(-2, -1), grad);
 }
@@ -476,9 +488,8 @@ Tensor solve_backward_A(const Tensor & grad, const Tensor & self, const Tensor &
     return -at::mm(grad_self, solution.conj().transpose(-2, -1));
   }
   // if self was unsqueezed from (..., M) to (..., M, 1)
-  auto batched_rhs_shape = IntArrayRef(A.sizes().data(), A.dim()-1);  // A.shape[:-1]
-  bool is_rhs_broadcasted = self.dim() == 1 || (A.dim()-1 == self.dim() && self.sizes().equals(batched_rhs_shape));
-  if (is_rhs_broadcasted) {
+  bool vector_case = at::native::linalg_solve_is_vector_rhs(A, self);
+  if (vector_case) {
     return -at::matmul(grad_self.unsqueeze(-1), solution.unsqueeze(-1).conj().transpose(-2, -1));
   }
   return -at::matmul(grad_self, solution.conj().transpose(-2, -1));
