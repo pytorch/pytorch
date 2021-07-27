@@ -1405,11 +1405,17 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
+        @unittest.skipIf(
+            BACKEND == "_internal_ucc", "UCC does not support send/recv from any source"
+        )
         def test_send_recv_any_source(self):
             self._test_send_recv_any_source(profiler_ctx=None)
 
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
+        )
+        @unittest.skipIf(
+            BACKEND == "_internal_ucc", "UCC does not support send/recv from any source"
         )
         def test_send_recv_any_source_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
@@ -1417,6 +1423,9 @@ class DistributedTest:
 
         @unittest.skipIf(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
+        )
+        @unittest.skipIf(
+            BACKEND == "_internal_ucc", "UCC does not support send/recv from any source"
         )
         @unittest.skipIf(IS_FBCODE, "Kineto in fbcode code causes hang")
         @unittest.skipIf(
@@ -1651,6 +1660,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support broadcast")
         def test_broadcast(self):
             group, group_id, rank = self._init_global_test()
             self._test_broadcast_helper(group, group_id, rank)
@@ -1669,11 +1679,13 @@ class DistributedTest:
 
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support broadcast")
         def test_broadcast_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_broadcast_helper(group, group_id, rank)
 
         @unittest.skipIf(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @unittest.skipIf(BACKEND == "_internal_ucc", "UCC does not support broadcast")
         def test_broadcast_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_broadcast_helper(group, group_id, rank)
