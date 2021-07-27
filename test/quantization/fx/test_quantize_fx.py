@@ -552,12 +552,9 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
         return tests
 
-    """
-    Unit tests for functionalities
-    """
     @skipIfNoFBGEMM
-    def test_functional_not_reference(self):
-        """ Test quantizing functional conv and linear
+    def test_conv_linear_not_reference(self):
+        """ Test quantizing conv and linear
         """
         tests = self._get_conv_linear_test_cases(is_reference=False)
         for (is_dynamic, ModuleClass, module_constructor_inputs,
@@ -574,7 +571,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 is_reference=False)
 
     @skipIfNoFBGEMM
-    def test_functional_reference(self):
+    def test_conv_linear_reference(self):
         """ Test quantizing functional conv and linear with reference option
         """
         tests = self._get_conv_linear_test_cases(is_reference=True)
@@ -590,6 +587,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
+            # TODO: extra checks to make sure weight_activation_post_process is attached
+            # to the float modules in reference patterns
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
