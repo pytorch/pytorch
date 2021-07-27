@@ -292,7 +292,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
     return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(vjp, is_inputs_tuple)
 
 
-def jvp(func, inputs, v=None, create_graph=False, strict=False):
+def jvp(func, inputs, v=None, create_graph=False, strict=False, double_backwards_trick=True):
     r"""Function that computes the dot product between  the Jacobian of
     the given function at the point given by the inputs and a vector ``v``.
 
@@ -349,44 +349,55 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         (sometimes called the double backwards trick) as we don't have support
         for forward mode AD in PyTorch at the moment.
     """
-
-    with torch.enable_grad():
+    if v is not None:
+        _, v = _as_tuple(v, "v", "jvp")
         is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
-        inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
-
-        if v is not None:
-            _, v = _as_tuple(v, "v", "jvp")
-            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
-            _validate_v(v, inputs, is_inputs_tuple)
-        else:
-            if len(inputs) != 1 or inputs[0].nelement() != 1:
-                raise RuntimeError("The vector v can only be None if the input to "
-                                   "the user-provided function is a single Tensor "
-                                   "with a single element.")
-
-        outputs = func(*inputs)
-        is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
-        _check_requires_grad(outputs, "outputs", strict=strict)
-        # The backward is linear so the value of grad_outputs is not important as
-        # it won't appear in the double backward graph. We only need to ensure that
-        # it does not contain inf or nan.
-        grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
-
-        grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
-        _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
-
-    if create_graph:
+        _validate_v(v, inputs, is_inputs_tuple)
+    else:
+        if len(inputs) != 1 or inputs[0].nelement() != 1:
+            raise RuntimeError("The vector v can only be None if the input to "
+                               "the user-provided function is a single Tensor "
+                               "with a single element.")
+    if not double_backwards_trick:
+        if create_graph:
+            raise RuntimeError('torch.autograd.functional.jacobian: `create_graph=True` '
+                               'and `double_backwards_trick=False` are not supported together. '
+                               'Please either set `create_graph=False` or '
+                               '`double_backwards_trick=True`.')
+        with fwAD.dual_level():
+            dual_inputs = tuple(
+                fwAD.make_dual(input, tangent) for input, tangent in zip(inputs, v))
+            dual_outputs = _as_tuple(func(*dual_inputs))
+            # TODO what if not all outputs are dual tensors
+            outputs, jvp = zip(*[fwAD.unpack_dual(dual_out)[0] for dual_out in dual_outputs])
+    else:
         with torch.enable_grad():
+            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
+
+            inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
+            outputs = func(*inputs)
+            is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+            _check_requires_grad(outputs, "outputs", strict=strict)
+            # The backward is linear so the value of grad_outputs is not important as
+            # it won't appear in the double backward graph. We only need to ensure that
+            # it does not contain inf or nan.
+            grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+
+            grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
+            _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+
+        if create_graph:
+            with torch.enable_grad():
+                grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
+                jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
+        else:
             grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
             jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
-    else:
-        grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
-        jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
 
-    # Cleanup objects and return them to the user
-    outputs = _grad_postprocess(outputs, create_graph)
-    jvp = _grad_postprocess(jvp, create_graph)
-
+        # Cleanup objects and return them to the user
+        outputs = _grad_postprocess(outputs, create_graph)
+        jvp = _grad_postprocess(jvp, create_graph)
+    # why is_inputs_tuple is not used?
     return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(jvp, is_outputs_tuple)
 
 
@@ -423,21 +434,21 @@ def _construct_standard_basis_for(tensors: Tuple[torch.Tensor, ...], tensor_nume
 def _jacfwd(func, inputs, strict=False, vectorize=False):
     if strict:
         raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
-                            'and `forward_ad=True` are not supported together (yet). '
-                            'Please either set `strict=False` or '
-                            '`forward_ad=False`.')
+                           'and `forward_ad=True` are not supported together (yet). '
+                           'Please either set `strict=False` or '
+                           '`forward_ad=False`.')
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jacobian")
     outputs = func(*inputs)
     is_outputs_tuple, outputs = _as_tuple(outputs,
-                                            "outputs of the user-provided function",
-                                            "jacobian")
+                                          "outputs of the user-provided function",
+                                          "jacobian")
     if vectorize:
         # See NOTE: [Computing jacobian with vmap and grad for multiple outputs]
         if strict:
             raise RuntimeError('torch.autograd.functional.jacobian: `strict=True` '
-                                'and `vectorized=True` are not supported together. '
-                                'Please either set `strict=False` or '
-                                '`vectorize=False`.')
+                               'and `vectorized=True` are not supported together. '
+                               'Please either set `strict=False` or '
+                               '`vectorize=False`.')
         input_numels = tuple(input.numel() for input in inputs)
 
         # Step 1: Prepare tangents
@@ -540,6 +551,11 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
                  [0., 3.]]))
     """
     if forward_ad:
+        if create_graph:
+            raise RuntimeError('torch.autograd.functional.jacobian: `create_graph=True` '
+                               'and `forward_ad=True` are not supported together (yet). '
+                               'Please either set `strict=False` or '
+                               '`forward_ad=False`.')
         return _jacfwd(func, inputs, strict, vectorize)
 
     with torch.enable_grad():
@@ -551,8 +567,6 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
                                               "outputs of the user-provided function",
                                               "jacobian")
         _check_requires_grad(outputs, "outputs", strict=strict)
-
-
 
         if vectorize:
             if strict:
