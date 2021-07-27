@@ -855,7 +855,7 @@ class DistributedDataParallel(Module, _Joinable):
             # during forward computation.
             # This should be called only once during whole training period.
             if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-                if not self.static_graph and self.find_unused_parameters:
+                if self.static_graph or not self.find_unused_parameters:
                     logging.info(
                         "Reducer buckets have been rebuilt in this iteration."
                     )
