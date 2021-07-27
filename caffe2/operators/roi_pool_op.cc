@@ -118,15 +118,12 @@ C10_EXPORT bool RoIPoolOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPool, RoIPoolOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIPoolGradient, RoIPoolGradientOp<float, CPUContext>);
 
 // Input: X, rois
 // Output case #1: Y, argmaxes (train mode)
 // Output case #2: Y           (test mode)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPool)
     .NumInputs(2)
     .NumOutputs({1, 2})
@@ -196,7 +193,6 @@ Depending on the mode, there are multiple output cases:
 
 // Input: X, rois, argmaxes, dY (aka "gradOutput")
 // Output: dX (aka "gradInput")
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIPoolGradient).NumInputs(4).NumOutputs(1);
 
 class GetRoIPoolGradient : public GradientMakerBase {
@@ -210,7 +206,6 @@ class GetRoIPoolGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIPool, GetRoIPoolGradient);
 
 } // namespace caffe2

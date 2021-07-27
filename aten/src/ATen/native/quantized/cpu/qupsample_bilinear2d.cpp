@@ -179,7 +179,6 @@ Tensor upsample_bilinear2d_quantized_cpu(
   return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at
