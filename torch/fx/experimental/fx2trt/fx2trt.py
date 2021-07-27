@@ -288,4 +288,4 @@ class TRTInterpreter(BaseTRTInterpreter):
             module = copy.deepcopy(module)
         module = module.cpu().float()
         module = NormalizeArgs(module).transform()
-        super().__init__(module, input_specs, logger_level)
+        super().__init__(module, input_specs, logger_level=logger_level)
