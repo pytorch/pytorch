@@ -144,7 +144,7 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, branch):
                      'If it\'s a commit from a forked repo, please call hub.load() with forked repo directly.')
 
 
-def _get_cache_or_reload(github, force_reload, verbose=True):
+def _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=False):
     # Setup hub_dir to save downloaded files
     hub_dir = get_dir()
     if not os.path.exists(hub_dir):
@@ -169,7 +169,8 @@ def _get_cache_or_reload(github, force_reload, verbose=True):
             sys.stderr.write('Using cache found in {}\n'.format(repo_dir))
     else:
         # Validate the tag/branch is from the original repo instead of a forked repo
-        _validate_not_a_forked_repo(repo_owner, repo_name, branch)
+        if not skip_validation:
+            _validate_not_a_forked_repo(repo_owner, repo_name, branch)
 
         cached_file = os.path.join(hub_dir, normalized_br + '.zip')
         _remove_if_exists(cached_file)
@@ -254,7 +255,7 @@ def set_dir(d):
     _hub_dir = d
 
 
-def list(github, force_reload=False):
+def list(github, force_reload=False, skip_validation=False):
     r"""
     List all entrypoints available in `github` hubconf.
 
@@ -264,13 +265,15 @@ def list(github, force_reload=False):
             Example: 'pytorch/vision[:hub]'
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
+        skip_validation (bool, optional): whether to check package validity against github.
+            Default is `False`.
     Returns:
         entrypoints: a list of available entrypoint names
 
     Example:
         >>> entrypoints = torch.hub.list('pytorch/vision', force_reload=True)
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True)
+    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
@@ -284,7 +287,7 @@ def list(github, force_reload=False):
     return entrypoints
 
 
-def help(github, model, force_reload=False):
+def help(github, model, force_reload=False, skip_validation=False):
     r"""
     Show the docstring of entrypoint `model`.
 
@@ -295,10 +298,12 @@ def help(github, model, force_reload=False):
         model (string): a string of entrypoint name defined in repo's hubconf.py
         force_reload (bool, optional): whether to discard the existing cache and force a fresh download.
             Default is `False`.
+        skip_validation (bool, optional): whether to check package validity against github.
+            Default is `False`.
     Example:
         >>> print(torch.hub.help('pytorch/vision', 'resnet18', force_reload=True))
     """
-    repo_dir = _get_cache_or_reload(github, force_reload, True)
+    repo_dir = _get_cache_or_reload(github, force_reload, verbose=True, skip_validation=skip_validation)
 
     sys.path.insert(0, repo_dir)
 
@@ -345,6 +350,8 @@ def load(repo_or_dir, model, *args, **kwargs):
             local caches. Note that the message about first download cannot be
             muted. Does not have any effect if ``source = 'local'``.
             Default is ``True``.
+        skip_validation (bool, optional): whether to check package validity against github.
+            Default is `False`.
         **kwargs (optional): the corresponding kwargs for callable
             :attr:`model`.
 
@@ -363,13 +370,14 @@ def load(repo_or_dir, model, *args, **kwargs):
     source = kwargs.pop('source', 'github').lower()
     force_reload = kwargs.pop('force_reload', False)
     verbose = kwargs.pop('verbose', True)
+    skip_validation = kwargs.pop('skip_validation', False)
 
     if source not in ('github', 'local'):
         raise ValueError(
             f'Unknown source: "{source}". Allowed values: "github" | "local".')
 
     if source == 'github':
-        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose)
+        repo_or_dir = _get_cache_or_reload(repo_or_dir, force_reload, verbose, skip_validation)
 
     model = _load_local(repo_or_dir, model, *args, **kwargs)
     return model
