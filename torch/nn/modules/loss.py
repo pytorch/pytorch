@@ -1068,7 +1068,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
       .. math::
           \ell(x, y) = \begin{cases}
-              \sum_{n=1}^N \frac{1}{\sum_{n=1}^N \sum_{c=1}^C w_c y_{n,c}} l_n, &
+              \frac{\sum_{n=1}^N l_n}{N}, &
                \text{if reduction} = \text{`mean';}\\
                 \sum_{n=1}^N l_n,  &
                 \text{if reduction} = \text{`sum'.}
