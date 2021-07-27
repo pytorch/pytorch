@@ -1956,14 +1956,14 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
                 return default_val
             elif inp == 'low':
                 if (val == float('-inf') or val < ranges[0]):
-                    return ranges[0] / 2
+                    return ranges[0]
                 elif val > ranges[1]:
                     raise ValueError(f"Expected low value < maximum limit for the dtype, but found {val} > {ranges[1]}")
                 else:
                     return val
             elif inp == 'high':
                 if (val == float('inf') or val > ranges[1]):
-                    return ranges[1] / 2
+                    return ranges[1]
                 elif val < ranges[0]:
                     raise ValueError(f"Expected high value > minimum limit for the dtype, but found {val} < {ranges[0]}")
                 else:
@@ -1991,19 +1991,16 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
-        span = high - low
-        # Windows doesn't support torch.rand(bfloat16) on CUDA
-        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            result = (torch.rand(size, device=device, dtype=torch.float32) * span + low).to(torch.bfloat16)
-        else:
-            result = torch.rand(size, device=device, dtype=dtype) * span + low
+        rand_val = torch.rand(size, device=device, dtype=dtype)
+        result = high * rand_val + low * (1 - rand_val)
     elif dtype in complex_types():
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
-        span = high - low
-        real = torch.rand(size, device=device, dtype=float_dtype) * span + low
-        imag = torch.rand(size, device=device, dtype=float_dtype) * span + low
+        real_rand_val = torch.rand(size, device=device, dtype=dtype)
+        imag_rand_val = torch.rand(size, device=device, dtype=dtype)
+        real = high * real_rand_val + low * (1 - real_rand_val)
+        imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
     else:
         raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
