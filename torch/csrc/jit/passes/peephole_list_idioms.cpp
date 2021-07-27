@@ -7,7 +7,10 @@
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/utils/memory.h>
+
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -270,6 +273,41 @@ struct PeepholeOptimizeListIdiomsImpl {
           mutated_lists_.insert(list_construct->output());
         }
         changed = true;
+      } else if (node->kind() == aten::slice) {
+        if (first_input->node()->kind() == prim::ListConstruct) {
+          size_t list_size = first_input->node()->inputs().size();
+          auto start_val = toIValue(node->input(1));
+          auto end_val = toIValue(node->input(2));
+          auto step_val = toIValue(node->input(3));
+          int64_t start = std::numeric_limits<int64_t>::max();
+          int64_t end = std::numeric_limits<int64_t>::max();
+          int64_t step = 1;
+          start = (start_val.has_value() && (*start_val).isInt())
+              ? (*start_val).to<int64_t>()
+              : start;
+          end = (end_val.has_value() && (*end_val).isInt())
+              ? (*end_val).to<int64_t>()
+              : end;
+          step = (step_val.has_value() && (*step_val).isInt())
+              ? (*step_val).to<int64_t>()
+              : step;
+          size_t num_values =
+              slice_indices_adjust(list_size, &start, &end, step);
+          WithInsertPoint guard(node);
+          auto list_construct =
+              graph_->insertNode(graph_->create(prim::ListConstruct));
+          list_construct->output()->setType(node->output()->type());
+          size_t i = start;
+          for (size_t j = 0; j < num_values; ++j) {
+            list_construct->addInput(first_input->node()->input(i));
+            i += step;
+          }
+          node->output()->replaceAllUsesWith(list_construct->output());
+          if (mutated_lists_.count(node->output())) {
+            mutated_lists_.insert(list_construct->output());
+          }
+          changed = true;
+        }
       }
     }
     return changed;

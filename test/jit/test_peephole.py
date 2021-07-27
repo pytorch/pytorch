@@ -121,6 +121,16 @@ class TestPeephole(JitTestCase):
         self.run_pass('peephole', foo.graph)
         FileCheck().check("aten::__getitem__").run(foo.graph)
 
+        @torch.jit.script
+        def foo(x: int):
+            return [1, 2, x, 4, 5, 6, 7][-5:6:2]
+
+        FileCheck().check("aten::slice").run(foo.graph)
+        self.run_pass('peephole', foo.graph)
+        FileCheck().check_not("aten::slice").run(foo.graph)
+        self.assertEqual(foo(3), [3, 5])
+
+
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
         a = torch.tensor([0.4], device='cpu')
