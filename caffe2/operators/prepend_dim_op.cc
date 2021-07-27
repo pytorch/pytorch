@@ -2,12 +2,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(PrependDim, PrependDimOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MergeDim, MergeDimOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(PrependDim)
     .NumInputs(1)
     .NumOutputs(1)
@@ -20,7 +17,6 @@ size of the next dimension by that amount.
     .Input(0, "data", "An input tensor.")
     .Output(0, "reshaped", "Reshaped tensor.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeDim)
     .NumInputs(1)
     .NumOutputs(1)
@@ -45,7 +41,6 @@ class GetPrependDimGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(PrependDim, GetPrependDimGradient);
 
 } // namespace caffe2

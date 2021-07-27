@@ -5,6 +5,8 @@ name: Linux CI (periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7)
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+    types: [unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -24,8 +26,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled'))
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -98,7 +108,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: periodic-pytorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
@@ -196,6 +206,7 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       ENABLE_JIT_LEGACY_TEST: ''
@@ -221,10 +232,7 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
@@ -327,10 +335,13 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
+          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -365,14 +376,19 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, ciflow_should_run]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:

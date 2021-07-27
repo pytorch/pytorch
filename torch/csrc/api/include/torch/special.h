@@ -21,6 +21,22 @@ inline Tensor& gammaln_out(Tensor& result, const Tensor& self) {
   return torch::special_gammaln_out(result, self);
 }
 
+/// Computes the multivariate log-gamma function with dimension `p`, elementwise
+/// See https://pytorch.org/docs/master/special.html#torch.special.multigammaln.
+///
+/// Example:
+/// ```
+/// auto t = torch::randn(128, dtype=kDouble);
+/// torch::special::multigammaln(t, 1);
+/// ```
+inline Tensor multigammaln(const Tensor& self, int64_t p) {
+  return torch::special_multigammaln(self, p);
+}
+
+inline Tensor& multigammaln_out(Tensor& result, const Tensor& self, int64_t p) {
+  return torch::special_multigammaln_out(result, self, p);
+}
+
 /// Computes the nth derivative of the digamma function on the input.
 /// See https:://pytorch.org/docs/master/special.html#torch.special.polygamma.
 ///

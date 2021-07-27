@@ -8,7 +8,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
 template <typename T>
