@@ -115,7 +115,8 @@ def register_module_backward_hook(
 ) -> RemovableHandle:
     r"""Registers a backward hook common to all the modules.
 
-    This function is deprecated in favor of :meth:`nn.module.register_module_full_backward_hook`
+    This function is deprecated in favor of
+    :func:`torch.nn.modules.module.register_module_full_backward_hook`
     and the behavior of this function will change in future versions.
 
     Returns:
