@@ -42,6 +42,7 @@ class _FunctionalSGD(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         momentum_buffer_list: List[Optional[Tensor]] = []
         lr = self.defaults['lr']
@@ -58,6 +59,7 @@ class _FunctionalSGD(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
 
                 if param not in self.state:
@@ -70,7 +72,7 @@ class _FunctionalSGD(object):
                     momentum_buffer_list.append(state['momentum_buffer'])
 
         with torch.no_grad():
-            F.sgd(params,
+            F.sgd(params_with_grad,
                   grads,
                   momentum_buffer_list,
                   weight_decay=weight_decay,
@@ -80,7 +82,7 @@ class _FunctionalSGD(object):
                   nesterov=self.nesterov)
 
         # update momentum_buffers in state
-        for i, p in enumerate(params):
+        for i, p in enumerate(params_with_grad):
             state = self.state[p]
             momentum_buffer = momentum_buffer_list[i]
             if momentum_buffer is not None:
