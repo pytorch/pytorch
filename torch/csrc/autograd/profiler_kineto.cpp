@@ -321,8 +321,7 @@ void pushProfilingCallbacks() {
             try {
               cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
             } catch (const std::exception& e) {
-              C10_LOG_EVERY_N(WARNING, 1000) << "Failed to record CUDA event. "
-                                            << e.what();
+              LOG(WARNING) << "Failed to record CUDA event. " << e.what();
             }
           }
           return ctx_ptr;
@@ -354,8 +353,7 @@ void pushProfilingCallbacks() {
               cudaStubs()->record(
                   nullptr, &kineto_ctx_ptr->cuda_event_end_, nullptr);
             } catch (const std::exception& e) {
-              C10_LOG_EVERY_N(WARNING, 1000) << "Failed to record CUDA event. "
-                                            << e.what();
+              LOG(WARNING) << "Failed to record CUDA event. " << e.what();
             }
           }
 
@@ -560,8 +558,7 @@ int64_t KinetoEvent::cudaElapsedUs() const {
   try {
     return (int64_t)cudaStubs()->elapsed(&cuda_event_start_, &cuda_event_end_);
   } catch (std::exception& e) {
-    C10_LOG_EVERY_N(WARNING, 1000)
-        << "Failed to measure time between two CUDA events. "
+    LOG(WARNING) << "Failed to measure time between two CUDA events. "
         << e.what();
   }
   return -1;

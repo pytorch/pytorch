@@ -294,11 +294,11 @@ struct TORCH_API ProfilerResult {
 #endif // USE_KINETO
 
  private:
-  bool saved_ = false;
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
 #ifdef USE_KINETO
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
+  bool saved_ = false;
 #endif // USE_KINETO
 };
 
