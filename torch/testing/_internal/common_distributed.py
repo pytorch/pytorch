@@ -22,7 +22,14 @@ import torch.distributed as c10d
 import torch.cuda.nccl
 
 from functools import partial, reduce
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, FILE_SCHEMA, find_free_port, retry_on_connect_failures
+from torch.testing._internal.common_utils import (
+    TestCase,
+    TEST_WITH_ROCM,
+    FILE_SCHEMA,
+    find_free_port,
+    retry_on_connect_failures,
+    IS_SANDCASTLE
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,7 @@ TEST_SKIPS = {
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
     "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
+    "generic": TestSkip(86, "Test skipped at subprocess level, look at subprocess log for skip reason"),
 }
 
 
@@ -514,6 +522,9 @@ class MultiProcessTestCase(TestCase):
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
+        except unittest.SkipTest as se:
+            logger.info(f'Process {self.rank} skipping test {test_name} for following reason: {str(se)}')
+            sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '
@@ -649,7 +660,15 @@ class MultiProcessTestCase(TestCase):
             )
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
-                raise unittest.SkipTest(skip.message)
+                if IS_SANDCASTLE:
+                    # Don't use unittest.skip to skip the test on sandcastle
+                    # since it creates tasks for skipped tests assuming there
+                    # is some follow-up needed. Instead just "pass" the test
+                    # with an appropriate message.
+                    logger.info(f'Skipping {self.id()} on sandcastle for the following reason: {skip.message}')
+                    return
+                else:
+                    raise unittest.SkipTest(skip.message)
         self.assertEqual(
             first_process.exitcode,
             0,
