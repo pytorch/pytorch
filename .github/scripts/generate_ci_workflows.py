@@ -294,7 +294,6 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
-        is_scheduled="45 0,4,8,12,16,20 * * *",
     ),
     # CIWorkflow(
     #     arch="linux",
