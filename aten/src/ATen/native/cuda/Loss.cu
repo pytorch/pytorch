@@ -462,7 +462,7 @@ void nll_loss_backward_out_cuda_template(
     const Tensor& input,
     const Tensor& target,
     const Tensor& total_weight,
-    const Tenso>& weight,
+    const Tensor& weight,
     int64_t reduction,
     int64_t ignore_index) {
   int64_t n_dims = input.dim();

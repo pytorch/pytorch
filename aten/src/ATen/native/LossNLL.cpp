@@ -1,4 +1,3 @@
-#include "c10/core/TensorOptions.h"
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -6,6 +5,8 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+
+#include <c10/core/TensorOptions.h>
 
 namespace at {
 namespace meta {
@@ -92,12 +93,12 @@ TORCH_META_FUNC(nll_loss_backward)
   if (reduction == Reduction::None && n_dims == 2) {
     const auto batch_size = self.size(0);
     check_dim_size(grad_output, 1, 0, batch_size);
+  } else {
+    TORCH_CHECK(
+        grad_output.dim() <= 1 && grad_output.numel() == 1,
+        "Expected a single element grad_output tensor, but got: ",
+        grad_output.sizes());
   }
-
-  TORCH_CHECK(
-      grad_output.dim() <= 1 && grad_output.numel() == 1,
-      "Expected a single element grad_output tensor, but got: ",
-      grad_output.sizes());
 
   TensorOptions options(self.options());
   set_output(self.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
