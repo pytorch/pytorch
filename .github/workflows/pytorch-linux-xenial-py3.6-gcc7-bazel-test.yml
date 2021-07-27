@@ -48,7 +48,7 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
-          rm ~/.ssh/authorized_keys
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
