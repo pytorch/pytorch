@@ -82,6 +82,11 @@ ADD ./common/install_openmpi.sh install_openmpi.sh
 RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
 RUN rm install_openmpi.sh
 
+# Install UCX and UCC
+ADD ./common/install_ucc.sh install_ucc.sh
+RUN if [ -n "${CUDA_VERSION}" ]; then bash install_ucc.sh; fi
+RUN rm install_ucc.sh
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
