@@ -23,7 +23,6 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 
 from torch.autograd.profiler_legacy import profile as _profile
 
-
 def rref_isinstance(rref, cls_to_check):
     return isinstance(rref.local_value(), cls_to_check)
 
