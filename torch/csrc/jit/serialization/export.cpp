@@ -231,6 +231,12 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  size_t GetGraphProtoSizes(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -601,7 +607,12 @@ void EncoderBase::AddInitializersIntoGraphProto(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-
+  // If model size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSizes(graph_proto, block, initializers) > INT_MAX) {
+    use_external_data_format = true;
+  }
   for (auto input : block->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
@@ -616,6 +627,32 @@ void EncoderBase::AddInitializersIntoGraphProto(
         use_external_data_format,
         onnx_file_path);
   }
+}
+
+size_t EncoderBase::GetGraphProtoSizes(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers) {
+  size_t sizes = 0;
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
+    onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
+    auto tensor_proto = graph_proto_copy->add_initializer();
+    const at::Tensor tensor = name_tensor_pair->second;
+    at::Tensor t;
+    if (tensor.is_quantized()) {
+      t = tensor.contiguous();
+    } else {
+      t = tensor.contiguous().cpu();
+    }
+    tensor_proto->set_raw_data(std::string(
+        static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
+    sizes += tensor_proto->ByteSizeLong();
+  }
+  return sizes;
 }
 
 void EncoderBase::AddAttribute(
@@ -958,7 +995,7 @@ std::string serialize_model_proto_to_string(
   TORCH_CHECK(
       proto_size <= INT_MAX,
       "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export with use_external_data_format=True.");
+      "Please call torch.onnx.export without setting use_external_data_format parameter.");
   return model_proto->SerializeAsString();
 }
 
