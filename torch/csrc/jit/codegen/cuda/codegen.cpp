@@ -921,7 +921,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void visit(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering
-    if (node->iter_domain()->isBroadcast() || node->vectorize()) {
+    if (node->iter_domain()->isBroadcast()) {
+      handleScope(node->body());
+      return;
+    } else if (node->vectorize()) {
       vectorize_scope_ = node->vectorize();
       handleScope(node->body());
       vectorize_scope_ = false;

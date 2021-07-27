@@ -313,7 +313,7 @@ jobs:
           fi
 
   clang-tidy:
-    runs-on: linux.2xlarge
+    runs-on: ubuntu-18.04 # linux.2xlarge doesn't run on our repo CI?
     container:
       # ubuntu20.04-cuda11.2-py3.8-tidy11
       image: ghcr.io/pytorch/cilint-clang-tidy:d8f0c777964d0dd8a147360de80aed1a13eb613a
