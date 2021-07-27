@@ -24,6 +24,29 @@
 namespace torch {
 namespace jit {
 
+namespace utils {
+std::string getNodesModuleHierarchy(const Node& n) {
+  if (!n.callstack().has_value()) {
+    return std::string();
+  }
+  InlinedCallStackPtr callstack_ptr = n.callstack().value();
+  std::string module_hierarchy;
+  for (auto& entry : callstack_ptr->vec()) {
+    const auto& opt_module_info = std::get<kModuleInstanceInfo>(entry);
+    if (opt_module_info.has_value()) {
+      const auto& module_instance_info = opt_module_info.value();
+      if (!module_hierarchy.empty()) {
+        module_hierarchy.append(".");
+      }
+      module_hierarchy.append(utils::get_module_info(module_instance_info));
+    } else {
+      module_hierarchy += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+    }
+  }
+  return module_hierarchy;
+}
+} // namespace utils
+
 namespace {
 
 // Constants relating to maintaining the topological index of nodes.
@@ -2059,10 +2082,18 @@ std::vector<Value*> inlineCallTo(
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
       module_instance_info = c10::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+    } else if (
+        to_replace->owningGraph()->inputs().size() > 0 &&
+        to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
+      // This CallMethod must correspond to method of the same object
+      // to which this graph belongs.
+      module_instance_info =
+          c10::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
     } else {
-      std::string instance_name_unknown("INSTANCE_NAME_UNKNOWN");
+      // Not sure if it is possible to come here ever.
+      // TODO: Remove this else. Or add assert
       module_instance_info = c10::make_optional(
-          ModuleInstanceInfo(class_type_ptr, instance_name_unknown));
+          ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
     }
   }
 
