@@ -147,10 +147,5 @@ void warn_or_error_on_sync() {
   }
 }
 
-WarningState& warning_state() {
-  static WarningState warning_state_;
-  return warning_state_;
-}
-
 } // namespace cuda
 } // namespace c10

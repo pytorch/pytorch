@@ -4278,7 +4278,7 @@ else:
             return x[ind]
 
         def _cond_fn(x):
-            if x: #taking boolean value of a tensor synchronizes
+            if x:  # taking boolean value of a tensor synchronizes
                 return x
             else:
                 return 2 * x
@@ -4296,8 +4296,8 @@ else:
                           lambda: _ind_get_fn(x, ind),
                           lambda: torch.nn.functional.one_hot(ind, num_classes=size),
                           lambda: torch.randperm(20000, device=device),
-                          lambda: torch.repeat_interleave(x, 2, output_size = 2 * size),
-                          lambda: torch.repeat_interleave(x, repeats, output_size = 2 * size))
+                          lambda: torch.repeat_interleave(x, 2, output_size=2 * size),
+                          lambda: torch.repeat_interleave(x, repeats, output_size=2 * size))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
                        lambda: _ind_get_fn(x, mask),

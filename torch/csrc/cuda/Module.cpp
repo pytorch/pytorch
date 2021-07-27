@@ -442,10 +442,11 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaSetSyncWarningLevel(PyObject * _unused, PyObject * arg){
+PyObject * THCPModule_cudaSetSyncDebugMode(PyObject * _unused, PyObject * arg){
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_warn_on_synchronization");
   int64_t level = THPUtils_unpackLong(arg);
+  TORCH_CHECK(level >=0 && level <=2, "invalid value of debug_mode, expected one of 0,1,2");
   c10::cuda::SyncWarningLevel l = (level == 0) ? c10::cuda::SyncWarningLevel::L_DISABLED :
   (level == 1) ? c10::cuda::SyncWarningLevel::L_WARN : c10::cuda::SyncWarningLevel::L_ERROR;
   c10::cuda::warning_state().set_sync_warning_level(l);
@@ -453,7 +454,7 @@ PyObject * THCPModule_cudaSetSyncWarningLevel(PyObject * _unused, PyObject * arg
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_cudaGetSyncWarningLevel(PyObject *self, PyObject *noargs){
+PyObject * THCPModule_cudaGetSyncDebugMode(PyObject *self, PyObject *noargs){
   HANDLE_TH_ERRORS
   auto warning_level = c10::cuda::warning_state().get_sync_warning_level();
   switch (warning_level){
@@ -602,8 +603,8 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", THCPModule_cudaSleep, METH_O, nullptr},
   {"_cuda_lock_mutex",   THCPModule_cudaLockMutex,   METH_NOARGS,  nullptr},
   {"_cuda_unlock_mutex", THCPModule_cudaUnlockMutex, METH_NOARGS,  nullptr},
-  {"_cuda_set_sync_warning_level", THCPModule_cudaSetSyncWarningLevel, METH_O, nullptr},
-  {"_cuda_get_sync_warning_level", THCPModule_cudaGetSyncWarningLevel, METH_NOARGS, nullptr},
+  {"_cuda_set_sync_debug_mode", THCPModule_cudaSetSyncDebugMode, METH_O, nullptr},
+  {"_cuda_get_sync_debug_mode", THCPModule_cudaGetSyncDebugMode, METH_NOARGS, nullptr},
 #ifdef USE_NCCL
   {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},
   {"_nccl_unique_id", THCPModule_nccl_unique_id, METH_NOARGS, nullptr},

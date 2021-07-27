@@ -14,7 +14,7 @@
 #include <hip/hip_version.h>
 #endif
 #include <cuda_runtime_api.h>
-
+#include <iostream>
 namespace c10 {
 namespace cuda {
 
@@ -41,7 +41,7 @@ enum class SyncWarningLevel { L_DISABLED = 0, L_WARN, L_ERROR };
 
 class WarningState {
  public:
-  C10_CUDA_API void set_sync_warning_level(SyncWarningLevel l) {
+  void set_sync_warning_level(SyncWarningLevel l) {
     sync_warning_level = l;
   }
 
@@ -53,9 +53,10 @@ class WarningState {
   SyncWarningLevel sync_warning_level = SyncWarningLevel::L_DISABLED;
 };
 
-// Make it CUDAWarningState class static member function to inline?
-C10_CUDA_API WarningState& warning_state();
-
+C10_CUDA_API __inline__ WarningState& warning_state() {
+  static WarningState warning_state_;
+  return warning_state_;
+}
 // the subsequent functions are defined in the header because for performance
 // reasons we want them to be inline
 C10_CUDA_API void __inline__ memcpy_and_sync(
@@ -64,8 +65,6 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
-  // here's uninlined call to warning_state that will be made even in the fast
-  // case
   if (C10_UNLIKELY(
           warning_state().get_sync_warning_level() !=
           SyncWarningLevel::L_DISABLED)) {
