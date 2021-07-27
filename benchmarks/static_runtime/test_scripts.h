@@ -341,6 +341,16 @@ const auto div_scalar_mode = R"JIT(
       return torch.div(a, b, rounding_mode=c).clone()
 )JIT";
 
+const auto mul_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.mul(a, b).clone()
+)JIT";
+
+const auto mul_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.mul(a, b).clone()
+)JIT";
+
 const auto log_tensor = R"JIT(
   def forward(self, inp: Tensor):
       a = torch.log(inp).clone()
@@ -365,6 +375,31 @@ const auto sub_tensor_alpha = R"JIT(
 const auto sub_scalar_alpha = R"JIT(
   def forward(self, a: Tensor, b: float, c: int):
       return torch.sub(a, b, alpha=c).clone()
+)JIT";
+
+const auto nan_to_num_script = R"JIT(
+  def forward(self, a: Tensor, nan: float, posinf: float, neginf: float):
+      return torch.nan_to_num(a, nan, posinf, neginf).clone()
+)JIT";
+
+const auto stack_dim = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, dim: int):
+      return torch.stack((a, b), dim = dim).clone()
+)JIT";
+
+const auto stack_three = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.stack((a, b, c)).clone()
+)JIT";
+
+const auto relu_script = R"JIT(
+  def forward(self, a: Tensor):
+      return torch.relu(a).clone()
+)JIT";
+
+const auto tanh_script = R"JIT(
+  def forward(self, a):
+      return torch.tanh(a).clone()
 )JIT";
 
 const std::string layer_norm_with_weights = R"JIT(

@@ -2408,8 +2408,8 @@ Stmt* TermExpander::mutate(const Block* v) {
 // SimplifierUnderContext
 //
 // This function records the bounds(range) info of the index var in a for-stmt.
-// The bounds info will be used later when simplifying expressions with the index
-// var.
+// The bounds info will be used later when simplifying expressions with the
+// index var.
 Stmt* SimplifierUnderContext::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
@@ -2435,8 +2435,8 @@ Stmt* SimplifierUnderContext::mutate(const For* v) {
   //   x = (i+20) / 5;
   //}
   // Inside the if stmt, i is in the range of [0, 5); and if we can restore this
-  // bound info after the for stmt, we can use it to simplify the assignment stmt
-  // x = (i+20)/5 to x = 4.
+  // bound info after the for stmt, we can use it to simplify the assignment
+  // stmt x = (i+20)/5 to x = 4.
   bool has_bounds = false;
   std::pair<const Expr*, const Expr*> bound_old;
   const Var* var_key = dynamic_cast<const Var*>(var);
