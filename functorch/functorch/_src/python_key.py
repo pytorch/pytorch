@@ -10,7 +10,6 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from torch.fx.node import map_aggregate
 import torch.utils._pytree as pytree
-from functorch._C import hasPythonKey, addPythonKey, removePythonKey
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
 import torch.fx._pytree as fx_pytree
@@ -61,36 +60,6 @@ class PythonTensor(torch.Tensor):
             return list([wrap_with_proxy(e, idx) for idx, e in enumerate(real_out)])
         else:
             return PythonTensor(real_out, proxy_out) if type(real_out) ==  torch.Tensor else real_out
-
-class PythonTensor2(object):
-    def __init__(self, out, proxy):
-        if isinstance(out, torch.Tensor):
-            self.value = torch.clone(out)
-        else:
-            self.value = torch.empty(out)
-        self.proxy = proxy
-
-    def __repr__(self):
-        return f"PythonTensor2({tuple(self.value.shape)})"
-
-    def tensor(self):
-        return self.value
-
-    def __torch_function__(self, func, types, args=(), kwargs={}):
-        namespace, func_name = func.split("::")
-        func = getattr(getattr(torch.ops, namespace), func_name)
-        outs = kwargs['val']
-        rets = []
-        proxy_args = map_aggregate(args, lambda i: i.proxy if isinstance(i, PythonTensor2) else i)
-        out_proxy = func(*proxy_args)
-        if len(outs) == 1 and isinstance(outs[0], torch.Tensor):
-            return [PythonTensor2(outs[0], out_proxy)]
-        for idx, out in enumerate(outs):
-            if isinstance(out, torch.Tensor):
-                rets.append(PythonTensor2(out, out_proxy[idx]))
-            else:
-                rets.append(out)
-        return rets
 
 class PythonKeyTracer(Tracer):
     def __init__(self):
