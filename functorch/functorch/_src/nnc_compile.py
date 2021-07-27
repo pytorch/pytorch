@@ -217,6 +217,12 @@ def binary_cross_entropy_with_logits_lower(name, out_shape, inp_shapes, args):
     loss_buf, loss_stmts = binary_cross_entropy_lower('binary_cross_entropy', out_shape, list(inp_shapes) + [None], [pred, args[1], args[3], args[4]])
     return loss_buf, [pred.stmt()] + loss_stmts
 
+def detach_lower(name, out_shape, inp_shapes, args):
+    return args[0], []
+
+# def clone_lower(name, out_shape, inp_shapes, args):
+#     return args[0], []
+
 lowering_functions[torch.ops.aten.full_like] = full_like_lower
 lowering_functions[torch.ops.aten.zeros_like] = zeros_like_lower
 lowering_functions[torch.ops.aten.ones_like] = ones_like_lower
@@ -230,6 +236,8 @@ lowering_functions[torch.ops.aten.view] = reshape_lower
 lowering_functions[torch.ops.aten.triangular_solve] = triangular_solve_lower
 lowering_functions[torch.ops.aten.binary_cross_entropy] = binary_cross_entropy_lower
 lowering_functions[torch.ops.aten.binary_cross_entropy_with_logits] = binary_cross_entropy_with_logits_lower
+lowering_functions[torch.ops.aten.detach] = detach_lower
+# lowering_functions[torch.ops.aten.clone] = clone_lower
 
 
 
