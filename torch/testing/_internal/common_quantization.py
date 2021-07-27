@@ -852,7 +852,6 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            # TODO: change this to return prepared model, qgraph and result
             return result
 
 
