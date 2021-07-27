@@ -790,27 +790,6 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
-    def test_vectorized_forward_ad_jacobian(self):
-        from torch.autograd.functional import jacobian
-
-        a = torch.rand(2, 3, requires_grad=True, dtype=torch.double)
-        b = torch.rand(4, requires_grad=True, dtype=torch.double)
-        c = torch.rand(4, requires_grad=True, dtype=torch.double)
-        d = torch.rand(3, 4, requires_grad=True, dtype=torch.double)
-
-        def test_fn(a, b, c, d):
-            return torch.matmul(a, d) * b.exp() + c.sin(), torch.mean(b * c, dim=0)
-
-        def run_test(fn, inputs):
-            self.assertEqual(jacobian(fn, inputs, forward_ad=True, vectorize=True), jacobian(fn, inputs))
-
-        run_test(test_fn, (a, b, c, d))
-        run_test(torch.sin, a)  # element-wise, has batching rule
-        run_test(lambda x: torch.mean(x, dim=0), a)  # reduction, batched fallback
-        run_test(lambda x: torch.dot(x, b), c)  # matmul-like, has batching rule
-        run_test(lambda x: torch.matmul(x, d), a)  # matmul-like operator
-        run_test(lambda x: x.view(-1), a)  # view op
-
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
