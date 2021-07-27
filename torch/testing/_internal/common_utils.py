@@ -2006,8 +2006,8 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
-        real_rand_val = torch.rand(size, device=device, dtype=dtype)
-        imag_rand_val = torch.rand(size, device=device, dtype=dtype)
+        real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
+        imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
         real = high * real_rand_val + low * (1 - real_rand_val)
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
