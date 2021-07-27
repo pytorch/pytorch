@@ -182,9 +182,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
 }} //at::native
