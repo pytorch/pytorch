@@ -1,4 +1,4 @@
-from unification import Var # type: ignore[import]
+from torch.fx.experimental.unification import Var
 
 class TensorType:
     """

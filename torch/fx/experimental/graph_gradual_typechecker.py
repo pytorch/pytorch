@@ -10,10 +10,7 @@ from torch.fx.experimental.refinement_types import Equality
 import itertools
 
 
-try:
-    from unification import Var  # type: ignore[import]
-except ImportError:
-    pass
+from torch.fx.experimental.unification import Var
 
 
 _INFERENCE_RULES: Dict[Target, Callable] = {}

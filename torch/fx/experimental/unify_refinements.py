@@ -1,11 +1,6 @@
 from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.tensor_type import TensorType
-
-try:
-    from unification import unify, Var  # type: ignore[import]
-except ImportError:
-    pass
-
+from torch.fx.experimental.unification import Var, unify
 
 def infer_symbolic_types_single_pass(traced):
     """
