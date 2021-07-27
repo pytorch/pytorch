@@ -84,6 +84,11 @@ class _SpectralNorm(Module):
 
         # Precondition
         assert weight_mat.ndim > 1
+
+        if n_power_iterations > 0:
+            # See above for why we need this clone
+            self._u = self._u.clone(memory_format=torch.contiguous_format)
+            self._v = self._v.clone(memory_format=torch.contiguous_format)
         for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
             # are the first left and right singular vectors.
@@ -92,9 +97,6 @@ class _SpectralNorm(Module):
                                   dim=0, eps=self.eps, out=self._u)   # type: ignore[has-type]
             self._v = F.normalize(torch.mv(weight_mat.t(), self._u),
                                   dim=0, eps=self.eps, out=self._v)   # type: ignore[has-type]
-        # See above on why we need to clone
-        self._u = self._u.clone(memory_format=torch.contiguous_format)
-        self._v = self._v.clone(memory_format=torch.contiguous_format)
 
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         if weight.ndim == 1:

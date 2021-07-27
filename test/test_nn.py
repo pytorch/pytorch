@@ -4289,6 +4289,15 @@ class TestNN(NNTestCase):
 
                     gradcheck(fn, (m.parametrizations.weight.original,))
 
+    def test_new_spectral_norm_executed_twice_single_forward(self):
+        inputs = torch.tensor([[1., 2.], [-1., -2.]])
+        m = nn.Linear(2, 2)
+        m = torch.nn.utils.parametrizations.spectral_norm(m)
+        x = m(inputs)
+        # Use the same module again in the same forward
+        x = m(x)
+        loss = x.sum().backward()
+
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
             inp = torch.randn(2, 3)
