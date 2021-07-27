@@ -20,6 +20,7 @@ env:
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  SQUID_PROXY: "http://tf-lb-20210722035235925400000002-1698082088.us-east-1.elb.amazonaws.com:3128"
 
 concurrency:
   group: pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
@@ -140,6 +141,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \

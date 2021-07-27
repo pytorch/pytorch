@@ -29,6 +29,7 @@ import torch.testing._internal.common_utils as common
 from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
+from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -40,12 +41,15 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     TestCase,
     run_tests,
     retry_on_connect_failures,
     TEST_WITH_TSAN,
 )
-from torch.utils.checkpoint import checkpoint
+
+if not IS_WINDOWS:
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
 
 
 class RendezvousEnvTest(TestCase):
@@ -1576,6 +1580,44 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
+    def _test_hook_then_optimizer(self, gradient_as_bucket_view=False):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        hook, hook_state = default.allreduce_hook, process_group
+
+        opt_hook_state = default.OptimizerHookState(
+            _FunctionalSGD,
+            1e-2,
+        )
+        gpu_model = self._gpu_model_with_ddp_comm_hook(
+            process_group,
+            default.hook_then_optimizer(hook, opt_hook_state),
+            gradient_as_bucket_view,
+            hook_state,
+        )
+        prev_params = copy.deepcopy(list(gpu_model.parameters()))
+        # Run model with optimizer as part of hook
+        for _ in range(8):
+            gpu_model.zero_grad()
+            self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+        new_params = list(gpu_model.parameters())
+        # Run plain model with allreduce hook and separate optimizer step.
+        # Verify gradients are the same.
+        gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
+            process_group,
+            default.allreduce_hook,
+            gradient_as_bucket_view,
+            hook_state
+        )
+        sgd = torch.optim.SGD(gpu_model_allreduce.parameters(), lr=1e-2)
+        for _ in range(8):
+            gpu_model_allreduce.zero_grad()
+            self._run_and_verify_hook(gpu_model_allreduce, 8, 0.25 * torch.ones(2, 2))
+            sgd.step()
+        post_opt_params = list(gpu_model_allreduce.parameters())
+        for opt_as_hook_param, post_opt_param in zip(new_params, post_opt_params):
+            self.assertEqual(opt_as_hook_param, post_opt_param)
+
     def _test_powerSGD_ddp_comm_hook_nccl(self, gradient_as_bucket_view=False):
         """
         This unit test verifies whether Python DDP communication hook POWER_SGD
@@ -1635,6 +1677,17 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_fp16_compress_wrapper_nccl(self):
         self._test_fp16_compress_wrapper()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_optimizer_nccl(self):
+        self._test_hook_then_optimizer()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
+        self._test_hook_then_optimizer(gradient_as_bucket_view=True)
+
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
