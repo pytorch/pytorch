@@ -26,7 +26,7 @@ namespace cpp_test {
 
 const std::unordered_set<std::string>* GetIgnoredCounters();
 
-// Converts an at::Tensor(device=torch::kXLA) to at::Tensor(device=torch::kCPU)
+// Converts an at::Tensor(device=torch::kLazy) to at::Tensor(device=torch::kCPU)
 // This at::Tensor can be torch::Tensor which is a Variable, or at::Tensor which
 // know nothing about autograd. If the input tensor is already a CPU tensor, it
 // will be returned. Needed because EqualValues and AllClose require CPU tensors

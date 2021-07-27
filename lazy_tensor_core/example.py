@@ -6,7 +6,7 @@ lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 torch.manual_seed(42)
 
-device = 'xla'
+device = 'lazy'
 dtype = torch.float32
 
 x = torch.randn(2, 3, 4, device=device, dtype=dtype)

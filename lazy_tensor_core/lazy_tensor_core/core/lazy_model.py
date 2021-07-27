@@ -139,7 +139,7 @@ def get_lazy_supported_devices(devkind=None, max_devices=None):
     kind_devices = []
     for i, device in enumerate(devices):
       if re.match(kind + r':\d+$', device):
-        kind_devices.append('xla:{}'.format(i))
+        kind_devices.append('lazy:{}'.format(i))
     if kind_devices:
       return kind_devices[:max_devices] if max_devices else kind_devices
 
@@ -235,14 +235,14 @@ def lazy_device(n=None, devkind=None):
     # the tensor barrier can work correctly and avoid growing graphs surprises.
     device = devices[0]
   else:
-    device = 'xla:{}'.format(n)
+    device = 'lazy:{}'.format(n)
   lazy_tensor_core._LAZYC._ltc_set_default_device(device)
   return torch.device(device)
 
 
 def _lazy_real_device(device):
   device_str = str(device)
-  m = re.match(r'xla:(\d+)$', device_str)
+  m = re.match(r'lazy:(\d+)$', device_str)
   if not m:
     raise RuntimeError('Invalid device format: {}'.format(device_str))
   return _DEVICES.value[int(m.group(1))]
@@ -422,13 +422,13 @@ def check_view_sharing(obj):
 
   def tensor_id(t):
     if is_lazy_tensor(t):
-      return lazy_tensor_core._LAZYC._ltc_get_tensor_id(t), 'xla'
+      return lazy_tensor_core._LAZYC._ltc_get_tensor_id(t), 'lazy'
     return id(t), 'torch'
 
   def alias_id(t):
     if is_lazy_tensor(t):
       aid = lazy_tensor_core._LAZYC._ltc_get_tensor_view_alias_id(t)
-      return None if aid == 0 else aid, 'xla'
+      return None if aid == 0 else aid, 'lazy'
     return t.storage().data_ptr(), 'torch'
 
   def check_object(obj):

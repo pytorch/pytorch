@@ -46,7 +46,7 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
       lazy_tensors::compiler::TSComputationClient::HardwareDeviceType());
 }
 
-TORCH_LIBRARY_IMPL(_, XLA, m) {
+TORCH_LIBRARY_IMPL(_, Lazy, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
 }
 

@@ -12,6 +12,6 @@ pushd $PTDIR
 python -m tools.codegen.gen_backend_stubs \
   --output_dir="$XDIR/lazy_tensor_core/csrc/ts_backend" \
   --source_yaml="$XDIR/ts_native_functions.yaml"\
-  --impl_path="$XDIR/lazy_tensor_core/csrc/ts_backend/aten_xla_type.cpp"\
+  --impl_path="$XDIR/lazy_tensor_core/csrc/ts_backend/aten_ltc_ts_type.cpp"\
 
 popd
