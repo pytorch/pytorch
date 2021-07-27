@@ -8,7 +8,6 @@ import torch
 import torch._C
 from torch.testing import FileCheck
 from torch.jit.mobile import _load_for_lite_interpreter
-from pathlib import Path
 
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -17,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     TEST_WITH_ROCM,
     skipIfRocm,
+    find_library_location,
 )
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -74,9 +74,8 @@ class JitBackendTestCase(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libjitbackend_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libjitbackend_test.so')
+        torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up three variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
@@ -492,9 +491,8 @@ class JitBackendTestCaseWithCompiler(JitTestCase):
 
     def setUp(self):
         super().setUp()
-        torch_root = Path(__file__).resolve().parent.parent.parent
-        p = torch_root / 'build' / 'lib' / 'libbackend_with_compiler.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libbackend_with_compiler.so')
+        torch.ops.load_library(str(lib_file_path))
         # Subclasses are expected to set up four variables in their setUp methods:
         # module - a regular, Python version of the module being tested
         # scripted_module - a scripted version of module
@@ -685,3 +683,66 @@ class TestBackendsWithCompiler(JitTestCase):
     @skipIfRocm
     def test_errors(self):
         self.error_module_compiler_test.test_errors()
+
+
+class CompModuleTestSameNameWithCompiler(JitBackendTestCase):
+    """
+    Tests for CompModule, which is a module with two lowered submodules with same module name
+    """
+
+    class ModuleAdd(torch.nn.Module):
+        """
+        A simple Module used to test to_backend lowering machinery.
+        """
+
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, x, h):
+            return x + h
+
+    class CompModule(torch.nn.Module):
+        """
+        A module with two lowered submodules.
+        """
+
+        def __init__(self):
+            super().__init__()
+            compile_spec = {
+                "forward": {
+                    "some_other_option": "True",
+                },
+            }
+            self.add = torch._C._jit_to_backend(
+                "backend_with_compiler_demo",
+                torch.jit.script(ModuleAdd()),
+                compile_spec,
+            )
+            self.sub = torch._C._jit_to_backend(
+                "backend_with_compiler_demo",
+                torch.jit.script(ModuleAdd()),
+                compile_spec,
+            )
+
+        def forward(self, a, b, s: int):
+            c = self.add.forward(a, b)
+            d = self.sub.forward(a, b)
+            y = s * (c * d)
+            return y
+
+
+    def setUp(self):
+        super().setUp()
+
+        self.module = CompModule()
+        self.scripted_module = torch.jit.script(self.module)
+        buffer = io.BytesIO(self.scripted_module._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        self.mobile_module = _load_for_lite_interpreter(buffer)
+
+    def test_execution(self):
+        a = torch.ones(1)
+        b = 3 * torch.ones(1)
+        s = 3
+        # Test forward.
+        self.check_function("forward", (a, b, s))

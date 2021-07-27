@@ -219,9 +219,15 @@ inline void _vec_softmax(
   int64_t outer_stride = dim_size * dim_stride;
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   int vectorized_step = Vec().size(); // Currently, we only support scalar_t with double or float32
-  TORCH_CHECK(
+#ifdef CPU_CAPABILITY_AVX512
+  TORCH_INTERNAL_ASSERT(
+    (vectorized_step == 16) || (vectorized_step == 8),
+    "vectorized_step must be 16 with dtype float or 8 with dtype double");
+#else
+  TORCH_INTERNAL_ASSERT(
     (vectorized_step == 8) || (vectorized_step == 4),
     "vectorized_step must be 8 with dtype float or 4 with dtype double");
+#endif
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         int64_t idx = begin;
@@ -384,15 +390,11 @@ static void log_softmax_backward_lastdim_kernel_impl(
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     softmax_backward_lastdim_kernel,
     &softmax_backward_lastdim_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(
     log_softmax_backward_lastdim_kernel,
     &log_softmax_backward_lastdim_kernel_impl);
