@@ -391,11 +391,8 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v2
         name: Download PyTorch Test Reports
-        env:
-          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         with:
-          name: 'test-reports-${{ env.COMMIT_SHA1 }}-${{ env.WORKFLOW_ID }}'
+          name: test-reports-${{ matrix.config }}
           path: .
       - name: Unzip test reports
         run: |
