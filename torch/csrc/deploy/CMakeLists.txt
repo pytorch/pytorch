@@ -18,10 +18,10 @@ target_link_libraries(remove_dt_needed PRIVATE fmt::fmt-header-only)
 add_custom_command(
   OUTPUT libtorch_deployinterpreter.o
   # remove the DT_NEEDED entries
-  COMMAND $<TARGET_FILE:remove_dt_needed> $<TARGET_FILE:torch_deployinterpreter> libtorch_deployinterpreter.so
+  COMMAND $<TARGET_FILE:remove_dt_needed> $<TARGET_FILE:torch_deployinterpreter> libtorch_deployinterpreter_all.so
   # package the result into an object we can link into the libdeploy binary.
-  COMMAND ld -r -b binary -o libtorch_deployinterpreter.o libtorch_deployinterpreter.so
-  COMMAND rm libtorch_deployinterpreter.so
+  COMMAND ld -r -b binary -o libtorch_deployinterpreter.o libtorch_deployinterpreter_all.so
+  COMMAND rm libtorch_deployinterpreter_all.so
   DEPENDS torch_deployinterpreter remove_dt_needed
   VERBATIM
 )
