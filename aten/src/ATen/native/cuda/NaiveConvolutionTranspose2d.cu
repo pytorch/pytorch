@@ -757,8 +757,6 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cuda)
       dilation,
       columns,
       ones);
-
-  return output;
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cuda(const Tensor& grad_output,
