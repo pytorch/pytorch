@@ -299,7 +299,16 @@ Returns:
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
+)")
+      .def(
+          "get_model_params_for_bucket",
+          &::c10d::GradBucket::getModelParamsForBucket,
+          py::call_guard<py::gil_scoped_release>(),
+                    R"(
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a model
+    parameter.
 )")
       .def(
           "is_the_last_bucket_to_allreduce",

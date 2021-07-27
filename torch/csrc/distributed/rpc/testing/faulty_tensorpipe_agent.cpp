@@ -1,36 +1,41 @@
-#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
+#ifdef USE_TENSORPIPE
+
+#include <torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-std::string fromVec(const std::vector<char>& vec) {
+std::string fromVecToString(const std::vector<char>& vec) {
   return std::string(vec.begin(), vec.end());
 }
 
-FaultyProcessGroupAgent::FaultyProcessGroupAgent(
+FaultyTensorPipeAgent::FaultyTensorPipeAgent(
     const c10::intrusive_ptr<::c10d::Store>& store,
-    std::string workerName,
-    c10::intrusive_ptr<::c10d::ProcessGroup> pg,
-    int numSendRecvThreads,
-    std::chrono::milliseconds rpcTimeout,
-    std::unique_ptr<RequestCallback> cb,
-    const std::vector<std::string>& messagesToFail,
-    const std::unordered_map<std::string, float>& messageTypesToDelay,
-    int failNumSends)
-    : ProcessGroupAgent(
+    std::string selfName,
+    worker_id_t selfId,
+    int worldSize,
+    c10::intrusive_ptr<c10d::ProcessGroup> pg,
+    FaultyTensorPipeRpcBackendOptions opts,
+    std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
+    std::vector<c10::Device> devices,
+    std::unique_ptr<RequestCallback> callback)
+    : TensorPipeAgent(
           store,
-          std::move(workerName),
+          std::move(selfName),
+          selfId,
+          worldSize,
           std::move(pg),
-          numSendRecvThreads,
-          rpcTimeout,
-          std::move(cb)),
-      failNumSends_(failNumSends),
-      messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
-      messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
+          std::move(opts),
+          std::move(reverseDeviceMaps),
+          std::move(devices),
+          std::move(callback)),
+      numFailSends_(opts.numFailSends),
+      messageTypesToFail_(parseMessagesToFailInput(opts.messagesToFail)),
+      messageTypesToDelay_(parseMessagesToDelay(opts.messagesToDelay)) {}
 
-std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
+std::vector<MessageType> FaultyTensorPipeAgent::parseMessagesToFailInput(
     const std::vector<std::string>& messagesToFail) const {
   // Since we can only pass strings corresponding to the Message Types from the
   // python tests, we must parse the list of strings and resolve the actual
@@ -44,7 +49,7 @@ std::vector<MessageType> FaultyProcessGroupAgent::parseMessagesToFailInput(
   return messageTypesToFail;
 }
 
-std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
+std::unordered_map<MessageType, float, std::hash<int>> FaultyTensorPipeAgent::
     parseMessagesToDelay(const std::unordered_map<std::string, float>&
                              messageTypesToDelay) const {
   std::unordered_map<MessageType, float, std::hash<int>> delayMessages;
@@ -52,13 +57,13 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
     float delay = messagePair.second;
     TORCH_CHECK(
         delay >= 0,
-        "Delays passed to FaultyProcessGroupAgent must be non-negative.")
+        "Delays passed to FaultyTensorPipeAgent must be non-negative.")
     delayMessages.insert({messageStringToType(messagePair.first), delay});
   }
   return delayMessages;
 }
 
-c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
+c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     const WorkerInfo& to,
     c10::intrusive_ptr<Message> message,
     const float rpcTimeoutSeconds,
@@ -66,19 +71,20 @@ c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message->type())) {
-    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
+    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
+
   // This send function checks the failMessageCountMap_ to check whether
   // we must fail the next send. If the send must be failed, we set an error
   // on the returned future immediately and increment the counter in the map,
-  // otherwise we just call the ProcessGroupAgent send.
-  const auto key = fromVec(message->payload());
+  // otherwise we just call the TensorPipeAgent send.
+  const auto key = fromVecToString(message->payload());
   std::unique_lock<std::mutex> lock(failMapMutex_);
   auto it = failMessageCountMap_.find(key);
   if (it == failMessageCountMap_.end()) {
     failMessageCountMap_[key] = 0;
   }
-  if (failMessageCountMap_[key] < failNumSends_) {
+  if (failMessageCountMap_[key] < numFailSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
     auto jitFuture = c10::make_intrusive<JitFuture>(at::AnyClassType::get());
@@ -88,43 +94,38 @@ c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
     return jitFuture;
   } else {
     lock.unlock();
-    return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
+    return TensorPipeAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
 }
 
-void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
-  float msgDelay = getDelayForMessage(work.message_->type());
+void FaultyTensorPipeAgent::pipeWrite(
+    const std::shared_ptr<tensorpipe::Pipe>& pipe,
+    c10::intrusive_ptr<Message> rpcMessage,
+    std::vector<c10::Device>&& devices,
+    std::vector<c10::Stream> streams,
+    std::function<void(const tensorpipe::Error&)> fn) noexcept {
+  float msgDelay = getDelayForMessage(rpcMessage->type());
   if (msgDelay != 0) {
     // Sleep for the specified delay for the message.
     std::this_thread::sleep_for(std::chrono::milliseconds(
         static_cast<int>(msgDelay * kSecToMsConversion)));
   }
-  ProcessGroupAgent::enqueueSend(std::move(work));
+  TensorPipeAgent::pipeWrite(pipe, rpcMessage, std::move(devices), streams, fn);
 }
 
-void FaultyProcessGroupAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
-  float msgDelay = getDelayForMessage(message->type());
-  if (msgDelay != 0) {
-    // Sleep for the specified delay for the message.
-    std::this_thread::sleep_for(std::chrono::milliseconds(
-        static_cast<int>(msgDelay * kSecToMsConversion)));
-  }
-  ProcessGroupAgent::sendToSelf(std::move(message));
-}
-
-bool FaultyProcessGroupAgent::shouldFailMessage(MessageType type) const {
+bool FaultyTensorPipeAgent::shouldFailMessage(MessageType type) const {
   // Return true if the input message type is in the messageTypesToFail_ list
   return (
       std::find(messageTypesToFail_.begin(), messageTypesToFail_.end(), type) !=
       messageTypesToFail_.end());
 }
 
-float FaultyProcessGroupAgent::getDelayForMessage(MessageType type) const {
+float FaultyTensorPipeAgent::getDelayForMessage(MessageType type) const {
   const auto& it = messageTypesToDelay_.find(type);
   return it == messageTypesToDelay_.end() ? 0 : it->second;
 }
 
-MessageType FaultyProcessGroupAgent::messageStringToType(
+MessageType FaultyTensorPipeAgent::messageStringToType(
     const std::string& messageString) const {
   // Lazily constructed map that returns string to message type mapping
   static std::unordered_map<std::string, MessageType> msgMap = {
@@ -150,3 +151,5 @@ MessageType FaultyProcessGroupAgent::messageStringToType(
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

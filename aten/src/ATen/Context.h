@@ -73,6 +73,9 @@ class TORCH_API Context {
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
   }
+  static bool hasLazy() {
+    return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
+  }
   static bool hasMLC() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::MLC);
   }
