@@ -9,7 +9,6 @@
 
 #include <torch/csrc/THP.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_FatalError;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_CUDAOutOfMemoryError;

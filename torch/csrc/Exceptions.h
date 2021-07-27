@@ -133,7 +133,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_CUDAOutOfMemoryError;
@@ -173,8 +172,7 @@ struct python_error : public std::exception {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual const char* what() const noexcept override {
+   const char* what() const noexcept override {
     return message.c_str();
   }
 
