@@ -148,7 +148,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["bucket_sizes"] =
       c10::Join(", ", get_bucket_sizes());
   // A list of bucket size limits (bytes) specified during construction time
-  ddp_logging_data_->strs_map["bucket_size_limits"] =
+  ddp_logging_data_->strs_map["initial_bucket_size_limits"] =
       c10::Join(", ", get_bucket_size_limits());
   set_env_variables();
 
@@ -234,7 +234,7 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->has_rebuilt_bucket_;
     ddp_logging_data_->strs_map["rebuilt_bucket_sizes"] =
         c10::Join(", ", get_bucket_sizes());
-    ddp_logging_data_->strs_map["bucket_size_limits"] =
+    ddp_logging_data_->strs_map["rebuilt_bucket_size_limits"] =
         c10::Join(", ", get_bucket_size_limits());
   }
 
