@@ -39,9 +39,8 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
         return super(LinearReLU, cls).from_float(mod)
 
     def to_float(self):
-        linear = torch.nn.Linear(self.in_features, self.out_features)
+        linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)
         linear.weight = torch.nn.Parameter(self.weight.detach())
-        linear.bias = None
         if self.bias is not None:
             linear.bias = torch.nn.Parameter(self.bias.detach())
         relu = torch.nn.ReLU()
