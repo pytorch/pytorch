@@ -606,9 +606,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
-    min_val: torch.Tensor
-    max_val: torch.Tensor
-    _version = 3
+    min_vals: torch.Tensor
+    max_vals: torch.Tensor
 
     def __init__(
         self,
@@ -630,8 +629,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.ch_axis = ch_axis
-        self.register_buffer("min_val", torch.tensor([], **factory_kwargs))
-        self.register_buffer("max_val", torch.tensor([], **factory_kwargs))
+        self.register_buffer("min_vals", torch.tensor([], **factory_kwargs))
+        self.register_buffer("max_vals", torch.tensor([], **factory_kwargs))
         if (
             self.qscheme == torch.per_channel_symmetric
             and self.reduce_range
@@ -648,8 +647,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
-        min_val = self.min_val
-        max_val = self.max_val
+        min_vals = self.min_vals
+        max_vals = self.max_vals
         x_dim = x.size()
 
         new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
@@ -658,27 +657,28 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = x.permute(new_axis_list)
         # Need to match dtype of min/max because the updates to buffers
         # are done in place and types need to match for comparisons
-        y = y.to(self.min_val.dtype)
+        y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val, max_val = torch._aminmax(y, 1)
+        if min_vals.numel() == 0 or max_vals.numel() == 0:
+            min_vals, max_vals = torch._aminmax(y, 1)
         else:
-            min_val_cur, max_val_cur = torch._aminmax(y, 1)
-            min_val = torch.min(min_val_cur, min_val)
-            max_val = torch.max(max_val_cur, max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+            min_vals = torch.min(min_vals_cur, min_vals)
+            max_vals = torch.max(max_vals_cur, max_vals)
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
     @torch.jit.export
     def calculate_qparams(self):
-        return self._calculate_qparams(self.min_val, self.max_val)
+        return self._calculate_qparams(self.min_vals, self.max_vals)
 
     def extra_repr(self):
-        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+        return "min_val={}, max_val={}".format(self.min_vals, self.max_vals)
 
+    @torch.jit.export
     def _load_from_state_dict(
         self,
         state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
@@ -689,30 +689,26 @@ class PerChannelMinMaxObserver(_ObserverBase):
         unexpected_keys: List[str],
         error_msgs: List[str],
     ):
-        version = local_metadata.get("version", None)
-        if version is None or version < 3:
-            local_state = ["min_vals", "max_vals"]
-        else:
-            local_state = ["min_val", "max_val"]
+        local_state = ["min_vals", "max_vals"]
         for name in local_state:
             key = prefix + name
             if key in state_dict:
                 val = state_dict[key]
-                # Custom handling to allow loading min_val or max_val
+                # Custom handling to allow loading min_vals or max_vals
                 # of size N into uninitialized buffers of size 0. The
                 # buffers are resized here, and the values are copied in
                 # the default state_dict loading code of the parent.
-                if name == "min_val" or name == "min_vals":
-                    self.min_val.resize_(val.shape)
+                if name == "min_vals":
+                    self.min_vals.resize_(val.shape)
                 else:
-                    self.max_val.resize_(val.shape)
+                    self.max_vals.resize_(val.shape)
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
-                    if name == "min_val" or name == "min_vals":
-                        self.min_val.copy_(val)
+                    if name == "min_vals":
+                        self.min_vals.copy_(val)
                     else:
-                        self.max_val.copy_(val)
+                        self.max_vals.copy_(val)
             elif strict:
                 missing_keys.append(key)
 
@@ -721,12 +717,13 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 state_dict,
                 prefix,
                 local_metadata,
-                False,
+                strict,
                 missing_keys,
                 unexpected_keys,
                 error_msgs,
             )
 
+    @torch.jit.export
     def _load_from_state_dict_script(
         self,
         state_dict: Union[Dict[str, torch.Tensor], Dict[str, torch.Tensor]],
@@ -751,8 +748,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        self.min_vals = torch.tensor([])
+        self.max_vals = torch.tensor([])
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -808,9 +805,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
-        x = x.to(self.min_val.dtype)
-        min_val = self.min_val
-        max_val = self.max_val
+        x = x.to(self.min_vals.dtype)
+        min_vals = self.min_vals
+        max_vals = self.max_vals
         x_dim = x.size()
 
         new_axis_list = [i for i in range(len(x_dim))]  # noqa: C416
@@ -818,16 +815,16 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         new_axis_list[0] = self.ch_axis
         y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val, max_val = torch._aminmax(y, 1)
+        if min_vals.numel() == 0 or max_vals.numel() == 0:
+            min_vals, max_vals = torch._aminmax(y, 1)
         else:
-            min_val_cur, max_val_cur = torch._aminmax(y, 1)
-            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
-            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
-        self.min_val.copy_(min_val)
-        self.max_val.copy_(max_val)
+            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
+            min_vals = min_vals + self.averaging_constant * (min_vals_cur - min_vals)
+            max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
+        self.min_vals.resize_(min_vals.shape)
+        self.max_vals.resize_(max_vals.shape)
+        self.min_vals.copy_(min_vals)
+        self.max_vals.copy_(max_vals)
         return x_orig
 
 
