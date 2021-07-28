@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+#include "caffe2/benchmarks/static_runtime/test_utils.h"
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 #include "test_utils.h"
@@ -328,6 +329,25 @@ TEST(StaticRuntime, IndividualOps_Div) {
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
 }
 
+TEST(StaticRuntime, IndividualOps_Mul) {
+  auto a = at::randn({3, 3});
+  auto b = at::randn({3, 3});
+  auto c = at::randn({3, 3, 3});
+  auto d = at::randn({3, 3, 3});
+
+  std::vector<IValue> tensor_args1{a, b};
+  std::vector<IValue> tensor_args2{c, d};
+
+  testStaticRuntime(mul_tensor, tensor_args1);
+  testStaticRuntime(mul_tensor, tensor_args1, tensor_args2);
+
+  std::vector<IValue> scalar_args1{a, 42};
+  std::vector<IValue> scalar_args2{c, 42};
+
+  testStaticRuntime(mul_scalar, scalar_args1);
+  testStaticRuntime(mul_scalar, scalar_args1, scalar_args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Log) {
   // Ensure that the input values are valid.
   auto a = at::abs(at::randn({2, 3}));
@@ -359,6 +379,74 @@ TEST(StaticRuntime, IndividualOps_Sub) {
   std::vector<IValue> args3{a, 2.3, 4};
   testStaticRuntime(sub_scalar_alpha, args3);
   testStaticRuntime(sub_scalar_alpha, {c, 1.3, 2});
+}
+
+TEST(StaticRuntime, IndividualOps_NanToNum) {
+  const auto inf = std::numeric_limits<double>::infinity();
+  const auto nan = std::numeric_limits<double>::quiet_NaN();
+
+  auto a = torch::tensor({{1.0, nan}, {-inf, inf}});
+  auto b = torch::tensor({{1.0, nan, -inf}, {-inf, inf, inf}, {nan, 1.0, 1.0}});
+
+  std::vector<IValue> args1{a, 1.0, 2.0, -2.0};
+  std::vector<IValue> args2{b, 1.0, 2.0, -2.0};
+
+  testStaticRuntime(
+      nan_to_num_script,
+      args1,
+      /*args2*/ {},
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      nan_to_num_script,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_Stack) {
+  auto a = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+  auto b = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+  auto c = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+  auto d = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+  auto e = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+  auto f = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+
+  std::vector<IValue> args1_dim{a, b, 0};
+  std::vector<IValue> args2_dim{d, e, 1};
+
+  std::vector<IValue> args1_three_tensors{a, b, c};
+  std::vector<IValue> args2_three_tensors{d, e, f};
+
+  testStaticRuntime(stack_dim, args1_dim);
+  testStaticRuntime(stack_dim, args1_dim, args2_dim);
+
+  testStaticRuntime(stack_three, args1_three_tensors);
+  testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
+}
+
+TEST(StaicRuntime, IndividualOps_ReLU) {
+  auto a = torch::tensor({{1, -1}, {2, 0}});
+  auto b = torch::tensor({{1, -1, -1}, {2, 0, -1}});
+
+  std::vector<IValue> args1{a};
+  std::vector<IValue> args2{b};
+
+  testStaticRuntime(relu_script, args1);
+  testStaticRuntime(relu_script, args1, args2);
+}
+
+TEST(StaicRuntime, IndividualOps_Tanh) {
+  auto a = at::randn({2, 2});
+  auto b = at::randn({3, 3, 3});
+
+  std::vector<IValue> args1{a};
+  std::vector<IValue> args2{b};
+
+  testStaticRuntime(tanh_script, args1, /*args2*/ {}, /*use_allclose*/ true);
+  testStaticRuntime(tanh_script, args1, args2, /*use_allclose*/ true);
 }
 
 TEST(StaticRuntime, IndividualOps_Norm) {
