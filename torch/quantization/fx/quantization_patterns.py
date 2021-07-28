@@ -987,19 +987,40 @@ class BatchNormQuantizeHandler(QuantizeHandler):
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
         # 1. attach activation post process to module
-        activation_post_process = \
+        output_activation_post_process = \
             self._maybe_get_last_node_only_observer(modules)
-        assert activation_post_process is not None
-        self.bn.activation_post_process = activation_post_process
-        qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
-        quantized = qbn_cls.from_float(self.bn)
-        parent_name, name = _parent_name(self.bn_node.target)
-        setattr(modules[parent_name], name, quantized)
-        return quantized_graph.create_node(
-            'call_module',
-            self.bn_node.target,
-            load_arg(quantized=[0])(self.bn_node.args),
-            load_arg(quantized=torch.float)(self.bn_node.kwargs))
+        assert output_activation_post_process is not None
+        if is_reference:
+            # produce dequant - float_op - quant pattern
+            dtype = activation_dtype(qconfig)
+            activation = load_arg(quantized=dtype)(self.bn_node.args[0])
+            args = load_arg(quantized=torch.float)(self.bn_node.args)
+            op_out = quantized_graph.create_node(
+                "call_module",
+                self.bn_node.target,
+                args,
+                {})
+            if output_activation_post_process:
+                op_out = quantize_node(
+                    op_out,
+                    output_activation_post_process,
+                    node,
+                    modules,
+                    quantized_graph,
+                    node_name_to_scope,
+                    is_input=False)
+            return op_out
+        else:
+            self.bn.activation_post_process = output_activation_post_process
+            qbn_cls = get_static_quant_module_class(type(self.bn), additional_static_quant_mapping)
+            quantized = qbn_cls.from_float(self.bn)
+            parent_name, name = _parent_name(self.bn_node.target)
+            setattr(modules[parent_name], name, quantized)
+            return quantized_graph.create_node(
+                'call_module',
+                self.bn_node.target,
+                load_arg(quantized=[0])(self.bn_node.args),
+                load_arg(quantized=torch.float)(self.bn_node.kwargs))
 
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
