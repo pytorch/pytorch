@@ -189,6 +189,71 @@ const Tensor& resize__plumbing(
   return self;
 }
 
+std::tuple<Tensor, optional<int64_t>> squeeze_batching_rule(const Tensor& self, optional<int64_t> bdim) {
+  TORCH_INTERNAL_ASSERT(bdim.has_value());
+  // Special case for scalar arrays to replicate PyTorch behavior.
+  if (self.dim() == 1) {
+    return std::make_tuple(self.alias(), bdim);
+  }
+
+  // Manually calculate the output shape by eliding all dimensions of
+  // size 1 keeping track of where the batch index started and where it
+  // ended up moving to. We also ensure we do not drop the batch index.
+  auto shape = self.sizes();
+  DimVector squeezed_sizes;
+  bool before_batch_idx = true;
+  int64_t new_batch_idx = 0;
+  int64_t original_idx = 0;
+
+  for (auto it = shape.begin(); it != shape.end(); ++it) {
+    // Keep only dimensions != 1 and the batch dimension (irrespective of size).
+    if (*it != 1 || original_idx == bdim) {
+      squeezed_sizes.push_back(*it);
+      if (original_idx == bdim) {
+        before_batch_idx = false;
+      }
+      // Only increment for the dimensions that will be kept in the output.
+      if (before_batch_idx) {
+        ++new_batch_idx;
+      }
+    }
+    ++original_idx;
+  }
+
+  auto result = self.view(squeezed_sizes);
+  return std::make_tuple(result, c10::optional<int64_t>(new_batch_idx));
+}
+
+std::tuple<Tensor, optional<int64_t>> squeeze_dim_batching_rule(const Tensor& self, optional<int64_t> bdim, int64_t dim) {
+  TORCH_INTERNAL_ASSERT(bdim.has_value());
+  // Special case for scalar arrays to replicate PyTorch behavior.
+  if (self.dim() == 1) {
+    TORCH_CHECK(dim == 0, "Dimension is out of range (expected to be in range of [-1, 0], but got ", dim);
+    return std::make_tuple(self.alias(), bdim);
+  }
+
+  // Calculate the proper offset if dim is negative.
+  auto actual_dim = dim;
+  if (dim < 0) {
+    actual_dim = self.dim() + dim - 1;
+  }
+  if (actual_dim < bdim) {
+    // Since dimension to be squeezed is before the batch dimension pass as-is.
+    auto original_size = self.dim();
+    auto result = self.squeeze(actual_dim);
+    auto updated_batch_idx = *bdim;
+    if (result.dim() != original_size) {
+      // A column before batch dimension has been dropped so adjust accordingly.
+      --updated_batch_idx;
+    }
+    return std::make_tuple(result, optional<int64_t>(updated_batch_idx));
+  } else {
+    // Since dimension to be squeezed is after the batch dimension adjust by one to account
+    // for the original batch dimension. In this case batch dimension won't move.
+    return std::make_tuple(self.squeeze(actual_dim + 1), bdim);
+  }
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("diag", diag_batch_rule);
 
@@ -204,6 +269,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
   m.impl("resize_", resize__plumbing);
+  VMAP_SUPPORT("squeeze", squeeze_batching_rule);
+  VMAP_SUPPORT("squeeze.dim", squeeze_dim_batching_rule);
 }
 
 }}
