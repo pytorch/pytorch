@@ -242,7 +242,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 self.bn.affine,
                 self.bn.track_running_stats)
             bn.weight = Parameter(self.bn.weight.detach())
-            if self.affine:
+            if self.bn.affine:
                 bn.bias = Parameter(self.bn.bias.detach())
             modules.append(bn)
 
