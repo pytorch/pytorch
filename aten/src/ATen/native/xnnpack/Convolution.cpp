@@ -324,54 +324,34 @@ Tensor run(
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status setup_status;
-  if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
-      (context.cached_output_ptr != output.data_ptr<float>()) ||
-      (padded_input_nhwc.size(Layout::Activation4D::batch) !=
-        static_cast<int64_t>(context.batch_size)) ||
-      (padded_input_nhwc.size(Layout::Activation4D::channels) !=
-        static_cast<int64_t>(context.input_channels)) ||
-      (padded_input_nhwc.size(Layout::Activation4D::height) !=
-        static_cast<int64_t>(context.input_height)) ||
-      (padded_input_nhwc.size(Layout::Activation4D::width) !=
-        static_cast<int64_t>(context.input_width))
-      ) {
 
-      if (context.transposed_) {
-        setup_status = xnn_setup_deconvolution2d_nhwc_f32(
-          context.op.get(),                                      // operator
-          padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-          padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-          padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-          context.output_padding_[0],                            // adjustment_height
-          context.output_padding_[1],                            // adjustment_width
-          padded_input_nhwc.data_ptr<float>(),                   // input
-          output.data_ptr<float>(),                              // output
-          caffe2::pthreadpool_());                               // threadpool
+  if (context.transposed_) {
+    setup_status = xnn_setup_deconvolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+      context.output_padding_[0],                            // adjustment_height
+      context.output_padding_[1],                            // adjustment_width
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
+      caffe2::pthreadpool_());                               // threadpool
 
-      } else {
-        setup_status = xnn_setup_convolution2d_nhwc_f32(
-          context.op.get(),                                      // operator
-          padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-          padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-          padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-          padded_input_nhwc.data_ptr<float>(),                   // input
-          output.data_ptr<float>(),                              // output
-          caffe2::pthreadpool_());
-      }
-
-      TORCH_CHECK(
-          xnn_status_success == setup_status,
-          (context.transposed_ ? "xnn_setup_deconvolution2d_nhwc_f32 failed!"
-                               : "xnn_setup_convolution2d_nhwc_f32 failed!"));
-
-      // Cache values to avoid setup for the next round
-      context.cached_input_ptr = padded_input_nhwc.data_ptr<float>();
-      context.cached_output_ptr = output.data_ptr<float>();
-      context.batch_size = padded_input_nhwc.size(Layout::Activation4D::batch);
-      context.input_channels = padded_input_nhwc.size(Layout::Activation4D::channels);
-      context.input_height = padded_input_nhwc.size(Layout::Activation4D::height);
-      context.input_width = padded_input_nhwc.size(Layout::Activation4D::width);
+  } else {
+    setup_status = xnn_setup_convolution2d_nhwc_f32(
+      context.op.get(),                                      // operator
+      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+      padded_input_nhwc.data_ptr<float>(),                   // input
+      output.data_ptr<float>(),                              // output
+      caffe2::pthreadpool_());
   }
+
+  TORCH_CHECK(
+      xnn_status_success == setup_status,
+      (context.transposed_ ? "xnn_setup_deconvolution2d_nhwc_f32 failed!"
+                            : "xnn_setup_convolution2d_nhwc_f32 failed!"));
 
   const xnn_status run_status = xnn_run_operator(
       context.op.get(),         // operator
