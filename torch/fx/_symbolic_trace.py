@@ -515,7 +515,20 @@ class Tracer(TracerBase):
         if isinstance(root, torch.nn.Module):
             self.root = root
             fn = type(root).forward
-            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
+
+            # Ensure that we don't have a situation in which multiple
+            # paths are sharing the same module. We only want to assign
+            # `self.submodule_paths` if we can guarantee a 1:1 mapping
+            # between modules and paths
+            maybe_submodule_paths = {}
+            seen = set()
+            for name, mod in root.named_modules():
+                if mod in seen:
+                    break
+                seen.add(mod)
+                maybe_submodule_paths[mod] = name
+            else:
+                self.submodule_paths = maybe_submodule_paths
         else:
             self.root = torch.nn.Module()
             fn = root
