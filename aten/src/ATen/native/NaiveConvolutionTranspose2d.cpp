@@ -195,7 +195,6 @@ TORCH_META_FUNC(slow_conv_transpose2d)
       dilation_width,
       false);
 
-  int n_input_plane = weight.size(0);
   int n_output_plane = weight.size(1);
 
   Tensor input_ = input.contiguous();
