@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, \
-    ctcloss_reference, new_module_tests
+    ctcloss_reference, new_module_tests, single_batch_reference_fn
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, onlyOnCPUAndCUDA, \
@@ -4759,6 +4759,10 @@ class TestNN(NNTestCase):
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
+        # no batch dims
+        input = torch.randn(50, 20, 64, 64)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
+
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -9378,6 +9382,11 @@ class TestNN(NNTestCase):
         with self.assertRaises(RuntimeError):
             F.cosine_similarity(input1, input2)
 
+        # Check type promotion, issue #61454
+        input = torch.tensor(12.)
+        out = F.cosine_similarity(input.to(torch.int8), input, dim=-1)
+        self.assertEqual(out, 1.)
+
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
         grid = torch.empty(1, 1, 1, 2)
@@ -11829,8 +11838,9 @@ for test_params in module_tests + new_module_tests:
         add_test(test, decorator)
 
 for test_params in criterion_tests:
-    name = test_params.pop('module_name')
-    test_params['constructor'] = getattr(nn, name)
+    if 'constructor' not in test_params:
+        name = test_params.pop('module_name')
+        test_params['constructor'] = getattr(nn, name)
     test = CriterionTest(**test_params)
     decorator = test_params.pop('decorator', None)
     add_test(test, decorator)
@@ -11880,6 +11890,22 @@ add_test(NewModuleTest(
     fullname='MaxUnpool3d_net',
     check_gradgrad=False,))
 
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool2d(2, return_indices=True),
+        nn.MaxUnpool2d(2)),
+    input_size=(1, 2, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool2d_net_no_batch_dim',))
+
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool3d(2, return_indices=True),
+        nn.MaxUnpool3d(2)),
+    input_size=(1, 2, 4, 6),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool3d_net_no_batch_dim',
+    check_gradgrad=False))
 
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
@@ -12836,6 +12862,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
+        # no batch dims
+        input = torch.empty(20, 64, 64)
+        self._test_dropout(nn.Dropout2d, device, input)
+
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -12847,6 +12877,10 @@ class TestNNDeviceType(NNTestCase):
 
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
+
+        # no batch dims
+        input = torch.empty(50, 20, 64, 64)
+        self._test_dropout(nn.Dropout3d, device, input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
@@ -13152,6 +13186,21 @@ class TestNNDeviceType(NNTestCase):
             g = torch.randn_like(out)
             out.backward(g)
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
+
+    @onlyOnCPUAndCUDA
+    def test_Bilinear_empty(self, device):
+        mod = torch.nn.Bilinear(20, 30, 40).to(device)
+        inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
+        inp2 = torch.randn(0, 10, 30, requires_grad=True, device=device)
+
+        output = mod(inp1, inp2)
+        output.sum().backward()
+
+        self.assertEqual(inp1, torch.zeros_like(inp1))
+        self.assertEqual(inp2, torch.zeros_like(inp2))
+
+        self.assertEqual(inp1.grad, torch.zeros_like(inp1))
+        self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
@@ -15672,6 +15721,19 @@ class TestNNDeviceType(NNTestCase):
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @dtypes(torch.double)
+    def test_Conv2d_backward_depthwise(self, device, dtype):
+        x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
+        weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
+
+        def conv2d_depthwise(x, weight):
+            return torch.nn.functional.conv2d(
+                x, weight, bias=None, stride=(1, 10), groups=2)
+
+        for cudnn_enabled in [False, True]:
+            with torch.backends.cudnn.flags(enabled=cudnn_enabled):
+                torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
+
     def _test_batchnorm_grad(self, device, dtype=torch.double):
         bs, n_feat, size_feat = 4, 5, 6
         input = torch.arange(bs * n_feat * size_feat, device=device,
@@ -15705,13 +15767,13 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(F.hardswish, (inputs,)))
 
 
-    def _test_batchnorm_eval(self, device, dtype, module_dtype=None):
+    def _test_batchnorm_eval(self, ndim, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype
         module = nn.BatchNorm1d(3).to(device, module_dtype)
         module.eval()
 
-        data = torch.rand(4, 3, device=device, dtype=dtype, requires_grad=True)
-        grad = torch.rand(4, 3, device=device, dtype=dtype)
+        data = torch.rand([3] * ndim, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.rand([3] * ndim, device=device, dtype=dtype)
 
         # 1st pass
         res1 = module(data)
@@ -15755,21 +15817,77 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     @dtypesIfCUDA(torch.float, torch.bfloat16)
     def test_batchnorm_eval(self, device, dtype):
-        self._test_batchnorm_eval(device, dtype)
+        self._test_batchnorm_eval(2, device, dtype)
+        self._test_batchnorm_eval(3, device, dtype)
 
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_eval(device, dtype)
+                self._test_batchnorm_eval(2, device, dtype)
+                self._test_batchnorm_eval(3, device, dtype)
 
     @onlyCUDA
     @dtypes(torch.bfloat16, torch.half)
     def test_batchnorm_eval_mixed(self, device, dtype):
         # Test bfloat16 input with float module
-        self._test_batchnorm_eval(device, dtype, torch.float)
+        self._test_batchnorm_eval(2, device, dtype, torch.float)
+        self._test_batchnorm_eval(3, device, dtype, torch.float)
 
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
-                self._test_batchnorm_eval(device, dtype, torch.float)
+                self._test_batchnorm_eval(2, device, dtype, torch.float)
+                self._test_batchnorm_eval(3, device, dtype, torch.float)
+
+    def _test_batchnorm_affine(self, ndim, device, dtype, module_dtype=None):
+        # Compare affine against no-op weights and bias
+        module_dtype = module_dtype or dtype
+        module = nn.BatchNorm1d(3, affine=False).to(device, module_dtype)
+        module_affine = nn.BatchNorm1d(3, affine=True).to(device, module_dtype)
+        with torch.no_grad():
+            module_affine.weight.fill_(1.0)
+            module_affine.bias.zero_()
+
+        data = torch.rand([3] * ndim, device=device, dtype=dtype, requires_grad=True)
+        grad = torch.ones_like(data, requires_grad=False)
+
+        # With weights all ones and bias all zeros
+        res1 = module_affine(data)
+        res1.backward(grad)
+        grad1 = data.grad.clone()
+        data.grad.zero_()
+
+        # Without any weights or bias
+        res2 = module(data)
+        res2.backward(grad)
+        grad2 = data.grad
+
+        self.assertEqual(res1, res2)
+        self.assertEqual(grad1, grad2)
+
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.bfloat16)
+    def test_batchnorm_affine(self, device, dtype):
+        self._test_batchnorm_affine(2, device, dtype)
+        self._test_batchnorm_affine(3, device, dtype)
+
+        if self.device_type == 'cuda' and self.has_cudnn():
+            with torch.backends.cudnn.flags(enabled=False):
+                self._test_batchnorm_affine(2, device, dtype)
+                self._test_batchnorm_affine(3, device, dtype)
+
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_batchnorm_affine_mixed(self, device, dtype):
+        cudnn_enabled = [False]
+        if self.device_type == 'cuda' and self.has_cudnn():
+            # TODO: Test fails with cudnn, see gh-62034
+            # cudnn_enabled = [False, True]
+            pass
+
+        # Test bfloat16 input with float module
+        for enabled in cudnn_enabled:
+            with torch.backends.cudnn.flags(enabled=enabled):
+                self._test_batchnorm_affine(2, device, dtype, torch.float)
+                self._test_batchnorm_affine(3, device, dtype, torch.float)
 
     def _test_batchnorm_simple_average(self, device, dtype, module_dtype=None):
         module_dtype = module_dtype or dtype
@@ -15935,6 +16053,24 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
+
+    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypes(torch.float)
+    def test_maxpool_indices_no_batch_dim(self, device, dtype):
+        """Check that indices with no batch dim is consistent with a single batch."""
+        max_pool_cases = [
+            (nn.AdaptiveMaxPool1d(3, return_indices=True),
+             torch.randn(3, 5, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool2d(3, return_indices=True),
+             torch.randn(3, 5, 6, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool3d(3, return_indices=True),
+             torch.randn(3, 5, 6, 7, device=device, dtype=dtype))]
+
+        for module, input in max_pool_cases:
+            _, indices_no_batch = module(input)
+            _, indicies_single_batch = module(input.unsqueeze(0))
+            self.assertEqual(indices_no_batch, indicies_single_batch.squeeze(0))
+
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
@@ -16296,48 +16432,6 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     def test_softmax_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
-
-    @onlyCPU
-    @dtypes(torch.float, torch.double)
-    def test_conv_thnn_nhwc(self, device, dtype):
-        def helper(n, c, h, w, out_channels, kernel_size, dilation, groups):
-            input = torch.randint(-3, 3, (n, c, h, w), dtype=dtype, device=device)\
-                .to(memory_format=torch.channels_last)
-            input.requires_grad_()
-            conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)\
-                .to(device='cpu', dtype=dtype, memory_format=torch.channels_last)
-            for p in conv.parameters():
-                p.data = torch.randint_like(p, -3, 3)
-
-            ref_input = input.detach().clone().contiguous().requires_grad_()
-            ref_conv = nn.Conv2d(c, out_channels, kernel_size, dilation=dilation, groups=groups)
-            # load_state_dict will restore the stride & memory_layout on ref_conv.weight.
-            ref_conv.load_state_dict(conv.state_dict())
-            ref_conv = ref_conv.to(device='cpu', dtype=dtype, memory_format=torch.contiguous_format)
-
-            out = conv(input)
-            ref_out = ref_conv(ref_input)
-
-            grad = torch.randint_like(out, -3, 3)
-            ref_grad = grad.detach().clone().contiguous()
-
-            out.backward(grad)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-            self.assertTrue(ref_out.is_contiguous())
-            self.assertEqual(out, ref_out, exact_dtype=False)
-            self.assertEqual(conv.weight.grad, ref_conv.weight.grad, exact_dtype=False)
-            self.assertEqual(conv.bias.grad, ref_conv.bias.grad, exact_dtype=False)
-            self.assertEqual(input.grad, ref_input.grad, exact_dtype=False)
-
-        # non-dilated conv goes to thnn_conv2d
-        # dilated conv goes to slow_conv_dilated2d
-        with torch.backends.mkldnn.flags(enabled=False):
-            helper(2, 8, 4, 4, out_channels=4, kernel_size=3, dilation=1, groups=1)
-            helper(2, 8, 4, 4, out_channels=8, kernel_size=3, dilation=1, groups=8)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=1)
-            helper(1, 16, 56, 56, out_channels=16, kernel_size=1, dilation=1, groups=16)
 
     @onlyCUDA
     @skipCUDAIfRocm
