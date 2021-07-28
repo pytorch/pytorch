@@ -12,10 +12,12 @@ namespace jit {
 // Implementation of Android NNAPI Backend delegate
 
 // The Android Neural Networks API (NNAPI) is an Android C API designed
-// for running computationally intensive operations for machine learning on Android devices
-// The API is available on all Android devices running Android 8.1 (API level 27) or higher.
+// for running computationally intensive operations for machine learning on
+// Android devices. The API is available on all Android devices running
+// Android 8.1 (API level 27) or higher.
 
-// Implementation is reflective of caffe2/torch/backends/_nnapi/prepare.py NnapiModule.forward()
+// Implementation is reflective of caffe2/torch/backends/_nnapi/prepare.py
+// NnapiModule.forward()
 class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
