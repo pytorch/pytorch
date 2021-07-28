@@ -3532,23 +3532,8 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
   auto n = LU_data.size(-1);
   auto nrhs = self.size(-1);
 
-  // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
-  Tensor self_grad;
-  if (self.requires_grad()) {
-    self_grad = std::get<0>(at::triangular_solve(
-      std::get<0>(at::triangular_solve(
-        P.transpose(-2, -1),
-        L,
-        /*upper=*/false,
-        /*transpose=*/false,
-        /*unitriangular=*/true
-      )),
-      U,
-      /*upper=*/true,
-      /*transpose=*/false,
-      /*unitriangular=*/false
-    )).transpose(-2, -1).conj().matmul(grad);
-  }
+  // stores L^{-1} P^T
+  Tensor Y;
 
   Tensor LU_data_grad;
   if (LU_data.requires_grad()) {
@@ -3561,6 +3546,8 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
       /*unitriangular=*/true
     ));
     if (nrhs >= n) {
+      // Y stores L^{-1} P^T to be reused in the computation of self_grad
+      Y = X;
       X = X.matmul(self);
     }
     X = X.matmul(grad.transpose(-2, -1).conj());
@@ -3617,6 +3604,26 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
     // LU_data_grad = L_grad * 1_L + U_grad * 1_U
     LU_data_grad = L_grad.tril() - L_grad_diag_embed + U_grad.triu();
   }
+
+  // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
+  Tensor self_grad;
+  if (self.requires_grad()) {
+    self_grad = std::get<0>(at::triangular_solve(
+      // reuse Y := L^{-1} P^T if already computed
+      Y.defined() ? Y : std::get<0>(at::triangular_solve(
+        P.transpose(-2, -1),
+        L,
+        /*upper=*/false,
+        /*transpose=*/false,
+        /*unitriangular=*/true
+      )),
+      U,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj().matmul(grad);
+  }
+
 
   return std::make_tuple(self_grad, LU_data_grad);
 }
