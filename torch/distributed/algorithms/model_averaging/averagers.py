@@ -1,10 +1,34 @@
 import warnings
+from abc import ABC, abstractmethod
 
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
 
-class PeriodicModelAverager:
+class ModelAverager(ABC):
+    r"""Base class for all model averagers.
+
+    Args:
+        params (Iterator[torch.nn.Parameter]): The model parameters to be averaged.
+        process_group: The process group to be used for all-reduce.
+                       If ``None``, the default process group, which
+                       is created by :func:`torch.distributed.init_process_group`,
+                       will be used. (default: ``None``)
+    """
+
+    def __init__(self, params, process_group=None):
+        self.params = list(params)
+        self.process_group = (
+            process_group if process_group is not None else dist.group.WORLD
+        )
+        self.step = 0
+
+    @abstractmethod
+    def average_parameters(self):
+        raise NotImplementedError
+
+
+class PeriodicModelAverager(ModelAverager):
     r"""
     Averages parameters periodically after the warm-up stage.
 
@@ -67,7 +91,7 @@ class PeriodicModelAverager:
         warmup_steps=0,
         process_group=None,
     ):
-        self.params = list(params)
+        super().__init__(params, process_group)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
@@ -81,10 +105,6 @@ class PeriodicModelAverager:
                 "DistributedDataParallel should be used for this case."
             )
         self.period = period
-        self.process_group = (
-            process_group if process_group is not None else dist.group.WORLD
-        )
-        self.step = 0
 
     def average_parameters(self):
         r"""
