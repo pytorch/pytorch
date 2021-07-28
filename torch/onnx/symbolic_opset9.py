@@ -1410,8 +1410,8 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
     else:
         input_size = sym_help._get_tensor_sizes(input)
         # If input shape is [N, C, H, W], reshape to [1, N * C, H, W] and call batch_norm.
-        # For more information :
-        # https://github.com/pytorch/pytorch/blob/9baf75c86edc7f6cd1c04bf9f42d18bc0d05f504/aten/src/ATen/native/Normalization.cpp#L532
+        # For more information instance_norm():
+        # https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/Normalization.cpp#L542
         input_size_reshape = input_size.copy()
         n = input_size[0]
         c = input_size[1]
