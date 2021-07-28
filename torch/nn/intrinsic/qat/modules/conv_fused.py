@@ -219,7 +219,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
     def to_float(self):
         modules = []
         cls = type(self)
-        conv = cls._FLOAT_CONV_MODULE(
+        conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined]
             self.in_channels,
             self.out_channels,
             self.kernel_size,
@@ -234,8 +234,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             conv.bias = torch.nn.Parameter(self.bias.detach())
         modules.append(conv)
 
-        if cls._FLOAT_BN_MODULE:
-            bn = cls._FLOAT_BN_MODULE(
+        if cls._FLOAT_BN_MODULE:  # type: ignore[attr-defined]
+            bn = cls._FLOAT_BN_MODULE(  # type: ignore[attr-defined]
                 self.bn.num_features,
                 self.bn.eps,
                 self.bn.momentum,
@@ -246,8 +246,8 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                 bn.bias = Parameter(self.bn.bias.detach())
             modules.append(bn)
 
-        if cls._FLOAT_RELU_MODULE:
-            relu = cls._FLOAT_RELU_MODULE()
+        if cls._FLOAT_RELU_MODULE:  # type: ignore[attr-defined]
+            relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
             modules.append(relu)
 
         result = cls._FLOAT_MODULE(*modules)
@@ -318,7 +318,7 @@ class ConvBnReLU1d(ConvBn1d):
     _FLOAT_MODULE = nni.ConvBnReLU1d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv1d
     _FLOAT_BN_MODULE = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE = nn.ReLU
+    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv1d args
@@ -411,7 +411,7 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_MODULE = nni.ConvBnReLU2d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv2d
     _FLOAT_BN_MODULE = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE = nn.ReLU
+    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
 
     def __init__(self,
                  # Conv2d args
@@ -564,8 +564,7 @@ class ConvBnReLU3d(ConvBn3d):
     _FLOAT_MODULE = nni.ConvBnReLU3d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE = nn.Conv3d
     _FLOAT_BN_MODULE = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE = nn.ReLU
-
+    _FLOAT_RELU_MODULE = nn.ReLU  # type: ignore[assignment]
 
     def __init__(
         self,
