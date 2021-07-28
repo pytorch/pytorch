@@ -30,7 +30,7 @@ concurrency:
 jobs:
   ciflow_should_run:
     runs-on: ubuntu-18.04
-    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default'))
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default')) }}
     steps:
       - name: noop
         run: echo running ciflow_should_run
@@ -100,7 +100,7 @@ jobs:
           fi
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
-        if: steps.check.outputs.rebuild
+        if: ${{ steps.check.outputs.rebuild }}
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
@@ -157,6 +157,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
