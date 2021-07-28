@@ -152,6 +152,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       // with the `-Werror` (treat compiler warnings as errors) flag set
       case Pybind11_OptionalType::Kind:
       default:
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unknown type found during "
+            "deserialization! Check "
+            "`restoreAccurateTypeTags` for details");
     }
   }
 }
