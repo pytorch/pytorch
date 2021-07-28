@@ -38,7 +38,6 @@ class IDEEPInt8ReluOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR_WITH_ENGINE(Int8Relu, DNNLOWP, IDEEPInt8ReluOp);
 
 } // namespace
