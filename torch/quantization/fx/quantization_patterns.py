@@ -23,10 +23,6 @@ from ..utils import (
     activation_dtype,
 )
 
-from ..quantize import (
-    is_activation_post_process,
-)
-
 from .pattern_utils import (
     register_quant_pattern,
     get_default_output_activation_post_process_map,
@@ -36,6 +32,7 @@ from .pattern_utils import (
 from .utils import (
     _parent_name,
     all_node_args_have_no_tensors,
+    maybe_get_next_module,
     quantize_node,
     get_per_tensor_qparams,
     get_linear_prepack_op_for_dtype,
@@ -82,11 +79,18 @@ class QuantizeHandler(ABC):
         If the last node of the pattern is observed, return the observer
         instance. Otherwise, return None.
         """
-        for maybe_obs_node, _ in self.last_node.users.items():
-            if maybe_obs_node.op == 'call_module':
-                maybe_obs = modules[str(maybe_obs_node.target)]
-                if is_activation_post_process(maybe_obs):
-                    return maybe_obs
+        last_node = self.last_node
+
+        # Handle the additional mul node that gets added during equalization if
+        # it exists
+        maybe_eq_node = maybe_get_next_module(last_node, modules, target_functional_type=torch.mul)
+        if maybe_eq_node is not None:
+            last_node = maybe_eq_node
+
+        maybe_obs_node = maybe_get_next_module(last_node, modules, object)
+        if maybe_obs_node is not None:
+            return modules[str(maybe_obs_node.target)]
+
         return None
 
 
