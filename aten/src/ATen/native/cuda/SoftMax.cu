@@ -902,7 +902,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
 TORCH_IMPL_FUNC(log_softmax_cuda_out) (
   const Tensor &input,
   const int64_t dim,
-  const bool half_to_float
+  const bool half_to_float,
   const Tensor &output) {
   auto res = host_softmax<LogSoftMaxForwardEpilogue,true>(input, dim, half_to_float);
   output.copy_(res);

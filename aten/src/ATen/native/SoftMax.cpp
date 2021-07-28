@@ -189,7 +189,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   }
 
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
-    log_softmax_lastdim_kernel(kCPU, output, input);
+    log_softmax_lastdim_kernel(kCPU, output, input_);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
