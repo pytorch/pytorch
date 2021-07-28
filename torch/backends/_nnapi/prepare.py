@@ -78,7 +78,7 @@ class NnapiModule(torch.nn.Module):
 
 def convert_model_to_nnapi(model, inputs, serializer=None):
     (shape_compute_module, ser_model_tensor, used_weights, inp_mem_fmts, out_mem_fmts,
-    retval_count) = process_for_nnapi(model, inputs, serializer)
+     retval_count) = process_for_nnapi(model, inputs, serializer)
 
     nnapi_model = NnapiModule(
         shape_compute_module,
