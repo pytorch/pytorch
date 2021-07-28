@@ -1,10 +1,11 @@
 import warnings
+from abc import ABC, abstractmethod
 
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.utils as utils
 
 
-class ModelAverager:
+class ModelAverager(ABC):
     r"""Base class for all model averagers.
 
     Args:
@@ -20,8 +21,9 @@ class ModelAverager:
         )
         self.step = 0
 
-    def average_parameters(self, params):
-        pass
+    @abstractmethod
+    def average_parameters(self):
+        raise NotImplementedError
 
 
 class PeriodicModelAverager(ModelAverager):
