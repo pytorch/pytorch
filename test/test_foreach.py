@@ -141,8 +141,11 @@ class TestForeach(TestCase):
             self._binary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath, is_inplace=True, alpha=alpha)
 
         # Tests of implicit broadcasting
-        # When sizes of tensors don't match, foreach functions are supposed to choose slow path.
-        # Thus, argument of `is_fastpath` is set to `False`.
+        # When sizes of tensors don't match, foreach functions are supposed to choose slow path
+        # even if this methods's argument `is_fastpath` is True.
+        # `cudaLaunchKernel` will be equal to `N`. For assert in `ForeachFuncWrapper` to pass,
+        # we pass `is_fastpath and disable_fastpath` to `_binary_test`'s argument of is_fastpath.
+        # as n_expected_cudaLaunchKernels is N if disable_fastpath.
         inputs = [
             opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
             [
