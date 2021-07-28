@@ -116,11 +116,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       std::lock_guard<std::mutex> guard(state_mutex_);
       libkineto::api().activityProfiler().recordThreadInfo();
 
-      cpu_trace->activities.emplace_back(
-          libkineto::GenericTraceActivity(
-            cpu_trace->span,
-            libkineto::ActivityType::CPU_INSTANT_EVENT,
-            "[memory]"));
+      cpu_trace->activities.emplace_back(libkineto::GenericTraceActivity(
+          cpu_trace->span,
+          libkineto::ActivityType::CPU_INSTANT_EVENT,
+          "[memory]"));
       auto& act = cpu_trace->activities.back();
       act.device = libkineto::processId();
       act.resource = libkineto::systemThreadId();
@@ -128,23 +127,22 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       act.startTime = getTimeUs();
       act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
       act.addMetadata("Device Id", std::to_string(device.index()));
-      act.addMetadata(
-          "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
+      act.addMetadata("Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
       act.addMetadata("Bytes", std::to_string(alloc_size));
       if (total_allocated >= 0) {
-        act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+        act.addMetadata("Total Allocated", std::to_string(total_allocated));
       }
       if (total_reserved >= 0) {
-        act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+        act.addMetadata("Total Reserved", std::to_string(total_reserved));
       }
 
       kineto_events_.emplace_back();
       auto& evt = kineto_events_.back();
       evt.activity(act)
-        .deviceType(device.type())
-        .deviceIndex(device.index())
-        .nBytes(alloc_size)
-        .startThreadId(at::RecordFunction::currentThreadId());
+          .deviceType(device.type())
+          .deviceIndex(device.index())
+          .nBytes(alloc_size)
+          .startThreadId(at::RecordFunction::currentThreadId());
     }
   }
 
