@@ -573,16 +573,26 @@ struct HelperInterpNearest : public HelperInterpBase {
     AT_DISPATCH_FLOATING_TYPES(
       scalar_type, "compute_indices_weights_nearest", [&] {
 
-        scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
-
         auto input_index_ptr = output[0].data_ptr<int64_t>();
-        int64_t input_index;
-
-        for (int64_t i=0; i<output_size; i++) {
-          const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
-              scale, i, /*align_corners=*/true, /*cubic=*/false);
-          input_index = static_cast<int64_t>(floorf(real_input_index));
-          input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
+        if (output_size == input_size) {
+          // scale_factor = 1, simply copy
+          for (int64_t i=0; i<output_size; i++) {
+            input_index_ptr[i] = i * stride;
+          }
+        } else if (output_size == 2 * input_size) {
+          // scale_factor = 2, shift input index
+          for (int64_t i=0; i<output_size; i++) {
+            input_index_ptr[i] = (i >> 1) * stride;
+          }
+        } else {
+          scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
+          int64_t input_index;
+          for (int64_t i=0; i<output_size; i++) {
+            const scalar_t real_input_index = area_pixel_compute_source_index<scalar_t>(
+                scale, i, /*align_corners=*/true, /*cubic=*/false);
+            input_index = static_cast<int64_t>(floorf(real_input_index));
+            input_index_ptr[i] = static_cast<int64_t>(std::min(input_index, input_size - 1)) * stride;
+          }
         }
       }
     );

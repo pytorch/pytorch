@@ -10177,6 +10177,29 @@ class TestNN(NNTestCase):
         input = torch.randn(1, 1, 2, requires_grad=True)
         gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [input])
 
+        # checks data copy if output_size == input_size
+        # Related issue https://github.com/pytorch/pytorch/issues/62237
+        s = 10
+        in_t = torch.arange(s, dtype=torch.float).unsqueeze(0).unsqueeze(0)
+        # for s in [1.00001, 0.99999]:  # 0.9999 case is broken
+        for s in [1.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            expected_out = in_t
+            self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
+
+        # checks data duplication if output_size == 2 * input_size
+        # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
+        for s in [2.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            # input is [[[0, 1, 2, 3, ..., 9]]]
+            # expected out is [[[0, 0, 1, 1, 2, 2, ..., 9, 9]]]
+            expected_out = in_t.repeat_interleave(2, dim=-1)
+            self.assertEqual(out_t, expected_out)
+
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
@@ -10325,6 +10348,33 @@ class TestNN(NNTestCase):
 
                 gradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
                 gradgradcheck(lambda x: F.interpolate(x, 4, mode='nearest'), [a.to('cuda')])
+
+        # checks data copy if output_size == input_size
+        # Related issue https://github.com/pytorch/pytorch/issues/62237
+        in_t = torch.rand(1, 2, 4, 6, 8).contiguous(memory_format=torch.contiguous_format)
+        # for s in [1.00001, 0.99999]:  # 0.99999 case is broken
+        for s in [1.00001, ]:
+            out_t = F.interpolate(in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            expected_out = in_t
+            self.assertEqual(out_t, expected_out)
+            # checks consistency between channels_last and channels_first
+            in2_t = in_t.contiguous(memory_format=torch.channels_last_3d)
+            out2_t = F.interpolate(in2_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            self.assertEqual(out_t, out2_t)
+
+        # checks data duplication if output_size == 2 * input_size
+        # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
+        for s in [2.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            expected_out = in_t
+            for dim in [-1, -2, -3]:
+                expected_out = expected_out.repeat_interleave(2, dim=dim)
+            self.assertEqual(out_t, expected_out)
+            # checks consistency between channels_last and channels_first
+            out2_t = F.interpolate(in2_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            self.assertEqual(out_t, out2_t)
 
     def test_upsamplingTrilinear3d(self):
         for align_corners in [True, False]:
@@ -13984,6 +14034,33 @@ class TestNNDeviceType(NNTestCase):
                     out_cpu.backward(g_cpu)
 
                     self.assertEqual(a_cuda.grad, a_cpu.grad)
+
+        # checks data copy if output_size == input_size
+        # Related issue https://github.com/pytorch/pytorch/issues/62237
+        in_t = torch.rand(1, 2, 4, 6, device=device).contiguous(memory_format=torch.contiguous_format)
+        # for s in [1.00001, 0.99999]:  # 0.99999 case is broken
+        for s in [1.00001, ]:
+            out_t = F.interpolate(in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            expected_out = in_t
+            self.assertEqual(out_t, expected_out)
+            # checks consistency between channels_last and channels_first
+            in2_t = in_t.contiguous(memory_format=torch.channels_last)
+            out2_t = F.interpolate(in2_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            self.assertEqual(out_t, out2_t)
+
+        # checks data duplication if output_size == 2 * input_size
+        # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
+        for s in [2.00001, ]:
+            out_t = F.interpolate(
+                in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest"
+            )
+            expected_out = in_t
+            for dim in [-1, -2]:
+                expected_out = expected_out.repeat_interleave(2, dim=dim)
+            self.assertEqual(out_t, expected_out)
+            # checks consistency between channels_last and channels_first
+            out2_t = F.interpolate(in2_t, scale_factor=s, recompute_scale_factor=False, mode="nearest")
+            self.assertEqual(out_t, out2_t)
 
     def test_upsamplingBilinear2d(self, device):
         for align_corners in [True, False]:
