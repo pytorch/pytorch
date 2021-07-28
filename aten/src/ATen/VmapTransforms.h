@@ -136,6 +136,10 @@ struct TORCH_API VmapPhysicalView {
   // sizes to the logical shape.
   VmapDimVector getPhysicalShape(IntArrayRef logical_shape) const;
 
+  // Maps logical strides to physical strides by pre-pending the batch
+  // strides to the logical strides
+  VmapDimVector getPhysicalStrides(IntArrayRef logical_strides) const;
+
   int64_t numBatchDims() const;
 
  private:

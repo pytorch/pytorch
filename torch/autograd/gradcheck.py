@@ -1299,6 +1299,7 @@ def gradgradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
+    check_forward_ad: bool = False,
     fast_mode: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
@@ -1386,4 +1387,5 @@ def gradgradcheck(
     return gradcheck(
         new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad,
+        fast_mode=fast_mode, check_forward_ad=check_forward_ad)

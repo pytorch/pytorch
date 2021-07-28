@@ -1592,6 +1592,7 @@
 
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, self, 0)
+  result: threshold_backward(self_t, self_p, 0)
 
 # NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
 - name: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -2007,6 +2008,7 @@
 - name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad)
+  result: zeros_like(self_t) + threshold_backward(grad_output_t, self_p, threshold)
 
 - name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
   grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
@@ -2210,6 +2212,7 @@
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
   tensors: "grad.defined() ? unbind(grad, dim) : std::vector<Tensor>(tensors.size())"
+  result: stack_jvp(tensors, dim)
 
 # fused RNN kernels
 

@@ -458,10 +458,16 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         def jvp(tangents):
             with fwAD.dual_level():
                 dual_inputs = tuple(
-                    fwAD.make_dual(input, tangent.view_as(input)) for input, tangent in zip(inputs, tangents))
+                    fwAD.make_dual(input, tangent.view_as(input), level=0) for input, tangent in zip(inputs, tangents))
                 dual_outputs = _as_tuple(func(*dual_inputs))
-                # TODO what if not all outputs are dual tensors
-                return tuple(fwAD.unpack_dual(dual_out)[1] for dual_out in dual_outputs)
+                jv = []
+                for dual_out in dual_outputs:
+                    primal, tangent = fwAD.unpack_dual(dual_out, level=0)
+                    if tangent is not None:
+                        jv.append(tangent)
+                    else:
+                        jv.append(torch.zeros_like(primal))
+                return tuple(jv)
 
         outputs_before_split = _vmap(jvp)(tangents)
 
@@ -472,8 +478,8 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
             for jac, input_j in zip(jac.split(input_numels, dim=0), inputs):
                 # We need to transpose the Jacobian because in forward AD, the
                 # batch dimension represents that of the inputs
-                jacobian_input_i_output_j = \
-                    jac.permute(*range(1, jac.ndim), 0).reshape(*output_i.shape, *input_j.shape)
+                jacobian_input_i_output_j = jac.permute(*range(1, jac.ndim), 0) \
+                    .reshape(tuple([*output_i.shape, *input_j.shape]))
                 jacobian_output_i_output.append(jacobian_input_i_output_j)
             jacobian_input_output.append(jacobian_output_i_output)
 
@@ -481,7 +487,6 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         return _tuple_postprocess(jacobian_input_output, (is_outputs_tuple, is_inputs_tuple))
     else:
         raise NotImplementedError("Only vectorized path is implemented")
-
 
 
 def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
@@ -683,7 +688,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, fo
 
         return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
-def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, forward_ad=False):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -758,7 +763,6 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
           tensor([[6., 0.],
                   [0., 6.]])))
     """
-
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
 
     def ensure_single_output_function(*inp):
@@ -775,11 +779,14 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
         return out.squeeze()
 
     def jac_func(*inp):
+        if forward_ad:
+            # Ensure the graph is created (and not detached)
+            inp = tuple(t.requires_grad_(True) for t in inp)
         jac = jacobian(ensure_single_output_function, inp, create_graph=True)
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize, forward_ad=forward_ad)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 

@@ -411,6 +411,14 @@ Tensor reshape_batching_rule(const Tensor& self, IntArrayRef shape) {
   return self_physical.getPhysicalToLogicalMap().apply(result);
 }
 
+Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto physical_shape = self_physical.getPhysicalShape(sizes);
+  auto physical_strides = self_physical.getPhysicalStrides(strides);
+  auto result = self_physical.tensor()._reshape_alias(physical_shape, physical_strides);
+  return self_physical.getPhysicalToLogicalMap().apply(result);
+}
+
 std::vector<Tensor> split_batching_rule(const Tensor& self, int64_t split_size, int64_t dim) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
   auto dim_physical = self_physical.getPhysicalDim(dim);
@@ -589,13 +597,7 @@ Tensor as_strided_batching_rule(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
   // physical_strides = physical tensor's batch strides + (logical) strides
-  auto batch_strides = physical_tensor.strides().slice(0, num_batch_dims);
-  at::VmapDimVector physical_strides;
-  physical_strides.reserve(num_batch_dims + strides.size());
-  physical_strides.insert(
-      physical_strides.end(), batch_strides.begin(), batch_strides.end());
-  physical_strides.insert(
-      physical_strides.end(), strides.begin(), strides.end());
+  auto physical_strides = physical_view.getPhysicalStrides(strides);
 
   // If zi = xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
   // is valid for all i, then it turns out that
@@ -1024,7 +1026,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // here is to just directly call the underlying implementation.
   m.impl("_make_dual", native::_make_dual);
   m.impl("is_same_size", native::is_same_size);
-  m.impl("_fw_primal", native::_fw_primal);
 
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
@@ -1054,6 +1055,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("numpy_T", native::numpy_T); // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
+  m.impl("_reshape_alias", _reshape_alias_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);

@@ -6739,17 +6739,15 @@ class TestAutogradFunctional(TestCase):
         result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
         self.assertEqual(result_backward_mode, expected)
 
-        if test_forward_ad:
-            result_forward_mode = autogradF.jacobian(f, inputs, forward_ad=True, vectorize=True)
-            self.assertEqual(result_forward_mode, expected)
+        result_forward_mode = autogradF.jacobian(f, inputs, forward_ad=True, vectorize=True)
+        self.assertEqual(result_forward_mode, expected)
 
     def test_jacobian_vectorize_correctness_simple(self):
         def f(x):
             return 3 * x ** 2
 
         x = torch.randn(2, 3, 5)
-        # TODO: test forward AD again when `pow` is supported
-        self._check_jacobian_vectorize_correctness(f, x, test_forward_ad=False)
+        self._check_jacobian_vectorize_correctness(f, x)
 
     def test_jacobian_vectorize_correctness_multi_input(self):
         def f(x, y):
@@ -6765,8 +6763,7 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn(5, 3)
         y = torch.randn(3, 5)
-        # TODO: test forward AD again when `sum` is supported
-        self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
 
     def test_jacobian_vectorize_correctness_unrelated_outputs(self):
         def f(x, y):
@@ -6783,16 +6780,14 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
-        # TODO: test forward AD again when `sum` is supported
-        self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
 
         # zero-dim input
         def g(x):
             return torch.stack([x, x, x])
 
         x = torch.randn([])
-        # TODO: test forward AD again when `stack` is supported
-        self._check_jacobian_vectorize_correctness(g, x, test_forward_ad=False)
+        self._check_jacobian_vectorize_correctness(g, x)
 
         # Mixed zero-dim input / zero-dim output
         def h(x, y):
@@ -6800,9 +6795,7 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn([])
         y = torch.randn(1)
-
-        # TODO: test forward AD again when `sum` is supported
-        self._check_jacobian_vectorize_correctness(h, (x, y), test_forward_ad=False)
+        self._check_jacobian_vectorize_correctness(h, (x, y))
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
     def test_jacobian_vectorize_correctness_different_devices(self):
@@ -6821,31 +6814,13 @@ class TestAutogradFunctional(TestCase):
         y = torch.randn(3)
         self._check_jacobian_vectorize_correctness(f, (x, y))
 
-    # def test_(self):
-    #     from torch.autograd.functional import jacobian
-
-    #     a = torch.rand(2, 3, requires_grad=True, dtype=torch.double)
-    #     b = torch.rand(4, requires_grad=True, dtype=torch.double)
-    #     c = torch.rand(4, requires_grad=True, dtype=torch.double)
-    #     d = torch.rand(3, 4, requires_grad=True, dtype=torch.double)
-
-    #     def test_fn(a, b, c, d):
-    #         return torch.matmul(a, d) * b.exp() + c.sin(), torch.mean(b * c, dim=0)
-
-    #     def run_test(fn, inputs):
-    #         self.assertEqual(jacobian(fn, inputs, forward_ad=True, vectorize=True), jacobian(fn, inputs))
-
-    #     run_test(test_fn, (a, b, c, d))
-    #     run_test(torch.sin, a)  # element-wise, has batching rule
-    #     run_test(lambda x: torch.mean(x, dim=0), a)  # reduction, batched fallback
-    #     run_test(lambda x: torch.dot(x, b), c)  # matmul-like, has batching rule
-    #     run_test(lambda x: torch.matmul(x, d), a)  # matmul-like operator
-    #     run_test(lambda x: x.view(-1), a)  # view op
-
     def _check_hessian_vectorize_correctness(self, f, inputs):
         expected = autogradF.hessian(f, inputs, vectorize=False)
         result = autogradF.hessian(f, inputs, vectorize=True)
         self.assertEqual(result, expected)
+
+        result_forward_mode = autogradF.hessian(f, inputs, forward_ad=True, vectorize=True)
+        self.assertEqual(result_forward_mode, expected)
 
     def test_hessian_vectorize_correctness_simple(self):
         def f(x):
@@ -6874,7 +6849,7 @@ class TestAutogradFunctional(TestCase):
 
         # output unrelated to all inputs
         def f(x, y):
-            return torch.randn([])
+            return torch.ones([])
 
         x = torch.randn(2)
         y = torch.randn(3)

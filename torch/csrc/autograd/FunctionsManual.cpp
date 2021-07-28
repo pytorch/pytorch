@@ -478,6 +478,26 @@ Tensor solve_jvp(
   return at::linalg_solve(input_primal, other_tangent - at::matmul(input_tangent, result));
 }
 
+Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
+  // Basically copy of cat_jvp below
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+    }
+    out_fw_grad = at::stack(fw_grads, dim);
+  }
+  return out_fw_grad;
+}
+
 Tensor solve_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
   return at::linalg_solve(A.conj().transpose(-2, -1), grad);
 }

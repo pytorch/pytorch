@@ -80,6 +80,17 @@ VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) cons
   return result;
 }
 
+VmapDimVector VmapPhysicalView::getPhysicalStrides(IntArrayRef logical_strides) const {
+  at::VmapDimVector physical_strides;
+  auto batch_strides = tensor().strides().slice(0, numBatchDims());
+  physical_strides.reserve(numBatchDims() + logical_strides.size());
+  physical_strides.insert(
+      physical_strides.end(), batch_strides.begin(), batch_strides.end());
+  physical_strides.insert(
+      physical_strides.end(), logical_strides.begin(), logical_strides.end());
+  return physical_strides;
+}
+
 static BatchDims computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   BatchDims bdims;
   int64_t dim = 0;
