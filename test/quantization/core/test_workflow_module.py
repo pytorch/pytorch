@@ -1056,6 +1056,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         )
         mod = obs()
         mod = torch.jit.script(mod)
+        mod.to(device)
 
         for i in range(10):
             x = torch.randn(m, n, device=device)
@@ -1088,17 +1089,17 @@ class TestFusedObsFakeQuantModule(TestCase):
             torch.testing.assert_allclose(out, out_ref)
             if mod.observer_enabled[0]:
                 torch.testing.assert_allclose(
-                    running_min_op, mod.activation_post_process.min_vals
+                    running_min_op, mod.activation_post_process.min_val
                 )
                 torch.testing.assert_allclose(
-                    running_max_op, mod.activation_post_process.max_vals
+                    running_max_op, mod.activation_post_process.max_val
                 )
             if mod.fake_quant_enabled:
                 torch.testing.assert_allclose(scale, mod.scale)
                 torch.testing.assert_allclose(zero_point, mod.zero_point)
 
-        torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_vals'], running_min_op)
-        torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_vals'], running_max_op)
+        torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+        torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
