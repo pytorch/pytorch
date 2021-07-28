@@ -2,6 +2,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -163,7 +164,6 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
@@ -375,7 +375,7 @@ Module Module::clone_impl(
 
   // Copy slots. If a slot is a module - recursively clone it.
   size_t N = type()->numAttributes();
-  for (size_t i = 0; i < N; ++i) {
+  for (const auto i : c10::irange(N)) {
     IValue s = _ivalue()->getSlot(i);
     std::string attr_name = type()->getAttributeName(i);
 
@@ -486,7 +486,7 @@ Module freeze(
     c10::optional<std::vector<std::string>> preserved_attrs,
     bool optimize_numerics) {
   TORCH_CHECK(
-      module.is_training(),
+      !module.hasattr("training") || !module.is_training(),
       "Freezing is currently only implemented for modules in eval mode. Please call .eval() before freezing");
 
   Module out_mod = freeze_module(

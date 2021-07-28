@@ -143,9 +143,7 @@ class IDEEPInt8GivenIntTensorFillOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Int8GivenTensorFill, IDEEPInt8GivenTensorFillOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Int8GivenIntTensorFill, IDEEPInt8GivenIntTensorFillOp);
 
 } // namespace
