@@ -3680,13 +3680,10 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
         ((S, M, S), (2, ))
     )
 
-    def generator():
-return [
-    SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
-    for shape, dim in cases
-]
-
-    return list(generator())
+    return [
+        SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
+        for shape, dim in cases
+    ]
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -5279,6 +5276,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            supports_out=False,
            supports_gradgrad=False,
+           assert_autodiffed=False,
            sample_inputs_func=sample_inputs_cdist,
            ),
     UnaryUfuncInfo('ceil',
@@ -6395,6 +6393,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
+           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -6403,11 +6402,14 @@ op_db: List[OpInfo] = [
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.leaky_relu',
+           aliases=None,
            aten_name="leaky_relu",
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=True,
            assert_autodiffed=True,
+           supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
@@ -6417,6 +6419,9 @@ op_db: List[OpInfo] = [
         ref=reference_logsigmoid,
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
         supports_out=False,
         # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
         decorators=[
@@ -6444,8 +6449,10 @@ op_db: List[OpInfo] = [
            aten_name="hardshrink",
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
+           supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::hardshrink"]),
@@ -6455,17 +6462,21 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCPU=all_types(),
            dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
+           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
+           supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::hardtanh"],
            ),
     OpInfo('nn.functional.gelu',
            aten_name="gelu",
+           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           supports_gradgrad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::gelu"]),
     OpInfo('nn.functional.relu6',
@@ -6475,8 +6486,10 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCPU=floating_types(),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            backward_dtypesIfCUDA=floating_types_and(torch.float16),
+           supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardshrink_hardtanh,
+           supports_gradgrad=True,
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::relu6"]),
@@ -7671,6 +7684,7 @@ op_db: List[OpInfo] = [
            aten_name='special_zeta',
            variant_test_name='grad',
            dtypes=all_types_and(torch.bool),
+           supports_autograd=True,
            safe_casts_outputs=True,
            skips=(
                # Lambda doesn't work in JIT test
@@ -7898,7 +7912,7 @@ op_db: List[OpInfo] = [
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
+        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True), 
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
