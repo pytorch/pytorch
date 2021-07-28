@@ -3484,15 +3484,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            # 1: ns.call_module(nnq.BatchNorm1d),
-            2: ns.call_module(nnq.BatchNorm2d),
-            3: ns.call_module(nnq.BatchNorm3d),
+            False: {
+                # 1: ns.call_module(nnq.BatchNorm1d),
+                2: ns.call_module(nnq.BatchNorm2d),
+                3: ns.call_module(nnq.BatchNorm3d),
+            },
+            True: {
+                # 1: ns.call_module(nn.BatchNorm1d),
+                2: ns.call_module(nn.BatchNorm2d),
+                3: ns.call_module(nn.BatchNorm3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             model = self.checkGraphModeFxOp(
-                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[dim])
+                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
@@ -3523,17 +3530,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            2: ns.call_module(nniq.BNReLU2d),
-            3: ns.call_module(nniq.BNReLU3d),
+            True: {
+                2: ns.call_module(nni.BNReLU2d),
+                3: ns.call_module(nni.BNReLU3d),
+            },
+            False: {
+                2: ns.call_module(nniq.BNReLU2d),
+                3: ns.call_module(nniq.BNReLU3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False),
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 self.checkGraphModeFxOp(
                     instance, self.img_data_dict[dim], quant_type,
-                    quantized_nodes[dim])
+                    quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     def _test_activation_impl(
             self, float_module, float_op, quantized_module, quantized_op):
