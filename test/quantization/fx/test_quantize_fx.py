@@ -2757,6 +2757,28 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m_reference, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
 
+    def test_linear_qint8_activation(self):
+        """Test support for qint8 activation in reference pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 2, 2, 2)
+                self.linear = torch.nn.Linear(8, 5)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.flatten(x, 1)
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": torch.quantization.QConfig(
+            activation = torch.quantization.HistogramObserver.with_args(
+            qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+        ), weight = torch.quantization.default_per_channel_weight_observer)})
+        m = convert_fx(m, is_reference=True)
+        m(torch.rand(2, 1, 5, 5))
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
