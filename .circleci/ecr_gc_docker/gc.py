@@ -7,6 +7,69 @@ import pytz
 import re
 import sys
 
+# TODO: See if this is actually still needed
+# Default list of legacy tags to keep
+PREFIX_IGNORE_TAGS = {
+    "pytorch": [
+        "256",
+        "262",
+        "271",
+        "278",
+        "282",
+        "291",
+        "300",
+        "323",
+        "327",
+        "347",
+        "389",
+        "401",
+        "402",
+        "403",
+        "405",
+        "1bc00f11-e0f3-4e5c-859f-15937dd938cd",
+        "209062ef-ab58-422a-b295-36c4eed6e906",
+        "6e7b11da-a919-49e5-b2ba-da66e3d4bb0a",
+        "8fcf46ef-4a34-480b-a8ee-b0a30a4d3e59",
+        "9a3986fa-7ce7-4a36-a001-3c9bef9892e2",
+        "a8006f9a-272d-4478-b137-d121c6f05c83",
+        "ab1632df-fa59-40e6-8c23-98e004f61148",
+        "be76e8fd-44e2-484d-b090-07e0cc3a56f0",
+        "e43973a9-9d5a-4138-9181-a08a0fc55e2f",
+        "f990c76a-a798-42bb-852f-5be5006f8026",
+        "fff7795428560442086f7b2bb6004b65245dc11a",
+    ],
+    "caffe2": [
+        "213",
+        "230",
+        "238",
+        "248",
+        "253",
+        "266",
+        "273",
+        "276",
+        "283",
+        "287",
+        "301",
+        "306",
+        "315",
+        "324",
+        "325",
+        "336",
+        "345",
+        "348",
+        "369",
+        "373",
+        "376",
+    ],
+    "translate": [
+        "8"
+    ],
+    "tensorcomp": [
+        "34"
+    ]
+
+}
+
 
 def save_to_s3(project, data):
     table_content = ""
@@ -141,7 +204,8 @@ client = boto3.client("ecr", region_name="us-east-1")
 stable_window = datetime.timedelta(days=args.keep_stable_days)
 unstable_window = datetime.timedelta(days=args.keep_unstable_days)
 now = datetime.datetime.now(pytz.UTC)
-ignore_tags = args.ignore_tags.split(",")
+# Combine inputted ignore_tags with legacy set
+ignore_tags = PREFIX_IGNORE_TAGS.get(args.filter_prefix, []).extend(args.ignore_tags.split(","))
 
 
 def chunks(chunkable, n):

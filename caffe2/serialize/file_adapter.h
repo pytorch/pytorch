@@ -2,8 +2,8 @@
 
 #include <fstream>
 #include <memory>
+#include <c10/macros/Macros.h>
 
-#include "c10/macros/Macros.h"
 #include "caffe2/serialize/istream_adapter.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
@@ -17,7 +17,7 @@ class TORCH_API FileAdapter final : public ReadAdapterInterface {
   size_t size() const override;
   size_t read(uint64_t pos, void* buf, size_t n, const char* what = "")
       const override;
-  ~FileAdapter() = default;
+  ~FileAdapter() override;
 
  private:
   // An RAII Wrapper for a FILE pointer. Closes on destruction.
