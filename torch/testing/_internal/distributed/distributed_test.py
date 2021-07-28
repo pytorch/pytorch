@@ -7469,12 +7469,7 @@ class DistributedTest:
                 loss.backward()
             self.assertFalse(ddp.reducer._ddp_graph_static())
 
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_new_tensor_in_fwd(self):
+        def _test_ddp_new_tensor_in_fwd(self, static_graph):
             # Test from https://github.com/pytorch/pytorch/issues/60733
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7510,6 +7505,9 @@ class DistributedTest:
                     find_unused_parameters=find_unused,
                 )
 
+                if static_graph:
+                    ddp._set_static_graph()
+
                 opt = [None for _ in range(3)]
                 for i in range(2):
                     ddp.zero_grad()
@@ -7526,3 +7524,19 @@ class DistributedTest:
                         else:
                             self.assertEqual(opt[i]["tensor"].grad_fn, None)
                     out.mean().backward()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_new_tensor_in_fwd(self):
+            return self._test_ddp_new_tensor_in_fwd(static_graph=False)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_new_tensor_in_fwd_static_graph(self):
+            return self._test_ddp_new_tensor_in_fwd(static_graph=True)
