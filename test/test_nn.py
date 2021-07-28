@@ -16774,8 +16774,8 @@ class TestNNDeviceType(NNTestCase):
             for reduction in ['none', 'mean', 'sum']:
                 # Ensure result with unit weights is equivalent to result without weights.
                 m = torch.nn.CrossEntropyLoss(reduction=reduction)
-                m_unit = torch.nn.CrossEntropyLoss(weight=torch.ones(C, dtype=target.dtype),
-                                                   reduction=reduction)
+                unit_weight = weight=torch.ones(C, device=device, dtype=target.dtype)
+                m_unit = torch.nn.CrossEntropyLoss(weight=unit_weight, reduction=reduction)
                 output = m(input, target)
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
