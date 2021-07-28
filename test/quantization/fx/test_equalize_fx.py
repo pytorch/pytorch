@@ -304,7 +304,11 @@ class TestEqualizeFx(QuantizationTestCase):
             elif ndim == 4:
                 x = torch.rand((16, 3, 224, 224))
 
-            prepared = prepare_fx(copy.deepcopy(m), specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             output = prepared(x)
 
             convert_ref = _convert_equalization_ref(prepared)
@@ -731,7 +735,11 @@ class TestEqualizeFx(QuantizationTestCase):
             quantized_output = quantized(x)
 
             # With equalization
-            prepared = prepare_fx(copy.deepcopy(m), specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             prepared(x)
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
