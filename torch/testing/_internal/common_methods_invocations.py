@@ -6016,6 +6016,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_matrix_power',
            dtypes=floating_and_complex_types(),
            supports_inplace_autograd=False,
+           supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCUDAIfRocm],
            sample_inputs_func=sample_inputs_linalg_matrix_power,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),

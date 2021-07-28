@@ -703,39 +703,80 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
 
-            # note that relu should already be fused into conv module in the fusion step
+            # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            # 1. attach output activation post process to linear module
+            if is_reference:
+                # produce dequant - float_op - quant pattern
+                dtype = torch.float
+                if activation_int8_quantized:
+                    dtype = activation_dtype(qconfig)
+                activation = load_arg(quantized=dtype)(self.linear_node.args[0])
+                args = load_arg(quantized=torch.float)(self.linear_node.args)
+                # Get the float linear and attach weight_activation_post_process
+                # lowering pass can call weight_activation_post_process.calculate_qparams
+                # to get scale and zero_point for weight
+                float_linear = self.linear
+                if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
+                    float_linear = float_linear.to_float()
+                    # change qat linear to linear
+                    parent_name, name = _parent_name(self.linear_node.target)
+                    setattr(modules[parent_name], name, float_linear)
+                    # Attach weight fake quant to the linear module
+                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        float_linear = float_linear[0]
+                    float_linear.weight_activation_post_process = self.linear.weight_fake_quant
+                else:
+                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        float_linear = self.linear[0]  # type: ignore[index]
+                    # Attach the weight observer to the module
+                    float_linear.weight_activation_post_process = qconfig.weight()  # type: ignore[union-attr]
+                    # Run weight observer
+                    float_linear.weight_activation_post_process(float_linear.weight)  # type: ignore[operator]
 
-            if output_activation_post_process:
-                self.linear.activation_post_process = output_activation_post_process
-
-            # 2. select corresponding quantized linear class for the float linear class
-            if activation_int8_quantized:
-                additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                qlinear = get_static_quant_module_class(
-                    type(self.linear), additional_static_quant_mapping,
-                    is_reference=is_reference)
+                op_out = quantized_graph.create_node(
+                    'call_module',
+                    self.linear_node.target,
+                    args, {})
+                if output_activation_post_process:
+                    op_out = quantize_node(
+                        op_out,
+                        output_activation_post_process,
+                        node,
+                        modules,
+                        quantized_graph,
+                        node_name_to_scope,
+                        is_input=False)
+                return op_out
             else:
-                assert dtypes in [
-                    (torch.float32, torch.qint8, torch.quint8),
-                    (torch.float32, torch.float16, None),
-                ], f"dtype {dtypes} not supported yet"
-                additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
-                qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+                # 1. attach output activation post process to linear module
+                if output_activation_post_process:
+                    self.linear.activation_post_process = output_activation_post_process
 
-            quantized = qlinear.from_float(self.linear)
-            parent_name, name = _parent_name(self.linear_node.target)
-            setattr(modules[parent_name], name, quantized)
-            # activation needs to be quantized for static quantization
-            dtype = torch.float
-            if activation_int8_quantized:
-                dtype = activation_dtype(qconfig)
-            return quantized_graph.create_node(
-                'call_module',
-                self.linear_node.target,
-                (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
+                # 2. select corresponding quantized linear class for the float linear class
+                if activation_int8_quantized:
+                    additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
+                    qlinear = get_static_quant_module_class(
+                        type(self.linear), additional_static_quant_mapping)
+                else:
+                    assert dtypes in [
+                        (torch.float32, torch.qint8, torch.quint8),
+                        (torch.float32, torch.float16, None),
+                    ], f"dtype {dtypes} not supported yet"
+                    additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
+                    qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+
+                quantized = qlinear.from_float(self.linear)
+                parent_name, name = _parent_name(self.linear_node.target)
+                setattr(modules[parent_name], name, quantized)
+                # activation needs to be quantized for static quantization
+                dtype = torch.float
+                if activation_int8_quantized:
+                    dtype = activation_dtype(qconfig)
+                return quantized_graph.create_node(
+                    'call_module',
+                    self.linear_node.target,
+                    (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
         else:  # call_function
             assert self.linear_node.op == 'call_function'
             if is_reference:
