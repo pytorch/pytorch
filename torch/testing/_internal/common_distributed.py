@@ -54,6 +54,7 @@ TEST_SKIPS = {
     "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
     "skipIfRocm": TestSkip(78, "Test skipped for ROCm"),
     "no_peer_access": TestSkip(79, "Test skipped because no GPU peer access"),
+    "generic": TestSkip(86, "Test skipped at subprocess level, look at subprocess log for skip reason"),
 }
 
 
@@ -521,6 +522,9 @@ class MultiProcessTestCase(TestCase):
         # We're retrieving a corresponding test and executing it.
         try:
             getattr(self, test_name)()
+        except unittest.SkipTest as se:
+            logger.info(f'Process {self.rank} skipping test {test_name} for following reason: {str(se)}')
+            sys.exit(TEST_SKIPS["generic"].exit_code)
         except Exception as e:
             logger.error(
                 f'Caught exception: \n{traceback.format_exc()} exiting '

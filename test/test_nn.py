@@ -13188,6 +13188,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
     @onlyOnCPUAndCUDA
+    def test_Bilinear_empty(self, device):
+        mod = torch.nn.Bilinear(20, 30, 40).to(device)
+        inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
+        inp2 = torch.randn(0, 10, 30, requires_grad=True, device=device)
+
+        output = mod(inp1, inp2)
+        output.sum().backward()
+
+        self.assertEqual(inp1, torch.zeros_like(inp1))
+        self.assertEqual(inp2, torch.zeros_like(inp2))
+
+        self.assertEqual(inp1.grad, torch.zeros_like(inp1))
+        self.assertEqual(inp2.grad, torch.zeros_like(inp2))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
@@ -15705,6 +15720,19 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(m.weight.grad.data,
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
+
+    @dtypes(torch.double)
+    def test_Conv2d_backward_depthwise(self, device, dtype):
+        x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
+        weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
+
+        def conv2d_depthwise(x, weight):
+            return torch.nn.functional.conv2d(
+                x, weight, bias=None, stride=(1, 10), groups=2)
+
+        for cudnn_enabled in [False, True]:
+            with torch.backends.cudnn.flags(enabled=cudnn_enabled):
+                torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
 
     def _test_batchnorm_grad(self, device, dtype=torch.double):
         bs, n_feat, size_feat = 4, 5, 6
