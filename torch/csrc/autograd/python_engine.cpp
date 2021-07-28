@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
+#include <torch/csrc/autograd/python_saved_variable_hooks.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
@@ -102,6 +103,10 @@ void PythonEngine::thread_on_exception(
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
   return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
+}
+
+std::unique_ptr<SavedVariableHooks> PythonEngine::get_default_saved_variable_hooks() {
+  return PyDefaultSavedVariableHooks::get_hooks();
 }
 
 variable_list PythonEngine::execute(
