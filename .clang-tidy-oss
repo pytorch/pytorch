@@ -1,5 +1,6 @@
 ---
 # NOTE there must be no spaces before the '-', so put the comma last.
+# We are using a separate clang-tidy config because FB internal CI fails if we set 'WarningsAsErrors'
 InheritParentConfig: true
 Checks: '
 bugprone-*,
@@ -22,6 +23,7 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
 -cppcoreguidelines-special-member-functions,
+-cppcoreguidelines-non-private-member-variables-in-classes,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
