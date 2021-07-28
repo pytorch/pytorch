@@ -189,6 +189,8 @@ test_aten() {
       BUILD_PATH="build"
 
       # Init wheel-test enviroment
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
       mv "$BUILD_PATH" "$BUILD_PATH".bak
       ls .
       ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* "$TORCH_TEST_PATH"
