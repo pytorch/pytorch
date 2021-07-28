@@ -732,7 +732,7 @@ void gatherTorchFunctions(std::vector<PyMethodDef> &torch_functions) {
   gatherTorchFunctions_1(torch_functions);
   gatherTorchFunctions_2(torch_functions);
 
-  std::array<std::pair<const char *, const char *>, 4> aliases{{
+  static std::array<std::pair<const char *, const char *>, 4> aliases{{
     // Canonical function, alias name
     {"sspaddmm", "saddmm"},
     {"mm", "spmm"},
@@ -743,7 +743,7 @@ void gatherTorchFunctions(std::vector<PyMethodDef> &torch_functions) {
   for (const auto& alias : aliases) {
     auto it = std::find_if(torch_functions.begin(), torch_functions.end(),
                           [&](const PyMethodDef& def) {
-                            return def.ml_name == alias.first;
+                            return strcmp(def.ml_name, alias.first) == 0;
                           });
     TORCH_INTERNAL_ASSERT(
         it != torch_functions.end(),
