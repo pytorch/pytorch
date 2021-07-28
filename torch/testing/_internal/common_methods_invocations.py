@@ -7910,7 +7910,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.grid_sample",
         ref=_NOTHING,
-        dtypes=floating_types_and(),
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
