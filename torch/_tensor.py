@@ -1056,8 +1056,8 @@ class Tensor(torch._C._TensorBase):
 
     def __dlpack__(self, stream=None):
         """
-        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_ of the current tensor to
-        be exported to other libraries.
+        Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
+        of the current tensor to be exported to other libraries.
 
         This function will be called from the `from_dlpack` method
         of the library that will consume the capsule. `from_dlpack` passes the current
