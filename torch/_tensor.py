@@ -1102,17 +1102,16 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__dlpack_device__, (self,), self)
         idx = self.device.index if self.device.index is not None else 0
-        device_type = self.device.type
-        if device_type == 'cuda' and torch.version.hip is not None:
+        if self.device.type == 'cuda' and torch.version.hip is not None:
             device_type = DLDeviceType.kDLROCM
-        elif device_type == 'cpu' and self.is_pinned():
+        elif self.device.type == 'cpu' and self.is_pinned():
             device_type = DLDeviceType.kDLCPUPinned
-        elif device_type == 'cuda':
+        elif self.device.type == 'cuda':
             device_type = DLDeviceType.kDLGPU
-        elif device_type == 'cpu':
+        elif self.device.type == 'cpu':
             device_type = DLDeviceType.kDLCPU
         else:
-            raise ValueError('Unknown device type {} for Dlpack'.format(device_type))
+            raise ValueError('Unknown device type {} for Dlpack'.format(self.device.type))
         return (device_type, idx)
 
     __module__ = 'torch'
