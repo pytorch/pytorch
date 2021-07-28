@@ -229,6 +229,8 @@ test_libtorch() {
 
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
+    pwd
+    ls -l .
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
       build/bin/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
@@ -459,7 +461,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "$
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
-  test_python_shard2
+  # test_python_shard2
   test_libtorch
   test_custom_script_ops
   test_custom_backend
@@ -471,9 +473,9 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 else
   install_torchvision
   install_monkeytype
-  test_python
-  test_aten
-  test_vec256
+  # test_python
+  # test_aten
+  # test_vec256
   test_libtorch
   test_custom_script_ops
   test_custom_backend
