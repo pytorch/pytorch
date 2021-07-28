@@ -162,9 +162,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
       auto extent = id->extent();
       // Use halo-extended extent if found
       auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
-      if (halo_extent.width() != 0) {
-        extent = ir_builder.addExpr(
-            extent, ir_builder.create<kir::Int>(halo_extent.width()));
+      if (halo_extent.hasHalo()) {
+        extent = ir_builder.addExpr(extent, halo_extent.width());
       }
       alloc_dims.push_back(extent);
     }
@@ -210,9 +209,9 @@ class AllocationInserter : public kir::MutableIrVisitor {
     auto getExtent = [this](IterDomain* id) {
       auto extent = gpu_lower->haloInfo().getExtent(id);
       if (extent == nullptr) {
-        extent = id->extent();
+        extent = gpu_lower->lowerValue(id->extent());
       }
-      return gpu_lower->lowerValue(extent);
+      return extent;
     };
 
     std::unordered_map<IterDomain*, kir::Val*> known_extents;

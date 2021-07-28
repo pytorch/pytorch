@@ -472,8 +472,11 @@ static const char* iter_type2string(IterType t) {
       return "sb";
     case IterType::BroadcastWithoutStride:
       return "b";
+    case IterType::Gather:
+      return "g";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected IterType", t);
+      // Don't try to print t as it would recursively call this function
+      TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");
   }
 }
 

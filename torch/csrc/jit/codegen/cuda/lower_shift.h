@@ -16,19 +16,16 @@ namespace cuda {
 //! Auxiliary class to represent information about halo of an axis
 class AxisHaloInfo {
  public:
+  AxisHaloInfo();
+
   //! Width of halo.
   //!
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  unsigned int width(int pos) const {
-    TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
-    return widths_[pos];
-  }
+  kir::Int* width(int pos) const;
 
   //! Sum of the widths of both widths
-  unsigned int width() const {
-    return width(0) + width(1);
-  }
+  kir::Int* width() const;
 
   const auto& widths() const {
     return widths_;
@@ -37,34 +34,18 @@ class AxisHaloInfo {
   //! Set the halo width of either side.
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  void setWidth(int pos, unsigned int width) {
-    TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
-    widths_[pos] = width;
-  }
+  void setWidth(int pos, kir::Int* width);
 
   //! Extend the halo width to account for another axis.
-  void merge(int pos, unsigned int other) {
-    setWidth(pos, std::max(width(pos), other));
-  }
+  void merge(int pos, kir::Int* other);
 
   //! Extend the halo width to account for another axis.
-  void merge(const AxisHaloInfo& other) {
-    for (size_t i = 0; i < widths_.size(); ++i) {
-      merge(i, other.width(i));
-    }
-  }
+  void merge(const AxisHaloInfo& other);
 
-  //! True when halo is attached
-  bool hasHalo() const {
-    return std::any_of(
-        widths_.begin(), widths_.end(), [](auto w) { return w != 0; });
-  }
+  //! True when halo may be attached
+  bool hasHalo() const;
 
-  std::string toString() const {
-    std::stringstream ss;
-    ss << "<" << width(0) << ", " << width(1) << ">";
-    return ss.str();
-  }
+  std::string toString() const;
 
  private:
   //! Sizes of the halo regions of two sides. Both values are zero for
@@ -72,7 +53,7 @@ class AxisHaloInfo {
   //! widths_[0] is non-zero and designates the size of the
   //! halo. Similarly, non-zero widths_[1] means the axis has halo at
   //! the other end of the axis.
-  std::array<unsigned int, 2> widths_;
+  std::array<kir::Int*, 2> widths_ = {nullptr, nullptr};
 };
 
 //! Helper class for lowering tensors with halo. Only valid at the
@@ -110,11 +91,11 @@ class HaloInfo {
   //!
   //! It's an error if queried for an axis with no halo width
   //! information.
-  unsigned getHaloWidth(IterDomain* id) const;
+  kir::Int* getHaloWidth(IterDomain* id) const;
 
   //! Returns an extent if id is extended for halo. Nullptr is
   //! returned otherwise.
-  Val* getExtent(IterDomain* id) const;
+  kir::Val* getExtent(IterDomain* id) const;
   kir::Val* getExtent(kir::IterDomain* id) const;
 
   // True when the extent of id1 is guaranteed to be lesser than or
@@ -156,8 +137,6 @@ class HaloInfo {
   std::unordered_map<kir::IterDomain*, AxisHaloInfo> kir_root_axis_map_;
 
   //! Halo-extended extents. No mapping for axes without halo extension
-  std::unordered_map<IterDomain*, Val*> extent_map_;
-  //! KIR version of extent_map_ for convenience
   std::unordered_map<kir::IterDomain*, kir::Val*> kir_extent_map_;
 
   //! The halo width of an axis.
@@ -194,7 +173,7 @@ class HaloInfo {
   //! inner axis is merged with another axis of extent M, we know that
   //! the extent of the resulting output axis is 5*M, but we don't
   //! create its mapping.
-  std::unordered_map<IterDomain*, unsigned> halo_width_map_;
+  std::unordered_map<IterDomain*, kir::Int*> halo_width_map_;
 };
 
 class ShiftPredicateInserter {

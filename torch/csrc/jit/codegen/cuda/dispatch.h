@@ -76,6 +76,7 @@ class WelfordOp;
 class BroadcastOp;
 class TransposeOp;
 class ShiftOp;
+class GatherOp;
 
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
@@ -106,6 +107,7 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const BroadcastOp*) {}
   virtual void handle(const TransposeOp*) {}
   virtual void handle(const ShiftOp*) {}
+  virtual void handle(const GatherOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -135,6 +137,7 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(BroadcastOp*) {}
   virtual void handle(TransposeOp*) {}
   virtual void handle(ShiftOp*) {}
+  virtual void handle(GatherOp*) {}
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
@@ -197,6 +200,9 @@ class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
   }
   virtual void handle(const ShiftOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
+  }
+  virtual void handle(const GatherOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
   }
 };
 
@@ -261,6 +267,9 @@ class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
   virtual void handle(ShiftOp*) {
     TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
   }
+  virtual void handle(GatherOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
+  }
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -312,6 +321,7 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(BroadcastOp*);
   virtual Statement* mutate(TransposeOp*);
   virtual Statement* mutate(ShiftOp*);
+  virtual Statement* mutate(GatherOp*);
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -383,6 +393,9 @@ class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
   }
   virtual Statement* mutate(ShiftOp*) {
     TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ShiftOp.");
+  }
+  virtual Statement* mutate(GatherOp*) {
+    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GatherOp.");
   }
 };
 

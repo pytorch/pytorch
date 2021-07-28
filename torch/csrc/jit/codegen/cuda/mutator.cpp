@@ -208,6 +208,18 @@ Statement* OptOutMutator::mutate(ShiftOp* sop) {
   return new ShiftOp(out, in, offsets);
 }
 
+Statement* OptOutMutator::mutate(GatherOp* op) {
+  Val* out = mutateAsVal(op->out())->asVal();
+  Val* in = mutateAsVal(op->in())->asVal();
+
+  if (out->sameAs(op->out()) && in->sameAs(op->in()))
+    return op;
+  auto window_shape = op->windowShape();
+  auto pad_width = op->padWidth();
+  FusionGuard::getCurFusion()->removeExpr(op);
+  return new GatherOp(out, in, window_shape, pad_width);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

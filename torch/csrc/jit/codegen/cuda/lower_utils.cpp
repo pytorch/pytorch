@@ -103,7 +103,8 @@ bool isTVOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::WelfordOp ||
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
-       expr->getExprType().value() == ExprType::ShiftOp)) {
+       expr->getExprType().value() == ExprType::ShiftOp ||
+       expr->getExprType().value() == ExprType::GatherOp)) {
     return true;
   }
   return false;

@@ -109,6 +109,9 @@ void Expr::dispatch(T handler, Expr* expr) {
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
       return;
+    case ExprType::GatherOp:
+      ptr(handler)->handle(expr->as<GatherOp>());
+      return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -193,6 +196,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
     case ExprType::ShiftOp:
       ptr(handler)->handle(expr->as<ShiftOp>());
       return;
+    case ExprType::GatherOp:
+      ptr(handler)->handle(expr->as<GatherOp>());
+      return;
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -271,6 +277,8 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
       return ptr(mutator)->mutate(expr->as<TransposeOp>());
     case ExprType::ShiftOp:
       return ptr(mutator)->mutate(expr->as<ShiftOp>());
+    case ExprType::GatherOp:
+      return ptr(mutator)->mutate(expr->as<GatherOp>());
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }

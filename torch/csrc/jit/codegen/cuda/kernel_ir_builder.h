@@ -67,6 +67,8 @@ class TORCH_CUDA_CU_API IrBuilder {
   Val* divExpr(Val* lhs, Val* rhs);
   Val* ceilDivExpr(Val* lhs, Val* rhs);
   Val* modExpr(Val* lhs, Val* rhs);
+  Val* maxExpr(Val* lhs, Val* rhs);
+  Val* minExpr(Val* lhs, Val* rhs);
 
   // Ternary operations
   Val* whereExpr(Val* pred, Val* lhs, Val* rhs);

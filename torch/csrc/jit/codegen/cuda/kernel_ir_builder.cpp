@@ -107,6 +107,14 @@ Val* IrBuilder::modExpr(Val* lhs, Val* rhs) {
   return newArithmeticExpr(BinaryOpType::Mod, lhs, rhs);
 }
 
+Val* IrBuilder::maxExpr(Val* lhs, Val* rhs) {
+  return newArithmeticExpr(BinaryOpType::Max, lhs, rhs);
+}
+
+Val* IrBuilder::minExpr(Val* lhs, Val* rhs) {
+  return newArithmeticExpr(BinaryOpType::Min, lhs, rhs);
+}
+
 Int* IrBuilder::zeroVal() {
   if (zero_ == nullptr) {
     zero_ = create<kir::Int>(0);

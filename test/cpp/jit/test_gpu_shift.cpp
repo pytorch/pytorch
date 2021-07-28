@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -109,6 +110,44 @@ auto shift(at::Tensor tensor, const std::vector<int>& offsets) {
   return t;
 }
 
+// ATen version of tensor shifting
+auto gather(
+    at::Tensor tensor,
+    const std::vector<int>& window_shape,
+    const std::vector<std::vector<int>>& pad_width) {
+  TORCH_CHECK(
+      tensor.ndimension() == window_shape.size(),
+      "Invalid window shape: ",
+      window_shape,
+      ". Size of the window shape is different from the tensor dimension.");
+  TORCH_CHECK(
+      tensor.ndimension() == pad_width.size(),
+      "Invalid pad width: ",
+      pad_width,
+      ". Size of the pad width is different from the tensor dimension.");
+  at::Tensor t = tensor;
+  for (size_t i = 0; i < window_shape.size(); ++i) {
+    const auto w_size = window_shape[i];
+    TORCH_CHECK(w_size != 0);
+    const auto& pad = pad_width[i];
+    TORCH_CHECK(pad.size() == 2);
+    at::Tensor concat_tensor;
+    for (int w = 0; w < w_size; ++w) {
+      std::vector<int> shift_offsets(t.ndimension(), 0);
+      shift_offsets[i] = pad[0] - w;
+      auto shifted = shift(t, shift_offsets);
+      shifted = shifted.unsqueeze(-1);
+      if (w == 0) {
+        concat_tensor = shifted;
+      } else {
+        concat_tensor = at::cat({concat_tensor, shifted}, -1);
+      }
+    }
+    t = concat_tensor;
+  }
+  return t;
+}
+
 } // namespace
 
 // Shift an input tensor
@@ -186,6 +225,7 @@ TEST(NVFuserTest, FusionShift2_CUDA) {
   // t3 allocation: (t3.size[0] + 2) * (t3.size[1] + 1)
   // t4 allocation: (t3.size[0] + 2) * (t3.size[1] + 1)
   GpuLower gpulw(&fusion);
+
   for (const auto& kir_node : gpulw.kernel()->irNodes()) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node.get())) {
       auto tensor_name = alloc->buffer()->name();
@@ -2290,6 +2330,539 @@ TEST(NVFuserTest, FusionMaxPooling_CUDA) {
       aten_inp, {pooling_window, pooling_window}, {1, 1}, {1, 1});
 
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionGatherPadding1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  const std::vector<int> window_shape = {1, 3};
+  const std::vector<std::vector<int>> padding_width = {{0, 0}, {1, 1}};
+
+  auto tv1 = gather(tv0, window_shape, padding_width);
+
+  fusion.addOutput(tv1);
+
+  const int s1 = 11;
+  const int s2 = 13;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1, s2}, options);
+
+  auto ref = gather(t0, window_shape, padding_width);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0});
+
+  TORCH_CHECK(ref.equal(outputs[0]));
+}
+
+TEST(NVFuserTest, FusionGatherPadding2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const std::vector<int> window_shape = {1, 3};
+  const std::vector<std::vector<int>> padding_width = {{0, 0}, {1, 1}};
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+
+  auto tv2 = gather(tv1, window_shape, padding_width);
+
+  auto tv3 = sum(tv2, {-1});
+
+  fusion.addOutput(tv3);
+
+  tv3->split(1, 32);
+  tv0->computeAt(tv3, 2);
+  tv2->computeAt(tv3, -1);
+
+  tv3->axis(0)->parallelize(ParallelType::BIDy);
+  tv3->axis(1)->parallelize(ParallelType::BIDx);
+  tv3->axis(2)->parallelize(ParallelType::TIDx);
+  tv1->axis(2)->parallelize(ParallelType::TIDx);
+
+  tv1->setMemoryType(MemoryType::Shared);
+
+  const int s1 = 99;
+  const int s2 = 101;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1, s2}, options);
+  std::vector<IValue> inputs = {t0};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(inputs);
+
+  auto t1 = t0 + 1;
+  auto t2 = gather(t1, window_shape, padding_width);
+  auto ref = sum(t2, {-1});
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionConv2DStatic_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [C, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // Weights: [K, C, 3, 3]
+  auto w = makeSymbolicTensor(4);
+  fusion.addInput(w);
+
+  // Gather a neighbor tile of [3, 3] with padding size of 1 for each
+  // side of the spatial dimensions
+  auto inp_tile = gather(inp, {1, 3, 3}, {{0, 0}, {1, 1}, {1, 1}});
+  // inp_tile: [C, H, W, 1, 3, 3]
+
+  auto inp_bc =
+      broadcast(inp_tile, {true, false, false, false, false, false, false});
+  auto w_bc = broadcast(w, {false, false, true, true, true, false, false});
+
+  auto inp_times_w = mul(inp_bc, w_bc);
+
+  // Reduce the channel and neighbor tile dimensions
+  auto out = sum(inp_times_w, {1, 4, 5, 6});
+
+  fusion.addOutput(out);
+
+  ////////////////////////////////////
+
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+  // Blocking the channel dimension
+  const int block_c = 8;
+
+  out->split(2, block_h);
+  out->split(4, block_w);
+  out->reorder({{3, 4}});
+  // out: [K, C, Ho, Wo, Hi, Wi, 1, 3, 3]
+
+  out->split(1, block_c);
+  // out: [K, Co, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
+
+  auto out_rf = out->rFactor({1, -3, -2, -1});
+  // out_rf: [K, rCo, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
+  // out_rf: [K, Ci, Ho, Wo, Hi, Wi]
+
+  // Create a [block_x, block_y] tile on smem
+  inp_cache->computeAt(out, 4);
+  // inp_cache: [Co, Ho, Wo, Ci, Hi, Wi]
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  // Move Ci forward
+  out_rf->reorder({{-4, -6}, {-5, -4}, {-6, -5}});
+  inp_cache->computeAt(out_rf, 5);
+
+  inp_tile->computeAt(out_rf, -1);
+  w->computeAt(out_rf, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(1)->parallelize(ParallelType::TIDz);
+  out->axis(4)->parallelize(ParallelType::TIDy);
+  out->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out, {inp_cache, out_rf});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 99;
+  const int dim_w = 101;
+  const int dim_c = 10;
+  const int dim_f = 20;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
+  at::Tensor at_w = at::randn({dim_f, dim_c, 3, 3}, options);
+  std::vector<IValue> inputs = {at_inp, at_w};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
+  auto at_out = at::conv2d(at_inp, at_w, {}, 1, 1);
+  at_out = at_out.squeeze(0); // drop the N axis
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
+}
+
+// Mostly the same as the static conv test, but the shape of the weights,
+// 3x3 in this case, is given dynamically
+TEST(NVFuserTest, FusionConv2DDynamic_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [C, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // Weights: [K, C, S, T]
+  auto w = makeSymbolicTensor(4);
+  fusion.addInput(w);
+
+  auto w_h = new Int();
+  fusion.addInput(w_h);
+  auto w_w = new Int();
+  fusion.addInput(w_w);
+
+  auto pad_h = new Int();
+  fusion.addInput(pad_h);
+  auto pad_w = new Int();
+  fusion.addInput(pad_w);
+
+  // Gather a neighbor tile of [w_dim_h, w_dim_w] with padding
+  auto inp_tile = gather(
+      inp,
+      {new Int(1), w_h, w_w},
+      {{new Int(0), new Int(0)}, {pad_h, pad_h}, {pad_w, pad_w}});
+  // inp_tile: [C, 1, H - w_h + 1, W - w_w + 1, w_h, w_w]
+
+  auto inp_bc =
+      broadcast(inp_tile, {true, false, false, false, false, false, false});
+  auto w_bc = broadcast(w, {false, false, true, true, true, false, false});
+
+  auto inp_times_w = mul(inp_bc, w_bc);
+
+  // Reduce the channel and neighbor tile dimensions
+  auto out = sum(inp_times_w, {1, 4, 5, 6});
+
+  fusion.addOutput(out);
+
+  ////////////////////////////////////
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+  // Blocking the channel dimension
+  const int block_c = 8;
+
+  out->split(2, block_h);
+  out->split(4, block_w);
+  out->reorder({{3, 4}});
+  // out: [K, C, Ho, Wo, Hi, Wi, 1, 3, 3]
+
+  out->split(1, block_c);
+  // out: [K, Co, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
+
+  auto out_rf = out->rFactor({1, -3, -2, -1});
+  // out_rf: [K, rCo, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
+  // out_rf: [K, Ci, Ho, Wo, Hi, Wi]
+
+  // Create a [block_x, block_y] tile on smem
+  inp_cache->computeAt(out, 4);
+  // inp_cache: [Co, Ho, Wo, Ci, Hi, Wi]
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  // Move Ci forward
+  out_rf->reorder({{-4, -6}, {-5, -4}, {-6, -5}});
+  inp_cache->computeAt(out_rf, 5);
+
+  inp_tile->computeAt(out_rf, -1);
+  w->computeAt(out_rf, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(1)->parallelize(ParallelType::TIDz);
+  out->axis(4)->parallelize(ParallelType::TIDy);
+  out->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out, {inp_cache, out_rf});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 99;
+  const int dim_w = 101;
+  const int dim_c = 10;
+  const int dim_f = 20;
+  const int dim_w_h = 3;
+  const int dim_w_w = 3;
+  const int dim_pad_h = (dim_w_h - 1) / 2;
+  const int dim_pad_w = (dim_w_w - 1) / 2;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
+  at::Tensor at_w = at::randn({dim_f, dim_c, dim_w_h, dim_w_w}, options);
+  std::vector<IValue> inputs = {
+      at_inp, at_w, dim_w_h, dim_w_w, dim_pad_h, dim_pad_w};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
+  auto at_out = at::conv2d(at_inp, at_w, {}, 1, 1);
+  at_out = at_out.squeeze(0); // drop the N axis
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
+}
+
+// 5x5 followed by 3x3
+TEST(NVFuserTest, FusionConv2DDynamicChain_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [K1, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // Weights: [K2, K1, S1, T1]
+  auto w1 = makeSymbolicTensor(4);
+  fusion.addInput(w1);
+
+  // Weights: [K3, K2, S2, T2]
+  auto w2 = makeSymbolicTensor(4);
+  fusion.addInput(w2);
+
+  auto w1_h = new Int();
+  fusion.addInput(w1_h);
+  auto w1_w = new Int();
+  fusion.addInput(w1_w);
+
+  auto w2_h = new Int();
+  fusion.addInput(w2_h);
+  auto w2_w = new Int();
+  fusion.addInput(w2_w);
+
+  auto pad_h1 = new Int();
+  fusion.addInput(pad_h1);
+  auto pad_w1 = new Int();
+  fusion.addInput(pad_w1);
+
+  auto pad_h2 = new Int();
+  fusion.addInput(pad_h2);
+  auto pad_w2 = new Int();
+  fusion.addInput(pad_w2);
+
+  // Gather a neighbor tile of [w1_h, w1_w] with padding
+  auto inp_tile = gather(
+      inp,
+      {new Int(1), w1_h, w1_w},
+      {{new Int(0), new Int(0)}, {pad_h1, pad_h1}, {pad_w1, pad_w1}});
+  // inp_tile: [C, 1, H - w1_h + 1, W - w1_w + 1, w1_h, w1_w]
+
+  auto inp_bc =
+      broadcast(inp_tile, {true, false, false, false, false, false, false});
+  auto w1_bc = broadcast(w1, {false, false, true, true, true, false, false});
+
+  auto inp_times_w1 = mul(inp_bc, w1_bc);
+
+  // Reduce the channel and neighbor tile dimensions
+  auto out1 = sum(inp_times_w1, {1, 4, 5, 6});
+
+  // Second conv
+  auto out1_tile = gather(
+      out1,
+      {new Int(1), w2_h, w2_w},
+      {{new Int(0), new Int(0)}, {pad_h2, pad_h2}, {pad_w2, pad_w2}});
+
+  auto out1_bc =
+      broadcast(out1_tile, {true, false, false, false, false, false, false});
+  auto w2_bc = broadcast(w2, {false, false, true, true, true, false, false});
+
+  auto out1_times_w2 = mul(out1_bc, w2_bc);
+
+  auto out2 = sum(out1_times_w2, {1, 4, 5, 6});
+
+  fusion.addOutput(out2);
+
+  ////////////////////////////////////
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+
+  out2->split(2, block_h);
+  out2->split(4, block_w);
+  out2->reorder({{3, 4}});
+  // out2: [K3, K2, Ho, Wo, Hi, Wi, 1, 3, 3]
+
+  // Create a [block_x, block_y] tile on smem
+  inp_cache->computeAt(out2, 4);
+  // inp_cache: [Co, Ho, Wo, Ci, Hi, Wi]
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  // Move Ci forward
+  out1->reorder({{5, 3}, {3, 4}, {4, 5}});
+  out1->setMemoryType(MemoryType::Shared);
+
+  inp_cache->computeAt(out1, 4);
+
+  inp_tile->computeAt(out1, -1);
+  w1->computeAt(out1, -1);
+
+  out1_tile->computeAt(out2, -1);
+  w2->computeAt(out2, -1);
+
+  out2->axis(0)->parallelize(ParallelType::BIDx);
+  out2->axis(4)->parallelize(ParallelType::TIDy);
+  out2->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out2, {inp_cache, out1});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 99;
+  const int dim_w = 101;
+  const int dim_k1 = 3;
+  const int dim_k2 = 5;
+  const int dim_k3 = 7;
+  const int dim_w1_h = 5;
+  const int dim_w1_w = 5;
+  const int dim_pad1_h = (dim_w1_h - 1) / 2;
+  const int dim_pad1_w = (dim_w1_w - 1) / 2;
+  const int dim_w2_h = 3;
+  const int dim_w2_w = 3;
+  const int dim_pad2_h = (dim_w2_h - 1) / 2;
+  const int dim_pad2_w = (dim_w2_w - 1) / 2;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_k1, dim_h, dim_w}, options);
+  at::Tensor at_w1 = at::randn({dim_k2, dim_k1, dim_w1_h, dim_w1_w}, options);
+  at::Tensor at_w2 = at::randn({dim_k3, dim_k2, dim_w2_h, dim_w2_w}, options);
+  std::vector<IValue> inputs = {
+      at_inp,
+      at_w1,
+      at_w2,
+      dim_w1_h,
+      dim_w1_w,
+      dim_w2_h,
+      dim_w2_w,
+      dim_pad1_h,
+      dim_pad1_w,
+      dim_pad2_h,
+      dim_pad2_w};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
+  auto at_out1 = at::conv2d(at_inp, at_w1, {}, 1, 2);
+  auto at_out2 = at::conv2d(at_out1, at_w2, {}, 1, 1);
+  at_out2 = at_out2.squeeze(0); // drop the N axis
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out2}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionConv2DStaticEvenSizedWindow_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Input: [C, H, W]
+  auto inp = makeSymbolicTensor(3);
+  fusion.addInput(inp);
+
+  // Weights: [K, C, 2, 2]
+  auto w = makeSymbolicTensor(4);
+  fusion.addInput(w);
+
+  // Gather a neighbor tile of [2, 2] with padding size of 1 only for
+  // the right side of the spatial dimensions. The left padding is
+  // zero so that the output axis stays the same.
+  auto inp_tile = gather(inp, {1, 2, 2}, {{0, 0}, {0, 1}, {0, 1}});
+  // inp_tile: [C, H, W, 1, 2, 2]
+
+  auto inp_bc =
+      broadcast(inp_tile, {true, false, false, false, false, false, false});
+  auto w_bc = broadcast(w, {false, false, true, true, true, false, false});
+
+  auto inp_times_w = mul(inp_bc, w_bc);
+
+  // Reduce the channel and neighbor tile dimensions
+  auto out = sum(inp_times_w, {1, 4, 5, 6});
+
+  fusion.addOutput(out);
+
+  ////////////////////////////////////
+
+  // Cache the input and weight tensors
+  auto inp_cache = inp->cache_after();
+
+  // Blocking the spatial dimensions
+  const int block_w = 16;
+  const int block_h = 4;
+  // Blocking the channel dimension
+  const int block_c = 8;
+
+  out->split(2, block_h);
+  out->split(4, block_w);
+  out->reorder({{3, 4}});
+  // out: [K, C, Ho, Wo, Hi, Wi, 1, 2, 2]
+
+  out->split(1, block_c);
+  // out: [K, Co, Ci, Ho, Wo, Hi, Wi, 1, 2, 2]
+
+  auto out_rf = out->rFactor({1, -3, -2, -1});
+  // out_rf: [K, rCo, Ci, Ho, Wo, Hi, Wi, 1, 2, 2]
+  // out_rf: [K, Ci, Ho, Wo, Hi, Wi]
+
+  // Create a [block_x, block_y] tile on smem
+  inp_cache->computeAt(out, 4);
+  // inp_cache: [Co, Ho, Wo, Ci, Hi, Wi]
+  inp_cache->setMemoryType(MemoryType::Shared);
+
+  // Move Ci forward
+  out_rf->reorder({{-4, -6}, {-5, -4}, {-6, -5}});
+  inp_cache->computeAt(out_rf, 5);
+
+  inp_tile->computeAt(out_rf, -1);
+  w->computeAt(out_rf, -1);
+
+  out->axis(0)->parallelize(ParallelType::BIDx);
+  out->axis(1)->parallelize(ParallelType::TIDz);
+  out->axis(4)->parallelize(ParallelType::TIDy);
+  out->axis(5)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(out, {inp_cache, out_rf});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  const int dim_h = 99;
+  const int dim_w = 101;
+  const int dim_c = 10;
+  const int dim_f = 20;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
+  at::Tensor at_w = at::randn({dim_f, dim_c, 2, 2}, options);
+  std::vector<IValue> inputs = {at_inp, at_w};
+
+  auto cg_outputs = fe.runFusion(inputs);
+
+  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
+  auto at_out = at::conv2d(at_inp, at_w, {}, 1, 1);
+  at_out = at_out.squeeze(0); // drop the N axis
+  // The shape of the spatial domain is (dim_h+1)x(dim_w+1), whereas
+  // the fuser output has dim_h*dim_w. Drop the first elements to make
+  // it match with the fuser output.
+  std::vector<at::indexing::TensorIndex> indices{
+      at::indexing::Slice(0, at::indexing::None),
+      at::indexing::Slice(1, at::indexing::None),
+      at::indexing::Slice(1, at::indexing::None)};
+  ;
+  at_out = at_out.index(indices);
+
+  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
 }
 
 } // namespace jit

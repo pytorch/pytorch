@@ -345,6 +345,46 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   const std::vector<int> offsets_;
 };
 
+//! Gather a window around each element.
+class TORCH_CUDA_CU_API GatherOp : public Expr {
+ public:
+  GatherOp(
+      Val* out,
+      Val* in,
+      std::vector<Int*> window_shape,
+      std::vector<std::vector<Int*>> pad_width);
+
+  GatherOp(const GatherOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+  Val* in() const {
+    return in_;
+  }
+
+  const auto& windowShape() const {
+    return window_shape_;
+  }
+
+  //! Returns the gather axis that corresponds to an input axis
+  int gatherAxis(int axis) const;
+
+  const auto& padWidth() const {
+    return pad_width_;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+  //! Shape of a window gathered for each element.
+  std::vector<Int*> window_shape_;
+  //! The size of zero-padding of each axis.
+  std::vector<std::vector<Int*>> pad_width_;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;
@@ -397,6 +437,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   bool isBroadcast() const {
     return getIterType() == IterType::BroadcastWithStride ||
         getIterType() == IterType::BroadcastWithoutStride;
+  }
+
+  bool isGather() const {
+    return getIterType() == IterType::Gather;
   }
 
   bool isParallelized() const {

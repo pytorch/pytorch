@@ -1178,6 +1178,99 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets) {
   return out;
 }
 
+namespace {
+std::vector<Int*> convertToIntVector(const std::vector<int>& x) {
+  std::vector<Int*> converted;
+  std::transform(x.begin(), x.end(), std::back_inserter(converted), [](int x) {
+    return new Int(x);
+  });
+  return converted;
+}
+} // namespace
+
+TensorView* gather(
+    TensorView* inp,
+    const std::vector<int>& window_shape,
+    const std::vector<std::vector<int>>& pad_width) {
+  std::vector<Int*> window_shape_int = convertToIntVector(window_shape);
+  std::vector<std::vector<Int*>> pad_width_int;
+  std::transform(
+      pad_width.begin(),
+      pad_width.end(),
+      std::back_inserter(pad_width_int),
+      [](const std::vector<int>& x) { return convertToIntVector(x); });
+  return gather(inp, window_shape_int, pad_width_int);
+}
+
+TensorView* gather(
+    TensorView* inp,
+    const std::vector<Int*>& window_shape,
+    const std::vector<std::vector<Int*>>& pad_width) {
+  auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
+  const auto ndims = inp_dom.size();
+
+  TORCH_CHECK(
+      ndims == window_shape.size(),
+      "Invalid window shape: number of entries expected to be ",
+      ndims,
+      " but received ",
+      window_shape.size());
+
+  TORCH_CHECK(
+      ndims == pad_width.size(),
+      "Invalid pad width: number of entries expected to be ",
+      ndims,
+      " but received ",
+      pad_width.size());
+
+  std::for_each(pad_width.begin(), pad_width.end(), [](const auto& p) {
+    TORCH_CHECK(
+        p.size() == 2,
+        "Each entry of pad_width must have two non-negative integers.");
+  });
+
+  std::vector<IterDomain*> out_dom;
+  std::vector<IterDomain*> out_gather_dom;
+
+  for (size_t i = 0; i < ndims; ++i) {
+    const auto inp_axis = inp_dom[i];
+    const auto window_dim = window_shape[i];
+    const auto pad_left = pad_width[i][0];
+    const auto pad_right = pad_width[i][1];
+    TORCH_INTERNAL_ASSERT(inp_axis->start()->isZeroInt());
+    Val* out_axis_dim = nullptr;
+    if (window_dim->isConst() && pad_left->isConst() && pad_right->isConst()) {
+      const int64_t extent_adjustment =
+          -(-window_dim->value().value() + 1 + pad_left->value().value() +
+            pad_right->value().value());
+      out_axis_dim = extent_adjustment == 0
+          ? inp_axis->extent()
+          : sub(inp_axis->extent(), new Int(extent_adjustment));
+    } else {
+      out_axis_dim =
+          add(add(sub(inp_axis->extent(), window_dim), new Int(1)),
+              add(pad_left, pad_right));
+    }
+    out_dom.push_back(new IterDomain(
+        new Int(0),
+        out_axis_dim,
+        ParallelType::Serial,
+        inp_axis->getIterType()));
+    // create a new axis for the gathered domain
+    out_gather_dom.push_back(new IterDomain(
+        new Int(0), window_dim, ParallelType::Serial, IterType::Gather));
+  }
+
+  out_dom.insert(out_dom.end(), out_gather_dom.begin(), out_gather_dom.end());
+
+  auto out = new TensorView(
+      new TensorDomain(out_dom, std::vector<bool>(out_dom.size(), true)),
+      inp->getDataType().value());
+
+  new GatherOp(out, inp, window_shape, pad_width);
+  return out;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

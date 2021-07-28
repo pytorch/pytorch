@@ -115,6 +115,10 @@ void IrCloner::handle(const ShiftOp* op) {
   clone_ = new ShiftOp(op, this);
 }
 
+void IrCloner::handle(const GatherOp* op) {
+  clone_ = new GatherOp(op, this);
+}
+
 void IrCloner::handle(const Split* split) {
   clone_ = new Split(split, this);
 }

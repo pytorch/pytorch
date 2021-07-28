@@ -322,6 +322,9 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMap : public RootDomainMap {
   //! Broadcast iter domain that does not match dimensions in its produer,
   //! meaning it is a brand new domain in its TensorDomain.
   DomainKeySet new_broadcast_domains_;
+
+  //! Keep track of window axes so that the map function can ignore them.
+  std::unordered_set<IterDomain*> window_axes_;
 };
 
 std::string toString(const ComputeAtRootDomainMap& root_map);
@@ -391,6 +394,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   void handle(BroadcastOp* op) override;
 
   void handle(TransposeOp* op) override;
+
+  void handle(GatherOp* op) override;
 
   void handle(TensorView* tv) override;
 

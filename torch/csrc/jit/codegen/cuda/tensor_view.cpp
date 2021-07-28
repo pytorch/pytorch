@@ -30,7 +30,7 @@ TensorView::TensorView(TensorDomain* domain, DataType dtype, MemoryType mtype)
   if (domain_->domain() == domain_->getRootDomain()) {
     // Mark the size-1 axes as broadcast to support implicit broadcast semantic
     for (auto* id : domain_->domain()) {
-      if (!id->isBroadcast() && !id->isReduction() &&
+      if (!id->isBroadcast() && !id->isReduction() && !id->isGather() &&
           id->extent()->isOneInt()) {
         id->convertToBroadcast();
       }

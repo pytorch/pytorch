@@ -537,6 +537,104 @@ bool ShiftOp::sameAs(const Statement* other) const {
   return Expr::sameAs(other);
 }
 
+GatherOp::GatherOp(
+    Val* out,
+    Val* in,
+    std::vector<Int*> window_shape,
+    std::vector<std::vector<Int*>> pad_width)
+    : Expr(ExprType::GatherOp),
+      out_(out),
+      in_(in),
+      window_shape_(std::move(window_shape)),
+      pad_width_(std::move(pad_width)) {
+  // clang-tidy complains about out_ that it may be null.
+  TORCH_INTERNAL_ASSERT(out_ != nullptr);
+  TORCH_INTERNAL_ASSERT(in_ != nullptr);
+
+  auto out_type = out->getValType().value();
+  auto in_type = in->getValType().value();
+
+  TORCH_INTERNAL_ASSERT(
+      out_type == ValType::TensorView && in_type == ValType::TensorView,
+      "Cannot shift a non-tensor object.");
+
+  const auto ndims =
+      TensorDomain::noReductions(in_->as<TensorView>()->getRootDomain()).size();
+
+  TORCH_INTERNAL_ASSERT(
+      window_shape_.size() == ndims,
+      "Invalid window_shape vector: ",
+      window_shape_);
+  TORCH_INTERNAL_ASSERT(
+      pad_width_.size() == ndims, "Invalid pad_width vector: ", pad_width_);
+
+  for (const auto& pad : pad_width_) {
+    TORCH_INTERNAL_ASSERT(
+        pad.size() == 2, "Padding size for each axis must have two Int vals.");
+  }
+
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {
+  std::transform(
+      src->window_shape_.begin(),
+      src->window_shape_.end(),
+      std::back_inserter(window_shape_),
+      [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
+  for (const auto& pad : src->pad_width_) {
+    std::vector<Int*> pad_clone;
+    std::transform(
+        pad.begin(),
+        pad.end(),
+        std::back_inserter(pad_clone),
+        [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
+    pad_width_.push_back(pad_clone);
+  }
+}
+
+bool GatherOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<GatherOp>()) {
+    return false;
+  }
+  const auto other_op = other->as<GatherOp>();
+  if (windowShape().size() != other_op->windowShape().size()) {
+    return false;
+  }
+  for (size_t i = 0; i < windowShape().size(); ++i) {
+    if (!windowShape()[i]->sameAs(other_op->windowShape()[i])) {
+      return false;
+    }
+  }
+  if (padWidth().size() != other_op->padWidth().size()) {
+    return false;
+  }
+  for (size_t i = 0; padWidth().size(); ++i) {
+    if (!padWidth()[i][0]->sameAs(other_op->padWidth()[i][0]) ||
+        !padWidth()[i][1]->sameAs(other_op->padWidth()[i][1])) {
+      return false;
+    }
+  }
+  return Expr::sameAs(other);
+}
+
+int GatherOp::gatherAxis(int axis) const {
+  if (axis < 0) {
+    axis += out()->as<TensorView>()->nDims();
+  }
+  TORCH_INTERNAL_ASSERT(
+      axis >= 0 && axis < (int)windowShape().size(), "Invalid axis: ", axis);
+  return int(windowShape().size()) + axis;
+}
+
 IterDomain::IterDomain(
     Val* start,
     Val* extent,
@@ -626,6 +724,10 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
           (!outer->isReduction() && inner->extent()->isOneInt()) ||
           (outer->extent()->isOneInt() && !inner->isReduction()),
       "Merging IterDomains requires that their iteration types match.");
+  TORCH_CHECK(
+      (outer->isGather() && inner->isGather()) ||
+          (!outer->isGather() && !inner->isGather()),
+      "Merging gather and non-gather domains is not supported.");
 
   Val* merged_id_size = mul(outer->extent(), inner->extent());
 

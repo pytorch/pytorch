@@ -310,7 +310,7 @@ std::unordered_map<kir::IterDomain*, kir::Val*> getReferenceHaloExtentMap(
 
 //! Offset of an index of a producer axis with respect to its
 //! corresponding consumer index
-int getProducerHaloOffset(
+kir::Val* getProducerHaloOffset(
     const TensorView* producer_tv,
     size_t producer_axis,
     const TensorView* consumer_tv) {
@@ -330,15 +330,22 @@ int getProducerHaloOffset(
   IterDomain* consumer_id = it->second;
 
   const auto& halo_map = GpuLower::current()->haloInfo();
-  const int p_pad = int(halo_map.getRootAxisInfo(producer_id).width(0));
-  const int c_pad = int(halo_map.getRootAxisInfo(consumer_id).width(0));
+  const auto p_pad = halo_map.getRootAxisInfo(producer_id).width(0);
+  const auto c_pad = halo_map.getRootAxisInfo(consumer_id).width(0);
 
-  int offset = p_pad - c_pad;
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  kir::Val* offset = (p_pad->isConst() && c_pad->isConst())
+      ? ir_builder.create<kir::Int>(
+            p_pad->value().value() - c_pad->value().value())
+      : ir_builder.subExpr(p_pad, c_pad);
 
   // If the consumer is a result of shifting the producer, adjust the
   // producer index per the offsets argument of the shift op.
   if (auto shift_op = dynamic_cast<const ShiftOp*>(consumer_tv->definition())) {
-    offset -= shift_op->offset(producer_axis);
+    offset = ir_builder.subExpr(
+        offset, ir_builder.create<kir::Int>(shift_op->offset(producer_axis)));
   }
 
   return offset;
@@ -350,20 +357,96 @@ kir::Val* getProducerIndexWithHalo(
     size_t producer_axis,
     kir::Val* producer_index,
     const TensorView* consumer_tv) {
-  const int offset =
+  const auto offset =
       getProducerHaloOffset(producer_tv, producer_axis, consumer_tv);
 
-  if (offset == 0) {
+  if (offset->isZeroInt()) {
     return producer_index;
   }
 
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  producer_index =
-      ir_builder.addExpr(producer_index, ir_builder.create<kir::Int>(offset));
+  producer_index = ir_builder.addExpr(producer_index, offset);
 
   return producer_index;
+}
+
+//! Offset a producer index of a gather expression
+//!
+//! Given an index of a producer root axis, build a new index
+//! expression that accesses a window position that the current loop
+//! structure refers to.
+kir::Val* getProducerIndexWithGather(
+    size_t producer_root_axis,
+    kir::Val* producer_index,
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::unordered_map<kir::IterDomain*, kir::Val*>& ref_index_map,
+    const std::unordered_map<IterDomain*, IterDomain*>& ref_concrete_map) {
+  auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
+
+  // Just return the producer index as is if this is not a gather
+  if (gather_op == nullptr) {
+    return producer_index;
+  }
+
+  // Consumer axis that corresponds to the producer axis
+  int consumer_axis = -1;
+  for (size_t i = 0; i <= producer_root_axis; ++i) {
+    if (producer_tv->getRootDomain()[i]->isReduction()) {
+      continue;
+    }
+    ++consumer_axis;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      consumer_axis >= 0 &&
+          consumer_axis < (int)gather_op->windowShape().size(),
+      "Invalid consumer axis",
+      consumer_axis,
+      ", producer_axis: ",
+      producer_root_axis);
+
+  // If the window extent is one, no specific offsetting
+  // is necessary
+  if (gather_op->windowShape()[consumer_axis]->isOneInt()) {
+    return producer_index;
+  }
+
+  // Basically, the goal is to build an expression of producer_index +
+  // window_index, so we first need to locate the index expression
+  // that corresponds to the window axis of this producer axis.
+
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // Locate the root IterDomain of the reference that corresponds to the gather
+  // axis
+  const auto window_root_axis = gather_op->gatherAxis(consumer_axis);
+  auto concrete_window_id = gpu_lower->caIndexMap().getConcreteMappedID(
+      consumer_tv->getRootDomain().at(window_root_axis));
+  auto ref_concrete_map_it = ref_concrete_map.find(concrete_window_id);
+  TORCH_INTERNAL_ASSERT(ref_concrete_map_it != ref_concrete_map.end());
+  IterDomain* reference_root_of_gather_axis = ref_concrete_map_it->second;
+
+  // Now that reference_root_of_gather_axis is the IterDomain for the
+  // window axis, take its corresponding index from the index map
+  auto window_idx =
+      ref_index_map.at(gpu_lower->lowerValue(reference_root_of_gather_axis)
+                           ->as<kir::IterDomain>());
+
+  // Positive (or negative) padding at offset zero means the indexing
+  // shifted to the negative (or positive) direction.
+  auto pad_width = gather_op->padWidth()[consumer_axis][0];
+
+  // producer_index - padding + window_index
+  auto offset_producer_index = ir_builder.addExpr(
+      ir_builder.subExpr(
+          producer_index, ir_builder.create<kir::Int>(pad_width)),
+      window_idx);
+
+  return offset_producer_index;
 }
 
 } // namespace
@@ -770,9 +853,8 @@ kir::Val* getHaloExtentOfRootAxis(
   }
 
   const auto& halo = gpu_lower->haloInfo().getRootAxisInfo(id);
-  if (halo.width() > 0) {
-    auto halo_extent = ir_builder.addExpr(
-        normal_extent, ir_builder.create<kir::Int>(halo.width()));
+  if (halo.hasHalo()) {
+    auto halo_extent = ir_builder.addExpr(normal_extent, halo.width());
     return halo_extent;
   } else {
     return normal_extent;
@@ -1034,6 +1116,14 @@ std::vector<kir::Val*> Index::getGlobalProducerStridedIndices(
     auto root_ind = producer_indexing.indexMap().at(kir_root_dom_i);
 
     root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
+
+    root_ind = getProducerIndexWithGather(
+        i,
+        root_ind,
+        producer_tv,
+        consumer_tv,
+        ref_compute.indexMap(),
+        reference_id_map);
 
     if (root_ind->isZeroInt()) {
       continue;
@@ -1304,6 +1394,14 @@ std::vector<kir::Val*> Index::getNonGlobalProducerStridedIndices(
 
     root_ind_i =
         getProducerIndexWithHalo(producer_tv, i, root_ind_i, consumer_tv);
+
+    root_ind_i = getProducerIndexWithGather(
+        i,
+        root_ind_i,
+        producer_tv,
+        consumer_tv,
+        ref_compute.indexMap(),
+        reference_id_map);
 
     if (root_ind_i->isZeroInt()) {
       continue;
@@ -1979,9 +2077,7 @@ Index::getReferenceRootPredicates(
       loops.begin(),
       loops.end(),
       std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
-      [&ir_builder](kir::ForLoop* fl) {
-        return std::make_pair(fl, fl->index());
-      });
+      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
 
   // If unswitch don't directly use indices from for loop, use for loop extent
   // minus 1
@@ -2070,8 +2166,7 @@ Index::getReferenceRootPredicates(
     auto extent = halo_info.getExtent(ref_id);
     if (extent != nullptr) {
       reference_halo_extent_map[gpu_lower->lowerValue(ref_id)
-                                    ->as<kir::IterDomain>()] =
-          gpu_lower->lowerValue(extent);
+                                    ->as<kir::IterDomain>()] = extent;
     }
   }
 

@@ -66,6 +66,7 @@ enum class ExprType {
   WelfordOp,
   TransposeOp,
   ShiftOp,
+  GatherOp,
   Split,
   Merge,
 };
@@ -199,7 +200,8 @@ enum class IterType {
   Iteration,
   Reduction,
   BroadcastWithStride,
-  BroadcastWithoutStride
+  BroadcastWithoutStride,
+  Gather
 };
 
 enum class SwizzleType { NoSwizzle, Transpose };

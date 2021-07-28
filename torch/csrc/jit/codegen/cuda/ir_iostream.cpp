@@ -366,6 +366,29 @@ void IrPrinter::handle(const ShiftOp* sop) {
       << "} )\n";
 }
 
+void IrPrinter::handle(const GatherOp* op) {
+  indent();
+  os_ << op->out() << " = gather( " << op->in() << ", {";
+  bool no_comma = true;
+  for (const auto& s : op->windowShape()) {
+    if (!no_comma) {
+      os_ << ", ";
+    }
+    os_ << s;
+    no_comma = false;
+  }
+  os_ << "}, {";
+  no_comma = true;
+  for (const auto& pad : op->padWidth()) {
+    if (!no_comma) {
+      os_ << ", ";
+    }
+    os_ << "{" << pad[0] << ", " << pad[1] << "}";
+    no_comma = false;
+  }
+  os_ << "} )\n";
+}
+
 void IrPrinter::handle(const Split* s) {
   os_ << (s->innerSplit() ? "Split: " : "Outer split: ");
   handle(s->in());

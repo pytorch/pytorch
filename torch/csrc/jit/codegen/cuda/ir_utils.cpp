@@ -212,6 +212,16 @@ struct SubstituteInExpr : public OptInDispatch {
     expr_ = new ShiftOp(out, in, shift_expr->offsets());
   }
 
+  void handle(GatherOp* gather_expr) final {
+    auto out = reference_->sameAs(gather_expr->out()) ? substitute_
+                                                      : gather_expr->out();
+    auto in =
+        reference_->sameAs(gather_expr->in()) ? substitute_ : gather_expr->in();
+
+    expr_ = new GatherOp(
+        out, in, gather_expr->windowShape(), gather_expr->padWidth());
+  }
+
   void handle(WelfordOp* welford_expr) final {
     auto out_avg = reference_->sameAs(welford_expr->outAvg())
         ? substitute_->as<TensorView>()

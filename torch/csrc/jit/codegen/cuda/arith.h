@@ -284,6 +284,34 @@ TORCH_CUDA_CU_API TensorView* shift(
     TensorView* inp,
     const std::vector<int>& offsets);
 
+//! Gather a window of nearby elements for each element.
+//!
+//! Each window of size window_shape is stored as a additional
+//! innermost domain, meaning that the number of dimensions of the
+//! output tensor doubles. The pad_width parameter specifies the
+//! padding width of each side of each axis.
+//!
+//! Example:
+//!   t0: 2D tensor of [N, M]
+//!   t1 = gather(t0, {1, 3}, {{0, 0}, {1, 1}});
+//!
+//!   then:
+//!     t1: [N, M, 1, 3]
+//!     t1[i, j, k, l] = The value at the window position of [k, l]
+//!                      for t0[i, j]
+TORCH_CUDA_CU_API TensorView* gather(
+    TensorView* inp,
+    const std::vector<int>& window_shape,
+    const std::vector<std::vector<int>>& pad_width);
+
+//! Gather a window of nearby elements for each element.
+//!
+//! Same as the another gather interface but with Int* parameters.
+TORCH_CUDA_CU_API TensorView* gather(
+    TensorView* inp,
+    const std::vector<Int*>& window_shape,
+    const std::vector<std::vector<Int*>>& pad_width);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
