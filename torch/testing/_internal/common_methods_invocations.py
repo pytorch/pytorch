@@ -7893,14 +7893,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types(),
         sample_inputs_func=sample_inputs_dropout,
-    ),
-    OpInfo(
-        "nn.functional.dropout",
-        variant_test_name="inplace",
-        ref=_NOTHING,
-        supports_out=False,
-        dtypes=floating_types(),
-        sample_inputs_func=partial(sample_inputs_dropout),
         inplace_variant=partial(torch.nn.functional.dropout, inplace=True),
     ),
 ]
