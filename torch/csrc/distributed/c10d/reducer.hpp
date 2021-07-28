@@ -168,31 +168,57 @@ class TORCH_API Reducer {
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
 
+  // When graph is not explicitly set by user as static and has unused
+  // parameters, this will return whether the graph has been static until the
+  // current iteration, which means unused params set has not changed.
+  bool ddp_graph_static();
+
  protected:
   // Forward declaration.
   struct Bucket;
 
   void push_rebuilt_params(const size_t& index);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<std::vector<at::Tensor>> replicas_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
-      grad_accumulators_;
+      grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
-      hooks_;
+      hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool expect_autograd_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool require_finalize_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t next_bucket_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_marked_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool find_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
+  // Previous iteration's unused params, used for checking if unused parameters
+  // change between iterations. Only filled during the first backwards call.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<size_t> prev_iteration_unused_parameters_;
+  // Whether graph is static or not. When user does not explicitly set static
+  // graph, the only possible dynamism is set of unused parameters changing
+  // between iterations which is tracked by this flag.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
