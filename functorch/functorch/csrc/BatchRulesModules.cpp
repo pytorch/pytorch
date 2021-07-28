@@ -211,7 +211,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
   OP_DECOMPOSE(dropout);
 
-  VMAP_SUPPORT("constant_pad_nd", SINGLE_ARG(basic_unary_batch_rule<decltype(&at::constant_pad_nd), &at::constant_pad_nd, IntArrayRef, const Scalar&>));
+  VMAP_SUPPORT("constant_pad_nd", BASIC_UNARY_BATCH_RULE(at::constant_pad_nd));
   VMAP_SUPPORT("reflection_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad1d), &at::reflection_pad1d, IntArrayRef>));
   VMAP_SUPPORT("reflection_pad2d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad2d), &at::reflection_pad2d, IntArrayRef>));
   VMAP_SUPPORT("replication_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad1d), &at::replication_pad1d, IntArrayRef>));
