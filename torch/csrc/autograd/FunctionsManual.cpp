@@ -2424,15 +2424,14 @@ Tensor eigh_jvp_eigenvectors(
   // An extended collection of matrix derivative results for forward and reverse mode automatic differentiation
   // https://ora.ox.ac.uk/objects/uuid:8d0c0a29-c92b-4153-a1d2-38b276e93124
   // Section 3.1 Eigenvalues and eigenvectors
-  auto F = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
-  F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
-  F = F.pow(-1);
+  auto E = eigenvalues.unsqueeze(-2) - eigenvalues.unsqueeze(-1);
+  E.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
 
   // see the note in the implementation of eigh_backward that tangent should be Hermitian
   auto hermitian_tangent = 0.5*(input_tangent + input_tangent.transpose(-2, -1).conj());
 
   auto tmp = at::matmul(at::matmul(eigenvectors.transpose(-2, -1).conj(), hermitian_tangent), eigenvectors);
-  auto eigenvectors_tangent = at::matmul(eigenvectors, F.mul(tmp));
+  auto eigenvectors_tangent = at::matmul(eigenvectors, tmp.div(E));
   return eigenvectors_tangent;
 }
 
