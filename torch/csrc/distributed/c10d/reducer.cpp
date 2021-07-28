@@ -1,6 +1,7 @@
-#include "c10d/Utils.hpp"
-#include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
+
+#include <c10d/Utils.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
