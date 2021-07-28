@@ -209,6 +209,17 @@ binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[tor
     torch.mul: binary_op_int8_dtypes,
 }
 
+QAT_CONV_MODULE_CLASSES = \
+    (torch.nn.qat.Conv2d,
+     torch.nn.qat.Conv3d,
+     torch.nn.intrinsic.qat.ConvBn2d,
+     torch.nn.intrinsic.qat.ConvBnReLU2d,
+     torch.nn.intrinsic.qat.ConvReLU2d,
+     torch.nn.intrinsic.qat.ConvBn3d,
+     torch.nn.intrinsic.qat.ConvBnReLU3d,
+     torch.nn.intrinsic.qat.ConvReLU3d)
+
+
 
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
@@ -541,14 +552,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # to get scale and zero_point for weight
                 if isinstance(
                         self.conv,
-                        (torch.nn.qat.Conv2d,
-                         torch.nn.qat.Conv3d,
-                         torch.nn.intrinsic.qat.ConvBn2d,
-                         torch.nn.intrinsic.qat.ConvBnReLU2d,
-                         torch.nn.intrinsic.qat.ConvReLU2d,
-                         torch.nn.intrinsic.qat.ConvBn3d,
-                         torch.nn.intrinsic.qat.ConvBnReLU3d,
-                         torch.nn.intrinsic.qat.ConvReLU3d)):
+                        QAT_CONV_MODULE_CLASSES):
                     # case 1. converting qat conv module to
                     # a float conv module, we need to attch
                     # weight fake_quant to the conv module,
