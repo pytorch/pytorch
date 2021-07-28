@@ -455,6 +455,7 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, ModuleInfoBasic) {
   Module m("M");
   m.define(R"JIT(
@@ -588,6 +589,7 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
   AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
+#endif
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
@@ -696,9 +698,9 @@ void backportAllVersionCheck(
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
 }
-
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -730,6 +732,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
 }
+#endif
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
@@ -738,6 +741,7 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -909,6 +913,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
   AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
+#endif
 
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
@@ -1186,6 +1191,7 @@ void testDefaultArgsPinv(int num_args) {
 }
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, DefaultArgsPinv) {
   // Test with different number of specified arguments.
   // Arguments not specified take default value.
@@ -1285,7 +1291,9 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
+#endif
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   Module a("A");
   a.define(R"(
@@ -1335,6 +1343,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
+#endif
 
 namespace {
 static auto reg =
