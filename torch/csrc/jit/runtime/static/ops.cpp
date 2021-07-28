@@ -1267,7 +1267,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
         : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::sub(in0_t, in1_t);
+      p_node->Output(0) = at::cpu::sub(in0_t, in1_t, alpha);
     } else {
       auto& out_t = p_node->Output(0).toTensor();
       fastResizeToZero(out_t);
@@ -1480,6 +1480,29 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
           p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
       packed_weight_tmp->apply_out(
           input, output_scale, output_zero_point, out_t);
+    }
+  };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& size = p_node->Input(0).toIntVector();
+    const auto fill_value = p_node->Input(1).toScalar();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+      const auto device = p_node->Input(4).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(5).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::full(size, fill_value, dtype, layout, device, pin_memory);
+    } else {
+      p_node->Output(0) =
+          at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
     }
   };
 });
