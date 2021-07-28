@@ -45,6 +45,7 @@ class _FunctionalRMSprop(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         square_avgs = []
         grad_avgs = []
@@ -64,6 +65,7 @@ class _FunctionalRMSprop(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -86,7 +88,7 @@ class _FunctionalRMSprop(object):
                 state['step'] += 1
 
         with torch.no_grad():
-            F.rmsprop(params,
+            F.rmsprop(params_with_grad,
                       grads,
                       square_avgs,
                       grad_avgs,

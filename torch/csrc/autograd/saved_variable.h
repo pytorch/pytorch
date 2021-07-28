@@ -98,6 +98,6 @@ class TORCH_API SavedVariable {
 
   void save_metadata(const Variable& data);
   static std::unique_ptr<SavedVariableHooks> get_default_hooks();
-  void register_hooks_(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data);
+  void set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data);
 };
 }} // namespace torch::autograd
