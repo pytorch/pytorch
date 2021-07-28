@@ -54,6 +54,7 @@ class TestPublicBindings(unittest.TestCase):
             "ConcreteModuleTypeBuilder",
             "CONV_BN_FUSION",
             "cpp",
+            "CUDAOutOfMemoryError",
             "CudaBFloat16StorageBase",
             "CudaBFloat16TensorBase",
             "CudaBFloat16TensorBase",
