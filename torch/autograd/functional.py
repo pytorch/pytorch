@@ -349,9 +349,10 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, double_backwards
         (sometimes called the double backwards trick) as we don't have support
         for forward mode AD in PyTorch at the moment.
     """
+    is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
+
     if v is not None:
         _, v = _as_tuple(v, "v", "jvp")
-        is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
         _validate_v(v, inputs, is_inputs_tuple)
     else:
         if len(inputs) != 1 or inputs[0].nelement() != 1:
@@ -372,7 +373,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, double_backwards
             outputs, jvp = zip(*[fwAD.unpack_dual(dual_out)[0] for dual_out in dual_outputs])
     else:
         with torch.enable_grad():
-            v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
+            if v is not None:
+                v = _grad_preprocess(v, create_graph=create_graph, need_graph=False)
 
             inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
             outputs = func(*inputs)
@@ -458,11 +460,11 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
         def jvp(tangents):
             with fwAD.dual_level():
                 dual_inputs = tuple(
-                    fwAD.make_dual(input, tangent.view_as(input), level=0) for input, tangent in zip(inputs, tangents))
+                    fwAD.make_dual(input, tangent.view_as(input)) for input, tangent in zip(inputs, tangents))
                 dual_outputs = _as_tuple(func(*dual_inputs))
                 jv = []
                 for dual_out in dual_outputs:
-                    primal, tangent = fwAD.unpack_dual(dual_out, level=0)
+                    primal, tangent = fwAD.unpack_dual(dual_out)
                     if tangent is not None:
                         jv.append(tangent)
                     else:
