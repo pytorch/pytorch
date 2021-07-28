@@ -10,7 +10,6 @@
 #include <torch/csrc/THP.h>
 
 PyObject *THPException_FatalError;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject *THPException_CUDAOutOfMemoryError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false

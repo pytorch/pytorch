@@ -7,7 +7,6 @@
 #include <mutex>
 
 #include <c10/util/Exception.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/auto_gil.h>
@@ -134,7 +133,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_CUDAOutOfMemoryError;
 
 // Throwing this exception means that the python error flags have been already
