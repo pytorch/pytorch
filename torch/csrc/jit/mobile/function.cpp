@@ -52,8 +52,6 @@ bool Function::append_operator(
   const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
-  // OperatorInfoWithSchema opinfo_with_schema{opname, num_specified_args};
-
   auto it = operator_cache.find(opname);
   if (it != operator_cache.end()) {
     // Operator (with fully qualified name) was found in the cache.
