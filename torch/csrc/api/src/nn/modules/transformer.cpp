@@ -71,11 +71,8 @@ Tensor TransformerEncoderLayerImpl::forward(
   else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
   }
-  else if (c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation())) {
-    auto callable_activation = *c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation());
-    src2 = linear2(dropout(callable_activation(linear1(ret))));
-  } else {
-    TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");
+  else {
+    TORCH_CHECK(false, "activation should be kGELU/kReLU, not ", torch::enumtype::get_enum_name(options.activation()));
   }
 
   // add & norm
@@ -188,11 +185,10 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
     return F::gelu(input);
   } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     return F::relu(input);
-  } else if(c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation())) {
-    auto callable_activation = *c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation());
-    return callable_activation(input);
   } else {
-    TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");
+    TORCH_CHECK(false,
+      "Unknown activation: ",
+      torch::enumtype::get_enum_name(options.activation()));
   }
 }
 
