@@ -61,7 +61,7 @@ git --no-pager log --max-count 1
 popd
 
 # Clone the Builder master repo
-retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT"
+retry git clone -q https://github.com/pytorch/builder.git "$BUILDER_ROOT" -b malfet/build-m1-binaries-with-PocketFFT-support
 pushd "$BUILDER_ROOT"
 echo "Using builder from "
 git --no-pager log --max-count 1
