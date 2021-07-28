@@ -2106,16 +2106,36 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
 
     def test_squeeze(self):
-        test = self._vmap_view_test
-        op = torch.squeeze
-        B0, B1 = 1, 11
-        test(op, (torch.rand(B0),))
-        test(op, (torch.rand(B0, 3, 5),))
-        test(op, (torch.rand(1, B0, 5),), in_dims=1)
-        test(op, (torch.rand(B0, 0, 1, 5, 1),))
-        test(op, (torch.rand(B0, 1, 1, 1, 1),))
-        test(vmap(op), (torch.rand(B0, B1, 1),))
-        test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
+        def verify_behavior(op, min_ndim=1):
+            test = self._vmap_view_test
+            B0, B1 = 1, 11
+            # These tests cannot be used with an operator that requires more
+            # than 1 dimension after batching.
+            if min_ndim <= 1:
+                test(op, (torch.rand(B0),))
+                test(op, (torch.rand(B1),))
+                test(vmap(op), (torch.rand(B0, B1, 1),))
+                test(vmap(op), (torch.rand(B1, 1, B0),), in_dims=2)
+            test(op, (torch.rand(B0, 3, 5),))
+            test(op, (torch.rand(1, B0, 5),), in_dims=1)
+            test(op, (torch.rand(B0, 0, 1, 5, 1),))
+            test(op, (torch.rand(B0, 1, 1, 1, 1),))
+            test(vmap(op), (torch.rand(B0, B1, 1, 3, 4),))
+            test(vmap(op), (torch.rand(B1, 1, B0, 4, 5),), in_dims=2)
+
+        verify_behavior(torch.squeeze)
+        verify_behavior(lambda x: torch.squeeze(x, dim=0), min_ndim=1)
+        verify_behavior(lambda x: torch.squeeze(x, dim=1), min_ndim=2)
+        verify_behavior(lambda x: torch.squeeze(x, dim=-1), min_ndim=2)
+        verify_behavior(lambda x: torch.squeeze(x, dim=-2), min_ndim=3)
+
+        msg = ""
+        try:
+            torch.squeeze(torch.rand(10), dim=1)
+        except IndexError as err:
+            msg = str(err)
+        with self.assertRaises(RuntimeError, msg=msg):
+            vmap(lambda x: torch.squeeze(x, dim=1))(torch.rand(10))
 
     def _test_mean_sum_dim(self, op):
         test = self._vmap_test
@@ -2905,7 +2925,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # Each one of these is a bug
         vmap_fail = {
             '__getitem__',
-            'squeeze',
             'unfold',
             'nn.functional.linear',
         }
