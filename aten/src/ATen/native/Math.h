@@ -191,6 +191,20 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
     }
   }
 
+  /* Asymptotic expansion
+   * https://dlmf.nist.gov/25.11#E43
+   */
+  if (q > acc_t{1e8}) {
+    return (one / (x - one) + one / (acc_t{2} * q)) * ::pow(q, one - x);
+  }
+
+  /* Euler-Maclaurin summation formula */
+
+  /* Permit negative q but continue sum until n+q > +9 .
+   * This case should be handled by a reflection formula.
+   * If q<0 and x is an integer, there is a relation to
+   * the polyGamma function.
+   */
   s = ::pow(q, -x);
   a = q;
   i = 0;
@@ -249,42 +263,6 @@ C10_HOST_DEVICE static inline T polevl(const T x, const T A[], size_t len) {
     result = result * x + A[i];
   }
   return result;
-}
-
-static inline double trigamma(double x) __ubsan_ignore_float_divide_by_zero__ {
-  double sign = +1;
-  double result = 0;
-  if (x < 0.5) {
-    sign = -1;
-    const double sin_pi_x = sin(c10::pi<double> * x);
-    result -= (c10::pi<double> * c10::pi<double>) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const double ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (1./6 - ixx * (1./30 - ixx * (1./42)))) / x;
-  return sign * result;
-}
-
-static inline float trigamma(float x) __ubsan_ignore_float_divide_by_zero__ {
-  float sign = +1;
-  float result = 0;
-  if (x < 0.5f) {
-    sign = -1;
-    const float sin_pi_x = sinf(c10::pi<float> * x);
-    result -= (c10::pi<float> * c10::pi<float>) / (sin_pi_x * sin_pi_x);
-    x = 1 - x;
-  }
-  for (int i = 0; i < 6; ++i) {
-    result += 1 / (x * x);
-    x += 1;
-  }
-  const float ixx = 1 / (x*x);
-  result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
-  return sign * result;
 }
 
 /*
