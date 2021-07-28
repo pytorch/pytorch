@@ -14,14 +14,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
-from torch.distributed.optim.functional_adadelta import _FunctionalAdadelta
-from torch.distributed.optim.functional_adagrad import _FunctionalAdagrad
-from torch.distributed.optim.functional_adam import _FunctionalAdam
-from torch.distributed.optim.functional_adamax import _FunctionalAdamax
-from torch.distributed.optim.functional_adamw import _FunctionalAdamW
-from torch.distributed.optim.functional_rmsprop import _FunctionalRMSprop
-from torch.distributed.optim.functional_rprop import _FunctionalRprop
-from torch.distributed.optim.functional_sgd import _FunctionalSGD
+from torch.distributed.optim import DistributedOptimizer
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -184,6 +177,8 @@ class _OverlapInfo():
             future.
         bucket_index_to_bucket (Dict[int, dist.GradBucket]): :class:`dict`
             mapping bucket index to the corresponding bucket.
+        bucket_indices_seen (List[int]): :class:`list` of the bucket indices
+            seen on this iteration.
     """
     def __init__(self):
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
@@ -196,8 +191,11 @@ class _OverlapInfo():
 
         # Modified per iteration
         self.broadcast_handles: List[Any] = []
+        # Used by `hook_with_zero_step()`
         self.bucket_index_to_future: Dict[int, torch.futures.Future] = {}
         self.bucket_index_to_bucket: Dict[int, dist.GradBucket] = {}
+        # Used by `hook_with_zero_step_interleaved()`
+        self.bucket_indices_seen: List[int] = []
 
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
@@ -235,17 +233,16 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             ``params.data`` stays intact (default: ``False``).
         overlap_with_ddp (bool, optional): if ``True``, :meth:step` is
             overlapped with :class:`DistributedDataParallel` 's gradient
-            synchronization; this requires a functional optimizer for the
-            ``optimizer_class`` as well as registering a DDP communication hook
-            constructed from :meth:`hook_then_zero_step`; parameters are packed
-            into buckets matching those in :class:`DistributedDataParallel`,
-            meaning ``parameters_as_bucket_view`` is ignored.
+            synchronization; this requires (1) either a functional optimizer
+            for the ``optimizer_class`` argument or one with a functional
+            equivalent and (2) registering a DDP communication hook
+            constructed from one of the functions in ``ddp_zero_hook.py``;
+            parameters are packed into buckets matching those in
+            :class:`DistributedDataParallel`, meaning that the
+            ``parameters_as_bucket_view`` argument is ignored.
             If ``False``, :meth:`step` runs disjointly after the backward pass
             (per normal).
             (default: ``False``)
-        to_zero_grad (bool, optional): if ``True``, zeroes gradients after
-            performing an optimizer step; if ``False``, :meth:`zero_grad()`
-            should be called by the user (default: ``False``).
         **defaults: any trailing arguments, which are forwarded to the local
             optimizer.
 
@@ -275,17 +272,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
     """
 
-    functional_optim_map = {
-        torch.optim.Adagrad: _FunctionalAdagrad,
-        torch.optim.Adam: _FunctionalAdam,
-        torch.optim.AdamW: _FunctionalAdamW,
-        torch.optim.SGD: _FunctionalSGD,
-        torch.optim.Adadelta: _FunctionalAdadelta,
-        torch.optim.RMSprop: _FunctionalRMSprop,
-        torch.optim.Rprop: _FunctionalRprop,
-        torch.optim.Adamax: _FunctionalAdamax,
-    }
-    functional_optims = functional_optim_map.values()
+    functional_optim_map = DistributedOptimizer.functional_optim_map
 
     def __init__(
         self,
@@ -294,7 +281,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         process_group: Optional[Any] = None,
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
-        to_zero_grad: bool = False,
         **defaults: Any,
     ):
         # Perform type and assumption checks on the input parameters
@@ -318,7 +304,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._partition_parameters_cache: List[List[Dict]] = []
         self._index_to_param_cache: List[torch.Tensor] = []
         self._device_to_params_per_rank_cache: Dict[torch.device, List[List[torch.Tensor]]] = {}
-        self._device_to_params_cache: Dict[torch.device, List[List[_DDPBucket]]] = {}
+        self._device_to_buckets_cache: Dict[torch.device, List[List[_DDPBucket]]] = {}
         self._device_to_device_index: Dict[torch.device, int] = {}
         self._is_trainable_mask = self._get_is_trainable_mask()
 
@@ -330,21 +316,9 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self.rank = dist.get_rank(self.process_group)
         self.global_rank = _get_global_rank(self.process_group, self.rank)
 
-        self._optim_defaults = defaults
-        self._optim_constructor = optimizer_class
-        functional_optims = ZeroRedundancyOptimizer.functional_optims
-        self._is_functional_optim = optimizer_class in functional_optims
-
-        if overlap_with_ddp and not self._is_functional_optim:
-            error_msg = "Overlapping with DDP requires a functional optimizer"
-            functional_optim_map = ZeroRedundancyOptimizer.functional_optim_map
-            if optimizer_class in functional_optim_map:
-                functional_optim_name = functional_optim_map[optimizer_class].__name__
-                raise ValueError(
-                    error_msg + f"; use {functional_optim_name} instead"
-                )
-            raise ValueError(error_msg)
         self._overlap_with_ddp = overlap_with_ddp
+        self._optim_defaults = defaults
+        self._optim_constructor = self._get_optimizer_constructor(optimizer_class)
 
         # If `overlap_with_ddp=True`, local optimizer initialization is delayed
         # to run time after the necessary information has been collected
@@ -352,7 +326,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             self._init_local_optimizer()
         else:
             self._overlap_info = _OverlapInfo()
-        self._to_zero_grad = to_zero_grad
 
         # `self._buckets` is used if `parameters_as_bucket_view=True` or
         # `overlap_with_ddp=True`, in which case parameter data is flattened
@@ -381,7 +354,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._index_to_param_cache.clear()
         self._param_to_index_cache.clear()
         self._device_to_params_per_rank_cache.clear()
-        self._device_to_params_cache.clear()
+        self._device_to_buckets_cache.clear()
 
     def add_param_group(self, param_group: dict) -> None:
         r"""
@@ -724,14 +697,14 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         return self._device_to_params_per_rank_cache
 
     @property
-    def _device_to_params(
+    def _device_to_buckets(
         self
     ) -> Dict[torch.device, List[List[_DDPBucket]]]:
         r"""
         :class:`dict` mapping each device to a :class:`list` of :class:`list`
         of :class:`_DDPBucket` s.
 
-        ``_device_to_params[d][r][i]`` gives the ``i``th bucket
+        ``_device_to_buckets[d][r][i]`` gives the ``i``th bucket
         assigned to rank ``r`` stored on device ``d``, where each bucket
         contains a list of the model parameters associated with the
         corresponding logical :class:`DistributedDataParallel` gradient bucket.
@@ -740,14 +713,14 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         ``overlap_with_ddp=True``.
         """
         assert self._overlap_with_ddp, \
-            "`_device_to_params` should only be used if " \
+            "`_device_to_buckets` should only be used if " \
             "`overlap_with_ddp=True`"
-        if len(self._device_to_params_cache) > 0:
-            return self._device_to_params_cache
+        if len(self._device_to_buckets_cache) > 0:
+            return self._device_to_buckets_cache
 
         overlap_info = self._overlap_info
         assert overlap_info.status == _OverlapStatus.INITIALIZED, \
-            "Accessing `_device_to_params` before the necessary " \
+            "Accessing `_device_to_buckets` before the necessary " \
             "information has been collected"
 
         params_per_bucket = overlap_info.params_per_bucket
@@ -756,11 +729,11 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             rank = self._ddp_bucket_index_to_rank(bucket_idx)
             bucket = _DDPBucket(bucket_idx, bucket_params)
             device = bucket_params[0].device  # assume same device per bucket
-            if device not in self._device_to_params_cache:
-                self._device_to_params_cache[device] = [[] for _ in range(self.world_size)]
-            self._device_to_params_cache[device][rank].append(bucket)
+            if device not in self._device_to_buckets_cache:
+                self._device_to_buckets_cache[device] = [[] for _ in range(self.world_size)]
+            self._device_to_buckets_cache[device][rank].append(bucket)
 
-        return self._device_to_params_cache
+        return self._device_to_buckets_cache
 
     def _local_step(
         self,
@@ -786,6 +759,11 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 ``None`` if ``gradients`` is not ``None``; (default: ``None``)
         Returns:
             Optional loss depending on the underlying local optimizer.
+
+        .. warning::
+            The argument ``gradients`` should only be specified (i.e. not
+            ``None``) if ``overlap_with_ddp=True``, in which case
+            :class:`ZeroRedundancyOptimizer` wraps a functional optimizer.
         """
         _Join.notify_join_context(self)
         # Check if the model trainability has changed
@@ -814,10 +792,10 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             loss = self.optim.step(**kwargs) if closure is None \
                 else self.optim.step(closure=closure, **kwargs)
         else:
-            assert self._is_functional_optim, "Specifying `gradients` is " \
-                "not supported for non-functional local optimizers"
-            assert closure is None, "`closure` is not supported for " \
-                "functional local optimizers"
+            assert self._overlap_with_ddp, "Specifying `gradients` should not " \
+                "be used when `overlap_with_ddp=False`"
+            assert closure is None, "`closure` is not supported when using " \
+                "a local functional optimizer"
             loss = self.optim.step(gradients=gradients)
 
         # Sync any updated attributes in the local optimizer to the exposed
@@ -858,10 +836,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
         # Perform the local optimizer step
         loss = self._local_step(closure=closure, **kwargs)
-
-        # Zero the gradient before syncing if needed
-        if self._to_zero_grad:
-            self.optim.zero_grad()
 
         # Sync all of the updated parameter shards across the ranks
         self._sync_params()
@@ -1089,10 +1063,10 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             "`_build_ddp_param_buckets()` should only be called when " \
             "`overlap_with_ddp=True`"
 
-        num_devices = len(self._device_to_params)
+        num_devices = len(self._device_to_buckets)
         self._buckets = [[{} for _ in range(self.world_size)] for _ in range(num_devices)]  # type: ignore[assignment]
 
-        for dev_idx, (device, ddp_buckets_per_rank) in enumerate(self._device_to_params.items()):
+        for dev_idx, (device, ddp_buckets_per_rank) in enumerate(self._device_to_buckets.items()):
             self._device_to_device_index[device] = dev_idx
             for rank, ddp_buckets in enumerate(ddp_buckets_per_rank):
                 for ddp_bucket in ddp_buckets:
@@ -1193,7 +1167,8 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             "The local optimizer class has not been set"
 
         param_groups = self._partition_parameters()[self.rank]
-        if self._is_functional_optim:
+        # `overlap_with_ddp=True` requires a local functional optimizer
+        if self._overlap_with_ddp:
             # Functional optimizers only support a single parameter group and
             # require passing in the parameters as a list
             assert len(param_groups) == 1, "Initializing the local " \
@@ -1208,30 +1183,13 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         # TODO: Manually add `self.param_groups` if using a functional
         # optimizer; remove this if/when the functional optimizers support
         # multiple parameter groups
-        if self._is_functional_optim and not hasattr(self.optim, "param_groups"):
+        if self._overlap_with_ddp and not hasattr(self.optim, "param_groups"):
             assert hasattr(self.optim, "param_group"), \
                 "The functional optimizer should set at least one of the " \
                 "attributes `param_group` or `param_groups`"
             self.optim.param_groups = [self.optim.param_group]  # type: ignore[attr-defined]
 
         self._sync_param_groups(self.optim.param_groups, self.param_groups)
-
-    @staticmethod
-    def _zero_grad(params: List[torch.Tensor]) -> None:
-        r"""
-        Zeroes the gradient of each parameter in ``params``.
-
-        Arguments:
-            params (List[torch.Tensor]): :class:`list` of parameters whose
-                gradients should be zeroed.
-        """
-        for p in params:
-            if p.grad is not None:
-                if p.grad.grad_fn is not None:
-                    p.grad.detach_()
-                else:
-                    p.grad.requires_grad_(False)
-                p.grad.zero_()
 
     def _init_zero_for_overlap(self) -> None:
         r"""
@@ -1245,8 +1203,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._partition_parameters(self._overlap_info.params_per_rank)
         self._build_ddp_param_buckets()
         self._init_local_optimizer()
-        if self._to_zero_grad:
-            ZeroRedundancyOptimizer._zero_grad(self._all_params)
 
     def _ddp_bucket_index_to_rank(self, bucket_index: int) -> int:
         r"""Assigns a rank to a given DDP gradient bucket index."""
@@ -1283,3 +1239,59 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 "ZeroRedundancyOptimizer instance has been fully "
                 "initialized"
             )
+
+    def _get_optimizer_constructor(self, optimizer_class: Any) -> Any:
+        r"""
+        Returns the proper optimizer constructor, performing the necessary
+        validation and transformation depending on ``overlap_with_ddp``.
+
+        Returns:
+            - ``optimizer_class`` if ``overlap_with_ddp=False`` and
+                ``optimizer_class`` is not a functional optimizer.
+            - ``optimizer_class`` if ``overlap_with_ddp=True`` and
+                ``optimizer_class`` is already a functional optimizer.
+            - The functional equivalent of ``optimizer_class`` if
+                ``overlap_with_ddp=True`` and ``optimizer_class`` is not
+                already a functional optimizer (assuming the equivalent
+                exists).
+
+        Raises:
+            ValueError:
+            - if ``overlap_with_ddp=True`` but ``optimizer_class`` is neither
+                a functional optimizer nor translatable to a functional
+                optimizer.
+            - if ``overlap_with_ddp=False`` and ``optimizer_class`` is a
+                functional optimizer.
+        """
+        functional_optim_map = ZeroRedundancyOptimizer.functional_optim_map
+        functional_optims = functional_optim_map.values()
+        if not self._overlap_with_ddp:
+            if optimizer_class in functional_optims:
+                # Using a functional optimizer is only supported when
+                # `overlap_with_ddp=True`
+                raise ValueError(
+                    f"Passing in a functional optimizer {optimizer_class} "
+                    "when `overlap_with_ddp=False`"
+                )
+            else:
+                return optimizer_class
+        else:
+            if optimizer_class in functional_optims:
+                # Already a functional optimizer
+                return optimizer_class
+            elif optimizer_class in functional_optim_map:
+                # Translate the passed-in optimizer class to its functional
+                # equivalent if `overlap_with_ddp=True`
+                optim_constructor = functional_optim_map[optimizer_class]
+                logging.info(
+                    f"Using the functional optimizer {optim_constructor} "
+                    f"instead of {optimizer_class} since "
+                    "`overlap_with_ddp=True`"
+                )
+                return optim_constructor
+            else:
+                raise ValueError(
+                    "Using `ddp_with_overlap=True` requires using a "
+                    "functional optimizer, but there is no supported functional "
+                    f"optimizer equivalent for {optimizer_class}"
+                )
