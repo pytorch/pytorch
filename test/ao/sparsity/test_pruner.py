@@ -11,7 +11,8 @@ from torch.testing._internal.common_utils import TestCase
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-DEVICES = set(["cpu", "cuda" if torch.cuda.is_available() else "cpu"])
+DEVICES = {"cpu", "cuda" if torch.cuda.is_available() else "cpu"}
+
 
 class Linear(nn.Module):
     def __init__(self):
@@ -120,11 +121,44 @@ class MultiplePruner(BasePruner):
 
 
 class TestBasePruner(TestCase):
-    def _test_constructor_on_device(self, device):
+    def _is_pruner_prepared(self, model, pruner, device):
+        for g in pruner.module_groups:
+            module = g['module']
+            assert module.weight.device == device
+            # Check mask exists
+            assert hasattr(module, 'mask')
+            # Check parametrization exists and is correct
+            assert parametrize.is_parametrized(module)
+            assert hasattr(module, "parametrizations")
+            # Assume that this is the 1st/only parametrization
+            assert type(module.parametrizations.weight[0]) == PruningParametrization
+        return True
+
+    def _is_pruner_converted(self, model, pruner, device):
+        for g in pruner.module_groups:
+            module = g['module']
+            assert module.weight.device == device
+            assert not hasattr(module, "parametrizations")
+            assert not hasattr(module, 'mask')
+        return True
+
+    def _is_pruner_valid_before_step(self, model, pruner, device):
+        for g in pruner.module_groups:
+            module = g['module']
+            assert module.weight.device == device
+            assert module.parametrizations.weight[0].pruned_outputs == set()
+        return True
+
+    def _is_pruner_valid_after_step(self, model, pruner, pruned_set, device):
+        for g in pruner.module_groups:
+            module = g['module']
+            assert module.weight.device == device
+            assert module.parametrizations.weight[0].pruned_outputs == pruned_set
+        return True
+
+    def _test_constructor_on_device(self, model, device):
         self.assertRaisesRegex(TypeError, 'with abstract methods update_mask',
                                BasePruner)
-        # Can instantiate the model with no configs
-        model = Linear()
         model = model.to(device)
         pruner = SimplePruner(model, None, None)
         for g in pruner.module_groups:
@@ -140,152 +174,106 @@ class TestBasePruner(TestCase):
         assert pruner.module_groups[0]['test'] == 3
 
     def test_constructor(self):
+        model = Linear()
         for device in DEVICES:
-            self._test_constructor_on_device(torch.device(device))
+            self._test_constructor_on_device(model, torch.device(device))
 
-    def _test_prepare_linear_on_device(self, device):
-        models = [Linear(), LinearB()]  # without and with bias
-        for model in models:
-            model = model.to(device)
-            x = torch.ones(128, 16)
-            pruner = SimplePruner(model, None, None)
-            pruner.prepare()
-            for g in pruner.module_groups:
-                module = g['module']
-                assert module.weight.device == device
-                # Check mask exists
-                assert hasattr(module, 'mask')
-                # Check parametrization exists and is correct
-                assert parametrize.is_parametrized(module)
-                assert hasattr(module, "parametrizations")
-                # Assume that this is the 1st/only parametrization
-                assert type(module.parametrizations.weight[0]) == PruningParametrization
-            assert model(x).shape == (128, 16)
+    def _test_prepare_linear_on_device(self, model, device):
+        model = model.to(device)
+        x = torch.ones(128, 16)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
+        assert self._is_pruner_prepared(model, pruner, device)
+        assert model(x).shape == (128, 16)
 
     def test_prepare_linear(self):
+        models = [Linear(), LinearB()]  # without and with bias
         for device in DEVICES:
-            self._test_prepare_linear_on_device(torch.device(device))
+            for model in models:
+                self._test_prepare_linear_on_device(model, torch.device(device))
 
-    def _test_prepare_conv2d_on_device(self, device):
-        model = Conv2d()
+    def _test_prepare_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
-        for g in pruner.module_groups:
-            module = g['module']
-            assert module.weight.device == device
-            assert hasattr(module, 'mask')
-            assert parametrize.is_parametrized(module)
-            assert hasattr(module, "parametrizations")
-            assert type(module.parametrizations.weight[0]) == PruningParametrization
+        assert self._is_pruner_prepared(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_prepare_conv2d(self):
+        model = Conv2d()
         for device in DEVICES:
-            self._test_prepare_conv2d_on_device(torch.device(device))
+            self._test_prepare_conv2d_on_device(model, torch.device(device))
 
-    def _test_convert_linear_on_device(self, device):
-        models = [Linear(), LinearB()]  # without and with bias
-        for model in models:
-            model = model.to(device)
-            x = torch.ones(128, 16)
-            pruner = SimplePruner(model, None, None)
-            pruner.prepare()
-            pruner.convert()
-            for g in pruner.module_groups:
-                module = g['module']
-                assert module.weight.device == device
-                assert not hasattr(module, "parametrizations")
-                assert not hasattr(module, 'mask')
-            assert model(x).shape == (128, 16)
+    def _test_convert_linear_on_device(self, model, device):
+        model = model.to(device)
+        x = torch.ones(128, 16)
+        pruner = SimplePruner(model, None, None)
+        pruner.prepare()
+        pruner.convert()
+        assert self._is_pruner_converted(model, pruner, device)
+        assert model(x).shape == (128, 16)
 
     def test_convert_linear(self):
+        models = [Linear(), LinearB()]  # without and with bias
         for device in DEVICES:
-            self._test_convert_linear_on_device(torch.device(device))
+            for model in models:
+                self._test_convert_linear_on_device(model, torch.device(device))
 
-    def _test_convert_conv2d_on_device(self, device):
-        model = Conv2d()
+    def _test_convert_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
-        for g in pruner.module_groups:
-            module = g['module']
-            assert module.weight.device == device
-            assert not hasattr(module, "parametrizations")
-            assert not hasattr(module, 'mask')
+        assert self._is_pruner_converted(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_convert_conv2d(self):
+        model = Conv2d()
         for device in DEVICES:
-            self._test_convert_conv2d_on_device(torch.device(device))
+            self._test_convert_conv2d_on_device(model, torch.device(device))
 
-    def _test_step_linear_on_device(self, device):
-        basic_models = [Linear(), LinearB()]
-        for model in basic_models:
-            model = model.to(device)
+    def _test_step_linear_on_device(self, model, is_basic, device):
+        model = model.to(device)
+        if is_basic:
             x = torch.ones(16, 16)
             pruner = SimplePruner(model, None, None)
             pruner.prepare()
             pruner.enable_mask_update = True
-            for g in pruner.module_groups:
-                # Before step
-                module = g['module']
-                assert module.weight.device == device
-                assert module.parametrizations.weight[0].pruned_outputs == set()
+            assert self._is_pruner_valid_before_step(model, pruner, device)
             pruner.step()
-            for g in pruner.module_groups:
-                # After step
-                module = g['module']
-                assert module.weight.device == device
-                assert module.parametrizations.weight[0].pruned_outputs == set({1})
-
-        complex_models = [MultipleLinear(), MultipleLinearB(), MultipleLinearMixed()]
-        for model in complex_models:
-            model = model.to(device)
+            assert self._is_pruner_valid_after_step(model, pruner, {1}, device)
+        else:
             x = torch.ones(7, 7)
             pruner = MultiplePruner(model, None, None)
             pruner.prepare()
             pruner.enable_mask_update = True
-            for g in pruner.module_groups:
-                # Before step
-                module = g['module']
-                assert module.weight.device == device
-                assert module.parametrizations.weight[0].pruned_outputs == set()
+            assert self._is_pruner_valid_before_step(model, pruner, device)
             pruner.step()
-            for g in pruner.module_groups:
-                # After step
-                module = g['module']
-                assert module.weight.device == device
-                assert module.parametrizations.weight[0].pruned_outputs == set({1, 2})
+            assert self._is_pruner_valid_after_step(model, pruner, {1, 2}, device)
 
     def test_step_linear(self):
+        basic_models = [Linear(), LinearB()]
+        complex_models = [MultipleLinear(), MultipleLinearB(), MultipleLinearMixed()]
         for device in DEVICES:
-            self._test_step_linear_on_device(torch.device(device))
+            for model in basic_models:
+                self._test_step_linear_on_device(model, True, torch.device(device))
+            for model in complex_models:
+                self._test_step_linear_on_device(model, False, torch.device(device))
 
-    def _test_step_conv2d_on_device(self, device):
-        model = Conv2d()
+    def _test_step_conv2d_on_device(self, model, device):
         model = model.to(device)
         x = torch.ones((1, 1, 28, 28))
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.enable_mask_update = True
-        for g in pruner.module_groups:
-            # Before step
-            module = g['module']
-            assert module.weight.device == device
-            assert module.parametrizations.weight[0].pruned_outputs == set()
+        assert self._is_pruner_valid_before_step(model, pruner, device)
         pruner.step()
-        for g in pruner.module_groups:
-            # After step
-            module = g['module']
-            assert module.weight.device == device
-            assert module.parametrizations.weight[0].pruned_outputs == set({1})
-            assert not (False in (model(x)[:, 1, :, :] == 0))
+        assert self._is_pruner_valid_after_step(model, pruner, {1}, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_step_conv2d(self):
+        model = Conv2d()
         for device in DEVICES:
-            self._test_step_conv2d_on_device(torch.device(device))
+            self._test_step_conv2d_on_device(model, torch.device(device))
