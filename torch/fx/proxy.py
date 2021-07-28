@@ -84,8 +84,10 @@ class TracerBase:
 
         Can be override to support more trace-specific types.
         """
+        if not isinstance(a, Proxy) and hasattr(a, '__fx_create_arg__'):
+            return a.__fx_create_arg__(self)
         # aggregates
-        if isinstance(a, tuple) and hasattr(a, '_fields'):
+        elif isinstance(a, tuple) and hasattr(a, '_fields'):
             # NamedTuple constructors don't seem to like getting a generator
             # expression as an argument to their constructor, so build this
             # intermediate tuple and unpack it into the NamedTuple constructor
@@ -134,8 +136,14 @@ class TracerBase:
         we don't know the value of the proxy, but a custom tracer can attach more
         information to the graph node using create_node and can choose to return an iterator.
         """
-        raise TraceError('Proxy object cannot be iterated. '
-                         'This can be attempted when used in a for loop or as a *args or **kwargs function argument.')
+        raise TraceError('Proxy object cannot be iterated. This can be '
+                         'attempted when the Proxy is used in a loop or'
+                         ' as a *args or **kwargs function argument. '
+                         'See the torch.fx docs on pytorch.org for a '
+                         'more detailed explanation of what types of '
+                         'control flow can be traced, and check out the'
+                         ' Proxy docstring for help troubleshooting '
+                         'Proxy iteration errors')
 
     def keys(self, obj: 'Proxy') -> Any:
         """Called when a proxy object is has the keys() method called.
@@ -165,6 +173,23 @@ class Proxy:
     If you're doing graph transforms, you can wrap your own ``Proxy``
     method around a raw ``Node`` so that you can use the overloaded
     operators to add additional things to a ``Graph``.
+
+    ``Proxy`` objects cannot be iterated. In other words, the symbolic
+    tracer will throw an error if a ``Proxy`` is used in a loop or as
+    an ``*args``/``**kwargs`` function argument.
+
+    There are two main ways around this:
+    1. Factor out the untraceable logic into a top-level function and
+    use ``fx.wrap`` on it.
+    2. If the control flow is static (i.e. the loop trip count is
+    based on some hyperparameter), the code can be kept in its original
+    position and refactored into something like::
+
+        for i in range(self.some_hyperparameter):
+            indexed_item = proxied_value[i]
+
+    For a more detailed description into the Proxy internals, check out
+    the "Proxy" section in `torch/fx/OVERVIEW.md`
     """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:

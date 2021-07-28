@@ -60,7 +60,7 @@ class TestMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_matmul_axis(
         self, M, K, N, axis_a, axis_b, trans_a, trans_b, gc, dc
     ):

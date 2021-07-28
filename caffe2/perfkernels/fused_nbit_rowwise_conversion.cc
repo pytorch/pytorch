@@ -34,7 +34,6 @@ void FloatToFused8BitRowwiseQuantized__base(
         *std::max_element(input_row, input_row + input_columns);
     float range = maximum_element - minimum_element;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_row_scale_bias[0] = range / 255.0f;
     output_row_scale_bias[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
@@ -76,7 +75,7 @@ void FloatToFused8BitRowwiseQuantized(
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFused8BitRowwiseQuantizedSBFloat(
+  fbgemm::FloatOrHalfToFused8BitRowwiseQuantizedSBFloat<float>(
       input, input_rows, input_columns, output);
 #else
   FloatToFused8BitRowwiseQuantized__base(
@@ -90,7 +89,7 @@ void Fused8BitRowwiseQuantizedToFloat(
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloat(
+  fbgemm::Fused8BitRowwiseQuantizedSBFloatToFloatOrHalf<float>(
       input, input_rows, input_columns, output);
 #else
   Fused8BitRowwiseQuantizedToFloat__base(
@@ -104,7 +103,6 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
     int input_rows,
     int input_columns,
     std::uint8_t* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -165,7 +163,6 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
     int input_rows,
     int input_columns,
     float* output) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int num_elem_per_byte = 8 / bit_rate;
   int output_columns =
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -199,7 +196,7 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf(
     int input_columns,
     std::uint8_t* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FloatToFusedNBitRowwiseQuantizedSBHalf(
+  fbgemm::FloatOrHalfToFusedNBitRowwiseQuantizedSBHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FloatToFusedNBitRowwiseQuantizedSBHalf__base(
@@ -214,7 +211,7 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat(
     int input_columns,
     float* output) {
 #ifdef USE_FBGEMM
-  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloat(
+  fbgemm::FusedNBitRowwiseQuantizedSBHalfToFloatOrHalf<float>(
       bit_rate, input, input_rows, input_columns, output);
 #else
   FusedNBitRowwiseQuantizedSBHalfToFloat__base(

@@ -33,7 +33,10 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
 
   // replace addmm pattern to linear
   SubgraphRewriter addmm_to_linear;
-  addmm_to_linear.RegisterRewritePattern(addmm_pattern, fused_linear_addmm);
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"weight", "res"}, {"res", "res"}});
+  addmm_to_linear.RegisterRewritePattern(
+      addmm_pattern, fused_linear_addmm, value_mappings);
   addmm_to_linear.runOnGraph(
       graph, {aten_add_alpha_is_one, beta_is_one, weight_transposed});
 
@@ -47,10 +50,11 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
         %weight = aten::t(%weight_t)
         %res = aten::linear(%input, %weight, %bias)
         return (%res))IR";
+  value_mappings = {{"weight", "output"}, {"res", "output"}};
   // replace matmul + add pattern to linear
   SubgraphRewriter matmuladd_to_linear;
   matmuladd_to_linear.RegisterRewritePattern(
-      matmul_add_pattern, fused_linear_matmul);
+      matmul_add_pattern, fused_linear_matmul, value_mappings);
   matmuladd_to_linear.runOnGraph(
       graph, {aten_add_alpha_is_one, weight_transposed});
 
@@ -68,7 +72,7 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
   // replace matmul with bias=None pattern to linear
   SubgraphRewriter matmul_to_linear;
   matmul_to_linear.RegisterRewritePattern(
-      matmul_pattern, fused_linear_bias_none);
+      matmul_pattern, fused_linear_bias_none, value_mappings);
   matmul_to_linear.runOnGraph(graph, weight_transposed);
 
   // clean up extra transpose for the weight of aten::linear
@@ -84,9 +88,12 @@ void FuseLinear(std::shared_ptr<Graph>& graph) {
         %res = aten::linear(%input, %weight, %bias)
         return (%res))IR";
 
+  value_mappings = {{"res", "res"}};
   SubgraphRewriter cleanup;
   cleanup.RegisterRewritePattern(
-      linear_weight_extra_transpose, linear_weight_no_transpose);
+      linear_weight_extra_transpose,
+      linear_weight_no_transpose,
+      value_mappings);
   cleanup.runOnGraph(graph);
 }
 } // namespace jit

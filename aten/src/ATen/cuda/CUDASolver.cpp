@@ -99,16 +99,16 @@ void getrf<c10::complex<float>>(
 
 template <>
 void getrs<double>(
-    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info, cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(
-    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
 void getrs<float>(
-    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info, cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(
-    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, trans, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
@@ -121,10 +121,11 @@ void getrs<c10::complex<double>>(
     int* ipiv,
     c10::complex<double>* ret,
     int ldb,
-    int* info) {
+    int* info,
+    cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrs(
       handle,
-      CUBLAS_OP_N,
+      trans,
       n,
       nrhs,
       reinterpret_cast<cuDoubleComplex*>(dA),
@@ -145,10 +146,11 @@ void getrs<c10::complex<float>>(
     int* ipiv,
     c10::complex<float>* ret,
     int ldb,
-    int* info) {
+    int* info,
+    cublasOperation_t trans) {
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrs(
       handle,
-      CUBLAS_OP_N,
+      trans,
       n,
       nrhs,
       reinterpret_cast<cuComplex*>(dA),
@@ -711,6 +713,78 @@ void orgqr<c10::complex<double>>(
       m, n, k,
       reinterpret_cast<cuDoubleComplex*>(A), lda,
       reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(work), lwork,
+      devInfo));
+}
+
+template <>
+void ormqr_bufferSize<float>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<double>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr_bufferSize(handle, side, trans, m, n, k, A, lda, tau, C, ldc, lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<float>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<const cuComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr_bufferSize<c10::complex<double>>(
+    CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr_bufferSize(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<const cuDoubleComplex*>(C), ldc,
+      lwork));
+}
+
+template <>
+void ormqr<float>(CUDASOLVER_ORMQR_ARGTYPES(float)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnSormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<double>(CUDASOLVER_ORMQR_ARGTYPES(double)) {
+  TORCH_CUSOLVER_CHECK(
+      cusolverDnDormqr(handle, side, trans, m, n, k, A, lda, tau, C, ldc, work, lwork, devInfo));
+}
+
+template <>
+void ormqr<c10::complex<float>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnCunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuComplex*>(A), lda,
+      reinterpret_cast<const cuComplex*>(tau),
+      reinterpret_cast<cuComplex*>(C), ldc,
+      reinterpret_cast<cuComplex*>(work), lwork,
+      devInfo));
+}
+
+template <>
+void ormqr<c10::complex<double>>(CUDASOLVER_ORMQR_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUSOLVER_CHECK(cusolverDnZunmqr(
+      handle, side, trans,
+      m, n, k,
+      reinterpret_cast<const cuDoubleComplex*>(A), lda,
+      reinterpret_cast<const cuDoubleComplex*>(tau),
+      reinterpret_cast<cuDoubleComplex*>(C), ldc,
       reinterpret_cast<cuDoubleComplex*>(work), lwork,
       devInfo));
 }

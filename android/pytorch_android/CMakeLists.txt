@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.4.1)
-option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" OFF)
+option(BUILD_LITE_INTERPRETER "Master flag to build pytorch_jni_lite" ON)
 message(
   STATUS
   "BUILD_LITE_INTERPRETER (pytorch_jni_lite): ${BUILD_LITE_INTERPRETER}")

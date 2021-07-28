@@ -5,7 +5,6 @@
 #include <iomanip>
 #include <mutex>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_version,
     false,
@@ -76,7 +75,6 @@ bool GlobalInit(int* pargc, char*** pargv) {
     if (FLAGS_caffe2_version) {
       std::cerr << "Caffe2 build configuration: " << std::endl;
       for (const auto& it : GetBuildOptions()) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::cerr << "  " << std::setw(25) << std::left << it.first << " : "
                   << it.second << std::endl;
       }

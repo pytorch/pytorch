@@ -14,7 +14,7 @@ DECLARE_DISPATCH(unary_fn, abs_stub);
 DECLARE_DISPATCH(unary_fn, angle_stub);
 DECLARE_DISPATCH(unary_fn, real_stub);
 DECLARE_DISPATCH(unary_fn, imag_stub);
-DECLARE_DISPATCH(unary_fn, conj_stub);
+DECLARE_DISPATCH(unary_fn, conj_physical_stub);
 DECLARE_DISPATCH(unary_fn, acos_stub);
 DECLARE_DISPATCH(unary_fn, acosh_stub);
 DECLARE_DISPATCH(unary_fn, asinh_stub);
@@ -24,12 +24,11 @@ DECLARE_DISPATCH(unary_fn, atan_stub);
 DECLARE_DISPATCH(unary_fn, bitwise_not_stub);
 DECLARE_DISPATCH(unary_fn, logical_not_stub);
 DECLARE_DISPATCH(unary_fn, ceil_stub);
-DECLARE_DISPATCH(unary_fn_with_scalar, clamp_max_stub);
-DECLARE_DISPATCH(unary_fn_with_scalar, clamp_min_stub);
 DECLARE_DISPATCH(unary_fn, cos_stub);
 DECLARE_DISPATCH(unary_fn, cosh_stub);
 DECLARE_DISPATCH(unary_fn, digamma_stub);
 DECLARE_DISPATCH(unary_fn, special_entr_stub);
+DECLARE_DISPATCH(unary_fn, special_erfcx_stub);
 DECLARE_DISPATCH(unary_fn, erf_stub);
 DECLARE_DISPATCH(unary_fn, erfc_stub);
 DECLARE_DISPATCH(unary_fn, erfinv_stub);
@@ -41,10 +40,13 @@ DECLARE_DISPATCH(unary_fn, frac_stub);
 DECLARE_DISPATCH(unary_fn, frexp_stub);
 DECLARE_DISPATCH(unary_fn, i0_stub);
 DECLARE_DISPATCH(unary_fn, special_i0e_stub);
+DECLARE_DISPATCH(unary_fn, special_i1_stub);
+DECLARE_DISPATCH(unary_fn, special_i1e_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
 DECLARE_DISPATCH(unary_fn, log2_stub);
+DECLARE_DISPATCH(unary_fn, special_ndtri_stub);
 DECLARE_DISPATCH(unary_fn, neg_stub);
 
 DECLARE_DISPATCH(unary_fn, reciprocal_stub);
@@ -98,6 +100,5 @@ DECLARE_DISPATCH(
 // erfinv
 // clone
 // contiguous
-// clamp/_min/_max
 // zero
 }} // namespace at::native

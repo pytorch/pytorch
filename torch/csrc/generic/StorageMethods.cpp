@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/MapAllocator.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 
@@ -60,6 +61,7 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;
@@ -226,7 +228,7 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
     return nullptr;
   }
   if (shared)
-    shared = TH_ALLOCATOR_MAPPED_SHARED;
+    shared = at::ALLOCATOR_MAPPED_SHARED;
   THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS

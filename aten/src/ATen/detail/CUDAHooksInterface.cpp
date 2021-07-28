@@ -24,7 +24,6 @@ namespace detail {
 //
 // CUDAHooks doesn't actually contain any data, so leaking it is very benign;
 // you're probably losing only a word (the vptr in the allocated object.)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CUDAHooksInterface* cuda_hooks = nullptr;
 
 const CUDAHooksInterface& getCUDAHooks() {
@@ -35,6 +34,7 @@ const CUDAHooksInterface& getCUDAHooks() {
   // for an example where we relax this restriction (but if you try to avoid
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
+#if !defined C10_MOBILE
   static std::once_flag once;
   std::call_once(once, [] {
     cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
@@ -42,11 +42,15 @@ const CUDAHooksInterface& getCUDAHooks() {
       cuda_hooks = new CUDAHooksInterface();
     }
   });
+#else
+  if (cuda_hooks == nullptr) {
+    cuda_hooks = new CUDAHooksInterface();
+  }
+#endif
   return *cuda_hooks;
 }
 } // namespace detail
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(CUDAHooksRegistry, CUDAHooksInterface, CUDAHooksArgs)
 
 } // namespace at

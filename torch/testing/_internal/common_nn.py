@@ -18,7 +18,7 @@ from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.autograd.gradcheck import _get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import _get_numerical_jacobian, _iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
@@ -1248,6 +1248,16 @@ def fractional_max_pool3d_test(test_case):
             fullname='FractionalMaxPool3d_asymsize')
 
 
+def single_batch_reference_fn(input, parameters, module):
+    """Reference function for modules supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    single_batch_input = input.unsqueeze(0)
+    with freeze_rng_state():
+        return module(single_batch_input).squeeze(0)
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -1568,6 +1578,16 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
+        constructor_args=([56, 56, 56], 1e-5, False),
+        cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
+        input_size=(4, 56, 56, 56),
+        cudnn=True,
+        check_eval=True,
+        gradcheck_fast_mode=True,
+        desc='3d_no_affine_large_feature',
+    ),
+    dict(
+        module_name='LayerNorm',
         constructor_args=([5], 1e-3),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(0, 5),
@@ -1645,6 +1665,17 @@ new_module_tests = [
         check_eval=True,
         check_bfloat16=True,
         desc='2d_affine_large_feature',
+        test_cpu=False,
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 51, 1e-5, False),
+        cpp_constructor_args='torch::nn::GroupNormOptions(3, 51).eps(1e-5).affine(false)',
+        input_size=(2, 51, 28, 28),
+        cudnn=True,
+        check_eval=True,
+        check_bfloat16=True,
+        desc='2d_no_affine_large_feature',
         test_cpu=False,
     ),
     dict(
@@ -1851,6 +1882,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         module_name='Conv2d',
@@ -1914,6 +1946,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_groups_thnn',
@@ -1922,6 +1955,7 @@ new_module_tests = [
         input_size=(2, 4, 6, 5),
         check_with_long_tensor=True,
         with_tf32=True,
+        tf32_precision=0.005,
     ),
     dict(
         fullname='Conv2d_pad_valid',
@@ -1939,7 +1973,7 @@ new_module_tests = [
         input_size=(2, 2, 6, 5),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.01,
     ),
     dict(
         fullname='Conv2d_pad_same_dilated',
@@ -2076,10 +2110,26 @@ new_module_tests = [
         desc='stride_pad',
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::AvgPool1dOptions(2)',
+        input_size=(3, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
         input_size=(2, 3, 6, 6),
+    ),
+    dict(
+        module_name='AvgPool2d',
+        constructor_args=((2, 2),),
+        cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
+        input_size=(3, 6, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
     ),
     dict(
         module_name='AvgPool2d',
@@ -2173,6 +2223,14 @@ new_module_tests = [
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
+        input_size=(3, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
         input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2192,10 +2250,32 @@ new_module_tests = [
         desc='complex'
     ),
     dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 8, 8, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ReplicationPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
         input_size=(2, 3, 4),
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
     ),
     dict(
         module_name='ReplicationPad1d',
@@ -2250,6 +2330,14 @@ new_module_tests = [
         module_name='ConstantPad1d',
         constructor_args=((1, 2), 2.),
         cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='batch',
+    ),
+    dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
         input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2264,6 +2352,14 @@ new_module_tests = [
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2.),
         cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
+    ),
+    dict(
+        module_name='ConstantPad2d',
+        constructor_args=((1, 2, 3, 4), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
         input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2273,6 +2369,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
         input_size=(2, 3, 4, 4, 5),
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
+        input_size=(3, 4, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim'
     ),
     dict(
         module_name='ConstantPad3d',
@@ -2381,7 +2485,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same',
@@ -2390,7 +2494,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_pad_same_dilated',
@@ -2399,7 +2503,7 @@ new_module_tests = [
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2446,6 +2550,13 @@ new_module_tests = [
         constructor_args=((2, 2, 2),),
         cpp_constructor_args='torch::nn::AvgPool3dOptions({2, 2, 2})',
         input_size=(2, 3, 4, 4, 4),
+    ),
+    dict(
+        module_name='AvgPool3d',
+        constructor_args=((2, 2, 2),),
+        cpp_constructor_args='torch::nn::AvgPool3dOptions({2, 2, 2})',
+        input_size=(3, 4, 4, 4),
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AvgPool3d',
@@ -3090,6 +3201,13 @@ new_module_tests = [
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5),
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
@@ -3105,6 +3223,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
         constructor_args=((3, None),),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, c10::nullopt})',
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
@@ -3116,6 +3242,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
@@ -3153,6 +3287,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveAvgPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool1d',
         constructor_args=(1,),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool1dOptions(1)',
         input_fn=lambda: torch.rand(1, 3, 5),
@@ -3164,6 +3306,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
         input_fn=lambda: torch.rand(1, 3, 5, 6),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool2dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveAvgPool2d',
@@ -3195,6 +3345,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveAvgPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions(3)',
+        input_fn=lambda: torch.rand(3, 5, 2, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
         constructor_args=((3, 4, 5),),
         cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 4, 5})',
         input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
@@ -3206,6 +3364,13 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({c10::nullopt, 4, 5})',
         input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
         desc='tuple_none',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((3, 2, 2),),
+        cpp_constructor_args='torch::nn::AdaptiveAvgPool3dOptions({3, 2, 2})',
+        input_fn=lambda: torch.rand(1, 1, 3, 2, 6),
+        desc='last_dim',
     ),
     dict(
         module_name='SELU',
@@ -3267,6 +3432,17 @@ new_module_tests = [
         module_name='SiLU',
         input_size=(5, 6, 7),
         reference_fn=lambda x, *_: x * torch.sigmoid(x),
+    ),
+    dict(
+        module_name='Mish',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
+    ),
+    dict(
+        module_name='Mish',
+        input_size=(5, 6, 7),
+        reference_fn=lambda x, *_: x * torch.tanh(F.softplus(x)),
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=-1),
@@ -3686,7 +3862,17 @@ new_module_tests = [
         desc='multilayer_coder',
         with_tf32=True,
         tf32_precision=0.01,
-    )
+    ),
+    dict(
+        module_name='Linear',
+        constructor_args=(3, 5),
+        cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
+        input_fn=lambda: torch.rand(3),
+        reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
+        desc="no_batch_dim",
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
 ]
 
 # add conv padding mode tests:
@@ -3725,6 +3911,34 @@ for padding_mode, cpp_padding_mode in zip(
                 tf32_precision=0.05
             ),
         )
+
+# Check that non linear activations work with no batch dimensions
+non_linear_activations_no_batch = [
+    'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
+    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU',
+    'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
+    'Tanhshrink', 'Threshold'
+]
+non_linear_activations_extra_info: Dict[str, dict] = {
+    'CELU': {'constructor_args': (2.,)},
+    'Threshold': {'constructor_args': (2., 1.)},
+    'Hardsigmoid': {'check_gradgrad': False, 'check_jit': False},
+    'Hardswish': {'check_gradgrad': False, 'check_jit': False},
+    # For RRelu, test that compare CPU and GPU results fail because RNG
+    # is different between CPU and GPU
+    'RReLU': {'test_cuda': False},
+}
+for non_linear_activation in non_linear_activations_no_batch:
+    activation_test_info = dict(
+        module_name=non_linear_activation,
+        input_size=(3,),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+        test_cpp_api_parity=False,
+    )
+    extra_info = non_linear_activations_extra_info.get(non_linear_activation, {})
+    activation_test_info.update(extra_info)
+    new_module_tests.append(activation_test_info)
 
 
 def kldivloss_reference(input, target, reduction='mean'):
@@ -4733,6 +4947,42 @@ criterion_tests = [
 ]
 
 
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    criterion = args[-1]
+    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
+
+    output = criterion(*single_batch_input_args)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
+
+# Check that regression criterion work with no batch dimensions
+regression_criterion_no_batch = [
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+]
+reductions = ['none', 'mean', 'sum']
+for regression_criterion, reduction in product(regression_criterion_no_batch,
+                                               reductions):
+    regression_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
+        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        input_size=(3, ),
+        target_fn=lambda: torch.randn(3),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
+
+
 class NNTestCase(TestCase):
 
     # _forward is defined in classes inheriting from NNTestCase
@@ -4787,7 +5037,7 @@ class NNTestCase(TestCase):
 
         if jacobian_input:
             jacobian_inp = self._jacobian(input, output_size)
-            flat_jacobian_input = list(iter_tensors(jacobian_inp))
+            flat_jacobian_input = list(_iter_tensors(jacobian_inp))
 
         if jacobian_parameters:
             num_param = sum(p.numel() for p in self._get_parameters(module)[0])
@@ -4810,7 +5060,7 @@ class NNTestCase(TestCase):
             d_input = self._backward(module, input, output, d_out)
 
             if jacobian_input:
-                for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
+                for jacobian_x, d_x in zip(flat_jacobian_input, _iter_tensors(d_input)):
                     jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
@@ -4844,8 +5094,8 @@ class NNTestCase(TestCase):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = list(iter_tensors(analytical))
-        numerical_t = list(iter_tensors(numerical))
+        analytical_t = list(_iter_tensors(analytical))
+        numerical_t = list(_iter_tensors(numerical))
 
         differences = []
         for a, n in zip(analytical_t, numerical_t):
@@ -5139,6 +5389,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
+        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5158,11 +5409,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
             test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
-                                           check_batched_grad=self.check_batched_grad))
+                                           check_batched_grad=self.check_batched_grad,
+                                           fast_mode=self.gradcheck_fast_mode))
 
         if self.check_gradgrad:
             test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
-                                               check_batched_grad=self.check_batched_grad))
+                                               check_batched_grad=self.check_batched_grad,
+                                               fast_mode=self.gradcheck_fast_mode))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()

@@ -23,7 +23,7 @@ enum class C10_API_ENUM DebugInfoKind : uint8_t {
 class C10_API DebugInfoBase {
  public:
   DebugInfoBase() {}
-  virtual ~DebugInfoBase() {}
+  virtual ~DebugInfoBase() = default;
 };
 
 // Thread local debug information is propagated across the forward
@@ -68,11 +68,9 @@ class C10_API ThreadLocalDebugInfo {
 // Users can access the values through the ThreadLocalDebugInfo::get() call;
 class C10_API DebugInfoGuard {
  public:
-  DebugInfoGuard(
-      DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
+  DebugInfoGuard(DebugInfoKind kind, std::shared_ptr<DebugInfoBase> info);
 
-  explicit DebugInfoGuard(
-      std::shared_ptr<ThreadLocalDebugInfo> info);
+  explicit DebugInfoGuard(std::shared_ptr<ThreadLocalDebugInfo> info);
 
   ~DebugInfoGuard();
 

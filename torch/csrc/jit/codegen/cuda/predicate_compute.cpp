@@ -10,6 +10,8 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -43,7 +45,7 @@ std::vector<kir::Bool*> PredicateCompute::computePredicates(
   std::vector<kir::Bool*> preds(root.size(), true_bool);
   Val* extent = nullptr;
 
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     const bool zero_ind = indices[i]->isZeroInt();
     const bool simple_ind = indices[i]->getOrigin() == nullptr;
 
@@ -257,7 +259,7 @@ void UnrollPredicate::predicateOn(Expr* tv_expr) {
       all_preds.size() == root_dom.size(),
       "Predicates should be produced for every dimension, even if it's simply set as true.");
 
-  for (size_t i = 0; i < all_preds.size(); i++) {
+  for (const auto i : c10::irange(all_preds.size())) {
     if (all_preds[i]->isConst() && all_preds[i]->value().value()) {
       continue;
     }

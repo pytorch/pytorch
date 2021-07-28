@@ -6,14 +6,14 @@
 
 #include <gtest/gtest.h>
 
-#include "test/cpp/tensorexpr/test_base.h"
+#include <test/cpp/tensorexpr/test_base.h>
 
+#include <test/cpp/tensorexpr/padded_buffer.h>
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/testing/file_check.h>
-#include "test/cpp/tensorexpr/padded_buffer.h"
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
-#include "torch/csrc/jit/tensorexpr/ir_simplifier.h"
-#include "torch/csrc/jit/tensorexpr/loopnest.h"
-#include "torch/csrc/jit/tensorexpr/tensor.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -46,8 +46,8 @@ static void testCudaTestVectorAdd01_impl() {
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[1], 0);
-  l.setGPUThreadIndex(loops[2], 0);
+  loops[1]->set_gpu_block_index(0);
+  loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
@@ -111,8 +111,8 @@ TEST(Cuda, Sigmoid_CUDA) {
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[1], 0);
-  l.setGPUThreadIndex(loops[2], 0);
+  loops[1]->set_gpu_block_index(0);
+  loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf);
@@ -172,12 +172,11 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       },
       [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
   LoopNest l({c});
-  For* n_outer;
   For* n_inner;
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.splitWithMask(loops[0], block_size, &n_outer, &n_inner);
-  l.setGPUBlockIndex(n_outer, 0);
-  l.setGPUThreadIndex(n_inner, 0);
+  l.splitWithMask(loops[0], block_size, &n_inner);
+  loops[0]->set_gpu_block_index(0);
+  n_inner->set_gpu_thread_index(0);
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c, a_buf, b_buf);
@@ -341,8 +340,8 @@ TEST(Cuda, TestRand01_CUDA) {
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[1], 0);
-  l.setGPUThreadIndex(loops[2], 0);
+  loops[1]->set_gpu_block_index(0);
+  loops[2]->set_gpu_thread_index(0);
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
   CudaCodeGen cuda_cg(stmt, c);
@@ -391,12 +390,11 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   Tensor* b = Compute(
       "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
-  For* outer;
   For* inner;
   std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithMask(loops[0], 1024, &outer, &inner);
-  l.setGPUBlockIndex(outer, 0);
-  l.setGPUThreadIndex(inner, 0);
+  l.splitWithMask(loops[0], 1024, &inner);
+  loops[0]->set_gpu_block_index(0);
+  inner->set_gpu_thread_index(0);
   Stmt* s = l.root_stmt();
   CudaCodeGen cg(s, {a, b, n});
 
@@ -1178,9 +1176,9 @@ TEST(Cuda, MaskBlockDim_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
+  loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 0);
+  loops[0]->set_gpu_block_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -1271,9 +1269,9 @@ TEST(Cuda, MaskThreadDim_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUThreadIndex(loops[0], 0);
+  loops[0]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUThreadIndex(loops[0], 0);
+  loops[0]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -1366,9 +1364,9 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
+  loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 1);
+  loops[0]->set_gpu_block_index(1);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -1460,9 +1458,9 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
+  loops[0]->set_gpu_block_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUThreadIndex(loops[0], 0);
+  loops[0]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -1559,11 +1557,11 @@ TEST(Cuda, MaskMultiDim_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -1689,11 +1687,11 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -2103,11 +2101,11 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 1);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(1);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();
@@ -2234,11 +2232,11 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
 
   LoopNest l({c, d});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
   loops = l.getLoopStmtsFor(d);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
 
   l.prepareForCodegen();
   Stmt* stmt = l.root_stmt();

@@ -1,4 +1,5 @@
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer
 from collections import defaultdict
 
@@ -78,24 +79,14 @@ class Adadelta(Optimizer):
                     state['step'] += 1
                     states.append(state)
 
-            if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
-
-            torch._foreach_mul_(square_avgs, rho)
-            torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - rho)
-
-            std = torch._foreach_add(square_avgs, eps)
-            torch._foreach_sqrt_(std)
-
-            deltas = torch._foreach_add(acc_deltas, eps)
-            torch._foreach_sqrt_(deltas)
-            torch._foreach_div_(deltas, std)
-            torch._foreach_mul_(deltas, grads)
-
-            torch._foreach_add_(params_with_grad, deltas, alpha=-group['lr'])
-
-            torch._foreach_mul_(acc_deltas, rho)
-            torch._foreach_addcmul_(acc_deltas, deltas, deltas, value=1 - rho)
+            F.adadelta(params_with_grad,
+                       grads,
+                       square_avgs,
+                       acc_deltas,
+                       lr=group['lr'],
+                       weight_decay=group['weight_decay'],
+                       rho=group['rho'],
+                       eps=group['eps'])
 
         return loss
 

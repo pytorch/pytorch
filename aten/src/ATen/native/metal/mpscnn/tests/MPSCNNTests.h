@@ -2,7 +2,6 @@
 #define MPSCNNTests_h
 
 bool test_synchronization();
-bool test_nchw_to_nc4_cpu();
 bool test_copy_nchw_to_metal();
 bool test_conv2d();
 bool test_depthwiseConv();
@@ -52,5 +51,6 @@ bool test_mean_dim3();
 bool test_chunk();
 bool test_chunk2();
 bool test_chunk3();
+bool test_reflection_pad2d();
 
 #endif

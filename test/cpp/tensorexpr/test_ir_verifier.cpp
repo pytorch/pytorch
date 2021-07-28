@@ -16,7 +16,6 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, BitwiseOps) {
   KernelScope kernel_scope;
   const Var* X = new Var("x", kInt);
@@ -48,11 +47,9 @@ TEST(IRVerifier, BitwiseOps) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, CompareSelect) {
   KernelScope kernel_scope;
   const Expr* X = new IntImm(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Expr* Y = new FloatImm(3.14f);
   {
     auto a = new CompareSelect(X, X, X, Y, kEQ);
@@ -66,7 +63,6 @@ TEST(IRVerifier, CompareSelect) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Ramp) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -78,13 +74,11 @@ TEST(IRVerifier, Ramp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Load) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
   const Var* J = new Var("j", kLong);
   const Var* K = new Var("k", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok
@@ -107,7 +101,6 @@ TEST(IRVerifier, Load) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, IfThenElse) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -133,7 +126,6 @@ TEST(IRVerifier, IfThenElse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, For) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
@@ -147,11 +139,9 @@ TEST(IRVerifier, For) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Block) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("B", {new IntImm(10)}, kInt);
   {
     Stmt* store = new Store(B, {I}, I);
@@ -166,13 +156,11 @@ TEST(IRVerifier, Block) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRVerifier, Store) {
   KernelScope kernel_scope;
   const Var* I = new Var("i", kInt);
   const Var* J = new Var("j", kLong);
   const Var* K = new Var("k", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const Buf* B = new Buf("b", {new IntImm(10), new IntImm(20)}, kFloat);
   {
     // Indices with different int dtypes (kInt, kLong) are ok

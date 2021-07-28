@@ -92,7 +92,7 @@ static inline Variable valueToTensor(c10::TensorOptions options, PyObject* value
   if (THPVariable_Check(value)) {
     return THPVariable_Unpack(value);
   }
-  at::AutoDispatchBelowInplaceOrView guard;  // TODO: remove
+  at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   if (THPUtils_checkLong(value) || PyBool_Check(value)) {
     return at::indexing::scalarToTensor(Scalar(THPUtils_unpackLong(value)), options, device);
@@ -370,6 +370,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   // TODO: This qint special case looks very suspicious...
   if (isQIntType(self_.scalar_type())) {
     value = valueToTensor(device(kCPU).dtype(kFloat), py_value, at::Device(kCPU));
+  } else if (self_device.is_cuda()) {
+    value = valueToTensor(self_.options(), py_value, at::Device(kCPU));
   } else {
     value = valueToTensor(self_.options(), py_value, self_device);
   }

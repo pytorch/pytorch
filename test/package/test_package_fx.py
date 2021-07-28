@@ -29,7 +29,7 @@ class TestPackageFX(PackageTestCase):
         traced = symbolic_trace(st)
 
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
             pe.save_pickle("model", "model.pkl", traced)
 
         f.seek(0)
@@ -43,7 +43,8 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
         f.seek(0)
@@ -58,7 +59,8 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
         f.seek(0)
@@ -71,12 +73,14 @@ class TestPackageFX(PackageTestCase):
         # This should fail, because we are referencing some globals that are
         # only in the package.
         with self.assertRaises(ObjMismatchError):
-            with PackageExporter(f2, verbose=False) as pe:
+            with PackageExporter(f2) as pe:
+                pe.intern("**")
                 pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
-        with PackageExporter(f2, importer=(pi, sys_importer), verbose=False) as pe:
+        with PackageExporter(f2, importer=(pi, sys_importer)) as pe:
             # Make the package available to the exporter's environment.
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", traced)
         f2.seek(0)
         pi2 = PackageImporter(f2)
@@ -98,7 +102,8 @@ class TestPackageFX(PackageTestCase):
         gm = GraphModule(torch.nn.Module(), graph)
 
         f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
+        with PackageExporter(f) as pe:
+            pe.intern("**")
             pe.save_pickle("model", "model.pkl", gm)
         f.seek(0)
 

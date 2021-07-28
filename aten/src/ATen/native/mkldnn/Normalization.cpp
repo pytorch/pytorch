@@ -121,10 +121,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
 

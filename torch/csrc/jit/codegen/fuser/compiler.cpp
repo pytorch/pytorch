@@ -61,9 +61,7 @@ const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> next_kernel_id{0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int debug_fusion{-1};
 
 size_t nCompiledKernels() {
@@ -210,7 +208,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   auto graph = spec.graph()->copy();
 
-  for (size_t i = 0; i < input_desc.size(); i++) {
+  for (const auto i : c10::irange(input_desc.size())) {
     const auto& desc = input_desc[i];
 
     // TODO: can't get rid of this use of TensorType

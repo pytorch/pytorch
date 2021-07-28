@@ -958,6 +958,8 @@ class AdagradOptimizer(Optimizer):
                     ), "weight decay is not implemented for {} yet".format(op)
                     input_args += [mask_blob, mask_changed_blob]
                 else:
+                    if self.counter_halflife > 0:
+                        input_args += [update_counter]
                     op = "RowWiseSparseAdagrad"
             else:
                 if self.use_mask is True:
@@ -974,13 +976,22 @@ class AdagradOptimizer(Optimizer):
                 input_args += [lr_iteration, last_mask_updated_iter]
                 output_args += [mask_blob, last_mask_updated_iter]
 
-            if weight_decay > 0:
+            if weight_decay > 0 and self.counter_halflife == -1:
                 net.__getattr__(op)(
                     input_args,
                     output_args,
                     epsilon=self.epsilon,
                     weight_decay=weight_decay,
                     engine=self.engine,
+                )
+            elif weight_decay > 0 and self.counter_halflife != -1:
+                net.__getattr__(op)(
+                    input_args,
+                    output_args,
+                    epsilon=self.epsilon,
+                    weight_decay=weight_decay,
+                    engine=self.engine,
+                    counter_halflife=self.counter_halflife,
                 )
             else:
                 net.__getattr__(op)(
@@ -1503,6 +1514,7 @@ class AdamOptimizer(Optimizer):
         rowWise=False,
         engine="",
         enableRAdam=False,
+        use_smart_decay=False,  # See https://fburl.com/2jdiwrhy for context.
         **kwargs
     ):
         super(AdamOptimizer, self).__init__()
@@ -1518,6 +1530,18 @@ class AdamOptimizer(Optimizer):
         self.rowWise = rowWise
         self.engine = engine
         self.enableRAdam = enableRAdam
+        if use_smart_decay:
+            if rowWise:
+                raise NotImplementedError(('Smart decay is not implemented for rowWise Adam.  '
+                                           'Set rowWise or use_smart_decay to False.'))
+            if enableRAdam:
+                raise NotImplementedError(('Smart decay is not implemented for RAdam.  '
+                                           'Set enableRAdam or use_smart_decay to False.'))
+            if use_lr_adaption:
+                raise NotImplementedError(('Smart decay is not implemented with lr_adaption.  '
+                                           'Set use_lr_adaption or use_smart_decay to False.'))
+
+        self.use_smart_decay = use_smart_decay
         self.init_kwargs = kwargs
 
     def _run(self, net, param_init_net, param_info):
@@ -1547,6 +1571,14 @@ class AdamOptimizer(Optimizer):
                 [param], param + "_second_moment", value=0.0
             )
 
+        # Initialize "minibatch in which this parameter was last seen" for smart decay.
+        if self.use_smart_decay:
+            shapes, _ = workspace.InferShapesAndTypes([param_init_net])
+            last_seen = param_init_net.ConstantFill(
+                [], param + "_last_seen", shape=[shapes[param][0]], value=0, dtype=core.DataType.INT64
+            )
+            self._aux_params.local.append(last_seen)
+
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(m1)
         self._aux_params.local.append(m2)
@@ -1559,6 +1591,10 @@ class AdamOptimizer(Optimizer):
             )
 
         output_blobs = [param, m1, m2]
+
+        if self.use_smart_decay:
+            output_blobs.append(last_seen)
+
         if self.use_lr_adaption:
             effective_grad = str(param) + "_effective_grad"
             output_blobs.append(effective_grad)
@@ -1567,6 +1603,8 @@ class AdamOptimizer(Optimizer):
             grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
             if self.rowWise:
                 op = "RowWiseSparseAdam"
+            elif self.use_smart_decay:
+                op = "SmartDecaySparseAdam"
             else:
                 op = "SparseAdam"
 
@@ -1579,6 +1617,14 @@ class AdamOptimizer(Optimizer):
                     beta2=self.beta2,
                     epsilon=self.epsilon,
                     enableRAdam=self.enableRAdam,
+                )
+            elif op == "SmartDecaySparseAdam":
+                net.__getattr__(op)(
+                    [param, m1, m2, last_seen, grad.indices, grad.values, lr, iteration],
+                    output_blobs,
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon,
                 )
             else:
                 assert (
@@ -1628,6 +1674,7 @@ class DecayAdagradOptimizer(Optimizer):
         beta2=0.999,
         epsilon=0.1,
         weight_decay=0.0,
+        ema_options=None,
         bias_correction_first=True,
         policy="fixed",
         engine="",
@@ -1643,6 +1690,15 @@ class DecayAdagradOptimizer(Optimizer):
         self.policy = policy
         self.engine = engine
         self.init_kwargs = kwargs
+        self._process_ema_options(ema_options)
+
+    def _process_ema_options(self, ema_options):
+        self.ema_enabled = True if ema_options else False
+        if self.ema_enabled:
+            self.ema_start = ema_options.get("ema_start", None)
+            self.ema_end = ema_options.get("ema_end", None)
+            self.ema_step = ema_options.get("ema_step", None)
+            self.ema_alpha = ema_options.get("ema_alpha", None)
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -1685,6 +1741,21 @@ class DecayAdagradOptimizer(Optimizer):
                 weight_decay=self.weight_decay,
                 bias_correction_first=self.bias_correction_first,
             )
+
+            if self.ema_enabled:
+                param_ema = str(param) + "_ema"
+                if not param_init_net.BlobIsDefined(param_ema):
+                    param_init_net.ConstantFill([param], param_ema, value=0.0)
+                    self._aux_params.local.append(param_ema)
+
+                net.EMA(
+                    [param, param_ema, iteration],
+                    [param, param_ema],
+                    ema_start=self.ema_start,
+                    ema_end=self.ema_end,
+                    ema_step=self.ema_step,
+                    ema_alpha=self.ema_alpha,
+                )
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale

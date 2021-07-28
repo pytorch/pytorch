@@ -12,8 +12,10 @@ def _orthogonalize(matrix, epsilon=0):
     """
     Applies Gram-Schmidt procedure to orthogonalize a given 2D tensor.
     If epsilon is 0, this is equivalent to `torch.qr(matrix, out=(matrix, _))`,
-    but `torch.qr` is very slow, probably because it is not optimized for a matrix that has a small number of columns.
     """
+    # TODO Consider using Q = torch.orgqr(*torch.geqrf(A)) to compute the Q of the QR _much_ faster
+    # and more reliably.
+    # Works on FP32/64 or complex numbers (does not work for half precision)
     num_cols = matrix.shape[1]
     for i in range(num_cols):
         # Normalize the i'th column.
@@ -475,16 +477,16 @@ def powerSGD_hook(
             idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
-        return [
+        return (
             dist.all_reduce(
                 state.p_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def compute_qs(fut):
-        state.p_memory_dict[bucket_index] = fut.value()[0]
+        state.p_memory_dict[bucket_index] = fut.value()
         for p in ps:
             _orthogonalize(p, state.orthogonalization_epsilon)
 
@@ -497,16 +499,16 @@ def powerSGD_hook(
         # For warm-start, can take one such step at a time, and alternate between them.
 
         # Allreduce Qs.
-        return [
+        return (
             dist.all_reduce(
                 state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
 
         for p, q, tensor in zip(ps, qs, tensors_to_compress):
             torch.matmul(p, q.t(), out=tensor)
@@ -522,7 +524,7 @@ def powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [input_tensor]
+        return input_tensor
 
     return (
         allreduce_contiguous_uncompressed_tensors_fut.then(
@@ -705,16 +707,16 @@ def batched_powerSGD_hook(
         # one left multiplication and one right multiplication.
         # For warm-start, can take one such step at a time, and alternate between them.
 
-        return [
+        return (
             dist.all_reduce(
                 state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
         torch.matmul(
             state.p_memory_dict[bucket_index],
             state.q_memory_dict[bucket_index].t(),
@@ -735,6 +737,6 @@ def batched_powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [ret]
+        return ret
 
     return allreduce_p_fut.then(compute_q).then(decompress)

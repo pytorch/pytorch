@@ -13,9 +13,9 @@ namespace te = torch::jit::tensorexpr;
 
 static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  te::For *outer, *inner, *tail;
-  ln->splitWithTail(loops[0], width, &outer, &inner, &tail);
-  ln->vectorize(inner);
+  te::For *inner, *tail;
+  ln->splitWithTail(loops[0], width, &inner, &tail);
+  ASSERT_TRUE(te::LoopNest::vectorize(inner));
 }
 
 std::string diffs(const at::Tensor& a, const at::Tensor& b) {

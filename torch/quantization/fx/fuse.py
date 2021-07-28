@@ -13,9 +13,10 @@ from ..utils import (
 )
 
 from .pattern_utils import (
-    is_match,
     get_default_fusion_patterns,
 )
+
+from .match_utils import is_match
 
 from .graph_module import (
     FusedGraphModule

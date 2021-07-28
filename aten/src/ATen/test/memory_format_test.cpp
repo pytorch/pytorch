@@ -4,10 +4,8 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::vector<std::vector<int64_t>> sizes = {{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 1, 4, 4}, {4, 1, 4, 1}, {4, 1, 1, 4}, {1, 4, 1, 4}, {1, 4, 4, 1}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryFormatTest, SetMemoryFormat) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
@@ -27,20 +25,16 @@ TEST(MemoryFormatTest, SetMemoryFormat) {
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryFormatTest, TransposeMemoryFormat) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor t = at::rand({2, 3, 4, 5});
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
   t.transpose_(1, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   t = at::rand({2, 3, 4, 5});
   t.transpose_(1, 2);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   t = at::rand({2, 3, 4, 5});
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
@@ -82,7 +76,6 @@ inline void sliceStepTwo(Tensor& t, int dim, at::MemoryFormat format) {
   EXPECT_TRUE(t.suggest_memory_format() == format);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryFormatTest, SliceStepTwoMemoryFormat) {
   Tensor t = at::rand({4, 4, 4, 4});
   sliceStepTwo(t, 1, MemoryFormat::Contiguous);
@@ -146,7 +139,6 @@ inline void sliceFirst(Tensor& t, int dim, at::MemoryFormat format) {
   EXPECT_TRUE(t.suggest_memory_format() == format);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryFormatTest, SliceFirstMemoryFormat) {
   Tensor t = at::rand({4, 4, 4, 4});
   sliceFirst(t, 1, MemoryFormat::Contiguous);

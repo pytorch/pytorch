@@ -34,7 +34,7 @@ bool ScriptCall::hasQualifiedName() const {
   return qualifiedName_ ? true : false;
 }
 
-const c10::QualifiedName ScriptCall::qualifiedName() const {
+const c10::QualifiedName& ScriptCall::qualifiedName() const {
   return *qualifiedName_;
 }
 
@@ -108,7 +108,7 @@ std::unique_ptr<ScriptCall> ScriptCall::fromIValues(
   }
 }
 
-Message ScriptCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
   std::vector<IValue> ivalues;
   toIValues(ivalues);
 
@@ -116,7 +116,7 @@ Message ScriptCall::toMessageImpl() && {
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
 
-  return Message(
+  return c10::make_intrusive<Message>(
       std::move(payload), std::move(tensor_table), MessageType::SCRIPT_CALL);
 }
 

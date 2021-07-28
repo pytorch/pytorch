@@ -8,7 +8,6 @@
 
 #ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "onnx/optimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
@@ -54,7 +53,6 @@ bool TryConvertingTensorRawValues(
 bool IsOperator(const std::string& op_type) {
   // pull in all the operators upon first invocation
   // Intentional leaky
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static std::set<std::string>* ops_ =
       new std::set<std::string>(caffe2::GetRegisteredOperators());
   return ops_->count(caffe2::OpRegistryKey(op_type, "DEFAULT"));
@@ -69,21 +67,6 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   d.set_device_id(onnx_device.device_id);
   return d;
 }
-
-#ifndef C10_MOBILE
-ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
-  std::vector<std::string> passes{"fuse_consecutive_transposes",
-                                  "eliminate_nop_transpose",
-                                  "fuse_transpose_into_gemm"};
-
-  if (init) {
-    passes.emplace_back("split_init");
-  } else {
-    passes.emplace_back("split_predict");
-  }
-  return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
-}
-#endif
 
 template <class T, class U>
 U LookUpWithDefault(
@@ -772,7 +755,6 @@ Caffe2Ops Caffe2Backend::CreateGemm(
   // Support broadcast by default when opset_version > 6.
   auto broadcast =
     onnx_node->attributes.get<int64_t>("broadcast",
-                                       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                        (ctx.opset_version() > 6) ? 1L : 0L);
 
   // If the c's shape information is available and c is a 1d tensor(except
@@ -832,7 +814,6 @@ Caffe2Ops Caffe2Backend::CreateGemm(
     BuildOperator(
         c2_op, "MatMul", {input_a, input_b}, {ab}, {arg_trans_a, arg_trans_b});
     c2_op = ret.ops.Add();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (ctx.opset_version() >= 7) {
       BuildOperator(c2_op, "Add", {ab, input_c}, {output});
     } else {
@@ -873,9 +854,7 @@ Caffe2Ops Caffe2Backend::CreatePad(
 
   // first two dim is for batch and channel. Note that now all the values are
   // non-negative
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (!(pads.size() == 8 &&
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (pads.Get(0) + pads.Get(1) + pads.Get(4) + pads.Get(5) == 0))) {
     CAFFE_THROW(
         "Caffe2 only supports padding 2D Tensor, whereas padding is ", str);
@@ -885,9 +864,7 @@ Caffe2Ops Caffe2Backend::CreatePad(
   auto* attr = attributes.AddRewrittenAttribute(pad_name);
   attr->add_ints(pads.Get(2));
   attr->add_ints(pads.Get(3));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr->add_ints(pads.Get(6));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr->add_ints(pads.Get(7));
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
@@ -1236,12 +1213,10 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ctx.opset_version() < 6) {
     attributes.remove("consumed_inputs");
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ctx.opset_version() >= 7) {
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
@@ -1290,7 +1265,6 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
   auto& attributes = onnx_node->attributes;
   attributes.remove("mode");
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ctx.opset_version() >= 7 && ctx.opset_version() < 9) {
     const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
     if (scales.size() != 4) {
@@ -1308,7 +1282,6 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
     c2_width->set_name("width_scale");
     c2_width->set_f(scales.Get(3));
     return c2_op;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (ctx.opset_version() >= 9) {
     const auto& node = onnx_node->node;
     if (node.input_size() != 2) {
@@ -1347,7 +1320,6 @@ Caffe2Ops Caffe2Backend::CreateUpsample(
 Caffe2Ops Caffe2Backend::CreateDropout(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (ctx.opset_version() >= 7) {
     auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
@@ -1365,13 +1337,11 @@ Caffe2Ops Caffe2Backend::CreateLRN(
   if (!attributes.HasAttribute("alpha")) {
       auto* arg = c2_op.ops.Mutable(0)->add_arg();
       arg->set_name("alpha");
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       arg->set_f(1e-4);
   }
   if (!attributes.HasAttribute("beta")) {
       auto* arg = c2_op.ops.Mutable(0)->add_arg();
       arg->set_name("beta");
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       arg->set_f(0.75);
   }
   return c2_op;
@@ -1536,14 +1506,9 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#ifndef C10_MOBILE
-  ModelProto init_model = OptimizeOnnx(onnx_model, true);
-  ModelProto pred_model = OptimizeOnnx(onnx_model, false);
-#else
   ModelProto init_model = ModelProto();
   ModelProto pred_model = onnx_model;
   pred_model.mutable_graph()->mutable_initializer()->Clear();
-#endif
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");

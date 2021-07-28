@@ -382,7 +382,6 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<std::vector<int64_t>>())
       .def_pickle(
           [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             return std::vector<int64_t>{1, 3, 3, 7};
           },
           [](std::vector<int64_t> state) { // __setstate__

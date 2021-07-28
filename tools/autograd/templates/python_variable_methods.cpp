@@ -606,6 +606,40 @@ static PyObject * THPVariable_float(PyObject* self, PyObject* args, PyObject* kw
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_cdouble(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "cdouble(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::ComplexDouble, opt_memory_format);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_cfloat(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "cfloat(*, MemoryFormat? memory_format=None)"
+  });
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if(r.has_torch_function()){
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  auto opt_memory_format = r.memoryformatOptional(0);
+  return THPVariable_to_type(self, ScalarType::ComplexFloat, opt_memory_format);
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_half(PyObject* self, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
@@ -864,18 +898,6 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   auto& self_ = THPVariable_Unpack(self);
   OptionalDeviceGuard device_guard(device_of(self_));
   return THPVariable_Wrap(torch::utils::legacy_tensor_new(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "new_ones", args, kwargs);
-  }
-  auto& self_ = THPVariable_Unpack(self);
-  OptionalDeviceGuard device_guard(device_of(self_));
-  return THPVariable_Wrap(torch::utils::new_ones(legacyExtractDispatchKey(self_), self_.scalar_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -1155,6 +1177,9 @@ PyMethodDef variable_methods[] = {
   {"__le__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_le>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__gt__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_gt>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__ge__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_ge>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rand__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_and>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ror__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_or>), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rxor__", castPyCFunctionWithKeywords(TypeError_to_NotImplemented_<THPVariable_bitwise_xor>), METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__complex__", THPVariable_complex_scalar, METH_NOARGS, NULL},
@@ -1178,8 +1203,10 @@ PyMethodDef variable_methods[] = {
   {"dim", THPVariable_dim, METH_NOARGS, NULL},
   {"has_names", THPVariable_has_names, METH_NOARGS, NULL},
   {"double", castPyCFunctionWithKeywords(THPVariable_double), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cdouble", castPyCFunctionWithKeywords(THPVariable_cdouble), METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", THPVariable_element_size, METH_NOARGS, NULL},
   {"float", castPyCFunctionWithKeywords(THPVariable_float), METH_VARARGS | METH_KEYWORDS, NULL},
+  {"cfloat", castPyCFunctionWithKeywords(THPVariable_cfloat), METH_VARARGS | METH_KEYWORDS, NULL},
   {"get_device", THPVariable_get_device, METH_NOARGS, NULL},
   {"bool", castPyCFunctionWithKeywords(THPVariable_bool), METH_VARARGS | METH_KEYWORDS, NULL},
   {"half", castPyCFunctionWithKeywords(THPVariable_half), METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1192,7 +1219,6 @@ PyMethodDef variable_methods[] = {
   {"ndimension", THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", THPVariable_numel, METH_NOARGS, NULL},
   {"new", castPyCFunctionWithKeywords(THPVariable_new), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"new_ones", castPyCFunctionWithKeywords(THPVariable_new_ones), METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", THPVariable_numel, METH_NOARGS, NULL},

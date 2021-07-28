@@ -4,7 +4,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
 
 git submodule sync --recursive
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Build PyTorch
