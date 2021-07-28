@@ -101,11 +101,10 @@ jobs:
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
           CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
-          export PYTHONPATH=$PWD
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
           pip3 install requests
-          python3 .circleci/scripts/upload_binary_size_to_scuba.py || exit 0
+          python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
 
 concurrency:
   group: build-linux-libtorch-${{ github.event.pull_request.number || github.sha }}

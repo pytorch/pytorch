@@ -22,10 +22,8 @@ namespace torch {
 namespace jit {
 
 // Controls whether graph source ranges are printed by default
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool global_print_source_ranges = true;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -278,7 +276,6 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
-            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -570,6 +567,9 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
+      .def(
+          "getModuleHierarchy",
+          [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)
@@ -865,8 +865,9 @@ void initPythonIRBindings(PyObject* module_) {
         return types;
       });
   py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
-      .def(py::init(
-          [](std::vector<TypePtr> a) { return UnionType::create(a); }))
+      .def(py::init([](std::vector<TypePtr> a) {
+        return UnionType::create(std::move(a));
+      }))
       .def("containedTypes", [](UnionType& self) {
         return self.containedTypes().vec();
       });
@@ -887,10 +888,13 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
-  py::class_<Pybind11_OptionalType, UnionType, std::shared_ptr<Pybind11_OptionalType>>(
-      m, "OptionalType")
-      .def(py::init(
-          [](std::vector<TypePtr> a) { return Pybind11_OptionalType::create(std::move(a)); }))
+  py::class_<
+      Pybind11_OptionalType,
+      UnionType,
+      std::shared_ptr<Pybind11_OptionalType>>(m, "OptionalType")
+      .def(py::init([](std::vector<TypePtr> a) {
+        return Pybind11_OptionalType::create(std::move(a));
+      }))
       .def_static("ofTensor", &Pybind11_OptionalType::legacy_OptionalOfTensor)
       .def("getElementType", &UnionType::getContainedElementIfOptional);
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")

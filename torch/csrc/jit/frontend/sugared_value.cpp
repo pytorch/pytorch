@@ -122,9 +122,9 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   // Special case calling `unchecked_unwrap_optional` now that
   // `OptionalType` has been deprecated
   if (value_->type()->isOptional() && field == "unchecked_unwrap_optional") {
-      auto r = m.graph()->insert(
-          Symbol::fromQualString("prim::unchecked_unwrap_optional"), {value_});
-      return std::make_shared<SimpleValue>(r);
+    auto r = m.graph()->insert(
+        Symbol::fromQualString("prim::unchecked_unwrap_optional"), {value_});
+    return std::make_shared<SimpleValue>(r);
   }
 
   auto kind = value_->type()->kind();
@@ -473,7 +473,7 @@ RangeValue::RangeValue(
     Function& m,
     std::vector<Value*> inputs,
     c10::optional<int64_t> static_len) {
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)

@@ -5,8 +5,8 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
@@ -110,18 +110,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           }
         }
       } break;
-      case UnionType::Kind: {
-        auto t = w.static_type->expect<UnionType>();
-        if (t->containedTypes().size() == 2 && t->canHoldType(NoneType::get())) {
-          if (!w.value.isNone()) {
-            auto inner = t->containedTypes()[0] != NoneType::get()
-                         ? t->containedTypes()[0]
-                         : t->containedTypes()[1];
-            Work elem = {inner, w.value};
-            to_process.emplace_back(std::move(elem));
-          }
-        }
-      } break;
       case ListType::Kind: {
         // specialized lists do not need their type refined, so we can exit
         // early here
@@ -159,7 +147,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           Work elem = {typ->getAttribute(i), obj->getSlot(i)};
           to_process.emplace_back(std::move(elem));
         }
-      };
+      } break;
+      // We should never reach here. We only have this case for builds
+      // with the `-Werror` (treat compiler warnings as errors) flag set
+      case Pybind11_OptionalType::Kind:
+      default:
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Unknown type found during "
+            "deserialization! Check "
+            "`restoreAccurateTypeTags` for details");
     }
   }
 }

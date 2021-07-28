@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/input_buffer.h>
+#include <torch/csrc/autograd/saved_variable_hooks.h>
 
 #include <deque>
 #include <exception>
@@ -62,11 +63,13 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct ExecInfo {
     struct Capture {
       Capture(const Capture&) = delete;
       Capture(Capture&&) = default;
 
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
       Capture(int input_idx, int output_idx)
           : input_idx_(input_idx), output_idx_(output_idx) {}
       int input_idx_; // within Node inputs
@@ -169,6 +172,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
   // mutex_ as the two are protecting different data structures.
   std::mutex final_callbacks_lock_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
       bool keep_graph,
       bool grad_mode,
@@ -310,6 +314,10 @@ struct TORCH_API Engine {
     return std::make_unique<AnomalyMetadata>();
   }
 
+  virtual std::unique_ptr<SavedVariableHooks> get_default_saved_variable_hooks() {
+    return nullptr;
+  }
+
   // We pass cpu_ready_queue to evaluate_function, so that it knows
   // the correct ready queue to push to after a NodeTask is ready
   void evaluate_function(
@@ -397,6 +405,7 @@ struct TORCH_API Engine {
     // allocated inside Engine::execute and lives for the duration of execute
     std::queue<std::weak_ptr<GraphTask>> graphtasks_queue_;
 
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     ThreadPoolShared() : num_workers_(0) {}
  };
 

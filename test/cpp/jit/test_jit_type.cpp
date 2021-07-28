@@ -22,7 +22,6 @@ TEST(JitTypeTest, IsComplete) {
   TORCH_INTERNAL_ASSERT(!tt->strides().isComplete());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(JitTypeTest, UnifyTypes) {
   auto bool_tensor = TensorType::get()->withScalarType(at::kBool);
   auto opt_bool_tensor = UnionType::createOptionalOf(bool_tensor);
@@ -33,7 +32,8 @@ TEST(JitTypeTest, UnifyTypes) {
   TORCH_INTERNAL_ASSERT(!tensor->isSubtypeOf(opt_bool_tensor));
   auto unified = unifyTypes(opt_bool_tensor, tensor);
   TORCH_INTERNAL_ASSERT(unified);
-  auto elem = (*unified)->expectRef<UnionType>().getContainedElementIfOptional();
+  auto elem =
+      (*unified)->expectRef<UnionType>().getContainedElementIfOptional();
   TORCH_INTERNAL_ASSERT(elem->isSubtypeOf(TensorType::get()));
 
   auto opt_tuple_none_int = UnionType::createOptionalOf(

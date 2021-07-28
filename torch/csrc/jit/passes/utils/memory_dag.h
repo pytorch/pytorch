@@ -1,5 +1,6 @@
 #pragma once
 
+#include <aten/src/ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 #include <c10/util/flat_hash_map.h>
@@ -22,6 +23,9 @@ struct Element;
 struct Value;
 class MemoryDAG;
 
+using TypePtr = std::shared_ptr<c10::Type>;
+using AliasTypeSet = std::vector<TypePtr>;
+
 /**
  * Helper to build up the points-to graph.
  *
@@ -31,8 +35,7 @@ class MemoryDAG;
  */
 class TORCH_API MemoryDAGBuilder {
  public:
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  MemoryDAGBuilder() {}
+  MemoryDAGBuilder() = default;
   MemoryDAGBuilder(const MemoryDAGBuilder&) = delete;
   MemoryDAGBuilder& operator=(const MemoryDAGBuilder&) = delete;
 
@@ -113,8 +116,7 @@ class TORCH_API MemoryDAG {
   void setWildcards(
       const std::unordered_set<const Value*>& wildcards,
       const ska::flat_hash_map<const Value*, Element*>& elementMap,
-      const std::function<std::vector<Element*>(const Value*)>&
-          getWildcardElement);
+      const std::function<Element*(const Value*)>& getWildcardElement);
   Element* unsafeMakeFreshValue(const Value* v);
 
  private:

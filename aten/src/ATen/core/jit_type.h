@@ -26,12 +26,11 @@ namespace c10 {
 
 struct IValue;
 struct FunctionSchema;
+struct NamedType;
 using OptNameList = c10::optional<std::vector<std::string>>;
 
+void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill);
 void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten);
-
-// Forward declarations for use in certain method signatures
-struct NamedType;
 
 struct AnyType;
 using AnyTypePtr = std::shared_ptr<AnyType>;
@@ -104,15 +103,11 @@ struct TORCH_API UnionType : public Type {
 
   static const TypeKind Kind = TypeKind::UnionType;
 
-  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const;
+  bool isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const override;
 
-  std::string str() const;
+  std::string str() const override;
 
-  // If `types.size() == 1`, then `create` will throw while
-  // `maybeCreate` will return `types[0]`. Both factory functions throw
-  // if `types.empty()`
   static UnionTypePtr create(std::vector<TypePtr> types);
-  static TypePtr maybeCreate(std::vector<TypePtr> types);
 
   static TypePtr createOptionalOf(TypePtr type);
 
@@ -137,37 +132,37 @@ struct TORCH_API UnionType : public Type {
     return has_free_variables_;
   }
 
-  c10::optional<TypePtr> toOptional() const;
-
   TypePtr getContainedElementIfOptional() const;
 
+  TypePtr subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
+
  protected:
-    UnionType(std::vector<TypePtr> types);
-    std::string annotation_str_impl(TypePrinter printer) const override;
-    std::string unionStr(TypePrinter printer, bool is_annotation_str) const;
+    explicit UnionType(std::vector<TypePtr> types);
+    std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool has_free_variables_;
-
- private:
-  std::vector<TypePtr> types_;
-  bool can_hold_none_;
-
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
-  std::string unionStr(c10::optional<TypePrinter> printer, bool is_annotation_str) const;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+    std::vector<TypePtr> types_;
+    // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+    bool can_hold_none_;
 };
 
 // `OptionalType` has been DEPRECATED. Do not use this type in
 // internal code! The only reason we have this struct is that we can't
 // bind `UnionType` to more than one PyObject, but we still need to
-// expose both `OptionalType` and `UnionType` to the user
+// expose both `OptionalType` and `UnionType` to our users
 struct Pybind11_OptionalType;
 using Pybind11_OptionalTypePtr = std::shared_ptr<Pybind11_OptionalType>;
 struct TORCH_API Pybind11_OptionalType : public UnionType {
   static Pybind11_OptionalTypePtr create(std::vector<TypePtr> types);
 
+  static const TypeKind Kind = TypeKind::Pybind11_OptionalType;
+
   static UnionTypePtr legacy_OptionalOfTensor();
 
  protected:
-  Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
+  explicit Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
 };
 
 template <typename T>
@@ -756,6 +751,7 @@ struct TORCH_API ListType
 
   // common cast List[Tensor]
   static ListTypePtr ofTensors();
+  static ListTypePtr ofOptionalTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
   static ListTypePtr ofComplexDoubles();
@@ -970,9 +966,16 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 using NameList = std::vector<std::string>;
 // This type represents a Tuple
 struct TORCH_API TupleType : public NamedType {
+
   static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
       const std::vector<std::string>& field_names,
-      const std::vector<TypePtr>& types);
+      const std::vector<TypePtr>& field_types,
+      std::vector<IValue>& field_defaults);
+
+  static TupleTypePtr createNamed(const c10::optional<c10::QualifiedName>& name,
+      const std::vector<std::string>& field_names,
+      const std::vector<TypePtr>& field_types);
+
   static TupleTypePtr create(
       std::vector<TypePtr> types) {
     return TupleTypePtr(new TupleType(
@@ -1183,6 +1186,7 @@ struct TORCH_API FloatType : public NumberType {
     return "float";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -1207,6 +1211,7 @@ struct TORCH_API ComplexType : public NumberType {
     return "complex";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::ComplexType;
@@ -1231,6 +1236,7 @@ struct TORCH_API IntType : public NumberType {
     return "int";
   }
   bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    // NOLINTNEXTLINE(bugprone-parent-virtual-call)
     return rhs->kind() == TypeKind::NumberType || Type::isSubtypeOfExt(rhs, why_not);
   }
   static const TypeKind Kind = TypeKind::IntType;
@@ -1345,7 +1351,6 @@ struct TORCH_API NoneType : public Type {
   std::string str() const override {
     return "NoneType";
   }
-  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream *why_not) const override;
 
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
@@ -1583,22 +1588,32 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   return *result;
 }
 
-// Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned if default_to_union is false, and Any will be returned
-// if it is true. If t1 == t2, or t1 is a type refinement of t2,
-// then t2 will be returned (and vice versa).
+// Attempt to find the correct supertype of the two types `t1` and `t2`.
+// If no supertype is found, then nullopt will be returned if
+// `default_to_union` is false, and `Union[t1, t2]` will be returned
+// if it is true. If `t1 == t2`, or `t1` is a type refinement of `t2`,
+// then `t2` will be returned (and vice versa).
+//
 // Two different tensortypes will return dynamic.
-// Currently we chose not to support returning a NumberType for a float & int
-// input because of a lack of operator support for NumberType
+//
+// Currently we chose not to support returning a NumberType for
+// two types from the set of {FloatType, IntType, ComplexType}, because
+// there is a lack of operator support for NumberType.
+//
+// If `type_hint` is an `InterfaceType`, then we can use that as a
+// potential supertype for `ClassType`s in the list. Otherwise, we have
+// no way to find and use some common interface type
 TORCH_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
     const TypePtr& t2,
-    bool default_to_union=false);
+    bool default_to_union = false,
+    TypePtr type_hint = nullptr);
 
 TORCH_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,
     std::ostream& why_not,
-    bool default_to_union=false);
+    bool default_to_union = false,
+    TypePtr type_hint = nullptr);
 
 namespace detail {
 template <typename T>
@@ -1708,7 +1723,8 @@ struct getTypePtr_<c10::QScheme> final {
 template <>
 struct getTypePtr_<at::Generator> final {
   static TypePtr call() {
-    return UnionType::createOptionalOf(GeneratorType::get());
+    static auto type = UnionType::createOptionalOf(GeneratorType::get());
+    return type;
   }
 };
 template <>
@@ -2061,8 +2077,8 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<ClassType::Property> getProperty(const std::string& name);
   // Add a property named \p name with \p getter and \p setter as its getter and setter.
   void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
-
-  const std::vector<Property> properties() const {
+  // Get a list of all properties.
+  const std::vector<Property>& properties() const {
     return properties_;
   }
 

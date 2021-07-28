@@ -18,6 +18,7 @@ namespace cuda {
 //!
 //! TODO(kir): const node ptrs
 //!
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct KernelSummary {
   //! List of Write-After-Read (WAR) synchronization barriers
   std::unordered_map<size_t, kir::Sync*> war_hazard_syncs;
@@ -53,6 +54,7 @@ struct KernelSummary {
 //!  by a Fusion object. The goal is to have the Kernel object
 //!  own the Kernel IR nodes
 //!
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public NonCopyable {
  public:
   Kernel() = default;

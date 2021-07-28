@@ -77,12 +77,10 @@ using ExclusivelyOwnedTypes = ::testing::Types<
 
 TYPED_TEST_CASE(ExclusivelyOwnedTest, ExclusivelyOwnedTypes);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(ExclusivelyOwnedTest, DefaultConstructor) {
   c10::ExclusivelyOwned<TypeParam> defaultConstructed;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(ExclusivelyOwnedTest, MoveConstructor) {
   auto movedDefault = std::move(this->defaultConstructed);
   auto movedSample = std::move(this->sample);

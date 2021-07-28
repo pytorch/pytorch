@@ -115,8 +115,9 @@ Tensor* computeMean(
     mean_dims_expr = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
-      mean_dims_expr.push_back(idx);
+      mean_dims_expr.emplace_back(idx);
     }
   }
   return new Tensor(
@@ -134,6 +135,7 @@ Tensor* computeAdaptiveAvgPool2d(
     dtype = Dtype(*outputType);
   }
   BufHandle ResultBuf("adaptive_avgpool2d", outputShape, dtype);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto out_size_param = c10::get<IntList>(inputs[1]);
   return new Tensor(
       ResultBuf.node(),

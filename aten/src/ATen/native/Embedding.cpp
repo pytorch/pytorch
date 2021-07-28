@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/native/BinaryOps.h>
 
 #include <c10/util/irange.h>
 
@@ -93,6 +93,19 @@ Tensor embedding_dense_backward_cpu(
   int64_t numel = indices.numel();
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
 
+  auto add_iter = TensorIteratorConfig()
+    .add_output(grad_weight)
+    .add_input(grad_weight)
+    .add_input(grad)
+    .resize_outputs(false)
+    .declare_static_shape(grad.sizes(), /*squash_dims=*/0)
+    .build();
+
+  const auto gW_data = reinterpret_cast<char*>(grad_weight.data_ptr());
+  const auto gO_data = reinterpret_cast<char*>(grad.data_ptr());
+  const auto gW_stride = grad_weight.strides()[0] * grad_weight.element_size();
+  const auto gO_stride = grad.strides()[0] * grad.element_size();
+
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cpu", [&] () {
     auto indices_data = indices_contig.data_ptr<index_t>();
 
@@ -109,6 +122,7 @@ Tensor embedding_dense_backward_cpu(
     }
 
     auto parallel_section = [&](index_t start, index_t end) {
+      TensorIterator iter(add_iter);
       for (int64_t i = 0; i < numel; i++) {
         if (indices_data[i] != padding_idx) {
           index_t k = indices_data[i];
@@ -118,17 +132,19 @@ Tensor embedding_dense_backward_cpu(
               // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
               scale /= counts[k];
             }
-            grad_weight[k].add_(grad[i], scale);
+
+            // grad_weight[k].add_(grad[i], scale);
+            iter.unsafe_replace_operand(0, gW_data + k * gW_stride);
+            iter.unsafe_replace_operand(1, gW_data + k * gW_stride);
+            iter.unsafe_replace_operand(2, gO_data + i * gO_stride);
+            add_stub(kCPU, iter, scale);
           }
         }
       }
     };
 
-    if (numel > 1000) {
-      at::parallel_for(0, num_weights, 0, parallel_section);
-    } else {
-      parallel_section(0, num_weights);
-    }
+    at::parallel_for(0, num_weights, 1000, parallel_section);
+
   });
 
   return grad_weight;

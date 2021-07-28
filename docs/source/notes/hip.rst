@@ -112,6 +112,13 @@ hipFFT/rocFFT plan cache
 
 Setting the size of the cache for hipFFT/rocFFT plans is not supported.
 
+.. _torch-distributed-backends:
+
+torch.distributed backends
+--------------------------
+
+Currently, only the "nccl" and "gloo" backends for torch.distributed are supported on ROCm.
+
 Refer to CUDA Semantics doc
 ---------------------------
 

@@ -12,7 +12,7 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 from .quantization_types import Pattern
-from .qconfig_utils import QConfigAny
+from ..qconfig import QConfigAny
 from .match_utils import (
     find_matches,
 )
@@ -156,12 +156,15 @@ def convert(model: GraphModule, is_reference: bool = False,
         convert_custom_config_dict = {}
     patterns, node_name_to_scope, prepare_custom_config_dict = restore_state(model)
     qconfig_map: Dict[str, QConfigAny] = model._qconfig_map  # type: ignore[assignment]
-    # always run weight observers in the top level forward method
-    # for dynamic quant ops or weight only quant ops
-    run_weight_observers(model)
 
-    # move to cpu since we only have quantized cpu kernels
-    model.eval().cpu()
+    # TODO this should be removed now that gpu support for quantization is being supported.
+    # however in practice, as of 7/22/2021, certain functions that get called by convert expect
+    # only cpu arguments.
+    # As an example, in TestQuantizeFxModels.test_qat_functional_linear when device='cuda',
+    # fold_weight will call quantized::linear_prepack which doesn't support QuantizedCuda backend.
+    if not is_reference:
+        model.cpu()
+
     # mapping from fully qualified module name to module instance
     # for example,
     # {
@@ -187,6 +190,10 @@ def convert(model: GraphModule, is_reference: bool = False,
         # inputs, and scale the weight
         weight_eq_obs_dict = update_obs_for_equalization(model, modules)
         convert_eq_obs(model, modules, weight_eq_obs_dict)
+
+    # always run weight observers in the top level forward method
+    # for dynamic quant ops or weight only quant ops
+    run_weight_observers(model)
 
     quantized_graph = Graph()
     env: Dict[str, Dict[Optional[torch.dtype], Node]] = defaultdict(lambda: defaultdict(Node))  # type: ignore[arg-type]

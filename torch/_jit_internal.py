@@ -836,12 +836,17 @@ def is_dict(ann) -> bool:
             getattr(ann, '__origin__', None) is dict)
 
 def is_union(ann):
+    if ann is Optional:
+        raise_error_container_parameter_missing("Optional")
     if ann is Union:
         raise_error_container_parameter_missing("Union")
 
-    return (hasattr(ann, '__module__') and
-            ann.__module__ == 'typing' and
-            (getattr(ann, '__origin__', None) is Union))
+    if not hasattr(ann, '__module__') or not ann.__module__ == 'typing':
+        return False
+
+    typ = getattr(ann, '__origin__', None)
+
+    return typ is Union or typ is Optional
 
 def is_future(ann) -> bool:
     if ann is Future:
@@ -998,23 +1003,31 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    fields = list(obj._fields)
+    if hasattr(obj, "_field_defaults"):
+        defaults = [obj._field_defaults[field]
+                    for field in obj._fields
+                    if field in obj._field_defaults]
+    else:
+        defaults = []
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
-    for field in fields:
+    for field in obj._fields:
         if has_annotations and field in obj.__annotations__:
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
-    return type(obj).__name__, fields, annotations
+    return type(obj).__name__, obj._fields, annotations, defaults
 
 
-def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
+def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
+    if sys.version_info < (3, 7, 0):
+        TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[no-redef, misc]
+        TupleType.__new__.__defaults__ = defaults    # type: ignore[attr-defined]
+    else:
+        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
-
 
 @contextlib.contextmanager
 def _disable_emit_hooks():
@@ -1068,7 +1081,8 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Dict")
     elif target_type is None or target_type is Optional:
         raise_error_container_parameter_missing("Optional")
-
+    elif target_type is Union:
+        raise_error_container_parameter_missing("Union")
 
 # supports List/Dict/Tuple and Optional types
 # TODO support future
@@ -1167,6 +1181,8 @@ class _TensorExtractor(pickle.Pickler):
         # Futures and RRefs don't technically contain a value, they just offer
         # the means to access a value.
         if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, torch.cuda.Event):
             return ""
         return None
 

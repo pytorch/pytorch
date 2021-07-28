@@ -1,6 +1,7 @@
 #include <THC/THCCachingHostAllocator.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/cuda/detail/CUDAHooks.h>
 
 
 #include <cuda_runtime_api.h>
@@ -88,7 +89,7 @@ struct HostAllocator
     // So we grab any existing primary context, if available.
     // See pytorch/pytorch#21081.
     at::OptionalDeviceGuard device_guard;
-    auto primary_ctx_device_index = at::detail::getCUDAHooks().getDevceIndexWithPrimaryContext();
+    auto primary_ctx_device_index = at::cuda::detail::getDeviceIndexWithPrimaryContext();
     if (primary_ctx_device_index.has_value()) {
       device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
@@ -173,6 +174,8 @@ struct HostAllocator
 
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
+        // ignore and clear the error if not ready
+        cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         return err;
@@ -273,7 +276,6 @@ static void THCCachingHostDeleter(void* ptr) {
 
 struct THCCachingHostAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
-    THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
     return {ptr, ptr, &THCCachingHostDeleter, at::DeviceType::CPU};
