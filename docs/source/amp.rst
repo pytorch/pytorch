@@ -7,7 +7,7 @@ Automatic Mixed Precision package - torch.cuda.amp
 .. automodule:: torch.cuda.amp
 .. currentmodule:: torch.cuda.amp
 
-``torch.cuda.amp`` and ``torch`` provide convenience methods for mixed precision,
+:class:`torch.cuda.amp` and :class:`torch` provide convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
 use ``torch.float16`` (``half``). Some ops, like linear layers and convolutions,
 are much faster in ``float16``. Other ops, like reductions, often require the dynamic
