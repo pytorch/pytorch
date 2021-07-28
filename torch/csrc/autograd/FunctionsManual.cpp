@@ -3516,108 +3516,109 @@ Tensor i1e_backward(
 // L_grad = [-Z L^{-1}]^H.
 // After inserting U_grad and L_grad into (!!!) we get the value for LU_grad.
 
-Tensor lu_solve_backward_lu_data(
+std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU_data,
   const Tensor& LU_pivots
 ) {
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{});
+  }
+
   Tensor P, L, U;
   std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
 
   auto n = LU_data.size(-1);
   auto nrhs = self.size(-1);
 
-  // X = -L^{-1} P^T B grad^H
-  auto X = -std::get<0>(at::triangular_solve(
-    (nrhs < n) ? P.transpose(-2, -1).matmul(self) : P.transpose(-2, -1),
-    L,
-    /*upper=*/false,
-    /*transpose=*/false,
-    /*unitriangular=*/true
-  ));
-  if (nrhs >= n) {
-    X = X.matmul(self);
-  }
-  X = X.matmul(grad.transpose(-2, -1).conj());
-
-  // X <- X U^{-1}
-  X = std::get<0>(at::triangular_solve(
-    X.transpose(-2, -1).conj(),
-    U.transpose(-2, -1).conj(),
-    /*upper=*/false,
-    /*transpose=*/false,
-    /*unitriangular=*/false
-  )).transpose(-2, -1).conj();
-
-  // U_grad = [U^{-1} X]^H
-  auto U_grad = std::get<0>(at::triangular_solve(
-    X,
-    U,
-    /*upper=*/true,
-    /*transpose=*/false,
-    /*unitriangular=*/false
-  )).transpose(-2, -1).conj();
-
-  // L_grad = L^{-H} X^H
-  auto L_grad = std::get<0>(at::triangular_solve(
-    X.transpose(-2, -1).conj(),
-    L.transpose(-2, -1).conj(),
-    /*upper=*/true,
-    /*transpose=*/false,
-    /*unitriangular=*/true
-  ));
-
-  // Suppose
-  // 1 = ones(n, n)
-  // 1_U = 1.tril()
-  // 1_L = 1 - 1_U (note zero diagonal),
-  // * - the elementwise product.
-  //
-  // LU_data could be represented as
-  // LU_data = L + U - I, so
-  // dLU_data = dL + dU.
-  // Since the diagonal of L is never explicitly exposed, it follows that
-  // diag(dL) = 0, and hence:
-  // dL = dLU_data * 1_L,
-  // dU = dLU_data * 1_U.
-  // These would imply:
-  // LU_data_grad = L_grad * 1_L + U_grad * 1_U
-
-  // we cannot kill the diagonal of L_grad in-place as this varible
-  // is needed in the triangular_solve's (double) backward,
-  // hence we need a tensor of diag(L_grad) that is going to be
-  // subtracted from L_grad
-  auto L_grad_diag_embed = at::diag_embed(L_grad.diagonal(0, -2, -1));
-
-  // LU_data_grad = L_grad * 1_L + U_grad * 1_U
-  auto LU_data_grad = L_grad.tril() - L_grad_diag_embed + U_grad.triu();
-  return LU_data_grad;
-}
-
-Tensor lu_solve_backward_self(
-  const Tensor& grad,
-  const Tensor& self,
-  const Tensor& LU_data,
-  const Tensor& LU_pivots
-) {
-  Tensor P, L, U;
-  std::tie(P, L, U) = at::lu_unpack(LU_data, LU_pivots);
-
   // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
-  return std::get<0>(at::triangular_solve(
-    std::get<0>(at::triangular_solve(
-      P.transpose(-2, -1),
+  Tensor self_grad;
+  if (self.requires_grad()) {
+    self_grad = std::get<0>(at::triangular_solve(
+      std::get<0>(at::triangular_solve(
+        P.transpose(-2, -1),
+        L,
+        /*upper=*/false,
+        /*transpose=*/false,
+        /*unitriangular=*/true
+      )),
+      U,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj().matmul(grad);
+  }
+
+  Tensor LU_data_grad;
+  if (LU_data.requires_grad()) {
+    // X = -L^{-1} P^T B grad^H
+    auto X = -std::get<0>(at::triangular_solve(
+      (nrhs < n) ? P.transpose(-2, -1).matmul(self) : P.transpose(-2, -1),
       L,
       /*upper=*/false,
       /*transpose=*/false,
       /*unitriangular=*/true
-    )),
-    U,
-    /*upper=*/true,
-    /*transpose=*/false,
-    /*unitriangular=*/false
-  )).transpose(-2, -1).conj().matmul(grad);
+    ));
+    if (nrhs >= n) {
+      X = X.matmul(self);
+    }
+    X = X.matmul(grad.transpose(-2, -1).conj());
+
+    // X <- X U^{-1}
+    X = std::get<0>(at::triangular_solve(
+      X.transpose(-2, -1).conj(),
+      U.transpose(-2, -1).conj(),
+      /*upper=*/false,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj();
+
+    // U_grad = [U^{-1} X]^H
+    auto U_grad = std::get<0>(at::triangular_solve(
+      X,
+      U,
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/false
+    )).transpose(-2, -1).conj();
+
+    // L_grad = L^{-H} X^H
+    auto L_grad = std::get<0>(at::triangular_solve(
+      X.transpose(-2, -1).conj(),
+      L.transpose(-2, -1).conj(),
+      /*upper=*/true,
+      /*transpose=*/false,
+      /*unitriangular=*/true
+    ));
+
+    // Suppose
+    // 1 = ones(n, n)
+    // 1_U = 1.tril()
+    // 1_L = 1 - 1_U (note zero diagonal),
+    // * - the elementwise product.
+    //
+    // LU_data could be represented as
+    // LU_data = L + U - I, so
+    // dLU_data = dL + dU.
+    // Since the diagonal of L is never explicitly exposed, it follows that
+    // diag(dL) = 0, and hence:
+    // dL = dLU_data * 1_L,
+    // dU = dLU_data * 1_U.
+    // These would imply:
+    // LU_data_grad = L_grad * 1_L + U_grad * 1_U
+
+    // we cannot kill the diagonal of L_grad in-place as this varible
+    // is needed in the triangular_solve's (double) backward,
+    // hence we need a tensor of diag(L_grad) that is going to be
+    // subtracted from L_grad
+    auto L_grad_diag_embed = at::diag_embed(L_grad.diagonal(0, -2, -1));
+
+    // LU_data_grad = L_grad * 1_L + U_grad * 1_U
+    LU_data_grad = L_grad.tril() - L_grad_diag_embed + U_grad.triu();
+  }
+
+  return std::make_tuple(self_grad, LU_data_grad);
 }
 
 Tensor lu_unpack_backward(
