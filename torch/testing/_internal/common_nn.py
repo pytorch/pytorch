@@ -5008,7 +5008,6 @@ def single_batch_reference_criterion_fn(*args):
 classification_criterion_no_batch = [
     ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9)),
     ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
-    ('KLDivLoss', lambda: F.logsigmoid(torch.randn(9)), lambda: torch.sigmoid(torch.randn(9))),
     ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
     ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
