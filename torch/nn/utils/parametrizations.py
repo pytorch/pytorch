@@ -76,11 +76,8 @@ class _SpectralNorm(Module):
         #     parallized module (by shared storage).
         #
         #    However, after we update `u` and `v` in-place, we need to **clone**
-        #    them after using them to normalize the weight, since using them to
-        #    normalize saves `u` and `v` for backward. We want to save a copy
-        #    of `u` and `v` that aren't saved for backward into `self._u` and `self._v`
-        #    so that they can be modified in-place in the second forard. This is to
-        #    support backproping through two forward passes, e.g., the common pattern in
+        #    them before using them to normalize the weight. This is to support
+        #    backproping through two forward passes, e.g., the common pattern in
         #    GAN training: loss = D(real) - D(fake). Otherwise, engine will
         #    complain that variables needed to do backward for the first forward
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
@@ -105,16 +102,17 @@ class _SpectralNorm(Module):
             weight_mat = self._reshape_weight_to_matrix(weight)
             if self.training:
                 self._power_method(weight_mat, self.n_power_iterations)
+            # See above on why we need to clone
+            if self.n_power_iterations > 0:
+                u = self._u.clone(memory_format=torch.contiguous_format)
+                v = self._v.clone(memory_format=torch.contiguous_format)
+            else:
+                u = self._u
+                v = self._v
             # The proper way of computing this should be through F.bilinear, but
             # it seems to have some efficiency issues:
             # https://github.com/pytorch/pytorch/issues/58093
-            sigma = torch.dot(self._u, torch.mv(weight_mat, self._v))
-
-            if self.n_power_iterations > 0:
-                with torch.autograd.no_grad():
-                    # See note above for why we need this clone
-                    self._u = self._u.clone(memory_format=torch.contiguous_format)
-                    self._v = self._v.clone(memory_format=torch.contiguous_format)
+            sigma = torch.dot(u, torch.mv(weight_mat, v))
             return weight / sigma
 
     def right_inverse(self, value: torch.Tensor) -> torch.Tensor:
