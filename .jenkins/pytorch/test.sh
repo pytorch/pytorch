@@ -10,6 +10,12 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # Get fully qualified path using realpath
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
+TORCH_INSTALL_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_LIB_PATH="$TORCH_INSTALL_PATH"/lib
+TORCH_TEST_PATH="$TORCH_INSTALL_PATH"/test
+TORCH_BIN_PATH="$TORCH_INSTALL_PATH"/bin
+BUILD_PATH="build"
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -174,9 +180,6 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_INSTALL_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch
-    TORCH_LIB_PATH="$TORCH_INSTALL_PATH"/lib
-    TORCH_TEST_PATH="$TORCH_INSTALL_PATH"/test
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -186,7 +189,6 @@ test_aten() {
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
       echo "Running wheel test with the install folder"
-      BUILD_PATH="build"
 
       # Init wheel-test enviroment
       # Rename the build folder when running test to ensure it
@@ -257,21 +259,34 @@ test_libtorch() {
     TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_libtorch
     mkdir -p $TEST_REPORTS_DIR
 
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Running libtorch test with the install folder"
+      mv "$BUILD_PATH" "$BUILD_PATH".bak
+      BUILD_BIN_PATH="$TORCH_BIN_PATH"
+    else
+      echo "Running libtorch test with the build folder"
+      BUILD_BIN_PATH="build/bin"
+    fi
+
     # Run JIT cpp tests
     python test/cpp/jit/tests_setup.py setup
     pwd
     ls -l .
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      build/bin/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$BUILD_BIN_PATH"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
-      build/bin/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$BUILD_BIN_PATH"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-    build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$BUILD_BIN_PATH"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$BUILD_BIN_PATH"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    "$BUILD_BIN_PATH"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      mv"$BUILD_PATH".bak "$BUILD_PATH"
+    fi
     assert_git_not_dirty
   fi
 }
