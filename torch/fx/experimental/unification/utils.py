@@ -1,6 +1,3 @@
-from toolz.compatibility import map  # type: ignore[import]
-
-
 def hashable(x):
     try:
         hash(x)

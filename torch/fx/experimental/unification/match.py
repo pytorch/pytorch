@@ -1,7 +1,7 @@
 from .core import unify, reify  # type: ignore[attr-defined]
 from .variable import isvar
 from .utils import _toposort, freeze
-from toolz import groupby, first  # type: ignore[import]
+from .unification_tools import groupby, first  # type: ignore[import]
 
 
 class Dispatcher(object):

@@ -1,7 +1,7 @@
 from collections.abc import Iterator  # type: ignore[import]
 from functools import partial
 
-from toolz import assoc  # type: ignore[import]
+from .unification_tools import assoc  # type: ignore[import]
 from .utils import transitive_get as walk
 from .variable import isvar
 from .dispatch import dispatch
