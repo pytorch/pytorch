@@ -861,7 +861,7 @@ def max_unpool1d(
         output_size = output_size + [1]
     else:
         output_size = output_size + (1,)
-    return torch._C._nn.max_unpool2d(input.unsqueeze(3), indices.unsqueeze(3), output_size).squeeze(3)
+    return torch._C._nn.max_unpool2d(input.unsqueeze(-1), indices.unsqueeze(-1), output_size).squeeze(-1)
 
 
 def max_unpool2d(
@@ -4164,8 +4164,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 4:
-            assert len(pad) == 4, "4D tensors expect 4 values for padding"
+        elif len(pad) == 4 and (input.dim() == 3 or input.dim() == 4):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad2d(input, pad)
             elif mode == "replicate":
@@ -4175,8 +4174,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
 
-        elif input.dim() == 5:
-            assert len(pad) == 6, "5D tensors expect 6 values for padding"
+        elif len(pad) == 6 and (input.dim() == 4 or input.dim() == 5):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad3d(input, pad)
             elif mode == "replicate":
