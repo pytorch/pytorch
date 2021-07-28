@@ -5520,7 +5520,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     OpInfo('diff',
            op=torch.diff,
-           supports_forward_ad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diff),
@@ -6038,7 +6037,6 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, *[torch.bfloat16] if CUDA11OrLater else []),
            supports_inplace_autograd=False,
-           supports_forward_ad=True,
            # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
            check_batched_grad=False,
            check_batched_gradgrad=False,
@@ -7046,7 +7044,6 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('square',
                    ref=np.square,
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-                   supports_forward_ad=True,
                    decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
                    supports_forward_ad=True,
                    skips=(
@@ -7634,7 +7631,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            assert_autodiffed=True,
-           supports_forward_ad=True,
            sample_inputs_func=sample_unsqueeze),
     OpInfo('var',
            dtypes=floating_and_complex_types_and(torch.half),
