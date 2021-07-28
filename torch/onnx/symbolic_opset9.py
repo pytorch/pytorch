@@ -1389,6 +1389,7 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 
 @parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
+    sym_help.check_training_mode(use_input_stats, "instance_norm")
     channel_size = sym_help._get_tensor_dim_size(input, 1)
     if weight is None or sym_help._is_none(weight):
         if channel_size is None:
@@ -1408,7 +1409,9 @@ def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_s
         return g.op("InstanceNormalization", input, weight, bias, epsilon_f=eps)
     else:
         input_size = sym_help._get_tensor_sizes(input)
-        # if input shape is [N, C, H, W], reshape to [1, N * C, H, W] and call batch_norm
+        # If input shape is [N, C, H, W], reshape to [1, N * C, H, W] and call batch_norm.
+        # For more information :
+        # https://github.com/pytorch/pytorch/blob/9baf75c86edc7f6cd1c04bf9f42d18bc0d05f504/aten/src/ATen/native/Normalization.cpp#L532
         input_size_reshape = input_size.copy()
         n = input_size[0]
         c = input_size[1]
