@@ -9,6 +9,19 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/Math.h>
 
+namespace {
+
+template <typename scalar_t>
+static __noinline__ C10_HOST_DEVICE scalar_t
+calc_polygamma_cuda(int n, scalar_t x) {
+  // already blocked if n <= 1
+  return ((n % 2) ? 1.0 : -1.0) *
+      ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
+      zeta<scalar_t, /*is_cuda=*/true>(static_cast<scalar_t>(n + 1), x);
+}
+
+} // namespace
+
 namespace at { namespace native {
 
 void digamma_kernel_cuda(TensorIteratorBase& iter) {
@@ -25,7 +38,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "polygamma_cuda", [&]() {
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_polygamma<scalar_t, /*is_cuda=*/true>(int(n), a);
+        return calc_polygamma_cuda(static_cast<int>(n), a);
       });
     });
   }

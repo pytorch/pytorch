@@ -71,7 +71,7 @@ void xlog1py_kernel_cuda(TensorIteratorBase& iter) {
 
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t q) -> scalar_t {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t x, scalar_t q) -> scalar_t {
       return zeta<scalar_t, /*is_cuda=*/true>(x, q);
     });
   });

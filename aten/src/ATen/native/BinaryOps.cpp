@@ -372,19 +372,19 @@ Tensor& special_xlog1py_out(const Tensor& self, const Scalar& other, Tensor& res
 }
 
 Tensor special_zeta(const Scalar& x, const Tensor& y) {
-  return at::special_zeta(wrapped_scalar_tensor(x), y);
+  return at::special_zeta(wrapped_scalar_tensor(x, y.device()), y);
 }
 
 Tensor special_zeta(const Tensor& x, const Scalar& y) {
-  return at::special_zeta(x, wrapped_scalar_tensor(y));
+  return at::special_zeta(x, wrapped_scalar_tensor(y, x.device()));
 }
 
 Tensor& special_zeta_out(const Scalar& self, const Tensor& other, Tensor& result) {
-  return at::special_zeta_out(result, wrapped_scalar_tensor(self), other);
+  return at::special_zeta_out(result, wrapped_scalar_tensor(self, other.device()), other);
 }
 
 Tensor& special_zeta_out(const Tensor& self, const Scalar& other, Tensor& result) {
-  return at::special_zeta_out(result, self, wrapped_scalar_tensor(other));
+  return at::special_zeta_out(result, self, wrapped_scalar_tensor(other, self.device()));
 }
 
 TORCH_IMPL_FUNC(atan2_out) (const Tensor& self, const Tensor& other, const Tensor& result) {
