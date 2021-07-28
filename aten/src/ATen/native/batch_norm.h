@@ -32,6 +32,22 @@ static scalar_t* conditional_data_ptr(const Tensor& t) {
                      : nullptr;
 }
 
+inline ScalarType first_type() {
+  return ScalarType::Undefined;
+}
+
+template <typename... Args>
+inline ScalarType first_type(const Tensor& arg, const Args&... parameters) {
+  return arg.defined() ? arg.scalar_type() : first_type(parameters...);
+}
+
+template <typename... Args>
+inline bool is_mixed_type(const Tensor& input, const Args&... parameters) {
+  const auto parameter_type = first_type(parameters...);
+  return ((parameter_type != ScalarType::Undefined) &&
+          (parameter_type != input.scalar_type()));
+}
+
 } // namespace native
 
 } // namespace at

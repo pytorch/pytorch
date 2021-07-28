@@ -135,7 +135,7 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
   return std::make_tuple(output, save_mean, save_invstd);
 }
 
-template<typename scalar_t, template<typename T> class VarTransform>
+template<typename scalar_t, typename param_t, template<typename T> class VarTransform>
 std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
     double momentum, double eps) {
@@ -146,6 +146,36 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   int64_t n = input.numel() / n_input;
   const int64_t ndim = input.dim();
 
+  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+
+  bool all_contiguous = is_contiguous(input);
+  if (all_contiguous) {
+    const auto options = running_mean.defined() ? running_mean.options() : input.options();
+    auto _mean = at::empty({n_input}, options);
+    auto _var_sum = at::empty({n_input}, options);
+    auto _mean_a = _mean.accessor<param_t, 1>();
+    auto _var_sum_a = _var_sum.accessor<param_t, 1>();
+
+    batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
+
+    parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
+      for (int64_t f = b_begin; f < b_end; ++f) {
+        _var_sum_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
+
+        if (running_mean.defined()) {
+          running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
+        }
+        if (running_var.defined()) {
+           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
+           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+        }
+      }
+    });
+    return std::make_tuple(_mean, _var_sum);
+  }
+
+  // non-contiguous path
   // Reduce all dimensions except dim=1
   DimVector reduce_dims(ndim - 1);
   reduce_dims[0] = 0;
@@ -158,37 +188,6 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   auto save_mean_a = save_mean.accessor<scalar_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<scalar_t, 1>();
 
-  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
-
-  bool all_contiguous = is_contiguous(input);
-  if (all_contiguous) {
-    auto _mean = at::empty({n_input}, input.options());
-    auto _var_sum = at::empty({n_input}, input.options());
-    auto _mean_a = _mean.accessor<scalar_t, 1>();
-    auto _var_sum_a = _var_sum.accessor<scalar_t, 1>();
-
-    batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
-
-    parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
-      for (int64_t f = b_begin; f < b_end; ++f) {
-        save_mean_a[f] = _mean_a[f];
-        save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
-
-        if (running_mean.defined()) {
-          running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
-        }
-        if (running_var.defined()) {
-           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
-           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
-        }
-      }
-    });
-
-    return std::make_tuple(save_mean, save_var_transform);
-  }
-
-  // non-contiguous path
   auto channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
@@ -584,8 +583,13 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   const Tensor& running_mean = *running_mean_maybe_owned;
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
+  const bool mixed_type = is_mixed_type(self, running_mean, running_var);
   return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
-      return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
+      if (mixed_type) {
+        return batch_norm_cpu_update_stats_template<scalar_t, float, Var>(self, running_mean, running_var, momentum, 0);
+      } else {
+        return batch_norm_cpu_update_stats_template<scalar_t, scalar_t, Var>(self, running_mean, running_var, momentum, 0);
+      }
     });
 }
 
@@ -600,12 +604,18 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10:
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
+  const bool mixed_type = is_mixed_type(self, weight, bias, running_mean, running_var);
   return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "batch_norm", [&] {
       if (!train) {
         return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
       } else {
-        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
+        if (mixed_type) {
+          auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, float, InvStd>(self, running_mean, running_var, momentum, eps);
+          return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
+        } else {
+          auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
+          return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
+        }
       }
     });
 }
