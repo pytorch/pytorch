@@ -18,7 +18,7 @@ class Function {
   bool run(Stack& stack) const;
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
-  const c10::QualifiedName& qualname() const;
+  TORCH_API const c10::QualifiedName& qualname() const;
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool
   append_operator(const std::string& name, const std::string& overload_name, const c10::optional<int>& num_specified_args, int64_t model_version /* TODO: T90339189 deprecate all v3 when v3 models are removed */);
