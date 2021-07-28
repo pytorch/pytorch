@@ -408,6 +408,10 @@ void initJITBindings(PyObject* module) {
           py::arg("value_name_pairs") =
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
+      // RemoveInplaceOps is used by CoreML so it must be removed with care.
+      .def(
+          "_jit_pass_remove_inplace_ops",
+          [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
       .def(
           "_jit_pass_create_functional_graphs",
           [](std::shared_ptr<Graph>& g) { return CreateFunctionalGraphs(g); })
