@@ -132,7 +132,6 @@ class TestBasePruner(TestCase):
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
             assert type(module.parametrizations.weight[0]) == PruningParametrization
-        return True
 
     def _check_pruner_converted(self, model, pruner, device):
         for g in pruner.module_groups:
@@ -140,21 +139,18 @@ class TestBasePruner(TestCase):
             assert module.weight.device == device
             assert not hasattr(module, "parametrizations")
             assert not hasattr(module, 'mask')
-        return True
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for g in pruner.module_groups:
             module = g['module']
             assert module.weight.device == device
             assert module.parametrizations.weight[0].pruned_outputs == set()
-        return True
 
     def _check_pruner_valid_after_step(self, model, pruner, pruned_set, device):
         for g in pruner.module_groups:
             module = g['module']
             assert module.weight.device == device
             assert module.parametrizations.weight[0].pruned_outputs == pruned_set
-        return True
 
     def _test_constructor_on_device(self, model, device):
         self.assertRaisesRegex(TypeError, 'with abstract methods update_mask',
@@ -183,7 +179,7 @@ class TestBasePruner(TestCase):
         x = torch.ones(128, 16)
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
-        assert self._check_pruner_prepared(model, pruner, device)
+        self._check_pruner_prepared(model, pruner, device)
         assert model(x).shape == (128, 16)
 
     def test_prepare_linear(self):
@@ -197,7 +193,7 @@ class TestBasePruner(TestCase):
         x = torch.ones((1, 1, 28, 28))
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
-        assert self._check_pruner_prepared(model, pruner, device)
+        self._check_pruner_prepared(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_prepare_conv2d(self):
@@ -211,7 +207,7 @@ class TestBasePruner(TestCase):
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
-        assert self._check_pruner_converted(model, pruner, device)
+        self._check_pruner_converted(model, pruner, device)
         assert model(x).shape == (128, 16)
 
     def test_convert_linear(self):
@@ -226,7 +222,7 @@ class TestBasePruner(TestCase):
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.convert()
-        assert self._check_pruner_converted(model, pruner, device)
+        self._check_pruner_converted(model, pruner, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_convert_conv2d(self):
@@ -241,17 +237,17 @@ class TestBasePruner(TestCase):
             pruner = SimplePruner(model, None, None)
             pruner.prepare()
             pruner.enable_mask_update = True
-            assert self._check_pruner_valid_before_step(model, pruner, device)
+            self._check_pruner_valid_before_step(model, pruner, device)
             pruner.step()
-            assert self._check_pruner_valid_after_step(model, pruner, {1}, device)
+            self._check_pruner_valid_after_step(model, pruner, {1}, device)
         else:
             x = torch.ones(7, 7)
             pruner = MultiplePruner(model, None, None)
             pruner.prepare()
             pruner.enable_mask_update = True
-            assert self._check_pruner_valid_before_step(model, pruner, device)
+            self._check_pruner_valid_before_step(model, pruner, device)
             pruner.step()
-            assert self._check_pruner_valid_after_step(model, pruner, {1, 2}, device)
+            self._check_pruner_valid_after_step(model, pruner, {1, 2}, device)
 
     def test_step_linear(self):
         basic_models = [Linear(), LinearB()]
@@ -268,9 +264,9 @@ class TestBasePruner(TestCase):
         pruner = SimplePruner(model, None, None)
         pruner.prepare()
         pruner.enable_mask_update = True
-        assert self._check_pruner_valid_before_step(model, pruner, device)
+        self._check_pruner_valid_before_step(model, pruner, device)
         pruner.step()
-        assert self._check_pruner_valid_after_step(model, pruner, {1}, device)
+        self._check_pruner_valid_after_step(model, pruner, {1}, device)
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_step_conv2d(self):
