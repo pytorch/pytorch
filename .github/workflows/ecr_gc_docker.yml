@@ -1,0 +1,43 @@
+name: Garbage Collect ECR Images
+
+on:
+  schedule:
+    # Runs every 30 minutes
+    - cron: "*/30 * * * *"
+  # Have the ability to trigger this job manually using the API as well
+  workflow_dispatch:
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_ECR_GC_SECRET_KEY }}
+  AWS_REGION: us-east-1
+
+jobs:
+  ecr_gc:
+    runs-on: ubuntu-18.04
+    if: ${{ github.repository_owner == 'pytorch' }}
+    strategy:
+      matrix:
+        filter_prefix: [pytorch, caffe2, translate, tensorcomp]
+    env:
+      FILTER_PREFIX: ${{ matrix.filter_prefix }}
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Checkout PyTorch
+        uses: actions/checkout@v2
+      - name: Install requirements
+        run: pip3 install -r .circleci/ecr_gc_docker/requirements.txt
+      - name: Generate tags to keep
+        run: |
+          GENERATED_IMAGE_TAG=$(\
+            git log --oneline --pretty='%H' .circleci/docker \
+              | xargs -I '{}' git rev-parse '{}:.circleci/docker' \
+              | paste -sd "," -)
+          echo "export GENERATED_IMAGE_TAG='${GENERATED_IMAGE_TAG}'" >> "${BASH_ENV}"
+      - name: Run garbage collection
+        run: |
+          .circleci/ecr_gc_docker/gc.py --filter-prefix "${FILTER_PREFIX}" --ignore-tags "${GENERATED_IMAGE_TAG}"

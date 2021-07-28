@@ -5,6 +5,8 @@ name: Linux CI (periodic-pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+    types: [unassigned]
   schedule:
     - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
@@ -24,10 +26,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled'))
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
-    needs: []
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -100,7 +108,7 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: periodic-pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
