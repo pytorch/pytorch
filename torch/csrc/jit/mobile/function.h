@@ -3,6 +3,7 @@
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/operator_name.h>
+#include <unordered_map>
 #include <vector>
 
 namespace torch {
@@ -29,7 +30,7 @@ struct OperatorFunctionWithSchema {
   std::function<void(Stack&)> fn;
   c10::optional<int> num_specified_args;
 
-  [[nodiscard]] bool has_same_arg_num(
+  C10_NODISCARD bool has_same_arg_num(
       const c10::optional<int>& other_num_args) const {
     return other_num_args == num_specified_args;
   }
@@ -38,7 +39,7 @@ struct OperatorFunctionWithSchema {
 class Function {
  public:
   using OperatorCacheType =
-    std::unordered_map<c10::OperatorName, OperatorFunctionWithSchema>;
+      std::unordered_map<c10::OperatorName, OperatorFunctionWithSchema>;
 
   Function(c10::QualifiedName name);
   bool run(Stack& stack) const;
