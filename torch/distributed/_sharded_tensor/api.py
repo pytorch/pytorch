@@ -1,3 +1,4 @@
+import collections
 from dataclasses import dataclass
 from typing import (
     Dict,
@@ -136,7 +137,15 @@ class ShardedTensor(object):
         if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = list(size)
+        if len(size) == 1 and isinstance(size[0], collections.Sequence):
+            dims = list(*size)
+        else:
+            dims = list(size)
+
+        for dim in dims:
+            if not isinstance(dim, int):
+                raise TypeError(f'size has to be a sequence of ints, found: {type(dim)}')
+
         self._sharding_spec = sharding_spec
         self._process_group = (
             process_group
