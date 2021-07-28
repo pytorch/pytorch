@@ -4547,7 +4547,7 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
-def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, inplace=False, **kwargs):
     input = make_tensor((S,), device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
@@ -4555,7 +4555,6 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(input, kwargs=dict(p=0.0)),
         SampleInput(input, kwargs=dict(p=1.0)),
         SampleInput(input, kwargs=dict(training=False)),
-        # SampleInput(input, kwargs=dict(inplace=True)),
     ]
 
 
@@ -7894,7 +7893,16 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types(),
         sample_inputs_func=sample_inputs_dropout,
-    )
+    ),
+    OpInfo(
+        "nn.functional.dropout",
+        variant_test_name="inplace",
+        ref=_NOTHING,
+        supports_out=False,
+        dtypes=floating_types(),
+        sample_inputs_func=partial(sample_inputs_dropout),
+        inplace_variant=partial(torch.nn.functional.dropout, inplace=True),
+    ),
 ]
 
 # Common operator groupings
