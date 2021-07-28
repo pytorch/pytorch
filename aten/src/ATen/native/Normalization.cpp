@@ -244,7 +244,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
     grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
+    auto options = input.options();
+    grad_bias = at::empty({input.size(1)}, input.options());
   }
 
   // since we are directly manipulating pointers in contiguous path,
