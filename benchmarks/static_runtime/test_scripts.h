@@ -454,6 +454,23 @@ const auto clamp_script_2 = R"JIT(
       return (a)
 )JIT";
 
+const auto full_script = R"JIT(
+  def forward(self,
+              size: List[int],
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool]):
+      a = torch.full(size,
+                     fill_value,
+                     dtype=dtype,
+                     layout=layout,
+                     device=device,
+                     pin_memory=pin_memory)
+      return (a.clone())
+)JIT";
+
 const auto full_like_script = R"JIT(
   def forward(self,
               a: Tensor,
