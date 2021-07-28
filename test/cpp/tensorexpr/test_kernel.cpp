@@ -28,7 +28,6 @@ class Kernel : public ::testing::Test {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, InliningIntermediates) {
   // here, each mul has only one use, so it should be completely inlined
   {
@@ -88,7 +87,6 @@ TEST_F(Kernel, InliningIntermediates) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _1) {
   KernelScope kernel_scope;
 
@@ -101,11 +99,8 @@ TEST_F(Kernel, _1) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
@@ -126,13 +121,11 @@ TEST_F(Kernel, _1) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   o = stack[0].toTensor();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 5 * 3; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _2) {
   KernelScope kernel_scope;
 
@@ -145,12 +138,9 @@ TEST_F(Kernel, _2) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto b =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
@@ -171,13 +161,11 @@ TEST_F(Kernel, _2) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   o = stack[0].toTensor();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 5 * 3; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, _3) {
   KernelScope kernel_scope;
 
@@ -190,12 +178,9 @@ TEST_F(Kernel, _3) {
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({10, 6}, TensorOptions(kCPU).dtype(at::kFloat))
                .index({Slice(None, None, 2), Slice(None, None, 2)});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = a * (a * b);
   TensorExprKernel k(graph);
@@ -216,13 +201,11 @@ TEST_F(Kernel, _3) {
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   o = stack[0].toTensor();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t i = 0; i < 5 * 3; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, DISABLED_Shape_Inference) {
   // disabled: doesn't do stride propagation, and isn't being used currently
 
@@ -240,12 +223,9 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto b = at::rand({10, 6}, TensorOptions(kCPU).dtype(at::kFloat))
                  .index({Slice(None, None, 2), Slice(None, None, 2)});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
     auto ref = a * (a * b);
     TensorExprKernel k(graph);
@@ -266,7 +246,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
     o = stack[0].toTensor();
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 5 * 3; i++) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
@@ -284,11 +263,8 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto a = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto b = at::rand({8, 8}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto o = at::zeros({8, 4}, TensorOptions(kCPU).dtype(at::kFloat));
     auto t = torch::chunk(a * b, 2, 1);
     auto ref = t[0] * t[1];
@@ -310,7 +286,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     o = stack[0].toTensor();
     CHECK_EQ(o.sizes()[0], 8);
     CHECK_EQ(o.sizes()[1], 4);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t i = 0; i < 8 * 4; i++) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
@@ -393,13 +368,9 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto o = at::zeros({5, 19, 2}, TensorOptions(kCPU).dtype(at::kFloat));
     auto ref = at::cat({a, b, c}, 1);
 
@@ -484,7 +455,6 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatInputTypesPromotion) {
   {
     // Test that we properly promote input types for aten::cat
@@ -501,11 +471,8 @@ TEST_F(Kernel, CatInputTypesPromotion) {
     auto graph = std::make_shared<Graph>();
     parseIR(graph_string, &*graph);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kDouble));
     auto ref = at::cat({a, b, c}, 1);
 
@@ -545,7 +512,6 @@ TEST_F(Kernel, CatInputTypesPromotion) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, CatWoConditionals) {
   getCatWoConditionals() = true;
   const auto graph_string = R"IR(
@@ -581,11 +547,8 @@ TEST_F(Kernel, CatWoConditionals) {
 # CHECK-NEXT: aten_cat)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({5, 7, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto c = at::rand({5, 9, 2}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = at::cat({a, b, c}, 1);
 
@@ -607,6 +570,73 @@ TEST_F(Kernel, CatWoConditionals) {
   for (size_t i = 0; i < num_el; i++) {
     CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
+  getCatWoConditionals() = false;
+}
+
+TEST_F(Kernel, OptimizeConditionals) {
+  bool old_cat_wo_conditionals = getCatWoConditionals();
+  bool old_opt_conditionals = getOptConditionals();
+  getCatWoConditionals() = false;
+  getOptConditionals() = true;
+  const auto graph_string = R"IR(
+      graph(%a : Float(5, 3, strides=[3, 1], device=cpu),
+            %b : Float(5, 7, strides=[7, 1], device=cpu),
+            %c : Float(5, 9, strides=[9, 1], device=cpu)):
+        %dim : int = prim::Constant[value=1]()
+        %inputs : Tensor[] = prim::ListConstruct(%a, %b, %c)
+        %r : Float(5, 19, strides=[19, 1]) = aten::cat(%inputs, %dim)
+        %t : Float(5, 19, strides=[19, 1]) = aten::relu(%r)
+        return (%t))IR";
+
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  TensorExprKernel k(graph);
+  Stmt* s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for
+# CHECK-NEXT: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK: for
+# CHECK-NEXT: aten_relu
+# CHECK-NOT: Allocate
+# CHECK-NOT: Free)IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto b = at::rand({5, 7}, TensorOptions(kCPU).dtype(at::kFloat));
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  auto c = at::rand({5, 9}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = at::relu(at::cat({a, b, c}, 1));
+
+  std::vector<at::Tensor> inputs = {a, b, c};
+  std::vector<IValue> stack = fmap<IValue>(inputs);
+  k.run(stack);
+  auto o = stack[0].toTensor();
+
+  // Check sizes
+  CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  CHECK_EQ(o.dtype(), ref.dtype());
+  size_t num_el = 1;
+  for (size_t idx = 0; idx < ref.sizes().size(); idx++) {
+    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    num_el *= ref.sizes()[idx];
+  }
+
+  // Check the contents
+  for (size_t i = 0; i < num_el; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+  getOptConditionals() = old_opt_conditionals;
+  getCatWoConditionals() = old_cat_wo_conditionals;
 }
 
 namespace {
@@ -636,26 +666,24 @@ at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_SumAllAxes) {
-  // [zero-dim tensors]
-  // NNC does not yet handle zero-dim tensors. aten::sum with no axis
-  // input returns a zero-dim tensors, so these tests must be disabled
-  // until we add support for zero-dim tensors.
-
+TEST_F(Kernel, SumAllAxes) {
   // Test lowering of sum on all axes.
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
         %1 : ${dtype}
-        %2 : Tensor = aten::sum(%0, %1)
+        %2 : ${out_dtype}(requires_grad=0, device=cpu) = aten::sum(%0, %1)
         return (%2))IR";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (auto scalar_type : {ScalarType::Undefined, ScalarType::Double}) {
     KernelScope kernel_scope;
     TemplateEnv env;
     env.s("dtype", dtypeConstant(scalar_type));
+    if (scalar_type == ScalarType::Undefined) {
+      env.s("out_dtype", "Float");
+    } else {
+      env.s("out_dtype", "Double");
+    }
     const auto graph_string = format(graph_template, env);
 
     auto graph = std::make_shared<Graph>();
@@ -703,7 +731,6 @@ std::string li_to_str(at::ArrayRef<int64_t> li) {
   return out.str();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumOneAxis) {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
@@ -713,7 +740,6 @@ TEST_F(Kernel, SumOneAxis) {
         %3 : ${dtype}
         %4 : ${out_dtype}(${size}, strides=[${strides}], device=cpu) = aten::sum(%0, %1, %2, %3)
         return (%4))IR";
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {
@@ -768,17 +794,16 @@ TEST_F(Kernel, SumOneAxis) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SumMultipleAxes) {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
+      graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], requires_grad=0, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
         %4 : bool = prim::Constant[value=${keepdim}]()
         %5 : ${dtype}
-        %6 : Float(${size}, strides=[${strides}]) = aten::sum(%0, %3, %4, %5)
+        %6 : Float(${size}, strides=[${strides}], requires_grad=0, device=cpu) = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
   auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
@@ -835,7 +860,6 @@ TEST_F(Kernel, SumMultipleAxes) {
 // This test and the following ones testing Softmax only tests with dim set
 // to one of the valid input dimensions. It does not test with dim=None
 // because that is supposed to be deprecated.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax2D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu)):
@@ -844,7 +868,6 @@ TEST_F(Kernel, Softmax2D) {
         %3 : Float(${size}, strides=[${strides}]) = aten::${op}(%0, %1, %2)
         return (%3))IR";
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   const std::string& verification_template =
@@ -904,7 +927,6 @@ TEST_F(Kernel, Softmax2D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax3D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(3, 4, 5, strides=[20, 5, 1], device=cpu)):
@@ -913,7 +935,6 @@ TEST_F(Kernel, Softmax3D) {
         %3 : Float(${size}, strides=[${strides}]) = aten::${op}(%0, %1, %2)
         return (%3))IR";
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({3, 4, 5}, TensorOptions(kCPU).dtype(at::kFloat));
 
   const std::string& verification_template =
@@ -985,7 +1006,6 @@ TEST_F(Kernel, Softmax3D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, Softmax4D) {
   const auto graph_template = R"IR(
       graph(%0 : Float(2, 3, 2, 3, strides=[18, 6, 3, 1], device=cpu)):
@@ -1069,18 +1089,16 @@ TEST_F(Kernel, Softmax4D) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
-  // see : [zero-dim tensors]
+TEST_F(Kernel, InlineProducerIntoReduction) {
   KernelScope kernel_scope;
 
   // Inline producer (mul) into reduction (sum).
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
-        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %2 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=7]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
+        %4 : Double(device=cpu) = aten::sum(%2, %3)
         return (%4))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -1100,9 +1118,7 @@ TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {a, b};
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -1112,10 +1128,7 @@ TEST_F(Kernel, DISABLED_InlineProducerIntoReduction) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
-  // see : [zero-dim tensors]
-
+TEST_F(Kernel, InlineReductionIntoConsumer) {
   KernelScope kernel_scope;
 
   // Inline producer (mul %2) into reduction (sum %4) but DO NOT
@@ -1125,8 +1138,8 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
             %1 : Float(5, 3, strides=[3, 1], device=cpu)):
         %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
         %3 : int = prim::Constant[value=6]()
-        %4 : Float(5, 3, strides=[3, 1]) = aten::sum(%2, %3)
-        %5 : Float(5, 3, strides=[3, 1]) = aten::mul(%2, %4)
+        %4 : Float(device=cpu) = aten::sum(%2, %3)
+        %5 : Float(5, 3, strides=[3, 1], device=cpu) = aten::mul(%2, %4)
         return (%5))IR";
   auto graph = std::make_shared<Graph>();
   parseIR(graph_string, &*graph);
@@ -1149,9 +1162,7 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
         # CHECK-NOT: for)IR";
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {a, b};
   std::vector<IValue> stack = fmap<IValue>(inputs);
@@ -1161,7 +1172,6 @@ TEST_F(Kernel, DISABLED_InlineReductionIntoConsumer) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, SanitizeNames_CUDA) {
   const auto graph_string = R"IR(
       graph(%0 : Float(5, 3, strides=[3, 1], device=cuda:0),
@@ -1175,9 +1185,7 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   graph->inputs().at(0)->setDebugName("aten::add:");
   graph->inputs().at(1)->setDebugName("aten::add_");
   TensorExprKernel k(graph);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto a = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto b = at::rand({5, 3}, TensorOptions(kCUDA).dtype(at::kFloat));
   auto ref = a * (a * b);
   std::vector<at::Tensor> inputs = {a, b};
@@ -1187,7 +1195,6 @@ TEST_F(Kernel, SanitizeNames_CUDA) {
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, ConstantTensors) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1206,19 +1213,16 @@ TEST_F(Kernel, ConstantTensors) {
 
   TensorExprKernel k(graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::rand({16, 16}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {x};
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto o = stack[0].toTensor();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = at::ones({16, 16}, TensorOptions(kCPU).dtype(at::kFloat));
   auto ref = x * y;
   ASSERT_TRUE(at::allclose(o, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(Kernel, ConstantTensorsNonContiguous) {
   const auto graph_string = R"IR(
         graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
@@ -1242,19 +1246,128 @@ TEST_F(Kernel, ConstantTensorsNonContiguous) {
 
   TensorExprKernel k(graph);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto x = at::rand({16, 16}, TensorOptions(kCPU).dtype(at::kFloat));
   std::vector<at::Tensor> inputs = {x};
   std::vector<IValue> stack = fmap<IValue>(inputs);
   k.run(stack);
   auto o = stack[0].toTensor();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto y = at::arange(0, 256, TensorOptions(kCPU).dtype(at::kFloat))
-               // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                .view({16, 16})
                .t();
   auto ref = x * y;
   ASSERT_TRUE(at::allclose(o, ref));
+}
+
+TEST_F(Kernel, RunFast) {
+#ifdef TORCH_ENABLE_LLVM
+  // TODO: Implement call_raw in IREval and remove the ifdef
+  KernelScope kernel_scope;
+
+  const auto graph_string = R"IR(
+      graph(%0 : Float(5, 3, strides=[3, 1], device=cpu),
+            %1 : Float(5, 3, strides=[1, 5], device=cpu)):
+        %2 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %1)
+        %3 : Float(5, 3, strides=[3, 1]) = aten::mul(%0, %2)
+        return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  auto a = at::rand({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto b =
+      at::rand({3, 5}, TensorOptions(kCPU).dtype(at::kFloat)).transpose(0, 1);
+  auto o = at::zeros({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto ref = a * (a * b);
+  TensorExprKernel k(graph);
+
+  k.runFast({a.data_ptr(), b.data_ptr()}, {o.data_ptr()});
+  for (size_t i = 0; i < 5 * 3; i++) {
+    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+  }
+#endif
+}
+
+TEST_F(Kernel, CodegenInspection) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+        graph(%x : Float(16, 16, strides=[16, 1], device=cpu)):
+          %none : NoneType = prim::Constant()
+          %dtype : int = prim::Constant[value=6]()
+          %c0 : int = prim::Constant[value=0]()
+          %c256 : int = prim::Constant[value=256]()
+          %c16 : int = prim::Constant[value=16]()
+          %y_flat : Tensor = aten::arange(%c0, %c256, %dtype, %none, %none, %none)
+          %sizes : int[] = prim::ListConstruct(%c16, %c16)
+          %y_t : Tensor = aten::view(%y_flat, %sizes)
+          %y : Tensor = aten::t(%y_t)
+          %z : Float(16, 16, strides=[16, 1], device=cpu) = aten::mul(%x, %y)
+          return (%z))IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+  // IRParser doesn't support tensor constants, so we generate several aten
+  // calls to produce non-contiguos constant tensor and then const-prop it
+  ConstantPropagation(graph);
+
+  TensorExprKernel k(graph);
+
+  // Check that we could retrieve generated assembly
+  auto asm_str = k.getCodeText("asm");
+  const std::string& asm_verification_pattern =
+      R"ASM(
+        # CHECK: .text
+        # CHECK: retq)ASM";
+  torch::jit::testing::FileCheck().run(asm_verification_pattern, asm_str);
+
+  // Check that we could retrieve info about codegen parameters
+  auto constants = k.getConstantDescriptors();
+  auto buf_args = k.getBufferArgs();
+  // Expected buf args: [input0, output0, constant0]
+  ASSERT_EQ(buf_args.size(), 3);
+  ASSERT_EQ(constants.size(), 1);
+  ASSERT_TRUE(
+      !buf_args[0].isVar() && !buf_args[1].isVar() && !buf_args[2].isVar());
+#endif
+}
+
+Tensor* lowerNanToNum(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  auto input_buf = c10::get<BufHandle>(inputs[0]);
+  auto e = Compute(
+      "custom_nan_to_num",
+      c10::fmap<DimArg>(outputShape),
+      [&](const std::vector<VarHandle>& axes) {
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
+        auto load = input_buf.load(indices);
+        return IfThenElse::make(Cast::make(kBool, isnan(load)), 0.0f, load);
+      });
+  return e;
+}
+
+TEST_F(Kernel, CustomLowering) {
+  const auto graph_string = R"IR(
+      graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
+          %none : NoneType = prim::Constant()
+          %y : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu) = aten::nan_to_num(%x, %none, %none, %none)
+          return (%y)
+)IR";
+  KernelScope kernel_scope;
+  auto graph = std::make_shared<Graph>();
+  parseIR(graph_string, &*graph);
+
+  std::unordered_map<c10::Symbol, NNCLoweringFunction> lowerings = {
+      {aten::nan_to_num, lowerNanToNum}};
+  TensorExprKernel k(graph, lowerings);
+
+  auto stmt = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *stmt;
+
+  // Check that our custom lowering is actually used
+  torch::jit::testing::FileCheck().check("custom_nan_to_num")->run(oss.str());
+  torch::jit::testing::FileCheck().check("isnan")->run(oss.str());
 }
 
 } // namespace jit

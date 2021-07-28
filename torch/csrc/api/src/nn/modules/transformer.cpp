@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/nn/init.h>
 #include <torch/nn/modules/transformerlayer.h>
 #include <torch/nn/modules/transformercoder.h>
@@ -201,7 +202,8 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (int64_t i = 0; i < options.num_layers(); ++i) {
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -218,7 +220,7 @@ void TransformerEncoderImpl::reset_parameters() {
     "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
 
   size_t num_layers = layers->size();
-  for (size_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     layers->at<TransformerEncoderLayerImpl>(i).reset_parameters();
   }
   // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
@@ -243,7 +245,7 @@ Tensor TransformerEncoderImpl::forward(
   if (num_layers > 0) {
     output = layers->at<TransformerEncoderLayerImpl>(0).forward(src, src_mask, src_key_padding_mask);
   }
-  for (size_t i = 1; i < num_layers; ++i) {
+  for (const auto i : c10::irange(1, num_layers)) {
     output = layers->at<TransformerEncoderLayerImpl>(i).forward(output, src_mask, src_key_padding_mask);
   }
 
@@ -263,7 +265,8 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
-  for (int64_t i = 0; i < options.num_layers(); ++i) {
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
+  for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }
 
@@ -281,7 +284,7 @@ void TransformerDecoderImpl::reset_parameters() {
     " decoder layers, but got ", layers->size());
 
   size_t num_layers = layers->size();
-  for (size_t i = 0; i < num_layers; ++i) {
+  for (const auto i : c10::irange(num_layers)) {
     layers->at<TransformerDecoderLayerImpl>(i).reset_parameters();
   }
   // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
@@ -315,7 +318,7 @@ Tensor TransformerDecoderImpl::forward(
       tgt_key_padding_mask,
       memory_key_padding_mask);
   }
-  for (size_t i = 1; i < num_layers; ++i) {
+  for (const auto i : c10::irange(1, num_layers)) {
     output = layers->at<TransformerDecoderLayerImpl>(i).forward(
       output,
       memory,
@@ -421,21 +424,17 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   TORCH_CHECK(sz >= 0,
     "Input size must be non-negative to genearte a valid square subsequent mask, but got ", sz);
 
-  Tensor mask = (torch::triu(torch::ones({sz, sz})) == 1).transpose(0, 1).to(torch::kFloat32);
-
   // check IEEE754 support here since -inf is not guaranteed to be valid on non IEEE754 platform
   if (std::numeric_limits<float>::is_iec559) {
-    mask = mask.masked_fill(mask == 0, -std::numeric_limits<float>::infinity()).masked_fill(mask == 1, 0.f);
+    return torch::triu(torch::full({sz, sz}, -std::numeric_limits<float>::infinity()), 1);
   }
   // if IEEE754 is not supported, we use the smallest float number in current platform
   else {
     TORCH_WARN_ONCE(
       "IEEE754 is not supporetd on this platform, generate_square_subsequent_mask will fill "
       "the mask with smallest float number on this platform instead of -inf");
-    mask = mask.masked_fill(mask == 0, std::numeric_limits<float>::lowest()).masked_fill(mask == 1, 0.f);
+    return torch::triu(torch::full({sz, sz}, std::numeric_limits<float>::lowest()), 1);
   }
-
-  return mask;
 }
 
 } // namespace nn

@@ -53,8 +53,8 @@ namespace at { namespace native { namespace {
  *      for (int n = 0; n < input_accessor.size(0); n++) {
  *        grid_sample_2d_grid_slice_iterator(
  *          grid_accessor[n],
- *          [&](const Vec256<scalar_t>& grid_x,
- *              const Vec256<scalar_t>& grid_y,
+ *          [&](const Vectorized<scalar_t>& grid_x,
+ *              const Vectorized<scalar_t>& grid_y,
  *              int64_t spatial_offset, int64_t len) {
  *            grid_sample.forward(out_accessor[n], input_accessor[n],
  *                                spatial_offset, grid_x, grid_y, len);
@@ -70,7 +70,7 @@ namespace at { namespace native { namespace {
  *
  *        template<typename scalar_t, GridSamplerPadding padding>
  *        struct ComputeLocation {
- *          using Vec = Vec256<scalar_t>;
+ *          using Vec = Vectorized<scalar_t>;
  *
  *          // ctor
  *          ComputeLocation(int64_t size);
@@ -151,8 +151,8 @@ namespace at { namespace native { namespace {
  *                (There might not be enough near boundary.)
 
  *       It should be callable as if it has declaration:
- *          void apply_fn(const Vec256<scalar_t>& grid_x,
- *                        const Vec256<scalar_t>& grid_y,
+ *          void apply_fn(const Vectorized<scalar_t>& grid_x,
+ *                        const Vectorized<scalar_t>& grid_y,
  *                        int64_t spatial_offset, int64_t len);
  *
  *      `apply_fn` will be called multiple times, and together cover the entire
@@ -166,7 +166,7 @@ namespace at { namespace native { namespace {
 
 using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
-using namespace at::vec256;
+using namespace at::vec;
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ComputeLocation ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -179,7 +179,7 @@ struct ComputeLocationBase;
 
 template<typename scalar_t>
 struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
 
   // values are clipped to between 0 and max_val
   const scalar_t max_val;
@@ -261,7 +261,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
 
 template<typename scalar_t>
 struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
 
   // values are clipped to between 0 and max_val
   const scalar_t max_val;
@@ -276,13 +276,11 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
   ComputeLocationBase(int64_t size)
     : max_val(static_cast<scalar_t>(size - 1))
     , scaling_factor(static_cast<scalar_t>(size) / 2)
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     , low(static_cast<scalar_t>(-0.5))
     , twice_span(static_cast<scalar_t>(size) * 2)
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
   }
 
@@ -346,7 +344,7 @@ struct ComputeLocation;
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Zeros, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::scaling_factor;
 
@@ -368,7 +366,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Zeros, align_corners>
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates_get_grad;
@@ -394,7 +392,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
 template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates;
   using ComputeLocationBase<scalar_t, align_corners>::clip_coordinates_get_grad;
@@ -455,9 +453,9 @@ struct ApplyGridSample;
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
                        padding, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vec256<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -544,25 +542,16 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
     auto interp_params = compute_interp_params(x, y);
 
     auto nw = std::get<4>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne = std::get<5>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw = std::get<6>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se = std::get<7>(interp_params);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto nw_mask = std::get<8>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto ne_mask = std::get<9>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto sw_mask = std::get<10>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto se_mask = std::get<11>(interp_params);
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_y_n = std::get<12>(interp_params);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     auto i_x_w = std::get<13>(interp_params);
 
     auto i_nw_offset = i_y_n * iVec(inp_sH) + i_x_w * iVec(inp_sW);
@@ -700,9 +689,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
                        padding, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vec256<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -805,9 +794,9 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
 template<typename scalar_t, GridSamplerPadding padding, bool align_corners>
 struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
                        padding, align_corners> {
-  using Vec = Vec256<scalar_t>;
+  using Vec = Vectorized<scalar_t>;
   using integer_t = int_same_size_t<scalar_t>;
-  using iVec = Vec256<integer_t>;
+  using iVec = Vectorized<integer_t>;
 
   const int64_t inp_H;
   const int64_t inp_W;
@@ -838,14 +827,12 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = tx + Vec(1);  // 1 < x = |-1 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
     x = tx;           // x = |0 - tx| <= 1
     coeffs[1] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = ((A + Vec(2)) * x - (A + Vec(3))) * x * x + Vec(1);
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = ((A * x - Vec(5) * A) * x + Vec(8) * A) * x - Vec(4) * A;
   }
 
@@ -854,14 +841,12 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void get_cubic_coefficients_grad(Vec (&coeffs)[4], const Vec& tx) const {
     Vec x;
     x = Vec(-1) - tx; // 1 < x = |-1 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[0] = (Vec(-3) * A * x - Vec(10) * A ) * x - Vec(8) * A;
     x = Vec(0) - tx;  // x = |0 - tx| <= 1
     coeffs[1] = (Vec(-3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(1) - tx;  // x = |1 - tx| <= 1
     coeffs[2] = (Vec(3) * (A + Vec(2)) * x - Vec(2) * (A + Vec(3))) * x;
     x = Vec(2) - tx;  // 1 < x = |2 - tx| < 2
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
@@ -1027,8 +1012,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
   int64_t grid_sCoor = grid_slice.stride(2);
   auto grid_ptr = grid_slice.data();
 
-  using Vec = Vec256<scalar_t>;
-  using iVec = Vec256<int_same_size_t<scalar_t>>;
+  using Vec = Vectorized<scalar_t>;
+  using iVec = Vectorized<int_same_size_t<scalar_t>>;
   constexpr int64_t step = Vec::size();
 
   // Loop over each output pixel in grid.
@@ -1041,7 +1026,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     // Grid is contiguous.
     // Strategy: Sequentially load two vectors at the same time, and get,
     //           e.g.,  {x0, y0, x1, y1}, {x2, y2, x3, y3}. Then we use
-    //           at::vec256::deinterleave2 to get x and y vectors.
+    //           at::vec::deinterleave2 to get x and y vectors.
     auto total_size = out_H * out_W;
     for (int64_t spatial_offset = 0; spatial_offset < total_size; spatial_offset += step) {
       auto grid_offset = spatial_offset * 2;
@@ -1102,7 +1087,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
     // Case 3:
     // General case.
     // Strategy: Do a for-loop over H, for each W slice, use
-    //           at::vec256::gather to load the x and y vectors.
+    //           at::vec::gather to load the x and y vectors.
     int64_t spatial_offset = 0;
     const int64_t i_offset_delta = grid_sW * step;
 
@@ -1122,8 +1107,8 @@ static inline void grid_sample_2d_grid_slice_iterator(
           // prevents illegal memory access, sets the exceeding offsets to zero
           i_offsets = iVec::set(iVec(0), i_offsets, len);
         }
-        apply_fn(vec256::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
-                 vec256::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
+        apply_fn(vec::gather<sizeof(scalar_t)>(grid_ptr_x, i_offsets),
+                 vec::gather<sizeof(scalar_t)>(grid_ptr_y, i_offsets),
                  spatial_offset, len);
 
         grid_ptr_x += i_offset_delta;
@@ -1160,7 +1145,7 @@ Tensor grid_sampler_2d_cpu_kernel_impl(const Tensor& input, const Tensor& grid,
         auto inp_slice = inp_acc[n];                                           \
         grid_sample_2d_grid_slice_iterator(                                    \
           grid_acc[n],                                                         \
-          [&](const Vec256<scalar_t>& grid_x, const Vec256<scalar_t>& grid_y,  \
+          [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,  \
               int64_t spatial_offset, int64_t len) {                           \
             grid_sample.forward(out_slice, inp_slice, spatial_offset,          \
                                 grid_x, grid_y, len);                          \
@@ -1220,7 +1205,6 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
   auto N = input.size(0);
   auto spatial_size = grid.size(1) * grid.size(2);
   auto grain_size = spatial_size == 0 ? (N + 1)
-                                      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                                       : at::divup(at::internal::GRAIN_SIZE, spatial_size * 10 /* 2d * 5 tensors*/);
 
 #define HANDLE_CASE(interp, padding, align_corners)                              \
@@ -1235,7 +1219,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
         auto inp_slice = inp_acc[n];                                             \
         grid_sample_2d_grid_slice_iterator(                                      \
           grid_acc[n],                                                           \
-          [&](const Vec256<scalar_t>& grid_x, const Vec256<scalar_t>& grid_y,    \
+          [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,    \
               int64_t spatial_offset, int64_t len) {                             \
             grid_sample.backward(gInp_slice, gGrid_slice, gOut_slice, inp_slice, \
                                  spatial_offset, grid_x, grid_y, len);           \
@@ -1283,9 +1267,7 @@ grid_sampler_2d_backward_cpu_kernel_impl(const Tensor& grad_output_,
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(grid_sampler_2d_cpu_kernel, &grid_sampler_2d_cpu_kernel_impl);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(grid_sampler_2d_backward_cpu_kernel, &grid_sampler_2d_backward_cpu_kernel_impl);
 
 

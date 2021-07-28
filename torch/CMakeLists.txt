@@ -223,6 +223,10 @@ if(USE_DEPLOY)
 
   target_compile_options(torch_python_obj PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    target_compile_options(torch_python_obj PRIVATE -fno-gnu-unique)
+  endif()
+
   target_include_directories(torch_python_obj PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
   target_include_directories(torch_python_obj PRIVATE ../third_party/fmt/include)
 
@@ -261,25 +265,28 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 if(USE_DISTRIBUTED)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(WIN32)
       append_filelist("libtorch_python_distributed_core_sources" TORCH_PYTHON_SRCS)
     else()
-      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_RPC)
       append_filelist("libtorch_python_distributed_sources" TORCH_PYTHON_SRCS)
     endif()
     # Disable certain warnings for GCC-9.X
     if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/autograd/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
-      set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/rpc/testing/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
       set_source_files_properties(${TORCH_SRC_DIR}/csrc/distributed/c10d/init.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
     endif()
-    if(USE_TENSORPIPE)
-      list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
-      list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+    # NCCL is a private dependency of libtorch, but libtorch_python includes
+    # some private headers of libtorch, which in turn include NCCL. As a hacky
+    # alternative to making NCCL a public dependency of libtorch, we make it
+    # a private dependency of libtorch_python as well.
+    if(USE_NCCL)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES __caffe2_nccl)
     endif()
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
+    # Same for MPI.
+    if(USE_MPI)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${MPI_CXX_LIBRARIES})
+    endif()
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
 endif()
 
@@ -360,3 +367,15 @@ add_custom_target(
   DEPENDS ${TORCH_SRC_DIR}/version.py
 )
 add_dependencies(torch_python gen_torch_version)
+
+# Skip building this library under MacOS, since it is currently failing to build on Mac
+# Github issue #61930
+if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+  # Add Android Nnapi delegate library
+  add_library(nnapi_backend SHARED
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_lib.cpp
+          ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
+          )
+  # Pybind11 requires explicit linking of the torch_python library
+  target_link_libraries(nnapi_backend torch torch_python)
+endif()

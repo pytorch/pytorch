@@ -45,12 +45,10 @@
 #endif
 
 inline uint32_t rotl32(uint32_t x, int8_t r) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return (x << r) | (x >> (32 - r));
 }
 
 inline uint64_t rotl64(uint64_t x, int8_t r) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return (x << r) | (x >> (64 - r));
 }
 
@@ -77,15 +75,10 @@ FORCE_INLINE uint64_t getblock64(const uint64_t* p, int i) {
 // Finalization mix - force all bits of a hash block to avalanche
 
 FORCE_INLINE uint32_t fmix32(uint32_t h) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   h ^= h >> 16;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   h *= 0x85ebca6b;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   h ^= h >> 13;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   h *= 0xc2b2ae35;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   h ^= h >> 16;
 
   return h;
@@ -94,13 +87,10 @@ FORCE_INLINE uint32_t fmix32(uint32_t h) {
 //----------
 
 FORCE_INLINE uint64_t fmix64(uint64_t k) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   k ^= k >> 33;
   k *= BIG_CONSTANT(0xff51afd7ed558ccd);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   k ^= k >> 33;
   k *= BIG_CONSTANT(0xc4ceb9fe1a85ec53);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   k ^= k >> 33;
 
   return k;
@@ -131,7 +121,6 @@ void MurmurHash3_x86_32(const void* key, int len, uint32_t seed, void* out) {
 
     h1 ^= k1;
     h1 = ROTL32(h1, 13);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h1 = h1 * 5 + 0xe6546b64;
   }
 
@@ -144,11 +133,9 @@ void MurmurHash3_x86_32(const void* key, int len, uint32_t seed, void* out) {
 
   switch (len & 3) {
     case 3:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= tail[2] << 16;
       FALLTHROUGH_INTENDED;
     case 2:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= tail[1] << 8;
       FALLTHROUGH_INTENDED;
     case 1:
@@ -192,7 +179,6 @@ void MurmurHash3_x86_128(
   //----------
   // body
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const uint32_t* blocks = (const uint32_t*)(data + nblocks * 16);
 
   for (int i = -nblocks; i; i++) {
@@ -208,7 +194,6 @@ void MurmurHash3_x86_128(
 
     h1 = ROTL32(h1, 19);
     h1 += h2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h1 = h1 * 5 + 0x561ccd1b;
 
     k2 *= c2;
@@ -218,7 +203,6 @@ void MurmurHash3_x86_128(
 
     h2 = ROTL32(h2, 17);
     h2 += h3;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h2 = h2 * 5 + 0x0bcaa747;
 
     k3 *= c3;
@@ -228,7 +212,6 @@ void MurmurHash3_x86_128(
 
     h3 = ROTL32(h3, 15);
     h3 += h4;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h3 = h3 * 5 + 0x96cd1c35;
 
     k4 *= c4;
@@ -238,14 +221,12 @@ void MurmurHash3_x86_128(
 
     h4 = ROTL32(h4, 13);
     h4 += h1;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h4 = h4 * 5 + 0x32ac3b17;
   }
 
   //----------
   // tail
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const uint8_t* tail = (const uint8_t*)(data + nblocks * 16);
 
   uint32_t k1 = 0;
@@ -253,21 +234,14 @@ void MurmurHash3_x86_128(
   uint32_t k3 = 0;
   uint32_t k4 = 0;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   switch (len & 15) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 15:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k4 ^= tail[14] << 16;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 14:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k4 ^= tail[13] << 8;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 13:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k4 ^= tail[12] << 0;
       k4 *= c4;
       k4 = ROTL32(k4, 18);
@@ -275,24 +249,16 @@ void MurmurHash3_x86_128(
       h4 ^= k4;
       FALLTHROUGH_INTENDED;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 12:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k3 ^= tail[11] << 24;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 11:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k3 ^= tail[10] << 16;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 10:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k3 ^= tail[9] << 8;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 9:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k3 ^= tail[8] << 0;
       k3 *= c3;
       k3 = ROTL32(k3, 17);
@@ -300,22 +266,15 @@ void MurmurHash3_x86_128(
       h3 ^= k3;
       FALLTHROUGH_INTENDED;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 8:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= tail[7] << 24;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 7:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= tail[6] << 16;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 6:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= tail[5] << 8;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5:
       k2 ^= tail[4] << 0;
       k2 *= c2;
@@ -325,15 +284,12 @@ void MurmurHash3_x86_128(
       FALLTHROUGH_INTENDED;
 
     case 4:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= tail[3] << 24;
       FALLTHROUGH_INTENDED;
     case 3:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= tail[2] << 16;
       FALLTHROUGH_INTENDED;
     case 2:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= tail[1] << 8;
       FALLTHROUGH_INTENDED;
     case 1:
@@ -409,7 +365,6 @@ void MurmurHash3_x64_128(
 
     h1 = ROTL64(h1, 27);
     h1 += h2;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h1 = h1 * 5 + 0x52dce729;
 
     k2 *= c2;
@@ -419,54 +374,37 @@ void MurmurHash3_x64_128(
 
     h2 = ROTL64(h2, 31);
     h2 += h1;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     h2 = h2 * 5 + 0x38495ab5;
   }
 
   //----------
   // tail
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   const uint8_t* tail = (const uint8_t*)(data + nblocks * 16);
 
   uint64_t k1 = 0;
   uint64_t k2 = 0;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   switch (len & 15) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 15:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[14]) << 48;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 14:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[13]) << 40;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 13:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[12]) << 32;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 12:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[11]) << 24;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 11:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[10]) << 16;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 10:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[9]) << 8;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 9:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k2 ^= ((uint64_t)tail[8]) << 0;
       k2 *= c2;
       k2 = ROTL64(k2, 33);
@@ -474,36 +412,25 @@ void MurmurHash3_x64_128(
       h2 ^= k2;
       FALLTHROUGH_INTENDED;
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 8:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[7]) << 56;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 7:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[6]) << 48;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 6:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[5]) << 40;
       FALLTHROUGH_INTENDED;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     case 5:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[4]) << 32;
       FALLTHROUGH_INTENDED;
     case 4:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[3]) << 24;
       FALLTHROUGH_INTENDED;
     case 3:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[2]) << 16;
       FALLTHROUGH_INTENDED;
     case 2:
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       k1 ^= ((uint64_t)tail[1]) << 8;
       FALLTHROUGH_INTENDED;
     case 1:

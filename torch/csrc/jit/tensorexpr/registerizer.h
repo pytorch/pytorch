@@ -1,12 +1,14 @@
 #pragma once
 #include <c10/core/ScalarType.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <vector>
 
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
+
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -21,7 +23,7 @@ For example it can replace:
 
 {
   A[0] = 0;
-  for (int x = 0; x < 10; x++) {
+  for(const auto x : c10::irange(10)) {
     A[0] = (A[0]) + x;
   }
 }
@@ -30,7 +32,7 @@ with:
 
 {
   int A_ = 0;
-  for (int x = 0; x < 10; x++) {
+  for(const auto x : c10::irange(10)) {
     A_ = x + A_;
   }
   A[0] = A_;
@@ -49,6 +51,7 @@ class Scope;
 class AccessInfo {
  public:
   AccessInfo() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
       const Buf* b,
@@ -218,6 +221,7 @@ using AccessHashMap =
 // Represents a scope block and holds all accesses contained within it.
 class Scope {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Scope(const Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(b), parent_(std::move(parent)), conditionId_(conditionId) {}
 
@@ -333,11 +337,11 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
 
   void visit(const Let* v) override;
 
-#define STMT_ON_STACK(Op)                    \
-  virtual void visit(const Op* v) override { \
-    stmtStack_.push_front(v);                \
-    IRVisitor::visit(v);                     \
-    stmtStack_.pop_front();                  \
+#define STMT_ON_STACK(Op)            \
+  void visit(const Op* v) override { \
+    stmtStack_.push_front(v);        \
+    IRVisitor::visit(v);             \
+    stmtStack_.pop_front();          \
   }
 
   STMT_ON_STACK(AtomicAdd);
@@ -374,6 +378,7 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
  */
 class TORCH_API RegisterizerReplacer : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterizerReplacer(std::vector<std::shared_ptr<AccessInfo>>& vec)
       : infoSet_(vec) {
     buildReplacements();

@@ -69,7 +69,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.linear_Q = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_K = nn.Linear(self.kdim, self.embed_dim, bias=bias, **factory_kwargs)
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias, **factory_kwargs)
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)
+        # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs)  # type: ignore[assignment]
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
@@ -98,8 +99,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed.qconfig = other.qconfig
 
         # Set the linear weights
-        observed.out_proj.weight = other.out_proj.weight
-        observed.out_proj.bias = other.out_proj.bias
+        # for the type: ignores, see https://github.com/pytorch/pytorch/issues/58969
+        observed.out_proj.weight = other.out_proj.weight  # type: ignore[has-type]
+        observed.out_proj.bias = other.out_proj.bias  # type: ignore[has-type]
         if other._qkv_same_embed_dim:
             # Use separate params
             bias = other.in_proj_bias
@@ -168,7 +170,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Set the linear weights
         # Note: Because the linear layers are quantized, mypy does not nkow how
         # to deal with them -- might need to ignore the typing checks.
-        w, b = self.out_proj._weight_bias()  # type: ignore[operator]
+        # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
+        w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
         fp.out_proj.weight = nn.Parameter(w.dequantize())
         if b is not None:
             fp.out_proj.bias = nn.Parameter(b)
@@ -354,8 +357,16 @@ class MultiheadAttention(nn.MultiheadAttention):
             key_padding_mask = key_padding_mask.to(torch.bool)
         if self.bias_k is not None and self.bias_v is not None:
             if static_k is None and static_v is None:
-                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
+
+                # Explicitly assert that bias_k and bias_v are not None
+                # in a way that TorchScript can understand.
+                bias_k = self.bias_k
+                assert bias_k is not None
+                bias_v = self.bias_v
+                assert bias_v is not None
+
+                k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
+                v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
                 if attn_mask is not None:
                     attn_mask = nnF.pad(attn_mask, (0, 1))
                 if key_padding_mask is not None:
@@ -439,7 +450,8 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output)
+        # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
+        attn_output = self.out_proj(attn_output)  # type: ignore[has-type]
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:

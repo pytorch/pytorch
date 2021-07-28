@@ -1,16 +1,13 @@
-import errno
 import hypothesis.strategies as st
 from hypothesis import given, assume, settings
 import io
 import math
 import numpy as np
 import os
-import shutil
 import struct
 import unittest
 from pathlib import Path
 from typing import Dict, Generator, List, NamedTuple, Optional, Tuple, Type
-
 from caffe2.proto import caffe2_pb2
 from caffe2.proto.caffe2_pb2 import BlobSerializationOptions
 from caffe2.python import core, test_util, workspace
@@ -433,6 +430,26 @@ class TestLoadSave(TestLoadSaveBase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
+    def testLoadWithDBOptions(self) -> None:
+        tmp_folder = self.make_tempdir()
+        tmp_file, arrays = self.saveFile(tmp_folder, "db", self._db_type, 0)
+
+        db_files = [tmp_file, tmp_file]
+        workspace.ResetWorkspace()
+        self.assertEqual(len(workspace.Blobs()), 0)
+
+        db_options = b"test_db_options"
+        op = core.CreateOperator(
+            "Load",
+            [], [str(i) for i in range(len(arrays))],
+            absolute_path=1,
+            dbs=db_files, db_type=self._db_type,
+            load_all=False,
+            db_options=db_options,
+        )
+        with self.assertRaises(RuntimeError):
+            workspace.RunOperatorOnce(op)
+
     def create_test_blobs(
         self, size: int = 1234, feed: bool = True
     ) -> List[Tuple[str, np.ndarray]]:
@@ -644,6 +661,36 @@ class TestLoadSave(TestLoadSaveBase):
         )
 
 
+    def testSaveWithDBOptions(self) -> None:
+        num_elems = 1234
+        chunk_size = 32
+        expected_num_chunks = math.ceil(num_elems / chunk_size)
+
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+
+        blobs = self.create_test_blobs(num_elems)
+
+        db_options = b"test_db_options"
+        # Saves the blobs to a local db.
+        save_op = core.CreateOperator(
+            "Save",
+            [name for name, data in blobs],
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            chunk_size=chunk_size,
+            db_options=db_options,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        self.load_and_check_blobs(blobs, [tmp_file])
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        for blob_name, chunks in blob_chunks.items():
+            self.assertEqual(len(chunks), expected_num_chunks)
+
     def testSaveFloatToBfloat16(self) -> None:
         tmp_folder = self.make_tempdir()
         tmp_file = str(tmp_folder / "save.output")
@@ -692,6 +739,129 @@ class TestLoadSave(TestLoadSaveBase):
         np.testing.assert_array_almost_equal(
             workspace.FetchBlob("float1"), float_data, decimal=2
         )
+
+    def testEstimateBlobSizes(self) -> None:
+        # Create some blobs to test with
+        float_data = np.random.random_sample(4000).astype(np.float32)
+        workspace.FeedBlob("float1", float_data)
+        workspace.FeedBlob("float2", float_data)
+        workspace.FeedBlob(
+            "float3", np.random.random_sample(2).astype(np.float32)
+        )
+        workspace.FeedBlob(
+            "ui16", np.random.randint(0, 0xffff, size=1024, dtype=np.uint16)
+        )
+
+        # Estimate the serialized size of the data.
+        # Request bfloat16 serialization for one of the float blobs, just to
+        # exercise size estimation when using this option.
+        options = caffe2_pb2.SerializationOptions(
+            options=[
+                BlobSerializationOptions(
+                    blob_name_regex="float1",
+                    float_format=BlobSerializationOptions.FLOAT_BFLOAT16,
+                    chunk_size=500,
+                ),
+            ],
+        )
+        get_blobs_op = core.CreateOperator(
+            "EstimateAllBlobSizes",
+            [],
+            ["blob_names", "blob_sizes"],
+            options=options,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(get_blobs_op))
+        blob_names = workspace.FetchBlob("blob_names")
+        blob_sizes = workspace.FetchBlob("blob_sizes")
+
+        sizes_by_name: Dict[str, int] = {}
+        for idx, name in enumerate(blob_names):
+            sizes_by_name[name.decode("utf-8")] = blob_sizes[idx]
+
+        # Note that the output blob list will include our output blob names.
+        expected_blobs = [
+            "float1", "float2", "float3", "ui16",
+            "blob_names", "blob_sizes"
+        ]
+        self.assertEqual(set(sizes_by_name.keys()), set(expected_blobs))
+
+        def check_expected_blob_size(
+            name: str, num_elems: int, elem_size: int, num_chunks: int = 1
+        ) -> None:
+            # The estimation code applies a fixed 40 byte per-chunk overhead to
+            # account for the extra space required for other fixed TensorProto
+            # message fields.
+            per_chunk_overhead = 50
+            expected_size = (
+                (num_chunks * (len(name) + per_chunk_overhead))
+                + (num_elems * elem_size)
+            )
+            self.assertEqual(
+                sizes_by_name[name],
+                expected_size,
+                f"expected size mismatch for {name}"
+            )
+
+        check_expected_blob_size("ui16", 1024, 3)
+        check_expected_blob_size("float2", 4000, 4)
+        check_expected_blob_size("float3", 2, 4)
+
+        # Our serialization options request to split float1 into 500-element
+        # chunks when saving it.  If fbgemm is available then the float1 blob
+        # will be serialized using 2 bytes per element instead of 4 bytes.
+        float1_num_chunks = 4000 // 500
+        if workspace.has_fbgemm:
+            check_expected_blob_size("float1", 4000, 2, float1_num_chunks)
+        else:
+            check_expected_blob_size("float1", 4000, 4, float1_num_chunks)
+
+        check_expected_blob_size("blob_names", len(expected_blobs), 50)
+        check_expected_blob_size("blob_sizes", len(expected_blobs), 8)
+
+        # Now actually save the blobs so we can compare our estimates
+        # to how big the serialized data actually is.
+        tmp_folder = self.make_tempdir()
+        tmp_file = str(tmp_folder / "save.output")
+        save_op = core.CreateOperator(
+            "Save",
+            list(sizes_by_name.keys()),
+            [],
+            absolute_path=1,
+            db=tmp_file,
+            db_type=self._db_type,
+            options=options,
+        )
+        self.assertTrue(workspace.RunOperatorOnce(save_op))
+
+        blob_chunks = self._read_chunk_info(Path(tmp_file))
+        saved_sizes: Dict[str, int] = {}
+        for blob_name, chunks in blob_chunks.items():
+            total_size = sum(chunk.value_size for chunk in chunks)
+            saved_sizes[blob_name] = total_size
+
+        # For sanity checking, ensure that our estimates aren't
+        # extremely far off
+        for name in expected_blobs:
+            estimated_size = sizes_by_name[name]
+            saved_size = saved_sizes[name]
+            difference = abs(estimated_size - saved_size)
+            error_pct = 100.0 * (difference / saved_size)
+            print(
+                f"{name}: estimated={estimated_size} actual={saved_size} "
+                f"error={error_pct:.2f}%"
+            )
+            # Don't check the blob_names blob.  It is a string tensor, and we
+            # can't estimate string tensor sizes very well without knowing the
+            # individual string lengths.  (Currently it requires 102 bytes to
+            # save, but we estimate 360).
+            if name == "blob_names":
+                continue
+            # Check that we are within 100 bytes, or within 25%
+            # We are generally quite close for tensors with fixed-width fields
+            # (like float), but a little farther off for tensors that use varint
+            # encoding.
+            if difference > 100:
+                self.assertLess(error_pct, 25.0)
 
 
 if __name__ == '__main__':

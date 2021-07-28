@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/Size.h>
 
 #include <string>
@@ -22,7 +23,7 @@ PyObject * THPSize_New(const torch::autograd::Variable& var)
   auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, var.dim()));
   if (!self) throw python_error();
 
-  for (int64_t i = 0; i < var.dim(); ++i) {
+  for (const auto i : c10::irange(var.dim())) {
     PyObject *py_size_tensor = THPVariable_Wrap(torch::jit::tracer::getSizeOf(var, i));
     if (!py_size_tensor) throw python_error();
     PyTuple_SET_ITEM(self.get(), i, py_size_tensor);
@@ -92,7 +93,6 @@ static PyObject * THPSize_repr(THPSize *self)
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyTypeObject THPSizeType;
 
 template<typename FnType, FnType fn, typename ...Args>
@@ -109,16 +109,12 @@ static PyObject* wrap_tuple_fn(Args ... args)
 // We use an anonymous namespace instead of static to work around
 // (what @peterjc123 think is) a bug in Visual Studio
 namespace {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 }
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PySequenceMethods THPSize_as_sequence = {
   nullptr,                                          /* sq_length */
   wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
@@ -130,7 +126,6 @@ static PySequenceMethods THPSize_as_sequence = {
   nullptr                                           /* sq_contains */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static PyMappingMethods THPSize_as_mapping = {
     nullptr,                                        /* mp_length */
     wrap_tuple_fn<decltype(&mp_subscript), &mp_subscript>,
@@ -184,14 +179,12 @@ static PyMethodDef THPSize_methods[] = {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPSizeType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.Size",                          /* tp_name */
   sizeof(THPSize),                       /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

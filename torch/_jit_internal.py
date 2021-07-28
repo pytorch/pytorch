@@ -15,21 +15,32 @@ from textwrap import dedent
 import torch
 import sys
 import builtins
+import typing
 import io
 import pickle
+import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
 from torch._utils_internal import get_source_lines_and_file
+from torch._C import Future as CFuture
 from torch.futures import Future
 import torch.package._mangling as package_mangling
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, Union  # noqa: F401
+from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
 
 if sys.version_info[:2] > (3, 7):
     from typing import Final
 else:
     from typing_extensions import Final
+
+LockType: Type
+try:
+    import _thread
+    LockType = _thread.LockType
+except ImportError:
+    import _dummy_thread
+    LockType = _dummy_thread.LockType
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -59,6 +70,11 @@ def createResolutionCallbackFromEnv(lookup_base):
         i = 0
         while i < len(expr) and expr[i] not in (',', '[', ']'):
             i += 1
+
+        # Special case logic for the empty Tuple as a subscript (used
+        # in the type annotation `Tuple[()]`)
+        if expr[:i] == '()':
+            return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
         assert base is not None, f"Unresolvable type {expr[:i]}"
@@ -216,6 +232,8 @@ def createResolutionCallbackFromClosure(fn):
         def __getattr__(self, key):
             if key in closure:
                 return closure[key]
+            elif hasattr(typing, key):
+                return getattr(typing, key)
             elif hasattr(builtins, key):
                 return getattr(builtins, key)
             return None
@@ -540,6 +558,14 @@ def unused(fn):
     fn._torchscript_modifier = FunctionModifiers.UNUSED
     return fn
 
+# No op context manager from python side
+class _IgnoreContextManager(contextlib.AbstractContextManager):
+    def __init__(self, **kwargs):
+        pass
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
+
 def ignore(drop=False, **kwargs):
     """
     This decorator indicates to the compiler that a function or method should
@@ -647,6 +673,10 @@ def module_has_exports(mod):
                     return True
     return False
 
+
+# WARNING: should_drop is currently being used by our JIT code coverage plug-in to mark JIT'd code as covered. If you
+# rename this function, please update references in tools/coverage_plugins_package/src/coverage_plugins/jit_plugin.py to
+# allow JIT'd code to still be covered.
 def should_drop(fn) -> bool:
     attr = get_torchscript_modifier(fn)
     if attr is None:
@@ -844,6 +874,7 @@ def is_future(ann) -> bool:
 
 if torch.distributed.rpc.is_available():
     from torch.distributed.rpc import RRef
+    from torch._C._distributed_rpc import PyRRef
 
     def is_rref(ann) -> bool:
         if ann is RRef:
@@ -853,6 +884,14 @@ if torch.distributed.rpc.is_available():
                 "RRef[int]"
             )
         return getattr(ann, "__origin__", None) is RRef
+
+    def is_rref_instance(obj) -> bool:
+        return isinstance(obj, PyRRef)
+
+else:
+    def is_rref_instance(obj) -> bool:
+        # If the RPC module doesn't exist then RRefs don't exist either.
+        return False
 
 def is_final(ann) -> bool:
     return ann.__module__ in {'typing', 'typing_extensions'} and \
@@ -961,7 +1000,11 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
         self.uses_true_division = uses_true_division
+        self.filename = filename
 
+@functools.lru_cache(maxsize=None)
+def make_source_context(*args):
+    return SourceContext(*args)
 
 def fake_range():
     return SourceContext('', None, 0, 0).make_raw_range(0, 1)
@@ -975,23 +1018,31 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(obj):
     assert issubclass(obj, tuple) and hasattr(obj, '_fields')
-    fields = list(obj._fields)
+    if hasattr(obj, "_field_defaults"):
+        defaults = [obj._field_defaults[field]
+                    for field in obj._fields
+                    if field in obj._field_defaults]
+    else:
+        defaults = []
     annotations = []
     has_annotations = hasattr(obj, '__annotations__')
-    for field in fields:
+    for field in obj._fields:
         if has_annotations and field in obj.__annotations__:
             the_type = torch.jit.annotations.ann_to_type(obj.__annotations__[field], fake_range())
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
-    return type(obj).__name__, fields, annotations
+    return type(obj).__name__, obj._fields, annotations, defaults
 
 
-def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
+def _create_named_tuple(t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]):
     # mypy: namedtuple() expects a string literal as the first argument
-    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[misc]
+    if sys.version_info < (3, 7, 0):
+        TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore[no-redef, misc]
+        TupleType.__new__.__defaults__ = defaults    # type: ignore[attr-defined]
+    else:
+        TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
-
 
 @contextlib.contextmanager
 def _disable_emit_hooks():
@@ -1132,8 +1183,21 @@ class _TensorExtractor(pickle.Pickler):
         if isinstance(obj, torch.Tensor):
             self.tensors.append(obj)
             return ""
-        else:
-            return None
+        # Since we just want to extract tensors, we don't mind if an object is
+        # unpicklable if it doesn't contain tensors, as we can just ignore/skip
+        # it. To play it safe, we only do so for common objects that we're sure
+        # don't contain tensors. Feel free to add new types here. Note also that
+        # even if a type isn't listed here this won't block users, since thet
+        # can just add a __getstate__ or __reduce__ method to their class.
+        if isinstance(obj, LockType):
+            return ""
+        # Futures and RRefs don't technically contain a value, they just offer
+        # the means to access a value.
+        if isinstance(obj, CFuture) or is_rref_instance(obj):
+            return ""
+        if isinstance(obj, torch.cuda.Event):
+            return ""
+        return None
 
 
 def _extract_tensors(obj):

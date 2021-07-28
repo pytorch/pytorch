@@ -11,10 +11,8 @@
     arg->set_##_type(_val);                 \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MobileTest, Convolution) {
   caffe2::NetDef net;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     if (i % 3) {
       caffe2::OperatorDef* def = net.add_op();

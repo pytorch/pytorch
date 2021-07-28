@@ -6,12 +6,16 @@
 using namespace c10;
 using namespace c10::impl;
 
-static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef strides) {
-  EXPECT_EQ(sizes.size(), strides.size()) << "bad test case: size() of sizes and strides don't match";
+static void checkData(
+    const SizesAndStrides& sz,
+    IntArrayRef sizes,
+    IntArrayRef strides) {
+  EXPECT_EQ(sizes.size(), strides.size())
+      << "bad test case: size() of sizes and strides don't match";
   EXPECT_EQ(sz.size(), sizes.size());
 
   int idx = 0;
-  for (auto x: sizes) {
+  for (auto x : sizes) {
     EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
@@ -21,7 +25,7 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
   EXPECT_EQ(sz.sizes_arrayref(), sizes);
 
   idx = 0;
-  for (auto x: strides) {
+  for (auto x : strides) {
     EXPECT_EQ(sz.stride_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.stride_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.strides_data()[idx], x) << "index: " << idx;
@@ -32,23 +36,18 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
   EXPECT_EQ(sz.strides_arrayref(), strides);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, DefaultConstructor) {
   SizesAndStrides sz;
   checkData(sz, {0}, {1});
   // Can't test size_at() out of bounds because it just asserts for now.
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetSizes) {
   SizesAndStrides sz;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.set_sizes({5, 6, 7, 8});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {5, 6, 7, 8}, {1, 0, 0, 0});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, Resize) {
   SizesAndStrides sz;
 
@@ -58,7 +57,6 @@ TEST(SizesAndStridesTest, Resize) {
   checkData(sz, {0, 0}, {1, 0});
 
   // Small to small growing, again.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
@@ -67,73 +65,52 @@ TEST(SizesAndStridesTest, Resize) {
     sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 5}, {2, 4, 6, 8, 10});
 
   // Small to small, shrinking.
   sz.resize(4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4}, {2, 4, 6, 8});
 
   // Small to small with no size change.
   sz.resize(4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4}, {2, 4, 6, 8});
 
   // Small to small, growing back so that we can confirm that our "new"
   // data really does get zeroed.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0}, {2, 4, 6, 8, 0});
 
   // Small to big.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(6);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 0}, {2, 4, 6, 8, 0, 0});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.size_at_unchecked(5) = 6;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.stride_at_unchecked(5) = 12;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
 
   // Big to big, growing.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(7);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
   // Big to big with no size change.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(7);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.size_at_unchecked(6) = 11;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.stride_at_unchecked(6) = 22;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6, 11}, {2, 4, 6, 8, 0, 12, 22});
 
   // Big to big, shrinking.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6}, {2, 4, 6, 8, 0, 12});
 
   // Grow back to make sure "new" elements get zeroed in big mode too.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(7);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {1, 2, 3, 4, 0, 6, 0}, {2, 4, 6, 8, 0, 12, 0});
 
   // Finally, big to small.
@@ -146,87 +123,57 @@ TEST(SizesAndStridesTest, Resize) {
     sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {-1, 0, 1, 2, 3, 4, 5}, {-2, 0, 2, 4, 6, 8, 10});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {-1, 0, 1, 2, 3}, {-2, 0, 2, 4, 6});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetAtIndex) {
   SizesAndStrides sz;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.size_at(4) = 42;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.stride_at(4) = 23;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.size_at(5) = 43;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.stride_at(5) = 24;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetAtIterator) {
   SizesAndStrides sz;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.sizes_begin() + 4) = 42;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.strides_begin() + 4) = 23;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.sizes_begin() + 5) = 43;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.strides_begin() + 5) = 24;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, SetViaData) {
   SizesAndStrides sz;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.sizes_data() + 4) = 42;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.strides_data() + 4) = 23;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42}, {1, 0, 0, 0, 23});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   sz.resize(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.sizes_data() + 5) = 43;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   *(sz.strides_data() + 5) = 24;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   checkData(sz, {0, 0, 0, 0, 42, 43}, {1, 0, 0, 0, 23, 24});
 }
 
@@ -243,7 +190,6 @@ static SizesAndStrides makeSmall(int offset = 0) {
 
 static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   big.resize(8);
   for (const auto ii : c10::irange(big.size())) {
     big.size_at_unchecked(ii) = ii - 1 + offset;
@@ -263,9 +209,7 @@ static void checkSmall(const SizesAndStrides& sm, int offset = 0) {
 }
 
 static void checkBig(const SizesAndStrides& big, int offset = 0) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int64_t> sizes(8), strides(8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int ii = 0; ii < 8; ++ii) {
     sizes[ii] = ii - 1 + offset;
     strides[ii] = 2 * (ii - 1 + offset);
@@ -273,7 +217,6 @@ static void checkBig(const SizesAndStrides& big, int offset = 0) {
   checkData(big, sizes, strides);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveConstructor) {
   SizesAndStrides empty;
 
@@ -301,7 +244,6 @@ TEST(SizesAndStridesTest, MoveConstructor) {
   EXPECT_EQ(big.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyConstructor) {
   SizesAndStrides empty;
 
@@ -330,7 +272,6 @@ TEST(SizesAndStridesTest, CopyConstructor) {
   checkBig(copiedBig);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallCopyFrom = makeSmall(1);
@@ -344,7 +285,6 @@ TEST(SizesAndStridesTest, CopyAssignmentSmallToSmall) {
   checkSmall(smallCopyFrom, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides smallMoveFrom = makeSmall(1);
@@ -359,7 +299,6 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallCopyFrom = makeSmall();
@@ -373,7 +312,6 @@ TEST(SizesAndStridesTest, CopyAssignmentSmallToBig) {
   checkSmall(smallCopyFrom);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides smallMoveFrom = makeSmall();
@@ -388,7 +326,6 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigCopyFrom = makeBig(1);
@@ -402,7 +339,6 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToBig) {
   checkBig(bigCopyFrom, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   SizesAndStrides bigTarget = makeBig();
   SizesAndStrides bigMoveFrom = makeBig(1);
@@ -417,7 +353,6 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigCopyFrom = makeBig();
@@ -431,7 +366,6 @@ TEST(SizesAndStridesTest, CopyAssignmentBigToSmall) {
   checkBig(bigCopyFrom);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   SizesAndStrides smallTarget = makeSmall();
   SizesAndStrides bigMoveFrom = makeBig();
@@ -446,7 +380,6 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, CopyAssignmentSelf) {
   SizesAndStrides small = makeSmall();
   SizesAndStrides big = makeBig();
@@ -468,7 +401,6 @@ static void selfMove(SizesAndStrides& x, SizesAndStrides& y) {
   x = std::move(y);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SizesAndStridesTest, MoveAssignmentSelf) {
   SizesAndStrides small = makeSmall();
   SizesAndStrides big = makeBig();

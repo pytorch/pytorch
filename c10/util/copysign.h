@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/util/math_compat.h>
 
 namespace c10 {
@@ -17,11 +17,12 @@ inline auto copysign(const T& a, const U& b) {
 // Implement copysign for half precision floats using bit ops
 // Sign is the most significant bit for both half and bfloat16 types
 inline c10::Half copysign(c10::Half a, c10::Half b) {
-  return c10::Half((a.x&0x7fff) | (b.x&0x8000), c10::Half::from_bits());
+  return c10::Half((a.x & 0x7fff) | (b.x & 0x8000), c10::Half::from_bits());
 }
 
 inline c10::BFloat16 copysign(c10::BFloat16 a, c10::BFloat16 b) {
-  return c10::BFloat16((a.x&0x7fff) | (b.x&0x8000), c10::BFloat16::from_bits());
+  return c10::BFloat16(
+      (a.x & 0x7fff) | (b.x & 0x8000), c10::BFloat16::from_bits());
 }
 
 } // namespace c10

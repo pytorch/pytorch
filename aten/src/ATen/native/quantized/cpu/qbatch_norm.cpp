@@ -10,9 +10,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
 
 namespace {
@@ -145,7 +143,11 @@ Tensor q_batch_norm1d_impl(
   // Remove the fake dimension, and go back to contiguous format
   // (since there is no 4th channel). Note, this has a performance
   // cost.
-  return qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  Tensor result = qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+  if (ndim == 2) {
+    result = result.squeeze(-1);
+  }
+  return result;
 }
 
 template <bool ReluFused>
@@ -357,7 +359,6 @@ Tensor q_batch_norm_impl(
   } else if (dim == 4) {
     qy = q_batch_norm2d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (dim == 5) {
     qy = q_batch_norm3d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);

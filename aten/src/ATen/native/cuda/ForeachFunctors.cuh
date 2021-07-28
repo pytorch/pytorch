@@ -1,3 +1,4 @@
+#pragma once
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 

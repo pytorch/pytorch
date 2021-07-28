@@ -12,10 +12,11 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
     void* ptr,
     const std::function<void(void*)>& deleter,
     Device device) {
-  return {ptr,
-          new InefficientStdFunctionContext({ptr, deleter}),
-          &deleteInefficientStdFunctionContext,
-          device};
+  return {
+      ptr,
+      new InefficientStdFunctionContext({ptr, deleter}),
+      &deleteInefficientStdFunctionContext,
+      device};
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -50,7 +51,6 @@ void reportMemoryUsageToProfiler(void* ptr, int64_t alloc_size, Device device) {
   }
 }
 
-// NOLINTNEXTLINE(modernize-use-equals-default)
-MemoryReportingInfoBase::MemoryReportingInfoBase() {}
+MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
 
 } // namespace c10

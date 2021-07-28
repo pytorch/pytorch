@@ -9,7 +9,6 @@
 #include <arm_neon.h>
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_profile_depthwise, false, "");
 
 namespace caffe2 {
@@ -532,15 +531,10 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
           size_t(stride_w()),
           size_t(pad_t()),
           gmacs,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           t.Seconds() * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           0 * 1E3,
           gflops);
       CAFFE_ENFORCE(ret > 0);
@@ -553,7 +547,6 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   Tensor bias_{CPU};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);
 } // namespace
 } // namespace caffe2

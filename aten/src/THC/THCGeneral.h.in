@@ -2,8 +2,8 @@
 #define THC_GENERAL_INC
 
 #include <TH/THGeneral.h>
-#include <TH/THAllocator.h>
 
+#include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
 
 #include <cuda.h>
@@ -46,8 +46,6 @@ TORCH_CUDA_CPP_API void THCudaShutdown(THCState* state);
 TORCH_CUDA_CPP_API int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess);
 
 TORCH_CUDA_CPP_API c10::Allocator* THCState_getCudaHostAllocator(THCState* state);
-
-TORCH_CUDA_CPP_API void THCMagma_init(THCState *state);
 
 /* For the current device and stream, returns the allocated scratch space */
 TORCH_CUDA_CPP_API size_t THCState_getCurrentDeviceScratchSpaceSize(THCState* state);

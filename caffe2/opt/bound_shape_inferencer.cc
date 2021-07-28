@@ -475,7 +475,6 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse") {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
@@ -1128,13 +1127,11 @@ std::shared_ptr<BoundShapeInferencerBase> getBoundShapeInferencer(
   return std::make_shared<BoundShapeInferencer>(spec);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_SHARED_REGISTRY(
     BoundShapeInferencerRegistry,
     BoundShapeInferencerBase,
     const BoundShapeSpec&);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(
     BoundShapeInferencerRegistry,
     C10,

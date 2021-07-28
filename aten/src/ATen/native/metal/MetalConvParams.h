@@ -8,7 +8,7 @@ namespace native {
 namespace metal {
 
 struct Conv2DParams final {
-  Conv2DParams() = delete;
+  Conv2DParams() {}
   Conv2DParams(
       c10::IntArrayRef inputSizes,
       c10::IntArrayRef weightSizes,

@@ -3,16 +3,13 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Int8RoIAlign, RoIAlign) {
   const int N = 2;
   const int C = 3;
   const int H = 100;
   const int W = 110;
   auto XQ = q({N, H, W, C});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->scale = 0.01f;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   XQ->zero_point = 127;
   auto X = dq(*XQ);
   const int n_rois = 10;
@@ -29,14 +26,12 @@ TEST(Int8RoIAlign, RoIAlign) {
     rois_array.push_back(std::min(w1, w2));
     rois_array.push_back(std::max(h1, h2));
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   add_input({n_rois, 5}, rois_array, "RoIs", &ws);
   auto xop = CreateOperatorDef(
       "RoIAlign",
       "",
       {"X", "RoIs"},
       {"Y"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<float>("spatial_scale", 0.25f),
        MakeArgument<int>("pooled_h", 2),
        MakeArgument<int>("pooled_w", 2),
@@ -47,14 +42,11 @@ TEST(Int8RoIAlign, RoIAlign) {
       "",
       {"XQ", "RoIs"},
       {"YQ"},
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {MakeArgument<float>("spatial_scale", 0.25f),
        MakeArgument<int>("pooled_h", 2),
        MakeArgument<int>("pooled_w", 2),
        MakeArgument<int>("sampling_ratio", 2),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<int>("Y_zero_point", 127),
-       // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
        MakeArgument<float>("Y_scale", 0.01f)});
   int8Copy(ws.CreateBlob("XQ")->GetMutable<int8::Int8TensorCPU>(), *XQ);
   BlobGetMutableTensor(ws.CreateBlob("X"), CPU)->CopyFrom(*X);

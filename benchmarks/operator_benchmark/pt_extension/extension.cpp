@@ -22,7 +22,7 @@ TORCH_LIBRARY_FRAGMENT(operator_benchmark, m) {
     m.def("_consume.list", &consume_list);
 }
 
-PYBIND11_MODULE(cpp_extension, m) {
+PYBIND11_MODULE(benchmark_cpp_extension, m) {
   m.def("_consume", &consume, "consume");
   m.def("_consume_list", &consume_list, "consume_list");
 }

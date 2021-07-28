@@ -686,11 +686,13 @@ const Term* PolynomialTransformer::mulTerms(const Term* lhs, const Term* rhs) {
 const Expr* PolynomialTransformer::polyByTerm(
     const Polynomial* poly,
     const Term* term) {
+  // poly * term
+  //    = (poly_terms + poly_scalar) * term
+  //    = poly_terms * term + poly_scalar * term
+
+  // First, multiply all variables (terms) in the polynomial by the input
+  // term.
   std::vector<const Term*> newTerms;
-
-  // scalar Term
-  const Expr* scalar = evaluateOp(new Mul(poly->scalar(), term->scalar()));
-
   for (auto* var : poly->variables()) {
     const Term* newTerm = mulTerms(var, term);
     if (newTerm) {
@@ -698,11 +700,23 @@ const Expr* PolynomialTransformer::polyByTerm(
     }
   }
 
-  if (newTerms.empty()) {
-    return scalar;
+  // If the scalar in poly is not 0, it must be multiplied by term.
+  // If there are no variables in term, this becomes the scalar in the result
+  // polynomial. If there are variables in term, this becomes a new term in
+  // the result polynomial.
+  if (!immediateEquals(poly->scalar(), 0)) {
+    const Expr* scalar = evaluateOp(new Mul(poly->scalar(), term->scalar()));
+    if (term->variables().empty()) {
+      return new Polynomial(hasher_, scalar, newTerms);
+    }
+    newTerms.push_back(new Term(hasher_, scalar, term->variables()));
   }
 
-  return new Polynomial(hasher_, scalar, std::move(newTerms));
+  // The only case when the result polynomial has a scalar is when the input
+  // term does not have any variables and the input polynomial has a non-zero
+  // scalar. That case is handled above. So, at this point, we do not have any
+  // scalars in the result polynomial.
+  return new Polynomial(hasher_, std::move(newTerms));
 }
 
 // Does multiplying these two expressions make a Rounding Off operation.
@@ -1453,7 +1467,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* IRSimplifierBase::mutate(const Cond* v) {
+Stmt* PolynomialBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1520,7 +1534,7 @@ Stmt* handleForCondReordering(const For* loop, Cond* cond) {
   return cond->cloneWithNewBody(new_f);
 }
 
-Stmt* IRSimplifierBase::mutate(const For* v) {
+Stmt* PolynomialBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1574,7 +1588,7 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* IRSimplifierBase::mutate(const Block* v) {
+Stmt* PolynomialBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
   // Flatten sub-blocks:
   for (Stmt* stmt : *v) {
@@ -1835,6 +1849,7 @@ c10::optional<class ModRound*> isModRound(const Term* e) {
         // divisor=multiplier=2, denom=t/7.
         Expr* c = evaluateOp(new Div(divisor, multiplier));
         divisor = multiplier;
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         denom = IRSimplifier::simplify(new Div(other, c));
       } else {
         return c10::nullopt;
@@ -1907,7 +1922,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
   while (!mods.empty() && repeat) {
     repeat = false;
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    for (int i = mods.size() - 1; i >= 0; i--) {
+    for (int64_t i = mods.size() - 1; i >= 0; i--) {
       const Term* m = mods[i];
       const Mod* mod = dynamic_cast<const Mod*>(m->variables()[0]);
       CHECK(mod);
@@ -1915,7 +1930,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       const Expr* mod_rhs = IRSimplifier::simplify(mod->rhs());
       bool merged = false;
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      for (int j = mod_rounds.size() - 1; j >= 0; j--) {
+      for (int64_t j = mod_rounds.size() - 1; j >= 0; j--) {
         const Term* mr = mod_rounds[j];
         auto a = isModRound(mr);
         CHECK(a);
@@ -1954,7 +1969,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
       }
 
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      for (int k = rounds.size() - 1; k >= 0; k--) {
+      for (int64_t k = rounds.size() - 1; k >= 0; k--) {
         const Term* r = rounds[k];
         const RoundOff* roundoff =
             dynamic_cast<const RoundOff*>(r->variables()[0]);
@@ -2017,7 +2032,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 }
 
 // Trivially factorize terms by GCD of scalar components.
-const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
+const Term* PolynomialBase::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
   const std::vector<const Term*>& variables = poly->variables();
 
@@ -2031,9 +2046,9 @@ const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
 
   // Create new struture.
   std::vector<const Term*> newPolyTerms;
+  newPolyTerms.reserve(variables.size());
   for (auto* t : variables) {
     // New term with the scalar divided by the GCD.
-    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     newPolyTerms.push_back(new Term(
         poly->hasher(), evaluateOp(new Div(t->scalar(), GCD)), t->variables()));
   }
@@ -2378,7 +2393,7 @@ Stmt* TermExpander::fuseSyncThreads(Block* block) {
 }
 
 Stmt* TermExpander::mutate(const Block* v) {
-  Stmt* new_stmt = IRSimplifierBase::mutate(v);
+  Stmt* new_stmt = PolynomialBase::mutate(v);
   Block* new_block = dynamic_cast<Block*>(new_stmt);
   if (!new_block) {
     return new_stmt;
@@ -2388,6 +2403,111 @@ Stmt* TermExpander::mutate(const Block* v) {
   new_block = fuseConditions(new_block);
   /// fuseSyncThreads too.
   return fuseSyncThreads(new_block);
+}
+
+// SimplifierUnderContext
+//
+// This function records the bounds(range) info of the index var in a for-stmt.
+// The bounds info will be used later when simplifying expressions with the
+// index var.
+Stmt* SimplifierUnderContext::mutate(const For* v) {
+  const Expr* var = v->var();
+  const Expr* start = v->start();
+  const Expr* stop = v->stop();
+  Stmt* body = v->body();
+  LoopOptions loop_options = v->loop_options();
+  const Expr* var_new_expr = var->accept_mutator(this);
+  const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
+  const Expr* start_new = start->accept_mutator(this);
+  const Expr* stop_new = stop->accept_mutator(this);
+  Stmt* body_new = body;
+
+  // save bounds info before this for-stmt
+  //
+  // The same variable could have appeared in a if-stmt which the for-stmt is
+  // nested inside, and we need to restore its bounds info after the for-stmt.
+  //
+  // An example,
+  // if (i>=0 && i<5) {
+  //   for (i=0; i<3; i++){
+  //     A[i] = ...
+  //   }
+  //   x = (i+20) / 5;
+  //}
+  // Inside the if stmt, i is in the range of [0, 5); and if we can restore this
+  // bound info after the for stmt, we can use it to simplify the assignment
+  // stmt x = (i+20)/5 to x = 4.
+  bool has_bounds = false;
+  std::pair<const Expr*, const Expr*> bound_old;
+  const Var* var_key = dynamic_cast<const Var*>(var);
+  auto got = var_bound_info_.find(var_key);
+  if (got != var_bound_info_.end()) {
+    has_bounds = true;
+    bound_old = got->second;
+  }
+  // set bounds info for index var
+  const std::pair<const Expr*, const Expr*> bound_new =
+      std::make_pair(start_new, stop_new);
+  var_bound_info_[var_key] = bound_new;
+
+  const Expr* iters = new Sub(stop_new, start_new);
+  iters = iters->accept_mutator(this);
+  if (loop_options.isDefault() && iters->isConstant()) {
+    if (immediateEquals(iters, 0)) {
+      return new Block({});
+    } else if (immediateEquals(iters, 1)) {
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+
+      // erase index var bounds info or restore old bounds info
+      if (has_bounds) {
+        var_bound_info_[var_key] = bound_old;
+      } else {
+        var_bound_info_.erase(var_key);
+      }
+
+      return body_new;
+    }
+  }
+
+  body_new = body_new->accept_mutator(this);
+
+  // erase index var bounds info or restore old bounds info
+  if (has_bounds) {
+    var_bound_info_[var_key] = bound_old;
+  } else {
+    var_bound_info_.erase(var_key);
+  }
+
+  if (!body_new) {
+    return new Block({});
+  }
+
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+
+    if (block->nstmts() == 1) {
+      // if the stmt in the loop body is a if-stmt, try to move the branching
+      // out of the loop
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
+    }
+  }
+
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
+  }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
 bool exprEquals(const Expr* A, const Expr* B) {

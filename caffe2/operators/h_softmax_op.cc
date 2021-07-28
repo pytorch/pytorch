@@ -206,7 +206,6 @@ bool HSoftmaxGradientOp<float, CPUContext>::RunOnDevice() {
   const auto& b = Input(2);
   auto& label = Input(3);
   auto& intermediate_output = Input(4);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto& dY = Input(5);
 
   auto* dX = Output(0, X.sizes(), at::dtype<float>());
@@ -551,19 +550,14 @@ bool HuffmanTreeHierarchyOp<T, Context>::RunOnDevice() {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmax, HSoftmaxOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmaxGradient,
   HSoftmaxGradientOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(HSoftmaxSearch, HSoftmaxSearchOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     HuffmanTreeHierarchy,
     HuffmanTreeHierarchyOp<int64_t, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HSoftmax)
     .NumInputs(4)
     .NumOutputs(2)
@@ -621,10 +615,8 @@ class GetHSoftmaxGradient : public GradientMakerBase {
         vector<string>{GI(0), GI(1), GI(2), GO(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(HSoftmax, GetHSoftmaxGradient);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HSoftmaxSearch)
     .NumInputs(3)
     .NumOutputs(2)
@@ -654,10 +646,8 @@ search tree.
         "For nodes, it will be the name defined in the tree. "
         "For leafs, it will be the index of the word in the tree.")
     .Output(1, "Y_scores", "The corresponding scores of Y_names");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HSoftmaxSearch);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(HuffmanTreeHierarchy)
     .NumInputs(1)
     .NumOutputs(1)
@@ -669,7 +659,6 @@ the input labels. It returns the tree as serialized HierarchyProto
     .Input(0, "Labels", "The labels vector")
     .Output(0, "Hierarch", "Huffman coding hierarchy of the labels");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(HuffmanTreeHierarchyOp);
 }  // namespace
 }  // namespace caffe2

@@ -59,7 +59,7 @@ void LBFGSOptions::set_lr(const double lr) {
 template <typename T>
 bool if_container_equal(T lhs, T rhs) {
   if (!(lhs.size() == rhs.size())) return false;
-  for (size_t i = 0; i < lhs.size(); i++) {
+  for(const auto i : c10::irange(lhs.size())) {
     if (!torch::equal(lhs.at(i), rhs.at(i))) return false;
   }
   return true;
@@ -154,7 +154,7 @@ void LBFGS::_add_grad(const double step_size, const Tensor& update) {
 void LBFGS::_set_param(const std::vector<Tensor>& params_data) {
   auto& _params = param_groups_.at(0).params();
   TORCH_INTERNAL_ASSERT(params_data.size() == _params.size());
-  for (size_t i = 0; i < _params.size(); i++) {
+  for(const auto i : c10::irange(_params.size())) {
     _params.at(i).copy_(params_data.at(i));
   }
 }

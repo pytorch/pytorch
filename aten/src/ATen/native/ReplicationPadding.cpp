@@ -69,8 +69,6 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   }
 
   /* sizes */
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
 
@@ -149,7 +147,6 @@ static inline void shapeCheck3d(
       "Expected 4D or 5D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
       input.sizes());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     dimw++;
@@ -185,7 +182,6 @@ TORCH_META_FUNC(replication_pad3d) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -195,7 +191,6 @@ TORCH_META_FUNC(replication_pad3d) (
 
   shapeCheck3d(input, pleft, pright, ptop, pbottom, pfront, pback);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -740,7 +735,6 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int ptop = paddingSize[2];
   int pbottom = paddingSize[3];
   int pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int pback = paddingSize[5];
   int dimw = 3;
   int dimh = 2;
@@ -748,7 +742,6 @@ Tensor& replication_pad3d_backward_out_cpu_template(
   int dimslices = 0;
   int64_t nbatch = 1;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5)
   {
     nbatch = input.size(0);
@@ -1034,7 +1027,6 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   int64_t ptop = paddingSize[2];
   int64_t pbottom = paddingSize[3];
   int64_t pfront = paddingSize[4];
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int64_t pback = paddingSize[5];
   int64_t dimw = 3;
   int64_t dimh = 2;
@@ -1045,7 +1037,6 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cpu) (
   /* get contiguous input */
   auto input = input_.contiguous();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.dim() == 5) {
     nbatch = input.size(0);
     dimw++;

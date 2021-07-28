@@ -17,36 +17,45 @@ class OptionalTest : public ::testing::Test {
 template <typename T>
 T getSampleValue();
 
-template<>
+template <>
 bool getSampleValue() {
   return true;
 }
 
-template<>
+template <>
 uint64_t getSampleValue() {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return 42;
 }
 
-template<>
+template <>
+c10::IntArrayRef getSampleValue() {
+  return {};
+}
+
+template <>
 std::string getSampleValue() {
   return "hello";
 }
 
-
 using OptionalTypes = ::testing::Types<
-  // 32-bit scalar optimization.
-  bool,
-  // Trivially destructible but not 32-bit scalar.
-  uint64_t,
-  // Non-trivial destructor.
-  std::string
-  >;
+    // 32-bit scalar optimization.
+    bool,
+    // Trivially destructible but not 32-bit scalar.
+    uint64_t,
+    // ArrayRef optimization.
+    c10::IntArrayRef,
+    // Non-trivial destructor.
+    std::string>;
 
+// This assert is also in Optional.cpp; including here too to make it
+// more likely that we'll remember to port this optimization over when
+// we move to std::optional.
+static_assert(
+    sizeof(c10::optional<c10::IntArrayRef>) == sizeof(c10::IntArrayRef),
+    "c10::optional<IntArrayRef> should be size-optimized");
 
 TYPED_TEST_CASE(OptionalTest, OptionalTypes);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Empty) {
   typename TestFixture::optional empty;
 
@@ -57,7 +66,6 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_THROW(empty.value(), c10::bad_optional_access);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TYPED_TEST(OptionalTest, Initialized) {
   using optional = typename TestFixture::optional;
 
@@ -70,8 +78,8 @@ TYPED_TEST(OptionalTest, Initialized) {
   optional moveAssign;
   moveAssign = std::move(moveFrom2);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  std::array<typename TestFixture::optional *, 5> opts = {&opt, &copy, &copyAssign, &move, &moveAssign};
+  std::array<typename TestFixture::optional*, 5> opts = {
+      &opt, &copy, &copyAssign, &move, &moveAssign};
   for (auto* popt : opts) {
     auto& opt = *popt;
     EXPECT_TRUE((bool)opt);

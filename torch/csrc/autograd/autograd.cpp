@@ -6,6 +6,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace autograd {
 
@@ -34,11 +36,8 @@ variable_list _make_grads(
   } else {
     TORCH_CHECK(
         num_tensors == num_gradients,
-        "got %ld tensors and %ld "
-        "gradients",
-        num_tensors,
-        num_gradients);
-    for (size_t i = 0; i < outputs.size(); ++i) {
+        "got ", num_tensors, " tensors and ", num_gradients, " gradients");
+    for (const auto i : c10::irange(outputs.size())) {
       const Variable& output = outputs[i];
       const Variable& grad_output = grad_outputs[i];
       if (!grad_output.defined()) {
@@ -74,7 +73,7 @@ variable_list run_backward(
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
-  for (size_t i = 0; i < num_tensors; i++) {
+  for(const auto i : c10::irange(num_tensors)) {
     const Variable& output = outputs[i];
     auto gradient_edge = impl::gradient_edge(output);
     TORCH_CHECK(
@@ -87,7 +86,7 @@ variable_list run_backward(
   if (!inputs.empty()) {
     size_t num_inputs = inputs.size();
     output_edges.reserve(num_inputs);
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       const Variable& input = inputs[i];
       const auto output_nr = input.output_nr();
       auto grad_fn = input.grad_fn();
@@ -95,10 +94,7 @@ variable_list run_backward(
         grad_fn = impl::try_get_grad_accumulator(input);
       }
       if (accumulate_grad) {
-        TORCH_CHECK(
-          input.is_leaf(),
-          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor"
-        )
+        input.retain_grad();
       }
       TORCH_CHECK(
           input.requires_grad(),
@@ -117,7 +113,7 @@ variable_list run_backward(
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       TORCH_CHECK(
           grad_inputs[i].defined(),
           "One of the "

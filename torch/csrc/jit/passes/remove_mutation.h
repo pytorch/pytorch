@@ -33,8 +33,9 @@ struct TORCH_API MutationRemover {
 
   bool inplaceOpVariant(Node* n);
 
+  static bool hasSideEffectOrAlias(Value* v, AliasDb* aliasDb);
+
  private:
-  bool newMemoryLocation(Value* v);
   Node* createSpecialMappedOp(Node* n);
   bool listMutationFollowingListConstruct(Node* n);
   bool tryMakeCreationAndMutationAtomic(
@@ -72,6 +73,10 @@ TORCH_API bool RemoveListMutation(const std::shared_ptr<Graph>& graph);
 TORCH_API bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
     c10::optional<std::function<bool(Node*)>> mutation_filter = c10::nullopt);
+
+// Replaces in-place aten activation ops with their functional equivalence
+TORCH_API bool InplaceToFunctionalActivation(
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

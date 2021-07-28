@@ -16,7 +16,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import gradcheck, TEST_WITH_ASAN, has_breakpad
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
@@ -28,16 +28,6 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
         TEST_CUDA and CUDNN_HEADER_EXISTS and torch.backends.cudnn.is_available()
     )
 IS_WINDOWS = sys.platform == "win32"
-
-
-def check_breakpad():
-    try:
-        torch._C._get_minidump_directory()
-        return True
-    except RuntimeError as e:
-        return "Minidump handler is uninintialized, make sure to call" in str(e)
-
-HAS_BREAKPAD = check_breakpad()
 
 
 def remove_build_path():
@@ -55,12 +45,14 @@ class TestCppExtensionJIT(common.TestCase):
     """
 
     def setUp(self):
+        super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
     def tearDown(self):
+        super().tearDown()
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
@@ -877,7 +869,7 @@ class TestCppExtensionJIT(common.TestCase):
 
         gradcheck(torch.ops.my.add, [a, b], eps=1e-2)
 
-    @unittest.skipIf(not HAS_BREAKPAD, "Breakpad library must be present on system for crash handler")
+    @unittest.skipIf(not has_breakpad(), "Breakpad library must be present on system for crash handler")
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     def test_crash_handler(self):
         def run_test(stderr_file, destination):
@@ -886,7 +878,7 @@ class TestCppExtensionJIT(common.TestCase):
             #include <torch/torch.h>
 
             int fail() {{
-                torch::crash_handler::_enable_minidump_collection("{destination}");
+                torch::crash_handler::enable_minidumps("{destination}");
 
                 volatile int* bad = nullptr;
                 return *bad;

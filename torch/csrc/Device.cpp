@@ -51,7 +51,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
     "Device(Device device)",
-    "Device(std::string type, int64_t? index=-1)"
+    "Device(c10::string_view type, int64_t? index=-1)"
   });
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -184,14 +184,12 @@ static PyMethodDef THPDevice_methods[] = {
   {nullptr}  /* Sentinel */
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyTypeObject THPDeviceType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.device",                        /* tp_name */
   sizeof(THPDevice),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   nullptr,                               /* tp_dealloc */
-  // NOLINTNEXTLINE(modernize-use-nullptr)
   0,                                     /* tp_vectorcall_offset */
   nullptr,                               /* tp_getattr */
   nullptr,                               /* tp_setattr */

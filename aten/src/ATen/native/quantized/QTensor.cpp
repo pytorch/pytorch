@@ -20,6 +20,15 @@ Tensor quantize_per_tensor(
   return quantizer->quantize(self);
 }
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
+  return quantizer->quantize(self);
+}
+
 std::vector<Tensor> quantize_per_tensor_list_cpu(
     TensorList tensors,
     const Tensor& scales,
@@ -36,7 +45,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
   return quantized_tensors;
 }
 
-Tensor quantize_per_channel_cpu(
+Tensor quantize_per_channel(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -50,14 +59,14 @@ Tensor dequantize_cpu(const Tensor& self) {
   return self.to(at::kFloat);
 }
 
-Tensor dequantize_quantized_cpu(const Tensor& self) {
+Tensor dequantize_quantized(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }
@@ -225,7 +234,6 @@ std::tuple<double, int64_t> _choose_qparams_per_tensor(
       /*min=*/x_min,
       /*max=*/x_max,
       /*qmin=*/0,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       /*qmax=*/255,
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false,
@@ -288,7 +296,8 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   float stepsize = (xmax - xmin) / n_bins;
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int min_bins = n_bins * (1.0 - (float) ratio);
-  const float* input = input_tensor.contiguous().data_ptr<float>();
+  Tensor input_tensor_contig = input_tensor.contiguous();
+  const float* input = input_tensor_contig.data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =

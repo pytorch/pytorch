@@ -1,9 +1,10 @@
 import atexit
 import shutil
 import re
-import tempfile
 import textwrap
 from typing import List, Optional, Tuple
+
+from torch.utils.benchmark import _make_temp_dir
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
@@ -13,9 +14,8 @@ _TEMPDIR: Optional[str] = None
 def get_temp_dir() -> str:
     global _TEMPDIR
     if _TEMPDIR is None:
-        temp_dir = tempfile.mkdtemp()
-        atexit.register(shutil.rmtree, path=temp_dir)
-        _TEMPDIR = temp_dir
+        _TEMPDIR = _make_temp_dir(prefix="instruction_count_microbenchmarks", gc_dev_shm=True)
+        atexit.register(shutil.rmtree, path=_TEMPDIR)
     return _TEMPDIR
 
 

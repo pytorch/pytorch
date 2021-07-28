@@ -22,19 +22,25 @@ __host__ __device__ static inline std::complex<T> ceil_wrapper(std::complex<T> v
 }
 
 void ceil_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "ceil_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ceil_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "ceil_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ceil_wrapper(a);
+        });
+      });
 }
 
 void frac_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "frac_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return a - ::trunc(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "frac_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return a - ::trunc(a);
+        });
+      });
 }
 
 // We manually overload floor because std::floor does not work with std::complex types.
@@ -49,11 +55,14 @@ __host__ __device__ static inline std::complex<T> floor_wrapper(std::complex<T> 
 }
 
 void floor_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "floor_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return floor_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "floor_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return floor_wrapper(a);
+        });
+      });
 }
 
 template <typename scalar_t>
@@ -88,11 +97,14 @@ __host__ __device__ static inline c10::complex<T> reciprocal_wrapper(c10::comple
 }
 
 void reciprocal_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "reciprocal_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return reciprocal_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.common_dtype(), "reciprocal_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return reciprocal_wrapper(a);
+        });
+      });
 }
 
 // We manually overload nearbyint because std::nearbyint does not work with std::complex types and ROCm.
@@ -117,12 +129,15 @@ __host__ __device__ static inline c10::complex<double> nearbyint_wrapper(c10::co
 #pragma pop
 
 void round_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "round_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      // We do not use std::round because we would like to round midway numbers to the nearest even integer.
-      return nearbyint_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "round_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          // We do not use std::round because we would like to round midway numbers to the nearest even integer.
+          return nearbyint_wrapper(a);
+        });
+      });
 }
 
 // We manually overload trunc because std::trunc does not work with std::complex types and ROCm.
@@ -144,11 +159,14 @@ __host__ __device__ static inline c10::complex<double> trunc_wrapper(c10::comple
 }
 
 void trunc_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half, iter.dtype(), "trunc_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return trunc_wrapper(a);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      iter.dtype(), "trunc_cuda",
+      [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return trunc_wrapper(a);
+        });
+      });
 }
 
 REGISTER_DISPATCH(ceil_stub, &ceil_kernel_cuda);

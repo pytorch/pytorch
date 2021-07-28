@@ -9,40 +9,34 @@ from typing import Dict, List, Optional, Union
 DeviceType = Union[int, str, torch.device]
 
 
-def _to_device_index(device: DeviceType) -> int:
+def _to_device(device: DeviceType) -> torch.device:
     device = torch.device(device)
     if device.type != "cuda":
         raise ValueError(
             "`set_devices` expect a list of CUDA devices, but got "
             f"device type {device.type}."
         )
-    return device.index
+    return device
 
 
-def _to_device_index_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[int, int]:
-    device_index_map : Dict[int, int] = {}
-    reverse_map : Dict[int, int] = {}
+def _to_device_map(device_map: Dict[DeviceType, DeviceType]) -> Dict[torch.device, torch.device]:
+    full_device_map : Dict[torch.device, torch.device] = {}
+    reverse_map : Dict[torch.device, torch.device] = {}
     for k in device_map:
         v = device_map[k]
         k, v = torch.device(k), torch.device(v)
-        if k.type != 'cuda' or v.type != 'cuda':
-            raise ValueError(
-                "`set_device_map` only supports CUDA devices, "
-                f"but got device pair {k}: {v}"
-
-            )
-        if v.index in reverse_map:
+        if v in reverse_map:
             raise ValueError(
                 "`device_map` only supports 1-to-1 mapping, "
-                f"trying to map {k} and {reverse_map[v.index]} to {v.index}"
+                f"trying to map {k} and {reverse_map[v]} to {v}"
             )
-        device_index_map[k.index] = v.index
-        reverse_map[v.index] = k.index
-    return device_index_map
+        full_device_map[k] = v
+        reverse_map[v] = k
+    return full_device_map
 
 
-def _to_device_index_list(devices: List[DeviceType]) -> List[int]:
-    return list(map(_to_device_index, devices))
+def _to_device_list(devices: List[DeviceType]) -> List[torch.device]:
+    return list(map(_to_device, devices))
 
 
 
@@ -90,13 +84,13 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         _transports: List = None,
         _channels: List = None,
     ):
-        device_index_maps = (
+        full_device_maps = (
             {} if device_maps is None else
-            {k : _to_device_index_map(v) for k, v in device_maps.items()}
+            {k : _to_device_map(v) for k, v in device_maps.items()}
         )
-        device_index_list = (
+        full_device_list = (
             [] if devices is None else
-            _to_device_index_list(devices)
+            _to_device_list(devices)
         )
         super().__init__(
             num_worker_threads,
@@ -104,8 +98,8 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             _channels,
             rpc_timeout,
             init_method,
-            device_index_maps,
-            device_index_list,
+            full_device_maps,
+            full_device_list,
         )
 
     def set_device_map(self, to: str, device_map: Dict[DeviceType, DeviceType]):
@@ -152,18 +146,18 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             >>> print(rets[0])  # tensor([2., 2.], device='cuda:0')
             >>> print(rets[1])  # tensor([2., 2.], device='cuda:1')
         """
-        device_index_map = _to_device_index_map(device_map)
+        full_device_map = _to_device_map(device_map)
         curr_device_maps = super().device_maps
 
         if to in curr_device_maps:
-            for k, v in device_index_map.items():
+            for k, v in full_device_map.items():
                 if k in curr_device_maps[to] and v != curr_device_maps[to][k]:
                     raise ValueError(
                         "`set_device_map` only supports 1-to-1 mapping, trying"
                         f" to map {k} to {v} and {curr_device_maps[to][k]}"
                     )
 
-        super()._set_device_map(to, device_index_map)
+        super()._set_device_map(to, full_device_map)
 
     def set_devices(self, devices: List[DeviceType]):
         r"""
@@ -175,4 +169,4 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             devices (List of int, str, or torch.device): local devices used by
                 the TensorPipe RPC agent.
         """
-        self.devices = _to_device_index_list(devices)
+        self.devices = _to_device_list(devices)

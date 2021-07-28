@@ -217,11 +217,9 @@ void ThreadedRecurrentNetworkExecutor::_Exec() {
   // Wait until threads finish.
   Timer t;
   while (!failed_ && countdown_ > 0) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     cv_.wait_for(lk, std::chrono::seconds(30), [&] {
       // Log if we are still running, so that we catch deadlocks.. there
       // should not be any deadlocks, but...
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       if (t.Seconds() > 10) {
         LOG(INFO) << "RNN Executor still running, remaining ops: "
                   << countdown_;

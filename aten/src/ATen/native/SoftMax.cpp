@@ -7,10 +7,18 @@
 #include <ATen/native/cpu/SoftmaxKernel.h>
 #include <ATen/NamedTensorUtils.h>
 
+#include <c10/core/TensorOptions.h>
+
 namespace at {
 namespace meta {
-TORCH_META_FUNC(_log_softmax)
-(const Tensor& input, const int64_t dim, const bool half_to_float) {
+TORCH_META_FUNC(_log_softmax) (
+  const Tensor& input,
+  const int64_t dim,
+  const bool half_to_float) {
+  TORCH_CHECK(
+      !half_to_float,
+      "softmax with half to float conversion is not supported on CPU");
+
   auto input_ = input.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, input.dim());
 
@@ -22,14 +30,8 @@ TORCH_META_FUNC(_log_softmax)
       dim_ >= 0 && dim_ < input_.dim(),
       "dim must be non-negative and less than input dimensions");
 
-  Tensor output = at::native::empty_like(
-      input_,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  set_output(input_.sizes(), output.options());
+  TensorOptions options(input_.options());
+  set_output(input_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 }
 
@@ -157,7 +159,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.numel() == 0) {
     return output;
   }
- if (input.dim() == 0)
+  if (input.dim() == 0)
     input = input.view(1);
   TORCH_CHECK(
       dim >= 0 && dim < input.dim(),
@@ -165,9 +167,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
     softmax_lastdim_kernel(kCPU, output, input);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
-      host_softmax<scalar_t, false>(output, input, dim);
-    });
+    softmax_kernel(kCPU, output, input, dim);
   }
   return output;
 }
@@ -177,10 +177,6 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
  const int64_t dim,
  const bool half_to_float,
  const Tensor& output) {
-  TORCH_CHECK(
-      !half_to_float,
-      "softmax with half to float conversion is not supported on CPU");
-
   if (input.numel() == 0) {
     return;
   }
@@ -193,7 +189,7 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   }
 
   if (input_.ndimension() > 0 && dim_ == input_.ndimension() - 1) {
-    // log_softmax_lastdim_kernel(kCPU, output, input);
+    log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND(
         at::ScalarType::BFloat16, input.scalar_type(), "log_softmax", [&] {
@@ -326,14 +322,16 @@ Tensor log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<Scala
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional<ScalarType> dtype) {
+  return at::log_softmax(input, dim, dtype);
+}
+
 DEFINE_DISPATCH(softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
+DEFINE_DISPATCH(softmax_kernel);
 
 Tensor softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) {
   return at::softmax(self, dimname_to_position(self, dim), dtype);

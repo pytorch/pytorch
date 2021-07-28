@@ -1,12 +1,11 @@
 #include <gtest/gtest.h>
 
-#include "test/cpp/jit/test_utils.h"
-#include "torch/csrc/jit/ir/irparser.h"
+#include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/ir/irparser.h>
 
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Attributes) {
   Graph g;
   auto one = attr::alpha;
@@ -15,7 +14,6 @@ TEST(IRTest, Attributes) {
   auto four = attr::perm;
   Node* n = g.create(Symbol::fromQualString("foo::bar"));
   Node& attr = *n;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr.f_(one, 3.4)->i_(two, 5)->s_(three, "what");
   ASSERT_EQ(attr.f(one), 3.4);
   ASSERT_EQ(attr.s(three), "what");
@@ -31,13 +29,11 @@ TEST(IRTest, Attributes) {
   Node& attr2 = *n2;
   attr2.copyAttributes(attr);
   ASSERT_EQ(attr2.s(one), "no");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   attr2.f_(one, 5);
   ASSERT_EQ(attr.s(one), "no");
   ASSERT_EQ(attr2.f(one), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, Blocks) {
   auto g = std::make_shared<Graph>();
   const auto graph_string = R"IR(
@@ -97,7 +93,6 @@ TEST(IRTest, Blocks) {
       ->run(*g2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IRTest, CommonAncestor) {
   std::string input_str = R"(
 graph(%x : Tensor,
@@ -159,6 +154,58 @@ graph(%x : Tensor,
       ASSERT_EQ(blocks_from_graph_block, ref_blocks_from_graph[i][j]);
     }
   }
+}
+
+TEST(IRTest, OperatorMap) {
+  OperatorMap<int> op_map;
+  const char* literal1 =
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor";
+  const char* literal2 =
+      "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor";
+  const char* literal3 =
+      "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor";
+  const char* literal4 =
+      "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor";
+  const char* literal5 =
+      "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor";
+  const char* literal6 =
+      "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor";
+  std::shared_ptr<Operator> op1 = getOperatorForLiteral(literal1);
+  std::shared_ptr<Operator> op2 = getOperatorForLiteral(literal2);
+  std::shared_ptr<Operator> op3 = getOperatorForLiteral(literal3);
+  std::shared_ptr<Operator> op4 = getOperatorForLiteral(literal4);
+  std::shared_ptr<Operator> op5 = getOperatorForLiteral(literal5);
+  std::shared_ptr<Operator> op6 = getOperatorForLiteral(literal6);
+  op_map.insert(op1, 1);
+  op_map.insert({{op2, 2}, {op3, 3}});
+  op_map.insert({{op4, 4}, {op5, 5}});
+  op_map.insert(op6, 6);
+  ASSERT_TRUE(op_map.contains(*op1));
+  ASSERT_TRUE(op_map.contains(*op2));
+  ASSERT_TRUE(op_map.contains(*op3));
+  ASSERT_TRUE(op_map.contains(*op4));
+  ASSERT_TRUE(op_map.contains(*op5));
+  ASSERT_TRUE(op_map.contains(*op6));
+  op_map.erase(op6);
+  op_map.erase(op3);
+  op_map.erase(op1);
+  ASSERT_FALSE(op_map.contains(*op1));
+  ASSERT_FALSE(op_map.contains(*op3));
+  ASSERT_FALSE(op_map.contains(*op6));
+  op_map.insert(op1, 1);
+  ASSERT_TRUE(op_map.contains(*op1));
+  c10::optional<int> o1 = op_map.find(*op1);
+  ASSERT_TRUE(o1.has_value());
+  c10::optional<int> o2 = op_map.find(*op2);
+  ASSERT_TRUE(o2.has_value());
+  c10::optional<int> o3 = op_map.find(*op3);
+  ASSERT_FALSE(o3.has_value());
+  c10::optional<int> o4 = op_map.find(*op4);
+  ASSERT_TRUE(o4.has_value());
+  c10::optional<int> o5 = op_map.find(*op5);
+  ASSERT_TRUE(o5.has_value());
+  c10::optional<int> o6 = op_map.find(*op6);
+  ASSERT_FALSE(o6.has_value());
 }
 
 } // namespace jit
