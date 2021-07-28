@@ -20,7 +20,6 @@ import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_localSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
-import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -66,6 +65,7 @@ from torch.testing._internal.common_utils import (
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -4481,6 +4481,10 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @unittest.skipIf(
+            IS_WINDOWS,
+            "PostLocalSGDOptimizer not yet supported with Windows."
         )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
