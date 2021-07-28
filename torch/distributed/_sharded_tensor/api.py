@@ -241,13 +241,13 @@ class ShardedTensor(object):
         with _sharded_tensor_lock:
             global _sharded_tensor_current_id, _sharded_tensor_map
             if self._sharded_tensor_id in _sharded_tensor_map:
-                _sharded_tensor_map.pop(self._sharded_tensor_id)
+                _sharded_tensor_map.pop(self._sharded_tensor_id)  # type: ignore[call-overload]
 
     def _init_rpc(self):
         with _sharded_tensor_lock:
             global _sharded_tensor_current_id, _sharded_tensor_map
-            self._sharded_tensor_id = _sharded_tensor_current_id
-            _sharded_tensor_map[self._sharded_tensor_id] = self
+            self._sharded_tensor_id = _sharded_tensor_current_id  # type: ignore[assignment]
+            _sharded_tensor_map[self._sharded_tensor_id] = self  # type: ignore[index]
             _sharded_tensor_current_id += 1
 
         self._rpc_initialized = True
