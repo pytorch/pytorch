@@ -569,28 +569,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("output", [](Node& n) { return n.output(); })
       .def(
           "getModuleHierarchy",
-          [](Node& n) {
-            if (!n.callstack().has_value()) {
-              return std::string();
-            }
-            InlinedCallStackPtr callstack_ptr = n.callstack().value();
-            std::string module_info;
-            for (auto& entry : callstack_ptr->vec()) {
-              const auto& opt_module_info =
-                  std::get<kModuleInstanceInfo>(entry);
-              if (opt_module_info.has_value()) {
-                const auto& module_instance_info = opt_module_info.value();
-                if (!module_info.empty()) {
-                  module_info.append(".");
-                }
-                module_info.append(
-                    utils::get_module_info(module_instance_info));
-              } else {
-                module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
-              }
-            }
-            return module_info;
-          })
+          [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)

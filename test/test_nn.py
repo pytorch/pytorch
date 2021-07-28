@@ -13188,6 +13188,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
     @onlyOnCPUAndCUDA
+    def test_Bilinear_empty(self, device):
+        mod = torch.nn.Bilinear(20, 30, 40).to(device)
+        inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
+        inp2 = torch.randn(0, 10, 30, requires_grad=True, device=device)
+
+        output = mod(inp1, inp2)
+        output.sum().backward()
+
+        self.assertEqual(inp1, torch.zeros_like(inp1))
+        self.assertEqual(inp2, torch.zeros_like(inp2))
+
+        self.assertEqual(inp1.grad, torch.zeros_like(inp1))
+        self.assertEqual(inp2.grad, torch.zeros_like(inp2))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
@@ -15706,6 +15721,19 @@ class TestNNDeviceType(NNTestCase):
                          torch.cat([m1.weight.grad.data, m2.weight.grad.data], 0),
                          atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
+    @dtypes(torch.double)
+    def test_Conv2d_backward_depthwise(self, device, dtype):
+        x = torch.randn(2, 2, 4, 20, device=device, dtype=dtype, requires_grad=True)
+        weight = torch.randn(2, 1, 3, 5, device=device, dtype=dtype, requires_grad=True)
+
+        def conv2d_depthwise(x, weight):
+            return torch.nn.functional.conv2d(
+                x, weight, bias=None, stride=(1, 10), groups=2)
+
+        for cudnn_enabled in [False, True]:
+            with torch.backends.cudnn.flags(enabled=cudnn_enabled):
+                torch.autograd.gradcheck(conv2d_depthwise, (x, weight))
+
     def _test_batchnorm_grad(self, device, dtype=torch.double):
         bs, n_feat, size_feat = 4, 5, 6
         input = torch.arange(bs * n_feat * size_feat, device=device,
@@ -16025,6 +16053,24 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float)
     def test_AdaptiveMaxPool3d_indices(self, device, dtype):
         self._test_maxpool_indices(3, adaptive=True, device=device, dtype=dtype)
+
+    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypes(torch.float)
+    def test_maxpool_indices_no_batch_dim(self, device, dtype):
+        """Check that indices with no batch dim is consistent with a single batch."""
+        max_pool_cases = [
+            (nn.AdaptiveMaxPool1d(3, return_indices=True),
+             torch.randn(3, 5, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool2d(3, return_indices=True),
+             torch.randn(3, 5, 6, device=device, dtype=dtype)),
+            (nn.AdaptiveMaxPool3d(3, return_indices=True),
+             torch.randn(3, 5, 6, 7, device=device, dtype=dtype))]
+
+        for module, input in max_pool_cases:
+            _, indices_no_batch = module(input)
+            _, indicies_single_batch = module(input.unsqueeze(0))
+            self.assertEqual(indices_no_batch, indicies_single_batch.squeeze(0))
+
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
