@@ -1,5 +1,4 @@
 #include <pybind11/pybind11.h>
-#include <torch/torch.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
