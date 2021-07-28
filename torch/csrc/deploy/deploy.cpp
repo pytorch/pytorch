@@ -224,7 +224,8 @@ Interpreter::Interpreter(InterpreterManager* manager)
 
   void* new_interpreter_impl = dlsym(handle_, "new_interpreter_impl");
   AT_ASSERT(new_interpreter_impl);
-  pImpl_ = std::unique_ptr<InterpreterImpl>(((InterpreterImpl * (*)()) new_interpreter_impl)());
+  pImpl_ = std::unique_ptr<InterpreterImpl>(
+      ((InterpreterImpl * (*)()) new_interpreter_impl)());
 }
 
 Interpreter::~Interpreter() {
