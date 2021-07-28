@@ -24,6 +24,7 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  SQUID_PROXY: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
 
 
 concurrency:
@@ -40,6 +41,8 @@ jobs:
     needs: []
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -112,6 +115,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
+      http_proxy: ${{ env.SQUID_PROXY }}
+      https_proxy: ${{ env.SQUID_PROXY }}
     needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
