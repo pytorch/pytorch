@@ -312,6 +312,11 @@ bool Reducer::static_graph_after_first_iteration() {
   return static_graph_ && num_iterations_ > 1;
 }
 
+bool Reducer::ddp_graph_static() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return ddp_graph_static_;
+}
+
 void Reducer::initialize_local_used_map() {
   const auto replica_count = replicas_.size();
   const auto variable_count = replicas_[0].size();
@@ -1261,6 +1266,14 @@ void Reducer::search_unused_parameters(
         "has any unused parameters in the forward pass, consider turning this "
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
+  }
+  if (!static_graph_ && ddp_graph_static_) {
+    if (num_iterations_ > 1) {
+      // Graph is still static if the set of unused parameters did not change.
+      ddp_graph_static_ =
+          prev_iteration_unused_parameters_ == unused_parameters_;
+    }
+    prev_iteration_unused_parameters_ = unused_parameters_;
   }
 }
 
