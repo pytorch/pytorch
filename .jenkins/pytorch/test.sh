@@ -143,6 +143,10 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+  SUDO=sudo
+fi
+
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
@@ -183,9 +187,6 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo
-    fi
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
       echo "Running wheel test with the install folder"
@@ -261,11 +262,16 @@ test_libtorch() {
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
       echo "Running libtorch test with the install folder"
+      BIN_PATH="$TORCH_BIN_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libjitbackend_test.so "$BIN_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch_cpu.so "$BIN_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch.so "$BIN_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10.so "$BIN_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libbackend_with_compiler.so "$BIN_PATH"
       mv "$BUILD_PATH" "$BUILD_PATH".bak
-      BUILD_BIN_PATH="$TORCH_BIN_PATH"
     else
       echo "Running libtorch test with the build folder"
-      BUILD_BIN_PATH="build/bin"
+      BIN_PATH="build/bin"
     fi
 
     # Run JIT cpp tests
@@ -273,19 +279,24 @@ test_libtorch() {
     pwd
     ls -l .
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-      "$BUILD_BIN_PATH"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$BIN_PATH"/test_jit  --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     else
-      "$BUILD_BIN_PATH"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
+      "$BIN_PATH"/test_jit  --gtest_filter='-*CUDA' --gtest_output=xml:$TEST_REPORTS_DIR/test_jit.xml
     fi
     python test/cpp/jit/tests_setup.py shutdown
     # Wait for background download to finish
     wait
-    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$BUILD_BIN_PATH"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
-    "$BUILD_BIN_PATH"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
-    "$BUILD_BIN_PATH"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
+    OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$BIN_PATH"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
+    "$BIN_PATH"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    "$BIN_PATH"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
-      mv"$BUILD_PATH".bak "$BUILD_PATH"
+      mv "$BUILD_PATH".bak "$BUILD_PATH"
+      ${SUDO} rm "$TORCH_LIB_PATH"/libjitbackend_test.so
+      ${SUDO} rm "$TORCH_LIB_PATH"/libtorch_cpu.so
+      ${SUDO} rm "$TORCH_LIB_PATH"/libtorch.so
+      ${SUDO} rm "$TORCH_LIB_PATH"/libc10.so
+      ${SUDO} rm "$TORCH_LIB_PATH"/libbackend_with_compiler.so
     fi
     assert_git_not_dirty
   fi
