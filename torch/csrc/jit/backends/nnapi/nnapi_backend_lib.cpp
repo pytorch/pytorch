@@ -11,8 +11,7 @@ class NnapiBackend : public PyTorchBackendInterface {
  public:
   // Constructor.
   explicit NnapiBackend() = default;
-  // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~NnapiBackend() = default;
+  ~NnapiBackend() override = default;
 
   bool is_available() override {
     return true;
