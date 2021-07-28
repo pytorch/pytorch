@@ -573,6 +573,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     float_conv = self.conv
                     if isinstance(self.conv, torch.nn.intrinsic._FusedModule):
                         float_conv = self.conv[0]
+                    assert qconfig is not None
                     float_conv.weight_post_process = qconfig.weight()
                     # run weight observer
                     float_conv.weight_post_process(float_conv.weight)
