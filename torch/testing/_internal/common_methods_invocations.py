@@ -4547,7 +4547,7 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
-def sample_inputs_dropout(op_info, device, dtype, requires_grad, inplace=False, **kwargs):
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
     input = make_tensor((S,), device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
