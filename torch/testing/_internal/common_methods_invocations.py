@@ -7894,7 +7894,8 @@ op_db: List[OpInfo] = [
         "nn.functional.softplus",
         ref=reference_softplus,
         sample_inputs_func=sample_inputs_softplus,
-        dtypes=floating_types(),
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
     ),
 ]
