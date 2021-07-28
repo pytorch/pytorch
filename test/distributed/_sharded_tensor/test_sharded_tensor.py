@@ -1,5 +1,6 @@
 from functools import wraps
 import io
+import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
@@ -22,7 +23,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
 )
-import unittest
+
+if TEST_WITH_ASAN:
+    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    sys.exit(0)
 
 class MyShardedModel2(torch.nn.Module):
     def __init__(self, spec=None, group=None):
@@ -108,9 +112,6 @@ def with_comms(func):
     return wrapper
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
-)
 class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
 
     @with_comms
@@ -277,43 +278,42 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         )
 
         pg = dist.new_group(ranks=[1, 2, 3])
-        if self.rank >= 1:
-            sharded_tensor = _sharded_tensor.empty(spec, 10, 20, process_group=pg)
+        sharded_tensor = _sharded_tensor.empty(spec, 10, 20, process_group=pg)
 
-            # Validate local shard.
-            local_shards = sharded_tensor.local_shards()
-            if self.rank >= 2:
-                self.assertEqual(1, len(local_shards))
-                local_shard = local_shards[0].tensor
-                self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
-                self.assertEqual((5, 20), local_shard.size())
-            else:
-                self.assertEqual(0, len(local_shards))
+        # Validate local shard.
+        local_shards = sharded_tensor.local_shards()
+        if self.rank >= 2:
+            self.assertEqual(1, len(local_shards))
+            local_shard = local_shards[0].tensor
+            self.assertEqual(torch.device(f"cuda:{self.rank}"), local_shard.device)
+            self.assertEqual((5, 20), local_shard.size())
+        else:
+            self.assertEqual(0, len(local_shards))
 
-            # Validate global metadata.
-            sharded_tensor_metadata = sharded_tensor.metadata()
-            shards_metadata = sharded_tensor_metadata.shards_metadata
-            self.assertEqual(2, len(shards_metadata))
+        # Validate global metadata.
+        sharded_tensor_metadata = sharded_tensor.metadata()
+        shards_metadata = sharded_tensor_metadata.shards_metadata
+        self.assertEqual(2, len(shards_metadata))
 
-            for shard_rank, shard_metadata in enumerate(shards_metadata):
-                self.assertEqual([shard_rank * 5, 0], shard_metadata.shard_offsets)
-                self.assertEqual([5, 20], shard_metadata.shard_lengths)
-                self.assertEqual(f'rank:{shard_rank + 1}/cuda:{shard_rank + 2}', shard_metadata.placement)
+        for shard_rank, shard_metadata in enumerate(shards_metadata):
+            self.assertEqual([shard_rank * 5, 0], shard_metadata.shard_offsets)
+            self.assertEqual([5, 20], shard_metadata.shard_lengths)
+            self.assertEqual(f'rank:{shard_rank + 1}/cuda:{shard_rank + 2}', shard_metadata.placement)
 
-            # Validate remote shards.
-            remote_shards = sharded_tensor.remote_shards()
-            if self.rank >= 2:
-                self.assertEqual(1, len(remote_shards))
-            else:
-                self.assertEqual(2, len(remote_shards))
+        # Validate remote shards.
+        remote_shards = sharded_tensor.remote_shards()
+        if self.rank >= 2:
+            self.assertEqual(1, len(remote_shards))
+        else:
+            self.assertEqual(2, len(remote_shards))
 
-            for rpc_rank, shards in remote_shards.items():
-                self.assertEqual(1, len(shards))
-                for remote_shard in shards:
-                    shard = remote_shard.to_here()
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    self.assertEqual(f'rank:{rpc_rank - 1}/cuda:{rpc_rank}', shard.metadata.placement)
-                    self.assertEqual((5, 20), shard.tensor.size())
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
+            for remote_shard in shards:
+                shard = remote_shard.to_here()
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                self.assertEqual(f'rank:{rpc_rank - 1}/cuda:{rpc_rank}', shard.metadata.placement)
+                self.assertEqual((5, 20), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -402,12 +402,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
     @requires_nccl()
     def test_invalid_sharding(self):
         self.init_pg()
-
-        spec = ChunkShardingSpec(dim=0, placements=["rank:1/cuda:1"])
-        pg = dist.new_group(ranks=[2, 3])
-        if self.rank < 2:
-            with self.assertRaisesRegex(ValueError, 'not part of process group'):
-                _sharded_tensor.empty(spec, 10, 20, process_group=pg)
 
         spec = ChunkShardingSpec(dim='H', placements=["rank:1/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'needs to be an integer'):
@@ -514,6 +508,39 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
+    def test_sharded_tensor_sizes(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        # Test with *args
+        sharded_tensor = _sharded_tensor.empty(spec, 10, 20)
+        self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
+
+        # Test with single *args
+        sharded_tensor = _sharded_tensor.empty(spec, 10)
+        self.assertEqual(torch.Size([10]), sharded_tensor.size())
+
+        # Test with list
+        sharded_tensor = _sharded_tensor.empty(spec, [10, 20])
+        self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
+
+        # Test with tuple
+        sharded_tensor = _sharded_tensor.empty(spec, (10, 20))
+        self.assertEqual(torch.Size([10, 20]), sharded_tensor.size())
+
+        with self.assertRaises(TypeError):
+            sharded_tensor = _sharded_tensor.empty(spec, 'foo')
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
     def test_state_dict(self):
         spec = ChunkShardingSpec(
             dim=0,
@@ -581,9 +608,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
 
-@unittest.skipIf(
-    TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
-)
 class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
 
     @with_comms
@@ -869,44 +893,43 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
 
         pg = dist.new_group(ranks=[1, 2, 3])
 
-        if self.rank >= 1:
-            sharded_tensor = _sharded_tensor.empty(spec, 10, 5, process_group=pg)
-            self.assertEqual((10, 5), sharded_tensor.size())
-            if self.rank == 1 or self.rank == 3:
-                # Verify local shard.
-                local_shard = sharded_tensor.local_shards()[0]
-                self.assertEqual(torch.device(f'cuda:{self.rank}'), local_shard.tensor.device)
-                self.assertEqual((5, 5), local_shard.tensor.size())
+        sharded_tensor = _sharded_tensor.empty(spec, 10, 5, process_group=pg)
+        self.assertEqual((10, 5), sharded_tensor.size())
+        if self.rank == 1 or self.rank == 3:
+            # Verify local shard.
+            local_shard = sharded_tensor.local_shards()[0]
+            self.assertEqual(torch.device(f'cuda:{self.rank}'), local_shard.tensor.device)
+            self.assertEqual((5, 5), local_shard.tensor.size())
 
-                # Verify local shard metadata.
-                self.assertEqual((self.rank // 2 * 5, 0), local_shard.metadata.shard_offsets)
-                self.assertEqual((5, 5), local_shard.metadata.shard_lengths)
-                self.assertEqual(f'rank:{self.rank - 1}/cuda:{self.rank}', local_shard.metadata.placement)
+            # Verify local shard metadata.
+            self.assertEqual((self.rank // 2 * 5, 0), local_shard.metadata.shard_offsets)
+            self.assertEqual((5, 5), local_shard.metadata.shard_lengths)
+            self.assertEqual(f'rank:{self.rank - 1}/cuda:{self.rank}', local_shard.metadata.placement)
 
-            # Verify global metadata.
-            sharded_tensor_metadata = sharded_tensor.metadata()
-            shards_metadata = sharded_tensor_metadata.shards_metadata
-            self.assertEqual(2, len(shards_metadata))
-            for rank, shard_metadata in enumerate(shards_metadata):
-                self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
-                self.assertEqual((5, 5), shard_metadata.shard_lengths)
-                self.assertEqual(f'rank:{rank * 2}/cuda:{rank * 2 + 1}', shard_metadata.placement)
+        # Verify global metadata.
+        sharded_tensor_metadata = sharded_tensor.metadata()
+        shards_metadata = sharded_tensor_metadata.shards_metadata
+        self.assertEqual(2, len(shards_metadata))
+        for rank, shard_metadata in enumerate(shards_metadata):
+            self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
+            self.assertEqual((5, 5), shard_metadata.shard_lengths)
+            self.assertEqual(f'rank:{rank * 2}/cuda:{rank * 2 + 1}', shard_metadata.placement)
 
-            # Validate remote shards.
-            remote_shards = sharded_tensor.remote_shards()
-            if self.rank == 1 or self.rank == 3:
-                self.assertEqual(1, len(remote_shards))
-            else:
-                self.assertEqual(2, len(remote_shards))
+        # Validate remote shards.
+        remote_shards = sharded_tensor.remote_shards()
+        if self.rank == 1 or self.rank == 3:
+            self.assertEqual(1, len(remote_shards))
+        else:
+            self.assertEqual(2, len(remote_shards))
 
-            owners = {}
-            for rpc_rank, shards in remote_shards.items():
-                self.assertEqual(1, len(shards))
+        owners = {}
+        for rpc_rank, shards in remote_shards.items():
+            self.assertEqual(1, len(shards))
 
-                for remote_shard in shards:
-                    self.assertEqual(rpc_rank, remote_shard.owner().id)
-                    shard = remote_shard.to_here()
-                    self.assertEqual((5, 5), shard.tensor.size())
+            for remote_shard in shards:
+                self.assertEqual(rpc_rank, remote_shard.owner().id)
+                shard = remote_shard.to_here()
+                self.assertEqual((5, 5), shard.tensor.size())
 
     @with_comms
     @skip_if_lt_x_gpu(4)

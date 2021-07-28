@@ -1,3 +1,4 @@
+import collections
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
@@ -191,7 +192,15 @@ class ShardedTensor(object):
         if memory_format != torch.contiguous_format:
             raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-        dims = list(size)
+        if len(size) == 1 and isinstance(size[0], collections.Sequence):
+            dims = list(*size)
+        else:
+            dims = list(size)
+
+        for dim in dims:
+            if not isinstance(dim, int):
+                raise TypeError(f'size has to be a sequence of ints, found: {type(dim)}')
+
         self._sharding_spec = sharding_spec
         self._process_group = (
             process_group
@@ -201,30 +210,27 @@ class ShardedTensor(object):
 
         self._local_shards: List[Shard] = []
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
-        self._metadata = None
-        self._sharded_tensor_id = None
 
-        if not distributed_c10d._rank_not_in_group(self._process_group):
-            if isinstance(self._sharding_spec, ChunkShardingSpec):
-                self._init_chunked(
-                    dims,
-                    dtype,
-                    layout,
-                    requires_grad,
-                    pin_memory,
-                    memory_format,
-                )
-            elif isinstance(self._sharding_spec, EnumerableShardingSpec):
-                self._init_enumerable(
-                    dims,
-                    dtype,
-                    layout,
-                    requires_grad,
-                    pin_memory,
-                    memory_format,
-                )
-            else:
-                raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
+        if isinstance(self._sharding_spec, ChunkShardingSpec):
+            self._init_chunked(
+                dims,
+                dtype,
+                layout,
+                requires_grad,
+                pin_memory,
+                memory_format,
+            )
+        elif isinstance(self._sharding_spec, EnumerableShardingSpec):
+            self._init_enumerable(
+                dims,
+                dtype,
+                layout,
+                requires_grad,
+                pin_memory,
+                memory_format,
+            )
+        else:
+            raise ValueError(f'Unsupported sharding_spec: {self._sharding_spec}')
 
         # Initialize RPC if available.
         if rpc._is_current_rpc_agent_set():
@@ -262,22 +268,17 @@ class ShardedTensor(object):
         # Share the local shards to the entire world.
         futs = []
         rpc_rank = rpc.get_worker_info().id
-        for rank in range(world_size):
+        for rank in range(dist.get_world_size()):
             # Skip self.
-            if rank == dist.get_rank(self._process_group):
+            if rank == dist.get_rank():
                 continue
-
-            if self._process_group == distributed_c10d._get_default_group():
-                global_rank = rank
-            else:
-                global_rank = distributed_c10d._get_global_rank(self._process_group, rank)
 
             if len(self.local_shards()) != 0:
                 rrefs: List[rpc.RRef[Shard]] = [rpc.RRef(shard) for shard in self.local_shards()]
                 fut = rpc.rpc_async(
-                    global_rank,
+                    rank,
                     _register_remote_shards,
-                    args=(all_tensor_ids[rank_to_name[global_rank]], rrefs, rpc_rank))
+                    args=(all_tensor_ids[rank_to_name[rank]], rrefs, rpc_rank))
                 futs.append(fut)
 
         torch.futures.wait_all(futs)
@@ -408,9 +409,10 @@ class ShardedTensor(object):
 
         on, local_device = _parse_remote_device(device)
 
-        # Validate rank.
-        if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
-            raise ValueError(f'Invalid rank: {on}')
+        # Validate rank, skip validation if rank is not part of process group.
+        if not distributed_c10d._rank_not_in_group(self._process_group):
+            if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
+                raise ValueError(f'Invalid rank: {on}')
 
         if isinstance(on, str):
             if not rpc._is_current_rpc_agent_set():
