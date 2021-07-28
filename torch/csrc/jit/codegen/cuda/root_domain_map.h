@@ -338,6 +338,9 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
       bool map_through_reduction = false);
 
  private:
+  //! Initialize the bcast map for fusion outputs
+  void initializeBcastMap(const TensorView* tv, const IterDomain* id);
+
   //! Set a pair of producer-consumer domain keys as mappable
   void setMapped(const DomainKey& producer, const DomainKey& consumer);
 
