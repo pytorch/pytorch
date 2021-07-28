@@ -23,7 +23,7 @@ from common_utils import (
     instantiate_parameterized_methods,
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
-    opinfo_in_dict
+    opinfo_in_dict,
 )
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map

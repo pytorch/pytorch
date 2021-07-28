@@ -168,43 +168,39 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(#op".Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &at::op>));
 
   BINARY_POINTWISE_WITH_SCALAR(add);
-  VMAP_SUPPORT("add.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(add, Scalar)), &at::add, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("add.Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(add, Scalar)));
   VMAP_SUPPORT("atan2", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(atan2)), &at::atan2>));
 
-  VMAP_SUPPORT("clamp",
-      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp)), &at::clamp, const optional<Scalar>&, const optional<Scalar>&>));
+  VMAP_SUPPORT("clamp", BASIC_UNARY_BATCH_RULE(ATEN_FN(clamp)));
   VMAP_SUPPORT("clamp.Tensor", clamp_tensor_batch_rule);
   VMAP_SUPPORT("clamp_min.Tensor",
       SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(clamp_min, Tensor)), &at::clamp_min>));
-  VMAP_SUPPORT("clamp_min",
-      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp_min)), &at::clamp_min, const Scalar&>));
+  VMAP_SUPPORT("clamp_min", BASIC_UNARY_BATCH_RULE(ATEN_FN(clamp_min)));
   VMAP_SUPPORT("clamp_max.Tensor",
       SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(clamp_max, Tensor)), &at::clamp_max>));
-  VMAP_SUPPORT("clamp_max",
-      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN(clamp_max)), &at::clamp_max, const Scalar&>));
-
+  VMAP_SUPPORT("clamp_max", BASIC_UNARY_BATCH_RULE(ATEN_FN(clamp_max)));
 
   BINARY_POINTWISE(div);
-  VMAP_SUPPORT("div.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(div, Scalar)), &at::div, const Scalar&>));
-  VMAP_SUPPORT("div.Scalar_mode", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(div, Scalar_mode)), &at::div, const Scalar&, c10::optional<string_view>>));
+  VMAP_SUPPORT("div.Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(div, Scalar)));
+  VMAP_SUPPORT("div.Scalar_mode", BASIC_UNARY_BATCH_RULE(ATEN_FN2(div, Scalar_mode)));
   VMAP_SUPPORT("div.Tensor_mode", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(div, Tensor_mode)), &at::div, c10::optional<string_view>>));
 
   VMAP_SUPPORT("maximum", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(maximum)), &at::maximum>));
   VMAP_SUPPORT("minimum", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN(minimum)), &at::minimum>));
 
   BINARY_POINTWISE(mul);
-  VMAP_SUPPORT("mul.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(mul, Scalar)), &at::mul, const Scalar&>));
+  VMAP_SUPPORT("mul.Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(mul, Scalar)));
 
   // at::pow has three out-of-place overloads
   VMAP_SUPPORT("pow.Tensor_Tensor", SINGLE_ARG(binary_pointwise_batch_rule<decltype(&ATEN_FN2(pow, Tensor_Tensor)), &at::pow>));
-  VMAP_SUPPORT("pow.Tensor_Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(pow, Tensor_Scalar)), &at::pow, const Scalar&>));
+  VMAP_SUPPORT("pow.Tensor_Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(pow, Tensor_Scalar)));
   VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
 
   BINARY_POINTWISE_WITH_SCALAR(sub);
-  VMAP_SUPPORT("sub.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(sub, Scalar)), &at::sub, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("sub.Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(sub, Scalar)));
 
   BINARY_POINTWISE_WITH_SCALAR(rsub);
-  VMAP_SUPPORT("rsub.Scalar", SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(rsub, Scalar)), &at::rsub, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT("rsub.Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(rsub, Scalar)));
 
   VMAP_SUPPORT("sigmoid_backward", SINGLE_ARG(
         binary_pointwise_batch_rule<decltype(&at::sigmoid_backward), &at::sigmoid_backward>));
@@ -256,8 +252,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(#op".Tensor", \
       SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN2(op, Tensor)), &at::op>)); \
-  VMAP_SUPPORT(#op".Scalar", \
-      SINGLE_ARG(basic_unary_batch_rule<decltype(&ATEN_FN2(op, Scalar)), &at::op, const Scalar&>));
+  VMAP_SUPPORT(#op".Scalar", BASIC_UNARY_BATCH_RULE(ATEN_FN2(op, Scalar)))
 
   COMPARISON_POINTWISE(eq);
   COMPARISON_POINTWISE(gt);
