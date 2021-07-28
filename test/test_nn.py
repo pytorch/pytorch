@@ -16780,6 +16780,23 @@ class TestNNDeviceType(NNTestCase):
                 output_unit = m_unit(input, target)
                 self.assertEqual(output, output_unit)
 
+    def test_cross_entropy_loss_index_target_unit_weights(self, device):
+        # Test with k-dimensional loss.
+        for k in range(5):
+            N, C = 5, 4
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
+
+            for reduction in ['none', 'mean', 'sum']:
+                # Ensure result with unit weights is equivalent to result without weights.
+                m = torch.nn.CrossEntropyLoss(reduction=reduction)
+                unit_weight = torch.ones(C, device=device, dtype=input.dtype)
+                m_unit = torch.nn.CrossEntropyLoss(weight=unit_weight, reduction=reduction)
+                output = m(input, target)
+                output_unit = m_unit(input, target)
+                self.assertEqual(output, output_unit)
+
     def test_cross_entropy_loss_one_hot_target(self, device):
         # Test with k-dimensional loss.
         for k in range(5):
@@ -16806,22 +16823,6 @@ class TestNNDeviceType(NNTestCase):
                 output = m(input, target)
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
-
-    def test_cross_entropy_loss_index_target_unit_weights(self, device):
-        # Test with k-dimensional loss.
-        for k in range(5):
-            N, C = 5, 4
-            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
-            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
-            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
-
-            for reduction in ['none', 'mean', 'sum']:
-                # Ensure result with unit weights is equivalent to result without weights.
-                m = torch.nn.CrossEntropyLoss(reduction=reduction)
-                m_unit = torch.nn.CrossEntropyLoss(weight=torch.ones(C), reduction=reduction)
-                output = m(input, target)
-                output_unit = m_unit(input, target)
-                self.assertEqual(output, output_unit)
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
