@@ -589,7 +589,6 @@ TEST(LiteInterpreterTest, TwoSubmodulesModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(C).A0(A).aten::add"));
   AT_ASSERT(module_debug_info_set.count("top(C).B0(B).aten::add"));
 }
-#endif
 
 TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
   auto runtime_bytecode_version = _get_runtime_bytecode_version();
@@ -598,6 +597,14 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+/**
+ * The test below is disarmed for FB internal xplat builds since
+ * BUCK requires us to pass in the script_module_v4.ptl file in
+ * as a resource dependency of the build rule for this file, and
+ * we would need to access it via the C++ Resources API instead
+ * of directly reading from disk (which is what the open source
+ * build/run does).
+ */
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
@@ -607,6 +614,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+#endif
 
 namespace {
 
