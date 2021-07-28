@@ -412,9 +412,6 @@ void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
     return;
   }
 
-  // FIXME: We need to call it here since Future completion requires all
-  // the work to be synchronized to CUDA.
-  work->synchronize();
   work->finishWorkGloo();
 }
 
@@ -438,26 +435,47 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  std::vector<c10::Device> devices;
+  for (const auto& tensorVec : outputTensors) {
+    for (const at::Tensor& tensor : tensorVec) {
+      if (tensor.device().has_index()) {
+        devices.push_back(tensor.device());
+      }
+    }
+  }
+
   if (outputTensors.size() > 1) {
     return c10::make_intrusive<c10::ivalue::Future>(
-        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+        c10::ListType::create(
+            c10::ListType::create(c10::TensorType::get())),
+            std::move(devices));
   }
   return c10::make_intrusive<c10::ivalue::Future>(
-      c10::ListType::create(c10::TensorType::get()));
+      c10::ListType::create(c10::TensorType::get()),
+      std::move(devices));
 }
 
 void returnFutureWithOutput(
     c10::intrusive_ptr<c10::ivalue::Future>& future,
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+
   if (outputTensors.size() == 0) {
     future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
     return;
   }
+
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages;
+  for (const auto& tensorVec : outputTensors) {
+    for (const auto& tensor : tensorVec) {
+      storages.emplace_back(tensor.storage().getWeakStorageImpl());
+    }
+  }
+
   if (outputTensors.size() > 1) {
-    future->markCompleted(c10::IValue(outputTensors));
+    future->markCompleted(c10::IValue(outputTensors), std::move(storages));
     return;
   }
-  future->markCompleted(c10::IValue(outputTensors[0]));
+  future->markCompleted(c10::IValue(outputTensors[0]), std::move(storages));
 }
 } // namespace
 
@@ -868,10 +886,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   at::Tensor tmp;
@@ -1307,10 +1322,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1359,10 +1371,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1589,10 +1598,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(inputs.size())) {
-      c10::Device device = inputs[i].device();
-      events[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1759,10 +1765,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmpInputs;
@@ -2092,10 +2095,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i][0].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmpInputs;
@@ -2276,10 +2276,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    for(const auto i : c10::irange(outputs.size())) {
-      c10::Device device = outputs[i].device();
-      outputEvents[i].block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
-    }
+    future_->wait();
   }
 
   std::vector<at::Tensor> tmpOutputs;
@@ -2470,8 +2467,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    c10::Device device = outputTensor.device();
-    outputEvents.front().block(c10::impl::VirtualGuardImpl(device.type()).getStream(device));
+    future_->wait();
   }
 
   at::Tensor cpuOutput;
