@@ -6,7 +6,6 @@ import os
 import random
 import sys
 import tempfile
-import unittest
 from functools import reduce
 from itertools import groupby
 
@@ -45,7 +44,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     retry_on_connect_failures,
     TEST_WITH_TSAN,
+    sandcastle_skip,
 )
+
+if TEST_WITH_TSAN:
+    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    sys.exit(0)
 
 
 def simple_reduce_tests(rank, world_size):
@@ -204,10 +208,6 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 @requires_gloo()
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def _create_process_group_gloo(self, store, rank, world_size, opts):
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, opts)
@@ -676,7 +676,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(tensors, outputs)
                 self.assertEqual(result, outputs)
 
-    @unittest.skip("intermittent failures on Windows, in CI")
+    @sandcastle_skip("intermittent failures on Windows, in CI")
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
 
@@ -835,7 +835,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
+    @sandcastle_skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
     @skip_if_lt_x_gpu(2)
     def test_scatter_stress_cuda(self):
         inputs = [
@@ -1370,10 +1370,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             del pg
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class DistributedDataParallelTest(
     test_c10d_common.AbstractDistributedDataParallelTest, MultiProcessTestCase
 ):
@@ -2023,7 +2019,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, self.process_group)
+        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2039,7 +2035,12 @@ class ReducerTest(TestCase):
         with self.assertRaises(RuntimeError):
             parameters = [list(model.parameters())]
             buckets = [list(range(len(parameters[0])))]
-            dist.Reducer(parameters, buckets, self.process_group)
+            dist.Reducer(
+                parameters,
+                buckets,
+                [dist._DEFAULT_FIRST_BUCKET_BYTES],
+                self.process_group
+            )
 
     def test_multi_dtype_multi_bucket(self):
         model = self._create_mixed_precision_model()
@@ -2048,7 +2049,12 @@ class ReducerTest(TestCase):
             range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
-        dist.Reducer(parameters, buckets, self.process_group)
+        dist.Reducer(
+            parameters,
+            buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in buckets],
+            self.process_group
+        )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
@@ -2059,6 +2065,7 @@ class ReducerTest(TestCase):
         return dist.Reducer(
             parameters,
             buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in range(len(buckets))],
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
@@ -2129,10 +2136,6 @@ class ReducerTest(TestCase):
             optimizer.step()
 
 
-@unittest.skipIf(
-    TEST_WITH_TSAN,
-    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
-)
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
@@ -2225,7 +2228,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_gloo()
     def test_sequence_num_incremented_gloo_subgroup(self):
         if self.world_size < 4:
-            return unittest.skip("Test requires world_size of at least 4")
+            return sandcastle_skip("Test requires world_size of at least 4")
         self._test_sequence_num_incremented_subgroup("gloo")
 
     @requires_gloo()

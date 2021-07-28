@@ -97,6 +97,27 @@ class QuantizeHandler(ABC):
         """
         return True
 
+    def is_general_tensor_value_op(self) -> bool:
+        """
+        Returns True if the operator works for both floating point and
+        quantized input, and does some computation based on the input Tensor,
+        so we need to insert observer/fake_quant for the output of the
+        operator since the distribution of values is different for input and output
+        Tensors (for HistogramObserver)
+        while they share the same quantization parameters
+        Example: avgpool2d
+        """
+        return False
+
+    def is_general_tensor_shape_op(self) -> bool:
+        """ Similar to is_general_tensor_value_op, this is a check
+        for ops that works for both floating point and quantized input,
+        that only re-arranges the Tensor values or query some metadata about the Tensor
+        We don't insert observer/fake_quant for the output of these operators
+        Example: reshape, transpose, maxpool2d
+        """
+        return False
+
     def should_insert_observer_for_output(
         self,
         qconfig: Any,
@@ -182,6 +203,10 @@ binary_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, 
 }
 binary_reference_op_supported_dtypes : Dict[Union[Callable, str], List[Tuple[torch.dtype, torch.dtype, None]]] = {
     torch.bmm: binary_op_int8_dtypes,
+    operator.add: binary_op_int8_dtypes,
+    torch.add: binary_op_int8_dtypes,
+    operator.mul: binary_op_int8_dtypes,
+    torch.mul: binary_op_int8_dtypes,
 }
 
 
@@ -258,11 +283,14 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         prepare step.
         """
         if self.num_tensor_args == 1:
-            return activation_dtype(qconfig) == torch.float16
+            return True
         elif self.all_node_args_are_tensors and self.input_output_observed():
             return True
         else:
             return False
+
+    def is_general_tensor_value_op(self) -> bool:
+        return self.num_tensor_args == 1
 
     def input_output_observed(self):
         # for x + y where x and y are scalars, we do not observe anything
@@ -288,10 +316,19 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
                 dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
-                args = load_arg(quantized=[torch.quint8, torch.qint8])(node.args)
-                args = load_arg(quantized=torch.float)(node.args)
-                kwargs = load_arg(quantized=torch.float)(node.kwargs)
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.binary_op_node.args)
+                args = load_arg(quantized=torch.float)(self.binary_op_node.args)
+                kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
+                op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
+
+                def modified_load_arg(n: Node):
+                    if n.name == self.binary_op_node.name:
+                        return op_out
+                    else:
+                        return load_arg(quantized=torch.float)(n)
+
+                if self.relu_node:
+                    op_out = quantized_graph.node_copy(self.relu_node, modified_load_arg)
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
@@ -383,6 +420,9 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
 
 @register_quant_pattern(torch.cat)
 class CatQuantizeHandler(QuantizeHandler):
+    def is_general_tensor_value_op(self) -> bool:
+        return True
+
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -663,39 +703,80 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
 
-            # note that relu should already be fused into conv module in the fusion step
+            # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            # 1. attach output activation post process to linear module
+            if is_reference:
+                # produce dequant - float_op - quant pattern
+                dtype = torch.float
+                if activation_int8_quantized:
+                    dtype = activation_dtype(qconfig)
+                activation = load_arg(quantized=dtype)(self.linear_node.args[0])
+                args = load_arg(quantized=torch.float)(self.linear_node.args)
+                # Get the float linear and attach weight_activation_post_process
+                # lowering pass can call weight_activation_post_process.calculate_qparams
+                # to get scale and zero_point for weight
+                float_linear = self.linear
+                if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
+                    float_linear = float_linear.to_float()
+                    # change qat linear to linear
+                    parent_name, name = _parent_name(self.linear_node.target)
+                    setattr(modules[parent_name], name, float_linear)
+                    # Attach weight fake quant to the linear module
+                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        float_linear = float_linear[0]
+                    float_linear.weight_activation_post_process = self.linear.weight_fake_quant
+                else:
+                    if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
+                        float_linear = self.linear[0]  # type: ignore[index]
+                    # Attach the weight observer to the module
+                    float_linear.weight_activation_post_process = qconfig.weight()  # type: ignore[union-attr]
+                    # Run weight observer
+                    float_linear.weight_activation_post_process(float_linear.weight)  # type: ignore[operator]
 
-            if output_activation_post_process:
-                self.linear.activation_post_process = output_activation_post_process
-
-            # 2. select corresponding quantized linear class for the float linear class
-            if activation_int8_quantized:
-                additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                qlinear = get_static_quant_module_class(
-                    type(self.linear), additional_static_quant_mapping,
-                    is_reference=is_reference)
+                op_out = quantized_graph.create_node(
+                    'call_module',
+                    self.linear_node.target,
+                    args, {})
+                if output_activation_post_process:
+                    op_out = quantize_node(
+                        op_out,
+                        output_activation_post_process,
+                        node,
+                        modules,
+                        quantized_graph,
+                        node_name_to_scope,
+                        is_input=False)
+                return op_out
             else:
-                assert dtypes in [
-                    (torch.float32, torch.qint8, torch.quint8),
-                    (torch.float32, torch.float16, None),
-                ], f"dtype {dtypes} not supported yet"
-                additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
-                qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+                # 1. attach output activation post process to linear module
+                if output_activation_post_process:
+                    self.linear.activation_post_process = output_activation_post_process
 
-            quantized = qlinear.from_float(self.linear)
-            parent_name, name = _parent_name(self.linear_node.target)
-            setattr(modules[parent_name], name, quantized)
-            # activation needs to be quantized for static quantization
-            dtype = torch.float
-            if activation_int8_quantized:
-                dtype = activation_dtype(qconfig)
-            return quantized_graph.create_node(
-                'call_module',
-                self.linear_node.target,
-                (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
+                # 2. select corresponding quantized linear class for the float linear class
+                if activation_int8_quantized:
+                    additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
+                    qlinear = get_static_quant_module_class(
+                        type(self.linear), additional_static_quant_mapping)
+                else:
+                    assert dtypes in [
+                        (torch.float32, torch.qint8, torch.quint8),
+                        (torch.float32, torch.float16, None),
+                    ], f"dtype {dtypes} not supported yet"
+                    additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
+                    qlinear = get_dynamic_quant_module_class(type(self.linear), additional_dynamic_quant_mapping)
+
+                quantized = qlinear.from_float(self.linear)
+                parent_name, name = _parent_name(self.linear_node.target)
+                setattr(modules[parent_name], name, quantized)
+                # activation needs to be quantized for static quantization
+                dtype = torch.float
+                if activation_int8_quantized:
+                    dtype = activation_dtype(qconfig)
+                return quantized_graph.create_node(
+                    'call_module',
+                    self.linear_node.target,
+                    (load_arg(quantized=dtype)(self.linear_node.args[0]),), {})
         else:  # call_function
             assert self.linear_node.op == 'call_function'
             if is_reference:
@@ -1273,6 +1354,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
     ) -> bool:
         return True
 
+    def is_general_tensor_value_op(self) -> bool:
+        return True
+
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -1371,7 +1455,7 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
 @register_quant_pattern('unsqueeze')
 @register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
-class TensorShapeOpQuantizeHandler(QuantizeHandler):
+class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
     """ Operators that works on both float and quantized input
     if input is quantized, the output Tensor shares
     the same quantization parameter with input.
@@ -1380,6 +1464,9 @@ class TensorShapeOpQuantizeHandler(QuantizeHandler):
     e.g. size, and we do not insert extra observer/fake_quant
     for the output of the operator.
     """
+    def is_general_tensor_shape_op(self) -> bool:
+        return True
+
     def should_mark_output_quantized_from_input_quantized_status(
         self,
         qconfig: QConfigAny
