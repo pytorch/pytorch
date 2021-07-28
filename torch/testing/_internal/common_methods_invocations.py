@@ -3647,11 +3647,10 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
     )
 
     def generator():
-        for shape, dim in cases:
-            if with_dtype:
-                yield SampleInput(make_arg(shape), args=dim, kwargs={'dtype': torch.float64})
-            else:
-                yield SampleInput(make_arg(shape), args=dim)
+return [
+    SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
+    for shape, dim in cases
+]
 
     return list(generator())
 
