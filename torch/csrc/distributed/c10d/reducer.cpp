@@ -1,6 +1,7 @@
-#include "c10d/Utils.hpp"
-#include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
+
+#include <c10d/Utils.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -1911,7 +1912,9 @@ compute_bucket_assignment_by_size(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
   TORCH_INTERNAL_ASSERT(tensors.size() > 0);
-
+  // Store bucket indices and their sizes together, because we later sort the
+  // resulting indices by minimum tensor index and want to keep sizes
+  // consistent.
   std::vector<std::tuple<std::vector<size_t>, size_t>> result;
   // Sparse tensors go in their own bucket, so they do not have an enforced size
   // limit.
@@ -1948,7 +1951,7 @@ compute_bucket_assignment_by_size(
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
           result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
-      continue;
+          continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
@@ -2010,9 +2013,9 @@ compute_bucket_assignment_by_size(
   bucket_indices.reserve(result.size());
   std::vector<size_t> per_bucket_size_limits;
   per_bucket_size_limits.reserve(result.size());
-  for (const auto & tup : result) {
-    bucket_indices.emplace_back(std::get<0>(tup));
-    per_bucket_size_limits.emplace_back(std::get<1>(tup));
+  for (const auto & bucket_indices_with_size : result) {
+    bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
+    per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
   return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
