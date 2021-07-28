@@ -43,7 +43,7 @@ class NnapiBackend : public PyTorchBackendInterface {
 
     // Wrap procesed in dictionary: {"forward": processed}
     c10::Dict<c10::IValue, c10::IValue> handles(
-      c10::StringType::get(), c10::AnyType::get());
+        c10::StringType::get(), c10::AnyType::get());
     handles.insert("forward", dict);
     return c10::impl::toGenericDict(handles);
   }
@@ -53,7 +53,7 @@ class NnapiBackend : public PyTorchBackendInterface {
       c10::impl::GenericList inputs) override {
     // Convert inputs to Tensors
     c10::List<at::Tensor> tensorInp;
-    for (c10::IValue element: inputs) {
+    for (c10::IValue element : inputs) {
       tensorInp.push_back(element.toTensor());
     }
 
@@ -64,7 +64,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     TORCH_CHECK(comp_ != nullptr)
 
     c10::List<at::Tensor> outputs;
-    for(at::Tensor out: out_templates_) {
+    for (at::Tensor out : out_templates_) {
       outputs.push_back(at::empty_like(out));
     }
 
@@ -128,7 +128,9 @@ class NnapiBackend : public PyTorchBackendInterface {
     auto shape_ptr = dict.at("shape_compute_module").toString();
     ss.str(*shape_ptr);
     shape_compute_module_ = _load_for_mobile(ss);
-    out_templates_ = shape_compute_module_.run_method("prepare", ser_model_, inputs).toTensorList();
+    out_templates_ =
+        shape_compute_module_.run_method("prepare", ser_model_, inputs)
+            .toTensorList();
 
     // Create and initialize NnapiComilation object
     comp_.reset(new torch::nnapi::bind::NnapiCompilation());
