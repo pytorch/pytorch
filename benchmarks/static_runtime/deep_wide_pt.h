@@ -54,7 +54,7 @@ struct DeepAndWideFast : torch::nn::Module {
       auto wide_offset = at::add(wide, mu_);
       auto wide_normalized = at::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
-      auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
+      auto wide_preproc = at::cpu::clamp(wide_normalized, -10.0, 10.0);
 
       auto user_emb_t = at::native::transpose(user_emb, 1, 2);
       auto dp_unflatten = at::native::bmm_cpu(ad_emb_packed, user_emb_t);
@@ -87,7 +87,7 @@ struct DeepAndWideFast : torch::nn::Module {
       at::add_out(prealloc_tensors[0], wide, mu_);
       at::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
-      at::native::clamp_out(
+      at::native::clip_out(
           prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.

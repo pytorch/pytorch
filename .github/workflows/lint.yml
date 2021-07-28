@@ -35,7 +35,7 @@ jobs:
       - name: Ensure no trailing spaces
         if: always()
         run: |
-          (! git --no-pager grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
+          (! git --no-pager grep -In '[[:blank:]]$' -- . ':(exclude)**/contrib/**' ':(exclude)**.diff' ':(exclude)third_party' || (echo "The above lines have trailing spaces; please remove them"; false))
       - name: Ensure no tabs
         if: always()
         run: |
