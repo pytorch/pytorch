@@ -126,7 +126,6 @@ class autocast(object):
         device_type(string, required):  Whether to use 'cuda' or 'cpu' device
         enabled(bool, optional, default=True)":  Whether autocasting should be enabled in the region.
         fast_dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16
-        
     """
     def __init__(self, device_type, enabled=True, **kwargs):
         self.device = device_type
