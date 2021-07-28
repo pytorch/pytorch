@@ -1039,9 +1039,10 @@ class CrossEntropyLoss(_WeightedLoss):
           l_n = - w_{y_n} \log \frac{\exp(x_{n,y_n})}{\sum_{c=1}^C \exp(x_{n,c})}
           \cdot \mathbb{1}\{y_n \not= \text{ignore\_index}\}
 
-      where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight, and
-      :math:`N` is the batch size. If :attr:`reduction` is not ``'none'``
-      (default ``'mean'``), then
+      where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
+      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
+      :math:`d_1, ..., d_k` for the `K`-dimensional case. If
+      :attr:`reduction` is not ``'none'`` (default ``'mean'``), then
 
       .. math::
           \ell(x, y) = \begin{cases}
@@ -1063,7 +1064,8 @@ class CrossEntropyLoss(_WeightedLoss):
           l_n = - \sum_{c=1}^C w_c \log \frac{\exp(x_{n,c})}{\exp(\sum_{i=1}^C x_{n,i})} y_{n,c}
 
       where :math:`x` is the input, :math:`y` is the target, :math:`w` is the weight,
-      :math:`N` is the batch size, and :math:`C` is the number of classes. If
+      :math:`C` is the number of classes, and :math:`N` spans the minibatch dimension as well as
+      :math:`d_1, ..., d_k` for the `K`-dimensional case. If
       :attr:`reduction` is not ``'none'`` (default ``'mean'``), then
 
       .. math::

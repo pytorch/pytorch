@@ -470,44 +470,36 @@ Tensor cross_entropy_loss_prob_target(
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  Tensor ret;
   auto input = at::log_softmax(self, 1, self.scalar_type());
   if (weight.defined()) {
     // Expand weight to the correct number of dims for broadcasting with input / target
-    auto weight_bc_shape = SmallBuffer<int64_t, 5>(input.dim());
-    std::fill(weight_bc_shape.begin(), weight_bc_shape.end(), 1);
-    weight_bc_shape[1] = weight.size(0);
-    Tensor weight_ = weight.view(weight_bc_shape);
+    auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+    std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+    weight_broadcast_shape[1] = weight.size(0);
+    Tensor weight_ = weight.view(weight_broadcast_shape);
 
     switch (reduction) {
       case Reduction::Mean:
-        ret = -(input * target * weight_).sum(1).mean();
-        break;
+        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        ret = -(input * target * weight_).sum();
-        break;
+        return -(input * target * weight_).sum();
       case Reduction::None:
-        ret = -(input * target * weight_).sum(1);
-        break;
+        return -(input * target * weight_).sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        ret = -(input * target).sum(1).mean();
-        break;
+        return -(input * target).sum() / (input.numel() / input.size(1));
       case Reduction::Sum:
-        ret = -(input * target).sum();
-        break;
+        return -(input * target).sum();
       case Reduction::None:
-        ret = -(input * target).sum(1);
-        break;
+        return -(input * target).sum(1);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   }
-  return ret;
 }
 
 Tensor cross_entropy_loss(
