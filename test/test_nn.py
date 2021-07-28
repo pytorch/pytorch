@@ -4519,7 +4519,7 @@ class TestNN(NNTestCase):
         self.assertIsInstance(m, nn.Linear)
 
     def test_orthogonal_parametrization(self):
-        # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of extra_memory)
+        # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
 
         def assert_is_orthogonal(X):
             n, k = X.size(-2), X.size(-1)
@@ -4529,6 +4529,20 @@ class TestNN(NNTestCase):
             Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
             eps = 10 * n * torch.finfo(X.dtype).eps
             torch.testing.assert_allclose(X.transpose(-2, -1).conj() @ X, Id, atol=eps, rtol=0.)
+
+
+        def assert_weight_allclose_Q(weight, W):
+            # Test that weight is equal to the Q part of the QR decomposition of W
+            # (or of its transpose if the matrix is wide)
+            wide_matrix = W.size(-2) < W.size(-1)
+            if wide_matrix:
+                W = W.transpose(-2, -1)
+            Q, R = torch.linalg.qr(W)
+            Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
+            if wide_matrix:
+                Q = Q.transpose(-2, -1)
+            torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
+
 
         for shape, dtype, batched, in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
                                               (torch.float32, torch.complex64),
@@ -4542,11 +4556,11 @@ class TestNN(NNTestCase):
             else:
                 input = torch.randn(3, shape[0], dtype=dtype)
 
-            for parametrization, extra_memory in product(("matrix_exp", "cayley", "householder"),
+            for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
                                                          (False, True)):
-                # right_inverse for Cayley and matrix_exp not implemented for extra_memory=False
+                # right_inverse for Cayley and matrix_exp not implemented for use_trivialization=False
                 # See Note [right_inverse expm cayley]
-                can_initialize = extra_memory or parametrization == "householder"
+                can_initialize = use_trivialization or parametrization == "householder"
 
                 # We generate them every time to always start with fresh weights
                 if batched:
@@ -4562,58 +4576,42 @@ class TestNN(NNTestCase):
                         torch.nn.utils.parametrizations.orthogonal(m,
                                                                    "weight",
                                                                    parametrization,
-                                                                   extra_memory=extra_memory)
+                                                                   use_trivialization=use_trivialization)
                     continue
 
+                wide_matrix = w_init.size(-2) < w_init.size(-1)
                 torch.nn.utils.parametrizations.orthogonal(m,
                                                            "weight",
                                                            parametrization,
-                                                           extra_memory=extra_memory)
+                                                           use_trivialization=use_trivialization)
                 # Forwards works as expected
                 self.assertEqual(w_init.shape, m.weight.shape)
                 assert_is_orthogonal(m.weight)
                 if can_initialize:
-                    # We are initialising the weight to the Q part of the QR decomposition of w_init
-                    # (or of its transpose if the matrix is wide)
-                    transpose = w_init.size(-2) < w_init.size(-1)
-                    if transpose:
-                        w_init = w_init.transpose(-2, -1)
-                    Q, R = torch.linalg.qr(w_init)
-                    Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
-                    if transpose:
-                        Q = Q.transpose(-2, -1)
-                    torch.testing.assert_allclose(Q, m.weight, atol=1e-5, rtol=0.)
+                    assert_weight_allclose_Q(m.weight, w_init)
 
                 # Intializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
-                transpose = X.size(-2) < X.size(-1)
-                if transpose:
+                if wide_matrix:
                     X = X.transpose(-2, -1)
                 w_new = torch.linalg.qr(X).Q
-                if transpose:
+                if wide_matrix:
                     w_new = w_new.transpose(-2, -1)
                 if can_initialize:
                     m.weight = w_new
                     torch.testing.assert_allclose(w_new, m.weight, atol=1e-5, rtol=0.)
                 else:
-                    msg =  "assign to the matrix exponential or the Cayley parametrization"
+                    msg = "assign to the matrix exponential or the Cayley parametrization"
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
-                # Intializing with a non-orthogonal matrix works
+                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
                 w_new = torch.randn_like(m.weight)
                 if can_initialize:
                     m.weight = w_new
-                    transpose = w_new.size(-2) < w_new.size(-1)
-                    if transpose:
-                        w_new = w_new.transpose(-2, -1)
-                    Q, R = torch.linalg.qr(w_new)
-                    Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
-                    if transpose:
-                        Q = Q.transpose(-2, -1)
-                    torch.testing.assert_allclose(Q, m.weight, atol=1e-5, rtol=0.)
+                    assert_weight_allclose_Q(m.weight, w_new)
                 else:
-                    msg =  "assign to the matrix exponential or the Cayley parametrization"
+                    msg = "assign to the matrix exponential or the Cayley parametrization"
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
@@ -4629,7 +4627,7 @@ class TestNN(NNTestCase):
                     else:
                         zeros_grad = grad.tril(-1)
                     self.assertEqual(zeros_grad, torch.zeros_like(zeros_grad))
-                    # The gradient in the diagonal can be just imaginary because a skew-Hermitian
+                    # The gradient in the diagonal can only be imaginary because a skew-Hermitian
                     # matrix has imaginary diagonal
                     diag_grad = grad.diagonal(dim1=-2, dim2=-1)
                     if grad.is_complex():

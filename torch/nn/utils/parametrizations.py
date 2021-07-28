@@ -1,3 +1,5 @@
+from enum import Enum, auto
+
 import torch
 from torch import Tensor
 from ..utils import parametrize
@@ -15,7 +17,7 @@ def _is_orthogonal(Q, eps=None):
     return torch.allclose(Q.transpose(-2, -1).conj() @ Q, Id, atol=eps)
 
 
-def make_orthogonal(A):
+def _make_orthogonal(A):
     """ Assume that A is a tall matrix.
     Compute the Q factor s.t. A = QR (A may be complex) and diag(R) is real and non-negative
     """
@@ -26,10 +28,20 @@ def make_orthogonal(A):
     return Q
 
 
+class OrthMaps(Enum):
+    matrix_exp = auto()
+    cayley = auto()
+    householder = auto()
+
+
 class _Orthogonal(Module):
     base: Tensor
 
-    def __init__(self, weight, parametrization: str = None, *, extra_memory=True) -> None:
+    def __init__(self,
+                 weight,
+                 parametrization: OrthMaps,
+                 *,
+                 use_trivialization=True) -> None:
         super().__init__()
 
         # Note [Householder complex]
@@ -43,8 +55,8 @@ class _Orthogonal(Module):
         # to parametrize the unitary matrices. Saving tau on its own does not work either, because
         # not every combination of `(A, tau)` gives a unitary matrix, meaning that if we optimise
         # them as independent tensors we would not maintain the constraint
-        # An equivalent reasoning holds for rectangular # matrices
-        if weight.is_complex() and parametrization == "householder":
+        # An equivalent reasoning holds for rectangular matrices
+        if weight.is_complex() and parametrization == OrthMaps.householder:
             raise ValueError("The householder parametrization does not support complex tensors.")
 
         # We could implement this for 1-dim tensors as the maps on the sphere
@@ -55,7 +67,7 @@ class _Orthogonal(Module):
 
         self.shape = weight.shape
         self.parametrization = parametrization
-        if extra_memory:
+        if use_trivialization:
             self.register_buffer("base", None)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
@@ -69,7 +81,7 @@ class _Orthogonal(Module):
             X = X.transpose(-2, -1)
             n, k = k, n
         # Here n > k and X is a tall matrix
-        if self.parametrization == "matrix_exp" or self.parametrization == "cayley":
+        if self.parametrization == OrthMaps.matrix_exp or self.parametrization == OrthMaps.cayley:
             # We just need n x k - k(k-1)/2 parameters
             X = X.tril()
             if n != k:
@@ -77,16 +89,16 @@ class _Orthogonal(Module):
                 X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
             A = X - X.transpose(-2, -1).conj()
             # A is skew-symmetric (or skew-hermitian)
-            if self.parametrization == "matrix_exp":
+            if self.parametrization == OrthMaps.matrix_exp:
                 Q = torch.matrix_exp(A)
-            elif self.parametrization == "cayley":
+            elif self.parametrization == OrthMaps.cayley:
                 # Computes the Cayley retraction (I+A/2)(I-A/2)^{-1}
                 Id = torch.eye(n, dtype=A.dtype, device=A.device)
                 Q = torch.linalg.solve(torch.add(Id, A, alpha=-0.5), torch.add(Id, A, alpha=0.5))
             # Q is now orthogonal (or unitary) of size (..., n, n)
             if n != k:
                 Q = Q[..., :k]
-            # Q is now the size of the original tensor
+            # Q is now the size of the X (albeit perhaps transposed)
         else:
             # X is real here, as we do not support householder with complex numbers
             A = X.tril(diagonal=-1)
@@ -118,7 +130,7 @@ class _Orthogonal(Module):
         # We always make sure to always copy Q in every path
         if not hasattr(self, "base"):
             # Note [right_inverse expm cayley]
-            # If we do not have extra_memory=True, we just implement the inverse of the forward
+            # If we do not have use_trivialization=True, we just implement the inverse of the forward
             # map for the Householder. To see why, think that for the Cayley map,
             # we would need to find the matrix X \in R^{n x k} such that:
             # Y = torch.cat([X.tril(), X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
@@ -127,11 +139,11 @@ class _Orthogonal(Module):
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of
             # Corollary 2.2 in Edelman, Arias and Smith?
-            if self.parametrization == "cayley" or self.parametrization == "matrix_exp":
+            if self.parametrization == OrthMaps.cayley or self.parametrization == OrthMaps.matrix_exp:
                 raise NotImplementedError("It is not possible to assign to the matrix exponential "
-                                          "or the Cayley parametrizations when extra_memory=False.")
+                                          "or the Cayley parametrizations when use_trivialization=False.")
 
-            # If parametrization == "householder", make Q orthogonal via the QR decomposition.
+            # If parametrization == OrthMaps.householder, make Q orthogonal via the QR decomposition.
             # Here Q is always real because we do not support householder and complex matrices.
             # See note [Householder complex]
             A, tau = torch.geqrf(Q)
@@ -147,14 +159,14 @@ class _Orthogonal(Module):
             if n == k:
                 # We check whether Q is orthogonal
                 if not _is_orthogonal(Q):
-                    Q = make_orthogonal(Q)
+                    Q = _make_orthogonal(Q)
                 else:  # Is orthogonal
                     Q = Q.clone()
             else:
                 # Complete Q into a full n x n orthogonal matrix
                 N = torch.randn(*(Q.size()[:-2] + (n, n - k)), dtype=Q.dtype, device=Q.device)
                 Q = torch.cat([Q, N], dim=-1)
-                Q = make_orthogonal(Q)
+                Q = _make_orthogonal(Q)
             self.base = Q
 
             # It is necessary to return the -Id, as we use the diagonal for the
@@ -170,7 +182,7 @@ def orthogonal(module: Module,
                name: str = 'weight',
                parametrization: Optional[str] = None,
                *,
-               extra_memory: bool = True) -> Module:
+               use_trivialization: bool = True) -> Module:
     r"""Applies an orthogonal or unitary paramtrization to a matrix or a batch of matrices.
 
     Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, the parametrized
@@ -189,21 +201,21 @@ def orthogonal(module: Module,
     In plain words, :math:`Q` will have orthonormal columns whenever :math:`m \geq n`
     and orthonormal rows otherwise.
 
-    If the tensor has more than two dimensions, we consider it as a batch of matrices of shape ``(..., m, n)``.
+    If the tensor has more than two dimensions, we consider it as a batch of matrices of shape `(..., m, n)`.
 
-    The matrix :math:`Q` may be parametrized in three different ways:
+    The matrix :math:`Q` may be parametrized via three different ``parametrization``s in terms of the original tensor:
 
     - ``"matrix_exp"``/``"cayley"``:
-      the matrix exponential :math:`Q = \exp(A)` (:func:`torch.linalg.matrix_exp`) and the Cayley map
-      :math:`Q = (\mathrm{I}_n + A/2)(\mathrm{I}_n - A/2)^{-1}` of a skew-symmetric
-      (resp. skew-Hermitian) matrix :math:`A` give an orthogonal (resp. unitary) matrix.
-    - ``"householder"``: the product of Householder transformations is orthogonal / unitary
-      (:func:`torch.linalg.householder_product`).
+      the :func:`~torch.matrix_exp` :math:`Q = \exp(A)` and the `Cayley map`_
+      :math:`Q = (\mathrm{I}_n + A/2)(\mathrm{I}_n - A/2)^{-1}` applied to a skew-symmetric
+      / skew-Hermitian matrix :math:`A` give an orthogonal / unitary matrix.
+    - ``"householder"``: the product of Householder reflectors is orthogonal / unitary
+      (:func:`~torch.linalg.householder_product`).
 
     ``"matrix_exp"``/``"cayley"`` often make the parametrized weight converge faster than
     ``"householder"``, but they are slower to compute for very thin or very wide matrices.
 
-    If ``extra_memory=True`` (default), the parametrization implements the "Dynamic Trivialization Framework",
+    If ``use_trivialization=True`` (default), the parametrization implements the "Dynamic Trivialization Framework",
     where an extra matrix :math:`B \in \mathbb{K}^{n \times n}` is stored under
     ``module.parametrizations.weight[0].base``. This helps the
     convergence of the parametrized layer at the expense of some extra memory use.
@@ -211,24 +223,25 @@ def orthogonal(module: Module,
 
     .. note::
         This function is implemented using the parametrization functionality
-        in :func:`torch.nn.utils.parametrize.register_parametrization`.
+        in :func:`~torch.nn.utils.parametrize.register_parametrization`.
 
     .. note ::
-        If the original tensor is not parametrized and ``extra_memory=True`` (default), the initial value
+        If the original tensor is not parametrized and ``use_trivialization=True`` (default), the initial value
         of ``Q`` is that of the original tensor if it is orthogonal (or unitary in the complex case)
         and it is orthogonalized via the QR decomposition otherwise (see :func:`torch.linalg.qr`).
-        Same happens when ``parametrization="householder"`` even when ``extra_memory=False``.
+        Same happens when it is not parametrized and ``parametrization="householder"`` even when ``use_trivialization=False``.
         Otherwise, the initial value is the result of the composition of all the registered
         parametrizations applied to the original tensor.
 
+    .. _`Cayley map`: https://en.wikipedia.org/wiki/Cayley_transform#Matrix_map
     .. _`Trivializations for Gradient-Based Optimization on Manifolds`: https://arxiv.org/abs/1909.09501
 
     Args:
-        module (nn.Module): module on which to register the parametrization
+        module (nn.Module): module on which to register the parametrization.
         name (str, optional): name of the tensor to make orthogonal. Default: ``"weight"``.
-        parametrization (str, optional): One of the following: ``["matrix_exp", "cayley", "householder"]``.
-            Default: ``"matrix_exp"`` if the matrix is square, ``"householder"`` otherwise.
-        extra_memory (bool, optional): whether to use the dynamic trivialization framework.
+        parametrization (str, optional): One of the following: ``"matrix_exp"``, ``"cayley"``, ``"householder"``.
+            Default: ``"matrix_exp"`` if the matrix is square or complex, ``"householder"`` otherwise.
+        use_trivialization (bool, optional): whether to use the dynamic trivialization framework.
             Default: ``True``.
 
     Returns:
@@ -255,16 +268,16 @@ def orthogonal(module: Module,
         raise ValueError(
             "Module '{}' has no attribute with name '{}'".format(module, name)
         )
-    # getattr should get the correct parametrized weight if there
-    # is already an parametrization registered
+    # getattr should get the correct parametrized weight if there is already a parametrization registered
     weight = getattr(module, name)
     if parametrization is None:
-        parametrization = "householder" if weight.size(-2) != weight.size(-1) else "matrix_exp"
+        parametrization = "matrix_exp" if weight.size(-2) == weight.size(-1) or weight.is_complex() else "householder"
 
-    if parametrization not in ["matrix_exp", "cayley", "householder"]:
-        raise ValueError('parametrization has to be one of "matrix_exp", "cayley", "householder"'
-                         f' got: {parametrization}')
-    parametrize.register_parametrization(module, name, _Orthogonal(weight, parametrization, extra_memory=extra_memory), unsafe=True)
+    if not hasattr(OrthMaps, parametrization):
+        raise ValueError('parametrization has to be one of "matrix_exp", "cayley", "householder". '
+                         f'Got: {parametrization}')
+    parametrization = OrthMaps[parametrization]
+    parametrize.register_parametrization(module, name, _Orthogonal(weight, parametrization, use_trivialization=use_trivialization), unsafe=True)
     return module
 
 
@@ -411,7 +424,7 @@ def spectral_norm(module: Module,
 
     .. note::
         This function is implemented using the parametrization functionality
-        in :func:`torch.nn.utils.parametrize.register_parametrization`. It is a
+        in :func:`~torch.nn.utils.parametrize.register_parametrization`. It is a
         reimplementation of :func:`torch.nn.utils.spectral_norm`.
 
     .. note::
@@ -461,7 +474,7 @@ def spectral_norm(module: Module,
             "Module '{}' has no attribute with name '{}'".format(module, name)
         )
     # getattr should get the correct parametrized weight if there
-    # is already an parametrization registered
+    # is already a parametrization registered
     weight = getattr(module, name)
 
     if dim is None:
