@@ -461,8 +461,9 @@
   self: deg2rad_backward(grad)
   result: auto_element_wise
 
-- name: linalg_det(Tensor self) -> Tensor
-  self: linalg_det_backward(grad, self, result)
+- name: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
+  self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
+  output_differentiability: [True, False, False]
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
@@ -721,6 +722,7 @@
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   self: -at::matmul(inverse.conj().transpose(-2, -1), at::matmul(grad, inverse.conj().transpose(-2, -1)))
+  inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
 
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
@@ -1211,6 +1213,7 @@
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
+  result: solve_jvp(input_p, input_t, other_t, result)
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
