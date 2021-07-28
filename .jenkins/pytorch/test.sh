@@ -174,7 +174,9 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+    TORCH_INSTALL_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+    TORCH_LIB_PATH="$TORCH_INSTALL_PATH"/lib
+    TORCH_TEST_PATH="$TORCH_INSTALL_PATH"/test
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -182,13 +184,41 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Running wheel test with the install folder"
+      BUILD_PATH="build"
 
-    ls build/bin
-    aten/tools/run_tests.sh build/bin
+      # Init wheel-test enviroment
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
+      mv "$BUILD_PATH" "$BUILD_PATH".bak
+      ls .
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* "$TORCH_TEST_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* "$TORCH_TEST_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* "$TORCH_TEST_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* "$TORCH_TEST_PATH"
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch* "$TORCH_TEST_PATH"
+
+      # Running ATen
+      aten/tools/run_tests.sh "$TORCH_TEST_PATH"
+
+      # Restore test environment
+      ${SUDO} rm "$TORCH_TEST_PATH"/libc10*
+      ${SUDO} rm "$TORCH_TEST_PATH"/libcaffe2*
+      ${SUDO} rm "$TORCH_TEST_PATH"/libmkldnn*
+      ${SUDO} rm "$TORCH_TEST_PATH"/libnccl*
+      ${SUDO} rm "$TORCH_TEST_PATH"/libtorch*
+      mv "$BUILD_PATH".bak "$BUILD_PATH"
+      ls .
+    else
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
+      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+
+      ls build/bin
+      aten/tools/run_tests.sh build/bin
+    fi
     assert_git_not_dirty
   fi
 }
