@@ -899,8 +899,13 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
 }
 }
 
-Tensor log_softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_float){
-  return host_softmax<LogSoftMaxForwardEpilogue,true>(input, dim, half_to_float);
+TORCH_IMPL_FUNC(log_softmax_cuda_out) (
+  const Tensor &input,
+  const int64_t dim,
+  const bool half_to_float
+  const Tensor &output) {
+  auto res = host_softmax<LogSoftMaxForwardEpilogue,true>(input, dim, half_to_float);
+  output.copy_(res);
 }
 
 Tensor log_softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t dim, const Tensor &input){
@@ -925,6 +930,5 @@ Tensor softmax_backward_cuda(const Tensor &grad, const Tensor &output, int64_t d
   Tensor tmp = grad * output;
   return host_softmax_backward<SoftMaxBackwardEpilogue,false>(tmp, output, dim, half_to_float);
 }
-
 }
 }
