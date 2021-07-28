@@ -85,14 +85,14 @@ class TORCH_API ProcessGroupGloo : public ProcessGroup {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+   protected:
+    friend class ProcessGroupGloo;
+
    private:
     void finishWorkGloo();
     void finishWorkGlooError(std::exception_ptr eptr);
 
     const std::vector<std::vector<at::Tensor>> outputTensors_;
-
-   protected:
-    friend class ProcessGroupGloo;
     c10::intrusive_ptr<at::ivalue::Future> future_;
   };
 

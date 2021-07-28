@@ -458,7 +458,6 @@ c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
 void returnFutureWithOutput(
     c10::intrusive_ptr<c10::ivalue::Future>& future,
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
-
   if (outputTensors.size() == 0) {
     future->markCompleted(c10::IValue(std::vector<at::Tensor>()));
     return;
@@ -886,7 +885,7 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   at::Tensor tmp;
@@ -1322,7 +1321,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1371,7 +1370,7 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1598,7 +1597,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmp;
@@ -1765,7 +1764,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmpInputs;
@@ -2095,7 +2094,7 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmpInputs;
@@ -2276,7 +2275,7 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   std::vector<at::Tensor> tmpOutputs;
@@ -2467,7 +2466,7 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
 
   void synchronize() override {
     // Synchronize with the copy back to CUDA tensors.
-    future_->wait();
+    getFuture()->wait();
   }
 
   at::Tensor cpuOutput;
