@@ -327,7 +327,13 @@ class TORCH_API Store : public StmtNode<Store> {
 
   void set_indices(std::vector<Expr*> indices) {
     indices_ = indices;
-  };
+  }
+  void set_value(Expr* value) {
+    value_ = value;
+  }
+  void set_buf(Buf* buf) {
+    buf_ = buf;
+  }
 
  private:
   Buf* buf_;

@@ -328,17 +328,19 @@ Stmt* IRMutator::mutate(For* v) {
   Expr* start_new = start->accept_mutator(this);
   Expr* stop_new = stop->accept_mutator(this);
   Stmt* body_new = body->accept_mutator(this);
-  if (!body_new) {
-    return nullptr;
+  if (body_new != body) {
+    v->setBody(body_new);
   }
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (Stmt*)v;
+  if (start_new != start) {
+    v->setStart(start_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (stop_new != stop) {
+    v->setStop(stop_new);
   }
-  return new For(var_new, start_new, stop_new, body_new, loop_options);
+  if (var_new != var) {
+    v->setVar(var_new);
+  }
+  return v;
 }
 
 Stmt* IRMutator::mutate(Block* v) {
@@ -377,10 +379,16 @@ Stmt* IRMutator::mutate(Store* v) {
   Expr* value = v->value();
   Buf* buf_new = dynamic_cast<Buf*>(buf->accept_mutator(this));
   Expr* value_new = value->accept_mutator(this);
-  if (buf == buf_new && !any_index_changed && value == value_new) {
-    return (Stmt*)v;
+  if (buf_new != buf) {
+    v->set_buf(buf_new);
   }
-  return new Store(buf_new, indices_new, value_new);
+  if (any_index_changed) {
+    v->set_indices(indices_new);
+  }
+  if (value_new != value) {
+    v->set_value(value_new);
+  }
+  return v;
 }
 
 Stmt* IRMutator::mutate(AtomicAdd* v) {

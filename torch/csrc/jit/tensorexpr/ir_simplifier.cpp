@@ -1559,14 +1559,19 @@ Stmt* PolynomialBase::mutate(For* v) {
     }
   }
 
-  if (var == var_new && start == start_new && stop == stop_new &&
-      body == body_new) {
-    return (Stmt*)v;
+  if (body_new != body) {
+    v->setBody(body_new);
   }
-  if (body_new == body) {
-    body_new = Stmt::clone(body);
+  if (start_new != start) {
+    v->setStart(start_new);
   }
-  return new For(var_new, start_new, stop_new, body_new, loop_options);
+  if (stop_new != stop) {
+    v->setStop(stop_new);
+  }
+  if (var_new != var) {
+    v->setVar(var_new);
+  }
+  return v;
 }
 
 Stmt* PolynomialBase::mutate(Block* v) {
@@ -1587,7 +1592,7 @@ Stmt* PolynomialBase::mutate(Block* v) {
         stmts.push_back(s);
       }
     } else {
-      stmts.push_back(Stmt::clone(stmt_new));
+      stmts.push_back(stmt_new);
     }
   }
 

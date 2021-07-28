@@ -3227,7 +3227,7 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
       a_buf, {x}, Load::make(a_buf, {x}) + Load::make(b_buf, {y}) + y * 2);
   auto inner_for = For::make(y, 10, 100, inner_for_body);
   auto for_stmt = For::make(x, 50, 100, inner_for);
-  Block::make({for_stmt});
+  auto par = Block::make({for_stmt});
 
   LoopNest::normalize(for_stmt);
 
@@ -3241,6 +3241,11 @@ TEST(LoopNest, NormalizeOnNestedOuterLoop) {
         # CHECK:     A[x + 50] = ((A[x + 50]) + (B[y])) + 2 * y;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Normalized for's body should refer to the same statement as before.
+  ASSERT_EQ(for_stmt->body()->front(), inner_for);
+  // Normalized for should not be invalid.
+  ASSERT_EQ(par->front(), for_stmt);
 }
 
 TEST(LoopNest, NormalizeOnNestedInnerLoop) {
@@ -3275,6 +3280,11 @@ TEST(LoopNest, NormalizeOnNestedInnerLoop) {
         # CHECK:     A[x] = (((B[y + 10]) + 2 * y) + (A[x])) + 20;
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  // Normalized for's body should refer to the same statement as before.
+  ASSERT_EQ(inner_for->body()->front(), inner_for_body);
+  // Normalized for should not be invalid.
+  ASSERT_EQ(for_stmt->body()->front(), inner_for);
 }
 
 TEST(LoopNest, NormalizeAndSplitWithTail) {
