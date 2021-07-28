@@ -590,6 +590,19 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
+TEST(StaticRuntime, IndividualOps_Full) {
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{4, 5};
+  std::vector<IValue> args{
+    size0, 4, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{
+    size1, 5, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(full_script, args);
+  testStaticRuntime(full_script, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_FullLike) {
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 2, 2});
