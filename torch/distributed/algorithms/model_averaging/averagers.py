@@ -22,7 +22,7 @@ class ModelAverager(ABC):
         self.step = 0
 
     @abstractmethod
-    def average_parameters(self):
+    def average_parameters(self, params):
         raise NotImplementedError
 
 
