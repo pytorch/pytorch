@@ -91,9 +91,12 @@ ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
         // represent a bool (see ncclDataType mapping).
         return ncclMax;
       }
+#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
+                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
       if (reduceOp == ReduceOp::AVG) {
         TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
       }
+#endif
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
