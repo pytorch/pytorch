@@ -236,7 +236,9 @@ class BytecodeDeserializer final {
    *
    * Accepts an operator_cache, which allows you to cache operator
    * functions for the entire model. This is keyed on
-   * OperatorInfoWithSchema.
+   * c10::OperatorName. The value may not be what you're looking for
+   * even if the key is the same. You need to call has_same_arg_num()
+   * on the value to ensure that the number of arguments are the same.
    */
   std::unordered_set<std::string> load_and_find_unsupported_operator_names(
       const std::vector<IValue>& ops_list,
@@ -331,7 +333,6 @@ void BytecodeDeserializer::parseMethods(
 
   // A Global Cache for Operator functions across all methods in the model.
   mobile::Function::OperatorCacheType operator_cache;
-  operator_cache.reserve(67);
 
   // Process all methods in this mobile module.
   for (size_t i = method_i_start; i < vals.size(); ++i) {

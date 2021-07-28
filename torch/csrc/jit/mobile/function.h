@@ -29,21 +29,22 @@ struct OperatorFunctionWithSchema {
   std::function<void(Stack&)> fn;
   c10::optional<int> num_specified_args;
 
-  bool has_same_arg_num(const c10::optional<int>& other_num_args) const {
+  [[nodiscard]] bool has_same_arg_num(
+      const c10::optional<int>& other_num_args) const {
     return other_num_args == num_specified_args;
   }
 };
 
 class Function {
  public:
-  typedef std::unordered_map<c10::OperatorName, OperatorFunctionWithSchema>
-      OperatorCacheType;
+  using OperatorCacheType =
+    std::unordered_map<c10::OperatorName, OperatorFunctionWithSchema>;
 
   Function(c10::QualifiedName name);
   bool run(Stack& stack) const;
   c10::IValue operator()(Stack& stack) const;
   const std::string& name() const;
-  const c10::QualifiedName& qualname() const;
+  TORCH_API const c10::QualifiedName& qualname() const;
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle = -1);
   bool append_operator(
       const std::string& name,
