@@ -14,6 +14,7 @@
 #include <ATen/quantized/Quantizer.h>
 
 using namespace at;
+#ifndef ATEN_CPU_STATIC_DISPATCH
 
 TEST(TestQTensor, QuantDequantAPIs) {
   auto num_elements = 10;
@@ -279,3 +280,4 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   }
   TORCH_CHECK(customDataDeleted);
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
