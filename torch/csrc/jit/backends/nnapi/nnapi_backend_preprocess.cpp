@@ -6,9 +6,12 @@
 namespace py = pybind11;
 
 // Converts model to Android NNAPI backend and serializes it for mobile
-// Returns a dictionary string with one entry:
-// Key: "NnapiModule"
-// Value: Android NNAPI module serialized for mobile, as a string
+// Returns a dictionary with preprocessed items:
+//    "shape_compute_module": torch::jit::Module,
+//    "ser_model": torch::Tensor,
+//    "weights": List[torch.Tensor],
+//    "inp_mem_fmts": List[int],
+//    "out_mem_fmts": List[int]
 //
 // method_compile_spec should contain a Tensor or
 // Tensor List which bundles several input parameters:
@@ -26,15 +29,15 @@ c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
-  // Import the python function for converting modules to Android NNAPI backend
+  // Import the python function for processing modules to Android NNAPI backend
   py::gil_scoped_acquire gil;
   py::object pyModule = py::module_::import("torch.backends._nnapi.prepare");
-  py::object pyMethod = pyModule.attr("convert_model_to_nnapi");
+  py::object pyMethod = pyModule.attr("process_for_nnapi");
 
   // Wrap the c module in a RecursiveScriptModule
-  auto out =
+  auto wrapped_mod =
       py::module::import("torch.jit._recursive").attr("wrap_cpp_module")(mod);
-  out.attr("eval")();
+  wrapped_mod.attr("eval")();
 
   // Test that method_compile_spec contains the necessary keys and
   // Tensor/TensorList input
@@ -67,26 +70,40 @@ c10::IValue preprocess(
   }
 
   // Convert input to a Tensor or a python list of Tensors
-  py::object nnapi_pyModel;
-
+  py::list nnapi_processed;
   if (inp.isTensor()) {
-    nnapi_pyModel = pyMethod(out, inp.toTensor());
+    nnapi_processed = pyMethod(wrapped_mod, inp.toTensor());
   } else {
     py::list pyInp;
-    for (at::Tensor inpElem : inp.toTensorList()) {
+    for (torch::Tensor inpElem : inp.toTensorList()) {
       pyInp.append(inpElem);
     }
-    nnapi_pyModel = pyMethod(out, pyInp);
+    nnapi_processed = pyMethod(wrapped_mod, pyInp);
   }
 
-  // Cast the returned py object and save it for mobile
-  std::stringstream ss;
-  auto nnapi_model = py::cast<torch::jit::Module>(nnapi_pyModel.attr("_c"));
-  nnapi_model._save_for_mobile(ss);
-
+  // Cast and insert processed items into dict
   c10::Dict<c10::IValue, c10::IValue> dict(
-      c10::StringType::get(), c10::StringType::get());
-  dict.insert("NnapiModule", ss.str());
+      c10::StringType::get(), c10::AnyType::get());
+  dict.insert("ser_model", py::cast<torch::Tensor>(nnapi_processed[1]));
+
+  // Serialize shape_compute_module for mobile
+  auto shape_compute_module =
+      py::cast<torch::jit::Module>(nnapi_processed[0].attr("_c"));
+  std::stringstream ss;
+  shape_compute_module._save_for_mobile(ss);
+  dict.insert("shape_compute_module", ss.str());
+
+  // transform Python lists to C++ c10::List
+  c10::List<torch::Tensor> weights(
+      py::cast<std::vector<torch::Tensor>>(nnapi_processed[2]));
+  c10::List<int64_t> inp_mem_fmts(
+      py::cast<std::vector<int64_t>>(nnapi_processed[3]));
+  c10::List<int64_t> out_mem_fmts(
+      py::cast<std::vector<int64_t>>(nnapi_processed[4]));
+  dict.insert("weights", weights);
+  dict.insert("inp_mem_fmts", inp_mem_fmts);
+  dict.insert("out_mem_fmts", out_mem_fmts);
+
   return dict;
 }
 
