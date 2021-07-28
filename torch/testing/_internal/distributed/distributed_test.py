@@ -7492,10 +7492,10 @@ class DistributedTest:
             class MyModel(nn.Module):
                 def __init__(self):
                     super().__init__()
-                    self.model = nn.Sequential(nn.Linear(2, 4000, bias=False),
-                        *[
-                            nn.Linear(4000, 4000, bias=False) for _ in range(10)
-                        ])
+                    self.mdel = nn.Sequential(
+                        nn.Linear(2, 4000, bias=False),
+                        *[nn.Linear(4000, 4000, bias=False) for _ in range(10)]
+                    )
 
                 def forward(self, x):
                     return self.model(x)

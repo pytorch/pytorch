@@ -61,11 +61,9 @@ void broadcast_coalesced(
   // Coalesce tensors into buckets taking into account the maximum buffer size.
   // This routine is multi-device aware, so the tensors can be split across
   // multiple devices and can contain a mix of CPU and CUDA tensors.
-  const auto tup =
-      compute_bucket_assignment_by_size(tensors.vec(), {buffer_size});
-
   std::vector<std::vector<size_t>> buckets;
-  std::tie(buckets, std::ignore) = tup;
+  std::tie(buckets, std::ignore) =
+      compute_bucket_assignment_by_size(tensors.vec(), {buffer_size});
 
   // Returns tensor at specified index in input tensor list.
   const auto lookup = [&tensors](size_t index) { return tensors[index]; };
