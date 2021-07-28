@@ -1925,17 +1925,15 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
                 exclude_zero: bool = False) -> torch.Tensor:
     """ Creates a random tensor with the given size, device and dtype.
 
-        By default, the tensor's values are in the range [-9, 9] for most dtypes. If low
-        and/or high are specified and are within the dtype limits, then the values will be
-        in the range [low, high). However, if low and/or high are specified but are not in
-        dtype limits, then the dtype minimum and maximum limits are taken as low/high.
-        If low and/or high are passed as -inf/inf (respectively), then the values will be
-        minimum and maximum limit of the respective dtype, however if low is passed as inf
-        and high is passed as -inf, then a ValueError is raised (the same error is raised
-        if a nan value is passed).
-
-        For unsigned types the default range is [0, 10) and for complex types the real and imaginary
-        parts each have the default range as [-9, 10).
+        Default values for low and high:
+            * boolean type: low = 0, high = 2
+            * uint8 type: low = 0, high = 9
+            * floating and integral types: low = -9 and high = 9
+            * complex types, for each real and imaginary part: low = -9, high = 9
+        If low/high are specified and within dtype limits: low = low, high = high
+        If low/high are specified but exceed the limits: low = dtype_min, high = dtype_max
+        If low is -inf and/or high is inf: low = dtype_min, high = dtype_max
+        If low is inf or nan and/or high is -inf or nan: ValueError raised
 
         If noncontiguous=True, a noncontiguous tensor with the given size will be returned unless the size
         specifies a tensor with a 1 or 0 elements in which case the noncontiguous parameter is ignored because
@@ -1991,11 +1989,11 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(ranges, low, high, default_values=(0, 10), is_integral_dtype=True)
+        low, high = _modify_low_high(ranges, low, high, default_values=(0, 9), is_integral_dtype=True)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(ranges, low, high, default_values=(-9, 10), is_integral_dtype=True)
+        low, high = _modify_low_high(ranges, low, high, default_values=(-9, 9), is_integral_dtype=True)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
