@@ -2110,6 +2110,14 @@ new_module_tests = [
         desc='stride_pad',
     ),
     dict(
+        module_name='AvgPool1d',
+        constructor_args=(2,),
+        cpp_constructor_args='torch::nn::AvgPool1dOptions(2)',
+        input_size=(3, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AvgPool2d',
         constructor_args=((2, 2),),
         cpp_constructor_args='torch::nn::AvgPool2dOptions({2, 2})',
@@ -4914,6 +4922,42 @@ criterion_tests = [
         check_half=False,
     ),
 ]
+
+
+def single_batch_reference_criterion_fn(*args):
+    """Reference function for criterion supporting no batch dimensions.
+
+    The criterion is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    criterion = args[-1]
+    single_batch_input_args = [input.unsqueeze(0) for input in args[:-1]]
+
+    output = criterion(*single_batch_input_args)
+    reduction = get_reduction(criterion)
+
+    if reduction == 'none':
+        return output.squeeze(0)
+    # reduction is 'sum' or 'mean' which results in a scalar
+    return output
+
+
+# Check that regression criterion work with no batch dimensions
+regression_criterion_no_batch = [
+    'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
+]
+reductions = ['none', 'mean', 'sum']
+for regression_criterion, reduction in product(regression_criterion_no_batch,
+                                               reductions):
+    regression_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
+        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        input_size=(3, ),
+        target_fn=lambda: torch.randn(3),
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    criterion_tests.append(regression_test_info)
 
 
 class NNTestCase(TestCase):
