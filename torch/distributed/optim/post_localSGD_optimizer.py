@@ -80,10 +80,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     def zero_grad(self):
         self.local_optimizer.zero_grad()
 
-    # TODO
     def state_dict(self):
-        pass
+        raise NotImplementedError
 
-    # TODO
     def load_state_dict(self, state_dict):
-        pass
+        raise NotImplementedError
