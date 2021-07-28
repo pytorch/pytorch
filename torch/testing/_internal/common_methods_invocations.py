@@ -4547,6 +4547,38 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
+    def make_tensor_(shape):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    batch_size = 2
+    num_channels = 3
+    modes = ("bilinear", "nearest")
+    align_cornerss = (False, True)
+    padding_modes = ("zeros", "border", "reflection")
+
+    sample_inputs = []
+    for dim in (2, 3):
+        input = make_tensor_((batch_size, num_channels, *[S] * dim))
+        grid = make_tensor_((batch_size, *[S] * dim, dim))
+
+        modes_ = (*modes, "bicubic") if dim == 2 else modes
+
+        for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
+            sample_inputs.append(
+                SampleInput(
+                    input,
+                    args=(grid,),
+                    kwargs=dict(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                )
+            )
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -7875,6 +7907,14 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+        "nn.functional.grid_sample",
+        ref=_NOTHING,
+        dtypes=floating_types_and(),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sample,
+        supports_gradgrad=False,
+    )
 ]
 
 # Common operator groupings
