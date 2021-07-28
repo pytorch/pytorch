@@ -4220,6 +4220,9 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
+                # Make sure we can compute gradients wrt to all the parameters in the case
+                # of double forward
+                fn(input.clone().requires_grad_()).sum().backward()
                 gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
@@ -4288,15 +4291,6 @@ class TestNN(NNTestCase):
                         return wrapped_m(input)
 
                     gradcheck(fn, (m.parametrizations.weight.original,))
-
-    def test_new_spectral_norm_executed_twice_single_forward(self):
-        inputs = torch.tensor([[1., 2.], [-1., -2.]])
-        m = nn.Linear(2, 2)
-        m = torch.nn.utils.parametrizations.spectral_norm(m)
-        x = m(inputs)
-        # Use the same module again in the same forward
-        x = m(x)
-        loss = x.sum().backward()
 
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
