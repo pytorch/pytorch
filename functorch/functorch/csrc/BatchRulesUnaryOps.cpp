@@ -26,20 +26,11 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl(#op, inplacePlumbing1<UnaryInplaceBRType, &unary_inplace_func_batch_rule<decltype(&at::op), &at::op>>);
 
 #define UNARY_POINTWISE(op) \
-  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op>));
-
-#define UNARY_POINTWISE_SCALAR(op) \
-  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&>));
-
-#define UNARY_POINTWISE_SCALAR_SCALAR(op) \
-  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&, const Scalar&>));
-
-#define UNARY_POINTWISE_SCALAR_SCALAR_SCALAR(op) \
-  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op, const Scalar&, const Scalar&, const Scalar&>));
+  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(at::op));
 
 #define UNARY_POINTWISE_ALL(op) \
   UNARY_POINTWISE_(op ## _); \
-  VMAP_SUPPORT(#op, SINGLE_ARG(basic_unary_batch_rule<decltype(&at::op), &at::op>));
+  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(at::op));
 
   UNARY_POINTWISE(alias);
   UNARY_POINTWISE_ALL(abs);
@@ -113,31 +104,28 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE(special_sinc);
 
   // Activation functions (from https://pytorch.org/docs/stable/nn.html#non-linear-activations-weighted-sum-nonlinearity)
-  UNARY_POINTWISE_SCALAR_SCALAR_SCALAR(elu);
-  UNARY_POINTWISE_SCALAR(hardshrink);
+  UNARY_POINTWISE(elu);
+  UNARY_POINTWISE(hardshrink);
   UNARY_POINTWISE(hardsigmoid);
-  UNARY_POINTWISE_SCALAR_SCALAR(hardtanh);
+  UNARY_POINTWISE(hardtanh);
   UNARY_POINTWISE(hardswish);
-  UNARY_POINTWISE_SCALAR(leaky_relu);
+  UNARY_POINTWISE(leaky_relu);
   UNARY_POINTWISE(log_sigmoid);
   UNARY_POINTWISE_ALL(relu);
   UNARY_POINTWISE(relu6);
   UNARY_POINTWISE(selu);
-  UNARY_POINTWISE_SCALAR(celu);
+  UNARY_POINTWISE(celu);
   UNARY_POINTWISE(gelu);
   UNARY_POINTWISE_ALL(sigmoid);
   UNARY_POINTWISE(silu);
-  UNARY_POINTWISE_SCALAR_SCALAR(softplus);
-  UNARY_POINTWISE_SCALAR(softshrink);
+  UNARY_POINTWISE(softplus);
+  UNARY_POINTWISE(softshrink);
   OP_DECOMPOSE(square);
   UNARY_POINTWISE_ALL(tanh);
 
 
   UNARY_POINTWISE_(zero_);
 
-#undef UNARY_POINTWISE_SCALAR_SCALAR_SCALAR
-#undef UNARY_POINTWISE_SCALAR_SCALAR
-#undef UNARY_POINTWISE_SCALAR
 #undef UNARY_POINTWISE
 #undef UNARY_POINTWISE_
 #undef UNARY_POINTWISE_ALL

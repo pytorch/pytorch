@@ -34,11 +34,27 @@ Tensor maybePadToLogicalRank(const Tensor& tensor, optional<int64_t> has_bdim, i
       decltype(&batch_rule), &batch_rule, to_operator_t<decltype(batch_rule)> \
       >::apply);
 
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> basic_unary_batch_rule(
-    const Tensor& tensor, optional<int64_t> batch_dim, ExtraArgs... extra_args) {
-  return std::make_tuple(Func(tensor, std::forward<ExtraArgs>(extra_args)...), batch_dim);
-}
+// DO NOT USE ME DIRECTLY! Use BASIC_UNARY_BATCH_RULE to save yourself some pain
+template <typename A, A a, typename C>
+struct BasicUnaryBatchRuleHelper;
+
+template <typename F, F Func, typename A, typename... T>
+struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& tensor,
+      optional<int64_t> batch_dim,
+      T... extra_args) {
+    return std::make_tuple(Func(tensor, std::forward<T>(extra_args)...), batch_dim);
+  }
+};
+
+// USAGE: BASIC_UNARY_BATCH_RULE(at::cholesky_inverse)
+// It is important that this macro is not passed a function pointer!!
+#define BASIC_UNARY_BATCH_RULE(fn) SINGLE_ARG(\
+    BasicUnaryBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> variadic_bdims_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
