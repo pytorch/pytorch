@@ -62,10 +62,10 @@ class Conv2d(nn.Conv2d):
         conv = torch.nn.Conv2d(
             self.in_channels,
             self.out_channels,
-            self.kernel_size,
-            self.stride,
-            self.padding,
-            self.dilation,
+            self.kernel_size,  # type: ignore[arg-type]
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
             self.groups,
             self.bias is not None,
             self.padding_mode)
@@ -164,10 +164,10 @@ class Conv3d(nn.Conv3d):
         conv = torch.nn.Conv3d(
             self.in_channels,
             self.out_channels,
-            self.kernel_size,
-            self.stride,
-            self.padding,
-            self.dilation,
+            self.kernel_size,  # type: ignore[arg-type]
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
             self.groups,
             self.bias is not None,
             self.padding_mode)
