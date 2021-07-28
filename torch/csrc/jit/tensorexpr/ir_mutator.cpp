@@ -189,6 +189,7 @@ const Expr* IRMutator::mutate(const Load* v) {
 const Expr* IRMutator::mutate(Buf* v) {
   const Var* var = v->base_handle();
   Var* var_new =
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       dynamic_cast<Var*>(const_cast<Expr*>(var->accept_mutator(this)));
   if (!var_new) {
     return nullptr;

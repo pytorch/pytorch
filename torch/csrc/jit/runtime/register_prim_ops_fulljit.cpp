@@ -27,7 +27,6 @@ namespace jit {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {Operator(
          prim::profile,
@@ -265,7 +264,8 @@ RegisterOperators reg(
                create_graph,
                allow_unused);
 
-           c10::impl::GenericList res_list{UnionType::createOptionalOf(TensorType::get())};
+           c10::impl::GenericList res_list{
+               UnionType::createOptionalOf(TensorType::get())};
            for (const at::Tensor& t : res) {
              res_list.emplace_back(t.defined() ? t : IValue());
            }
@@ -330,7 +330,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase())});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
@@ -374,6 +373,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());
@@ -484,7 +484,6 @@ void sort_op(Stack* stack) {
 }
 
 // NB: this must be registered after the other aten::sort operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators regSort({
     Operator(
         "aten::sorted.any(t[](a) self) -> (t[])",
@@ -787,7 +786,6 @@ void upsample_bilinear_op(Stack* stack) {
 }
 
 // These ops are no longer generated, but remain here for BC
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
@@ -854,7 +852,6 @@ std::string get_first(const c10::List<c10::List<std::string>>& strings) {
   return strings.get(0).get(0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg4 =
     torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",

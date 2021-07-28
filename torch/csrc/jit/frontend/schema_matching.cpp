@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -58,19 +59,12 @@ Value* tryConvertToType(
     Value* value,
     bool allow_conversions) {
   // treat conversion to Optional[T] as conversions to T
-  if (concrete_type->isOptional() && !value->type()->isOptional() && !value->type()->isSubtypeOf(NoneType::get())) {
-    auto contained = concrete_type->expect<UnionType>()->getContainedElementIfOptional();
+  if (concrete_type->isOptional() && !value->type()->isOptional() &&
+      !value->type()->isSubtypeOf(NoneType::get())) {
+    auto contained =
+        concrete_type->expect<UnionType>()->getContainedElementIfOptional();
     return tryConvertToType(loc, graph, contained, value, allow_conversions);
   }
-
-  //// Transform `Union[T, None]` to `Optional[T]` for schema matching
-  //// purposes only
-  //if (UnionTypePtr union_type = concrete_type->cast<UnionType>()) {
-  //  auto maybeOpt = union_type->toOptional();
-  //  if (maybeOpt) {
-  //    return tryConvertToType(loc, graph, *maybeOpt, value, allow_conversions);
-  //  }
-  //}
 
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
@@ -227,7 +221,7 @@ static Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     if (kwargs[i].name() == name)
       return i;
   }
@@ -335,7 +329,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+  for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
@@ -435,7 +429,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return c10::nullopt;
   }
   // check for unused kwargs
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (failure_messages) {
@@ -539,7 +533,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
-    for (size_t i = 0; i < schemas.size(); ++i) {
+    for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
           *schemas[i],
           loc,

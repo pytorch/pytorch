@@ -54,6 +54,7 @@ using OperationCreator = Operation (*)(const Node*);
 // the concrete operator nature.
 struct TORCH_API Operator {
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct C10Operator final {
     c10::OperatorHandle handle_;
     Operation op_;
@@ -62,6 +63,7 @@ struct TORCH_API Operator {
     std::string schema_string_;
     mutable c10::optional<c10::AliasAnalysisKind> alias_analysis_;
   };
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct JitOnlyOperator final {
     // The only valid transition for schema_ is from right->left, i.e.
     // when the schema gets parsed.

@@ -328,6 +328,29 @@ struct LoopContinuations {
   Node* curr_loop_ = nullptr;
 };
 
+void removeWidenToUnionNodes(std::shared_ptr<Graph>& graph) {
+  //  % val: List[Tensor] = op(...)
+  //% val2: Union[List[Tensor], None] = prim::WidenToUnion(%val)
+
+  // The widenToUnion node is removed
+  // val2 replaced all uses with val
+
+  /// replace output of prev node with output of widentounion node
+
+  // std::vector<Node*> bad_nodes;
+  // for (Node* n : graph->nodes()) {
+  //  if (n->kind() == prim::widenToUnion) {
+  //    //auto unused_list_node = n->prev();
+  //    //unused_list_node->destroy();
+  //    bad_nodes.push_back(n);
+  //  }
+  //}
+  // for (Node* n : bad_nodes) {
+  //    n->prev()->er;
+  //    n->destroy();
+  //}
+}
+
 // Converting to SSA works in multiple parts. First, we add control flow
 // loads and stores to the graph. Now that control flow outputs are set,
 // we can set remove Break & Continue to have the correct continuations to the
@@ -343,6 +366,7 @@ void ConvertToSSA(std::shared_ptr<Graph>& graph) {
   EraseLoadStores erase_loads_stores;
   erase_loads_stores.run(graph);
   TransformExits(graph);
+  removeWidenToUnionNodes(graph);
 }
 
 } // namespace jit

@@ -801,7 +801,7 @@ def _unpool_output_size(
     input_size = input.size()
     default_size = torch.jit.annotate(List[int], [])
     for d in range(len(kernel_size)):
-        default_size.append((input_size[d + 2] - 1) * stride[d] + kernel_size[d] - 2 * padding[d])
+        default_size.append((input_size[-len(kernel_size) + d] - 1) * stride[d] + kernel_size[d] - 2 * padding[d])
     if output_size is None:
         ret = default_size
     else:
@@ -1748,7 +1748,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
-    operations separately is slower, and numerically unstable. This function
+    operations separately is slower and numerically unstable. This function
     uses an alternative formulation to compute the output and gradient correctly.
 
     See :class:`~torch.nn.LogSoftmax` for more details.
@@ -1757,7 +1757,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if has_torch_function_unary(input):
@@ -4036,7 +4036,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are considered to be at ```0``
+        along a unit dimension are considered to be at ``0``
         (the center of the input image).
     """
     if has_torch_function_unary(theta):
@@ -4154,8 +4154,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
         return _VF.constant_pad_nd(input, pad, value)
     else:
         assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
-        if input.dim() == 3:
-            assert len(pad) == 2, "3D tensors expect 2 values for padding"
+        if len(pad) == 2 and (input.dim() == 2 or input.dim() == 3):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad1d(input, pad)
             elif mode == "replicate":
@@ -4187,7 +4186,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
             else:
                 raise NotImplementedError
         else:
-            raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+            raise NotImplementedError("Only 2D, 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # We define this function as _pad because it takes an argument
@@ -4243,6 +4242,8 @@ Returns cosine similarity between x1 and x2, computed along dim.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
+
+Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
@@ -4685,7 +4686,7 @@ def _in_projection_packed(
     v: Tensor,
     w: Tensor,
     b: Optional[Tensor] = None,
-) -> Tuple[Tensor, Tensor, Tensor]:
+) -> List[Tensor]:
     r"""
     Performs the in-projection step of the attention operation, using packed weights.
     Output is a triple containing projection tensors for query, key and value.
@@ -4717,8 +4718,7 @@ def _in_projection_packed(
     if k is v:
         if q is k:
             # self-attention
-            l = linear(q, w, b).chunk(3, dim=-1)
-            return l[0], l[1], l[2]
+            return linear(q, w, b).chunk(3, dim=-1)
         else:
             # encoder-decoder attention
             w_q, w_kv = w.split([E, E * 2])
@@ -4726,8 +4726,7 @@ def _in_projection_packed(
                 b_q = b_kv = None
             else:
                 b_q, b_kv = b.split([E, E * 2])
-            l = (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
-            return l[0], l[1], l[2]
+            return (linear(q, w_q, b_q),) + linear(k, w_kv, b_kv).chunk(2, dim=-1)
     else:
         w_q, w_k, w_v = w.chunk(3)
         if b is None:

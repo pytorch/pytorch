@@ -186,7 +186,7 @@ NoneStatus canBeNone(Value* v) {
     return ALWAYS;
   }
   if (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->canHoldNone()) {
+      v->type()->expect<UnionType>()->canHoldType(NoneType::get())) {
     return MAYBE;
   }
   return NEVER;
@@ -659,6 +659,7 @@ struct to_ir {
     // to SSA while part of their original graph, and closures are ready to
     // be inlined into forked closures
     ConvertToSSA(graph);
+
     // convert loops with an iter and body condition specified to
     // python-recognize while loops. we do this so they can be exported,
     // and run the pass early to avoid jitter. Like conversion to SSA,
@@ -1014,7 +1015,7 @@ struct to_ir {
   void emitReturn(const Return& stmt) {
     TypePtr declared_return_type =
         def_stack_.back().declared_return_type_; // nullptr if not annotated
-    Value* actual_return = emitExpr(stmt.expr(), declared_return_type);
+    auto actual_return = emitExpr(stmt.expr(), declared_return_type);
 
     // result type is annotated, every return must convert to that type
     if (declared_return_type) {
@@ -1324,13 +1325,51 @@ struct to_ir {
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
     auto emit_body = [&]() {
-      auto comprehension_out = emitExpr(lc.elt());
+      Value* out = emitExpr(lc.elt());
+
+      // If we didn't have a type annotation, the type of the list would
+      // be set to `Tensor`. We don't want to unify this default type
+      // with the actual elements in the list, so let the type begin as
+      // the first element in the list
       if (!type_set) {
-        list_value->setType(ListType::create(comprehension_out->type()));
+        list_value->setType(ListType::create(out->type()));
         type_set = true;
       }
+
+      ListTypePtr lt = list_value->type()->expect<ListType>();
+
+      const TypePtr element_type_hint =
+          type_hint ? type_hint->expect<ListType>()->getElementType() : nullptr;
+
+      auto unified = unifyTypes(
+          lt->getElementType(),
+          out->type(),
+          /*default_to_union=*/true,
+          element_type_hint);
+
+      if (lt->getElementType() != AnyType::get() &&
+          *unified == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. The first ",
+            "non-matching element was typed as ",
+            out->type()->repr_str(),
+            ", while the elements before it "
+            "were ",
+            lt->getElementType()->repr_str(),
+            "\n",
+            lc.range().str());
+      }
+
+      if (!type_hint) {
+        list_value->setType(ListType::create(*unified));
+      }
+
       NamedValue self = NamedValue(loc, "self", list_value);
-      NamedValue input = NamedValue(loc, "", comprehension_out);
+      NamedValue input = NamedValue(loc, "", out);
       emitBuiltinCall(loc, *graph, aten::append, {input}, {}, self);
     };
     emitFor(targets_list, itrs, loc, emit_body);
@@ -1369,10 +1408,88 @@ struct to_ir {
     auto emit_body = [&]() {
       auto k = emitExpr(dc.key());
       auto v = emitExpr(dc.value());
+
+      // Make sure that any key and value types are subtypes of the
+      // annotatated key/value types
+      if (type_hint) {
+        DictTypePtr dict_type_hint = type_hint->expect<DictType>();
+
+        std::stringstream ss;
+        std::stringstream err;
+
+        bool is_key_subtype =
+            k->type()->isSubtypeOfExt(dict_type_hint->getKeyType(), &ss);
+
+        if (!is_key_subtype) {
+          err << "Dict type annotation `" << dict_type_hint->repr_str()
+              << "` did not match the "
+              << "type of an actual key type `" << k->type()->repr_str()
+              << "`\n"
+              << ss.str();
+        }
+
+        ss.str(std::string());
+        bool is_value_subtype =
+            v->type()->isSubtypeOfExt(dict_type_hint->getValueType(), &ss);
+
+        if (!is_value_subtype) {
+          err << "Dict type annotation `" << dict_type_hint->repr_str()
+              << "` did not match the "
+              << "type of an actual value type `" << v->type()->repr_str()
+              << "`\n"
+              << ss.str();
+        }
+
+        if (!is_key_subtype || !is_value_subtype) {
+          throw ErrorReport(dc) << err.str();
+        }
+      }
+
+      // If we didn't have a type annotation, the type of the dict would
+      // be set to `(str, Tensor)`. We don't want to unify this default
+      // type with the actual elements in the dict, so let the type
+      // begin as the first element in the dict
       if (!type_set) {
         dict_value->setType(DictType::create(k->type(), v->type()));
         type_set = true;
       }
+
+      DictTypePtr dt = dict_value->type()->expect<DictType>();
+
+      const TypePtr value_type_hint =
+          type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
+      c10::optional<TypePtr> unified = unifyTypes(
+          dt->getValueType(),
+          v->type(),
+          /*default_to_union=*/true,
+          value_type_hint);
+
+      // Warn the user if we inferred the type of the values to be `Any`
+      // even though the annotation was something else
+      if (dt->getValueType() != AnyType::get() && *unified == AnyType::get()) {
+        TORCH_WARN(
+            "Dict consists of heterogeneous types, which means",
+            " that it has been typed as `Dict[str, Any]`. To use "
+            "any of the values in the Dict, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. The first ",
+            "non-matching element was typed as ",
+            v->type()->repr_str(),
+            ", while the elements before it "
+            "were ",
+            dt->getValueType()->repr_str(),
+            "\n",
+            dc.range().str());
+      }
+
+      // We only want to set `dict_value` if we don't have a type hint
+      // to allow for the case that `*unified` is a subtype of
+      // the value type given by `type_hint`
+      if (!type_hint) {
+        dict_value->setType(DictType::create(k->type(), *unified));
+      }
+
       NamedValue self = NamedValue(loc, "self", dict_value);
       NamedValue input_k = NamedValue(loc, "", k);
       NamedValue input_v = NamedValue(loc, "", v);
@@ -1607,6 +1724,7 @@ struct to_ir {
 
     // Register outputs in each block
     for (const auto& x : mutated_variables) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* tv;
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       Value* fv;
@@ -1650,16 +1768,22 @@ struct to_ir {
         }
       }
 
-      bool default_to_union =
-          full_type && (full_type->kind() == UnionType::Kind || full_type->kind() == OptionalType::Kind || full_type->kind() == NumberType::Kind);
+      // Try to unify the types. If we found a type annotation earlier
+      // in the environment, and if that type annotation is some form
+      // of union, then we need to tell `unifyTypes` not to throw an
+      // error if the branched return types we found are heterogenous
+      bool default_to_union = full_type &&
+          (full_type->kind() == UnionType::Kind ||
+           full_type->kind() == NumberType::Kind);
       auto unified = unifyTypes(
           tv->type(), fv->type(), /*default_to_union=*/default_to_union);
 
-      // attempt to unify the types. we allow variables to be set to different
-      // types in each branch as long as that variable is not already in scope,
-      // or if that variable does not get used later. here, we save the error
-      // so that the error message will be more informative in the case that is
-      // used later. When a is accessed in (a + 1), the error will get printed
+      // We allow variables to be set to different types in each branch
+      // as long as that variable is not already in scope or if that
+      // variable does not get used later. Here, we save the error so
+      // that the error message will be more informative in the case
+      // that is used later. When `a` is accessed in `(a + 1)`, the
+      // error will get printed:
       // if cond:
       //    a = 1
       // else:
@@ -1697,9 +1821,6 @@ struct to_ir {
   }
 
   CondValue emitIsInstance(const Expr& obj, const Expr& classinfo) {
-    // For use with `unifyTypeList`
-    std::stringstream nowhere;
-
     Value* lhs_val = emitExpr(obj);
     std::vector<TypePtr> lhs_types;
     std::vector<TypePtr> rhs_types;
@@ -1726,92 +1847,110 @@ struct to_ir {
     TypePtr unified_true = nullptr;
     TypePtr unified_false = nullptr;
 
-    if (obj.kind() == TK_VAR) {
-      std::string ident = Var(obj).name().name();
+    std::vector<TypePtr> isinstance_types;
+    std::vector<TypePtr> not_isinstance_types;
 
-      std::vector<Refinement> true_refinements;
-      std::vector<Refinement> false_refinements;
+    std::vector<Refinement> true_refinements;
+    std::vector<Refinement> false_refinements;
 
-      std::vector<TypePtr> isinstance_types;
-      std::vector<TypePtr> not_isinstance_types;
+    bool all_lhs_subtype_some_rhs = true;
 
-      // We can discard any rhs types that we know statically would be
-      // impossible. For example, if we had:
-      //
-      //    def fn(x: Optional[str]):
-      //        if isinstance(x, (List[str], str, int)):
-      //            ...
-      //
-      // then `x` would be `str` in the true branch and `None` in the
-      // false branch, not `(List[str], str, int)` in the true branch
-      // and `None` in the false branch
-      for (TypePtr lhs_type : lhs_types) {
-        if (lhs_type == AnyType::get()) {
-          isinstance_types.insert(
-              isinstance_types.end(), rhs_types.begin(), rhs_types.end());
-          break;
+    // We can discard any rhs types that we know statically would be
+    // impossible. For example, if we had:
+    //
+    //    def fn(x: Optional[str]):
+    //        if isinstance(x, (List[str], str, int)):
+    //            ...
+    //
+    // then `x` would be `str` in the true branch and `None` in the
+    // false branch, not `(List[str], str, int)` in the true branch
+    // and `None` in the false branch
+    for (const TypePtr& lhs_type : lhs_types) {
+      if (lhs_type == AnyType::get()) {
+        isinstance_types.insert(
+            isinstance_types.end(), rhs_types.begin(), rhs_types.end());
+        not_isinstance_types.push_back(AnyType::get());
+        // Edge case: we can still say that all lhs types subtype some
+        // rhs type if `lhs` is `Any` and `rhs` is `Any`
+        if (isinstance_types.size() != 1 ||
+            isinstance_types[0] != AnyType::get()) {
+          all_lhs_subtype_some_rhs = false;
         }
-        if (std::any_of(
-                rhs_types.begin(), rhs_types.end(), [&](TypePtr rhs_type) {
-                  return lhs_type->isSubtypeOf(rhs_type);
-                })) {
-          isinstance_types.push_back(lhs_type);
+        break;
+      }
+
+      auto get_smaller_type = [&](TypePtr t1, TypePtr t2) -> TypePtr {
+        if (t1->isSubtypeOf(t2)) {
+          return t1;
+        } else if (t2->isSubtypeOf(t1)) {
+          return t2;
         } else {
-          not_isinstance_types.push_back(lhs_type);
+          return nullptr;
+        }
+      };
+
+      TypePtr found_refinement = nullptr;
+      for (const TypePtr& rhs_type : rhs_types) {
+        TypePtr maybe_smaller_type = get_smaller_type(lhs_type, rhs_type);
+        if (!maybe_smaller_type) {
+          continue;
+        } else if (*maybe_smaller_type == *lhs_type) {
+          // Cover the case that we have something like
+          // lhs = `List[str]` and rhs = `list`
+          found_refinement = lhs_type;
+        } else if (*maybe_smaller_type == *rhs_type) {
+          // We want the narrowest possible type
+          found_refinement = found_refinement
+              ? *(unifyTypes(found_refinement, rhs_type))
+              : rhs_type;
         }
       }
 
-      // Get a single type for the true and false branches
-      if (!isinstance_types.empty()) {
-        unified_true = *unifyTypeList(isinstance_types, nowhere,/*default_to_union=*/true);
+      if (found_refinement) {
+        if (*found_refinement == *lhs_type) {
+          all_lhs_subtype_some_rhs &= true;
+        }
+        isinstance_types.push_back(found_refinement);
+      } else {
+        // If the lhs couldn't be a subtype of the rhs (or couldn't
+        // be "refined" to itself, as in the `List[str]` and `list`
+        // case above), then we add `lhs_type` to the false branch
+        // refinements. This is because the type can still be itself
+        // if the `isinstance` check is false
+        not_isinstance_types.push_back(lhs_type);
+        all_lhs_subtype_some_rhs = false;
       }
-      if (unified_true) {
-        true_refinements = {Refinement(ident, unified_true)};
-      }
-
-      // Get a single type for the true and false branches
-      if (!not_isinstance_types.empty()) {
-        unified_false = *unifyTypeList(not_isinstance_types, nowhere,/*default_to_union=*/true);
-      }
-      if (unified_false) {
-        false_refinements = {Refinement(ident, unified_false)};
-      }
-
-      refinement = RefinementSet(true_refinements, false_refinements);
     }
 
-    bool is_statically_true =
-        std::all_of(lhs_types.begin(), lhs_types.end(), [&](TypePtr lhs_type) {
-          return std::any_of(
-              rhs_types.begin(), rhs_types.end(), [&](TypePtr rhs_type) {
-                return lhs_type->isSubtypeOf(rhs_type);
-              });
-        });
+    // For use with `unifyTypeList`
+    std::stringstream nowhere;
 
-    bool is_statically_false =
-        std::all_of(lhs_types.begin(), lhs_types.end(), [&](TypePtr lhs_type) {
-          if (lhs_type == AnyType::get()) {
-            return false;
-          }
-          for (const auto& rhs_type : rhs_types) {
-            if (lhs_type->isSubtypeOf(rhs_type)) {
-              return false;
-            }
-            if (rhs_type->isSubtypeOf(AnyListType::get()) &&
-                (lhs_type->kind() == ListType::Kind ||
-                 lhs_type->kind() == AnyType::Kind)) {
-              return false;
-            }
-            if (rhs_type->isSubtypeOf(AnyTupleType::get()) &&
-                (lhs_type->kind() == TupleType::Kind ||
-                 lhs_type->kind() == AnyType::Kind)) {
-              return false;
-            }
-          }
-          return true;
-        });
+    // Get a single type for the true and false branches
+    if (!isinstance_types.empty()) {
+      unified_true =
+          *unifyTypeList(isinstance_types, nowhere, /*default_to_union=*/true);
+    }
+    if (obj.kind() == TK_VAR && unified_true) {
+      std::string ident = Var(obj).name().name();
+      true_refinements = {Refinement(ident, unified_true)};
+    }
 
-    if (is_statically_true) {
+    // Get a single type for the true and false branches
+    if (!not_isinstance_types.empty()) {
+      unified_false = *unifyTypeList(
+          not_isinstance_types, nowhere, /*default_to_union=*/true);
+    }
+    if (obj.kind() == TK_VAR && unified_false) {
+      std::string ident = Var(obj).name().name();
+      false_refinements = {Refinement(ident, unified_false)};
+    }
+
+    refinement = RefinementSet(true_refinements, false_refinements);
+
+    bool is_statically_false = isinstance_types.empty();
+
+    // If the statement is statically true
+    if (all_lhs_subtype_some_rhs) {
       return CondValue(*graph, obj.range(), true, std::move(refinement));
     }
 
@@ -1927,7 +2066,7 @@ struct to_ir {
     // a module which returns a Tensor,
     // we do not push a new environment frame because if we did all intermediary
     // values would have to subtype the input type.
-    for (int64_t i = 0; i < len; ++i) {
+    for (const auto i : c10::irange(len)) {
       auto index =
           materializeConstant(i, *method.graph(), loc, integral_constants);
       auto sugared_value = iterable->getitem(loc, method, index);
@@ -2354,9 +2493,12 @@ struct to_ir {
       } else {
         // Special case: we tried to do "advanced indexing". Lower this expr
         // into `index` and `index_put_` ops with tensordices of Tensor?[]
-        const auto indices = graph->insertNode(graph->createList(
-                                     UnionType::createOptionalOf(TensorType::get()), tensorIndices))
-                                 ->output();
+        const auto indices =
+            graph
+                ->insertNode(graph->createList(
+                    UnionType::createOptionalOf(TensorType::get()),
+                    tensorIndices))
+                ->output();
         const auto indexed =
             graph->insert(aten::index, {slicedArg, indices}, {}, stmt.range());
         const auto augmented = emitBuiltinCall(
@@ -2440,10 +2582,12 @@ struct to_ir {
       } else {
         // Special case: we tried to do "advanced indexing" with a tensor.
         // Dispatch to `aten::index_put_` with tensorindices of Tensor?[]
-        const auto indices = graph
-                                 ->insertNode(graph->createList(
-                                     UnionType::createOptionalOf(TensorType::get()), tensorIndices))
-                                 ->output();
+        const auto indices =
+            graph
+                ->insertNode(graph->createList(
+                    UnionType::createOptionalOf(TensorType::get()),
+                    tensorIndices))
+                ->output();
 
         graph->insert(
             aten::index_put_,
@@ -2854,6 +2998,26 @@ struct to_ir {
     }
   }
 
+  void checkApplyNumInputsRange(
+      Apply& apply,
+      size_t min_expected_inputs,
+      size_t max_expected_inputs) {
+    const SourceRange& loc = apply.range();
+    size_t position_arg_size = apply.inputs().size();
+    if (position_arg_size < min_expected_inputs ||
+        position_arg_size > max_expected_inputs) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name()
+          << " expected to have number of arguments between "
+          << min_expected_inputs << " and " << max_expected_inputs
+          << " but found " << position_arg_size;
+    }
+    if (apply.attributes().size() > 0) {
+      throw ErrorReport(loc)
+          << Var(apply.callee()).name().name() << " takes no keyword arguments";
+    }
+  }
+
   std::shared_ptr<SugaredValue> emitApplyExpr(
       Apply& apply,
       size_t n_binders,
@@ -2913,7 +3077,7 @@ struct to_ir {
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
         if (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->canHoldNone() &&
+            type->expect<UnionType>()->canHoldType(NoneType::get()) &&
             expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
@@ -2940,7 +3104,7 @@ struct to_ir {
         return std::make_shared<SimpleValue>(v);
       } break;
       case prim::GetAttr: {
-        checkApplyNumInputs(apply, 2);
+        checkApplyNumInputsRange(apply, 2, 3);
         auto obj = emitSugaredExpr(apply.inputs()[0], 1);
         auto selector = apply.inputs()[1];
         if (selector.kind() != TK_STRINGLITERAL) {
@@ -2948,8 +3112,20 @@ struct to_ir {
               << "getattr's second argument must be a string literal";
         }
         const std::string& name = StringLiteral(selector).text();
-        return obj->attr(apply.range(), method, name);
-      }
+
+        if (apply.inputs().size() == 2) {
+          return obj->attr(apply.range(), method, name);
+        } else {
+          // 3 inputs form of getattr, the third argument is the default value
+          // to return when attribute is not found
+          if (obj->hasAttr(apply.range(), method, name)) {
+            return obj->attr(apply.range(), method, name);
+          } else {
+            // attribute not found, just default val (3rd arg)
+            return emitSugaredExpr(apply.inputs()[2], 1);
+          }
+        }
+      } break;
       case prim::Uninitialized: {
         checkApplyNumInputs(apply, 1);
         TypePtr type = typeParser_.parseTypeFromExpr(apply.inputs()[0]);
@@ -3605,9 +3781,110 @@ struct to_ir {
             ->call(tree->range(), method, named_values, {}, 0));
   }
 
-  Value* emitSimpleExpr(
-      const TreeRef& tree,
-      const TypePtr& type_hint = nullptr) {
+  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint) {
+    auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // Determine the element type of the list. If we have a type hint
+    // of `List[T]`, use `T`. If the list is non-empty, find the
+    // greatest common supertype of all the list elements (defaulting to
+    // `Any` as a catch-all supertype). Assume `[]` is `List[Tensor]`
+    TypePtr elem_type = TensorType::get();
+
+    // If `type_hint` is a Union, we're going to change it to be
+    // the type of the rhs List, so we need to store the original
+    // UnionType for later. `nullptr` means that we don't need to emit
+    // a `widenToUnion` node (either because we don't have a type hint
+    // or because the type hint wasn't a Union)
+    TypePtr annotated_union_type =
+        type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
+
+    // Basic `type_hint` check here for better error reporting. We also
+    // see if we can narrow down the actual type if the given type hint
+    // is a Union
+    if (type_hint) {
+      // If necessary/possible, make `type_hint` a ListType
+      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+        std::vector<TypePtr> list_types;
+        std::copy_if(
+            union_type_hint->containedTypes().begin(),
+            union_type_hint->containedTypes().end(),
+            std::back_inserter(list_types),
+            [&](TypePtr type_ptr) {
+              return type_ptr->isSubtypeOf(AnyListType::get());
+            });
+        if (list_types.empty()) {
+          throw ErrorReport(ll)
+              << "Expected an Union type annotation "
+              << "with an inner List type, but got " << type_hint->repr_str();
+        } else if (values.empty() && list_types.size() > 1) {
+          throw ErrorReport(ll)
+              << "Cannot assign an empty list to a "
+              << "variable annotated to be type " << type_hint->repr_str()
+              << " because there are multiple possible List "
+              << "type candidates in the Union annotation";
+        } else {
+          type_hint = list_types[0];
+        }
+      }
+
+      if (auto list_type_hint = type_hint->cast<ListType>()) {
+        elem_type = list_type_hint->getElementType();
+      } else {
+        throw ErrorReport(ll) << "Expected an annotation of type "
+                              << "List, but got " << type_hint->repr_str();
+      }
+    }
+
+    if (!values.empty()) {
+      auto types = fmap(values, [](const Value* v) { return v->type(); });
+
+      std::stringstream nowhere; // never used
+
+      // We don't want to use `elem_type` as the final argument to
+      // `unifyTypeList` because there's a chance that `elem_type` is
+      // the Tensor default
+      auto known_elem_type =
+          type_hint ? type_hint->cast<ListType>()->getElementType() : nullptr;
+      c10::optional<TypePtr> unified = unifyTypeList(
+          types, nowhere, /*default_to_union=*/true, known_elem_type);
+
+      if (!type_hint && *unified == AnyType::get()) {
+        TORCH_WARN(
+            "List consists of heterogeneous types, which means",
+            " that it has been typed as `List[Any]`. To use "
+            "any of the values in the List, it will be "
+            "necessary to add an `assert isinstance` statement "
+            "before first use to trigger type refinement. \n",
+            ll.range().str());
+      }
+
+      if (type_hint && !(*unified)->isSubtypeOf(elem_type)) {
+        throw ErrorReport(ll)
+            << "List type annotation `" << type_hint->repr_str()
+            << "` did not match the types of the given list elements,"
+            << " which were unified to " << (*unified)->repr_str();
+      }
+
+      // We only want to set `elem_type` if we don't have a type hint
+      // to allow for the case that `*unified` is a subtype of
+      // `type_hint`
+      if (!type_hint) {
+        elem_type = *unified;
+      }
+    }
+
+    Node* result = graph->insertNode(graph->createList(elem_type, values));
+    if (annotated_union_type) {
+      Node* n = graph->insertNode(
+          graph->create(prim::unchecked_cast, {result->output()}));
+      n->output()->setType(std::move(annotated_union_type));
+      result = n;
+    }
+
+    return result->output();
+  }
+
+  Value* emitSimpleExpr(const TreeRef& tree, TypePtr type_hint = nullptr) {
     switch (tree->kind()) {
       case TK_FLOOR_DIV:
       case '@': {
@@ -3687,46 +3964,7 @@ struct to_ir {
       } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
-        auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
-
-        // determine the element type of the list
-        // if we have a type hint of List[T], use T
-        // if the list is non-empty use type_of(list[0])
-        // otherwise assume it is List[Tensor]
-        TypePtr elem_type = TensorType::get();
-        if (type_hint) {
-          if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expectRef<ListType>().getElementType();
-          } else {
-            // If the type hint was not a List[T] throw an error
-            throw ErrorReport(tree)
-                << "Expected a List type hint but instead got "
-                << type_hint->repr_str();
-          }
-        } else if (!values.empty()) {
-          std::stringstream ss;
-          auto types = fmap(values, [](const Value* v) { return v->type(); });
-          auto maybe_elem_type = unifyTypeList(types, ss);
-          if (!maybe_elem_type) {
-            throw ErrorReport(tree) << "Lists must contain only a single type\n"
-                                    << ss.str();
-          }
-          elem_type = maybe_elem_type.value();
-        }
-
-        for (auto v : values) {
-          std::stringstream ss;
-          if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
-            throw ErrorReport(tree)
-                << "Lists must contain only a single type, expected: "
-                << elem_type->repr_str() << " but found "
-                << v->type()->repr_str() << " instead.\n"
-                << ss.str();
-          }
-        }
-        Value* result =
-            graph->insertNode(graph->createList(elem_type, values))->output();
-        return result;
+        return emitListLiteral(ll, type_hint);
       } break;
       case TK_TUPLE_LITERAL: {
         auto ll = TupleLiteral(tree);
@@ -3740,7 +3978,7 @@ struct to_ir {
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
 
-        for (size_t i = 0; i < key_trees.size(); ++i) {
+        for (const auto i : c10::irange(key_trees.size())) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
         }
@@ -3748,10 +3986,45 @@ struct to_ir {
         TypePtr key_type = nullptr;
         TypePtr value_type = nullptr;
 
-        if (type_hint && type_hint->kind() == TypeKind::DictType) {
-          auto dict_type = type_hint->expect<DictType>();
-          key_type = dict_type->getKeyType();
-          value_type = dict_type->getValueType();
+        // See notes in `emitListLiteral` regarding the following logic
+
+        TypePtr annotated_union_type =
+            type_hint && type_hint->kind() == UnionType::Kind ? type_hint
+                                                              : nullptr;
+
+        if (type_hint) {
+          if (auto union_type_hint = type_hint->cast<UnionType>()) {
+            std::vector<TypePtr> dict_types;
+            std::copy_if(
+                union_type_hint->containedTypes().begin(),
+                union_type_hint->containedTypes().end(),
+                std::back_inserter(dict_types),
+                [&](TypePtr type_ptr) {
+                  return type_ptr->kind() == DictType::Kind;
+                });
+            if (dict_types.empty()) {
+              throw ErrorReport(dl) << "Expected an Union type annotation "
+                                    << "with an inner Dict type, but got "
+                                    << type_hint->repr_str();
+            } else if (values.empty() && dict_types.size() > 1) {
+              throw ErrorReport(dl)
+                  << "Cannot assign an empty dict to a "
+                  << "variable annotated to be type " << type_hint->repr_str()
+                  << " because there are multiple possible Dict "
+                  << "type candidates in the Union annotation";
+            } else {
+              type_hint = dict_types[0];
+            }
+          }
+
+          if (auto dict_type_hint = type_hint->cast<DictType>()) {
+            auto dict_type = type_hint->expect<DictType>();
+            key_type = dict_type->getKeyType();
+            value_type = dict_type->getValueType();
+          } else {
+            throw ErrorReport(dl) << "Expected an annotation of type "
+                                  << "Dict, but got " << type_hint->repr_str();
+          }
         } else if (keys.empty()) {
           key_type = StringType::get();
           value_type = TensorType::get();
@@ -3761,28 +4034,79 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        auto checkTypeOfValues = [](const TypePtr& type,
-                                    const char* what,
-                                    const std::vector<Value*>& values,
-                                    TreeList trees) {
-          for (size_t i = 0, N = values.size(); i < N; ++i) {
-            std::stringstream ss;
-            if (!values[i]->type()->isSubtypeOfExt(type, &ss)) {
-              throw ErrorReport(trees[i])
-                  << "Dict " << what
-                  << " must contain only a single type, expected: "
-                  << type->repr_str() << " but found "
-                  << values[i]->type()->repr_str() << " instead.\n"
-                  << ss.str();
+        for (const auto i : c10::irange(keys.size())) {
+          std::stringstream ss;
+          if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
+            throw ErrorReport(key_trees[i])
+                << "Dict keys must contain "
+                << "only a single type. Expected: " << key_type->repr_str()
+                << " but found " << keys[i]->type()->repr_str() << " instead.\n"
+                << ss.str();
+          }
+        }
+
+        if (!values.empty()) {
+          auto types = fmap(values, [](const Value* v) { return v->type(); });
+
+          std::stringstream nowhere; // never used
+
+          const TypePtr value_type_hint =
+              type_hint ? type_hint->expect<DictType>()->getKeyType() : nullptr;
+
+          c10::optional<TypePtr> unified = unifyTypeList(
+              types,
+              /*why_not=*/nowhere,
+              /*default_to_union=*/true,
+              value_type_hint);
+
+          if (!type_hint && *unified == AnyType::get()) {
+            TORCH_WARN(
+                "Dict values consist of heterogeneous types, which "
+                "means that they have been typed as `Any`. To use "
+                "any of the values in the Dist, it will be "
+                "necessary to add an `assert isinstance` statement "
+                "before first use to trigger type refinement. \n",
+                dl.range().str());
+          }
+
+          if (type_hint) {
+            TypePtr value_type_hint =
+                type_hint->expect<DictType>()->getValueType();
+            for (const auto i : c10::irange(types.size())) {
+              TORCH_CHECK(
+                  types[i]->isSubtypeOf(value_type_hint),
+                  "Type "
+                  "hint for dict was",
+                  type_hint->repr_str(),
+                  "but the value ",
+                  "at index ",
+                  i,
+                  " has type ",
+                  types[i]->repr_str(),
+                  ", which is not a valid"
+                  " subtype of ",
+                  value_type_hint->repr_str());
             }
           }
-        };
-        checkTypeOfValues(key_type, "keys", keys, key_trees);
-        checkTypeOfValues(value_type, "values", values, value_trees);
 
-        return graph
-            ->insertNode(graph->createDict(key_type, value_type, keys, values))
-            ->output();
+          // We only want to set `value_type` if we don't have a type
+          // hint to allow for the case that `*unified` is a subtype of
+          // the value type given by `type_hint`
+          if (!type_hint) {
+            value_type = *unified;
+          }
+        }
+
+        Node* result = graph->insertNode(
+            graph->createDict(key_type, value_type, keys, values));
+        if (annotated_union_type) {
+          Node* n = graph->insertNode(
+              graph->create(prim::unchecked_cast, {result->output()}));
+          n->output()->setType(std::move(annotated_union_type));
+          result = n;
+        }
+
+        return result->output();
       } break;
       case TK_LIST_COMP: {
         auto lc = ListComp(tree);
@@ -3905,8 +4229,7 @@ struct to_ir {
     // None/undefined tensor(optional tensor)
     auto opt_tensor = UnionType::createOptionalOf(TensorType::get());
     auto* index =
-        graph->insertNode(graph->createList(std::move(opt_tensor), indices))
-            ->output();
+        graph->insertNode(graph->createList(opt_tensor, indices))->output();
     return emitBuiltinCall(loc, *graph, aten::index, {input, index}, {});
   }
 
@@ -4015,7 +4338,8 @@ struct to_ir {
         } else {
           return dim;
         }
-      } else if (index->type()->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
+      } else if (index->type()->isSubtypeOf(
+                     UnionType::createOptionalOf(TensorType::get()))) {
         if (is_reverse) {
           throw ErrorReport(loc)
               << "Ellipses followed by tensor indexing is currently not supported";
@@ -4086,7 +4410,8 @@ struct to_ir {
       } else if (expr->type() == IntType::get()) {
         sliceable =
             emitSelect(loc, sliceable, insert_value_for_dim(dims[i]), expr);
-      } else if (expr->type()->isSubtypeOf(UnionType::createOptionalOf(TensorType::get()))) {
+      } else if (expr->type()->isSubtypeOf(
+                     UnionType::createOptionalOf(TensorType::get()))) {
         tensor_indices.resize(dims[i] + 1);
         tensor_indices[dims[i]] = expr;
       } else {
@@ -4731,7 +5056,7 @@ bool meaningfulName(const std::string& name) {
     return false;
   if (name[0] != '_')
     return true;
-  for (size_t i = 1; i < name.size(); ++i) {
+  for (const auto i : c10::irange(1, name.size())) {
     if (!isdigit(name[i]))
       return true;
   }

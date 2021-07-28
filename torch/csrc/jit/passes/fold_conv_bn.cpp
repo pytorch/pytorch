@@ -87,7 +87,8 @@ void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
 
   if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
-      auto optional_tensor_type = UnionType::createOptionalOf(TensorType::get());
+      auto optional_tensor_type =
+          UnionType::createOptionalOf(TensorType::get());
       t->addAttribute("bias", optional_tensor_type, true);
       auto optional_tensor = c10::optional<at::Tensor>();
       module.setattr("bias", optional_tensor);

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, Union
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -72,12 +72,11 @@ class TestUnion(JitTestCase):
             scripted("1")
 
     def test_union_with_enum(self):
-
-        global Color
-
         class Color(Enum):
             RED = 1
             GREEN = 2
+
+        make_global(Color)
 
         def fn(x: Union[str, Color]) -> str:
             return "foo"
@@ -96,7 +95,7 @@ class TestUnion(JitTestCase):
     def test_union_in_class_constructor(self):
 
         @torch.jit.script
-        class A(object):    # noqa B903
+        class A(object):    # noqa: B903
             def __init__(self, x: Union[int, str]) -> None:
                 self.x = x
 
@@ -657,6 +656,15 @@ class TestUnion(JitTestCase):
         self.checkScript(fn, (1,))
         self.checkScript(fn, (8,))
 
+    '''
+    TODO:
+    - test with list comprehension (also broken on master with Optional)
+    - test with dict comprehension (same, I assume--not tested)
+    - test with tuple literal probably (Untested on master)
+    - I guess also check dict(...)? Totally untested
+
+    '''
+
     def test_union_with_listliteral(self):
         def fn():
             x: Union[List[torch.Tensor], int] = [torch.tensor(3)]
@@ -682,12 +690,14 @@ class TestUnion(JitTestCase):
                 x.append(torch.tensor(3))
             return x
 
-        with self.assertRaisesRegex(RuntimeError, "grr"):
+        with self.assertRaisesRegex(RuntimeError, "there are multiple"
+                                    " possible List type candidates "
+                                    "in the Union annotation"):
             torch.jit.script(fn)
 
     def test_union_with_dictliteral(self):
         def fn():
-            x: Union[Dict[str, torch.Tensor], int] = {foo: torch.tensor(3)}
+            x: Union[Dict[str, torch.Tensor], int] = {"foo": torch.tensor(3)}
             if torch.jit.isinstance(x, Dict[str, torch.Tensor]):
                 x["bar"] = torch.tensor(3)
             return x
@@ -710,5 +720,6 @@ class TestUnion(JitTestCase):
                 x["foo"] = torch.tensor(3)
             return x
 
-        with self.assertRaisesRegex(RuntimeError, "grr"):
+        with self.assertRaisesRegex(RuntimeError, "there are multiple "
+                                    "possible Dict type candidates"):
             torch.jit.script(fn)

@@ -15,6 +15,7 @@ def _allreduce_fut(
 
     return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
 
+
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
 ) -> torch.futures.Future:
@@ -60,10 +61,53 @@ def fp16_compress_hook(
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
         decompressed_tensor.copy_(fut.value()[0])
-        return [decompressed_tensor]
+        return decompressed_tensor
 
     return fut.then(decompress)
 
+
+class OptimizerHookState(object):
+    """
+    Holds state for running optimizer in-line after DDP communication hook.
+    Currently contains only optimizer class which must have a method `step_param`.
+    """
+    __slots__ = ['functional_optimizer']
+
+    def __init__(self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs):
+        self.functional_optimizer = functional_optim_cls(
+            [],
+            *functional_optim_args,
+            **functional_optim_kwargs,
+            allow_empty_param_list=True
+        )
+        if not hasattr(self.functional_optimizer, 'step_param'):
+            raise ValueError(
+                f"Class {functional_optim_cls} must implement method step_param."
+            )
+
+def hook_then_optimizer(
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future], optimizer_state: OptimizerHookState
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+    """Runs optimizer in a functional fashion after DDP communication hook."""
+
+    def hook_then_optimizer_wrapper(
+        hook_state, bucket: dist.GradBucket
+    ) -> torch.futures.Future:
+        # Run original hook
+        fut = hook(hook_state, bucket)
+
+        def optimizer_step(fut):
+            gradient_tensors = bucket.get_per_parameter_tensors()
+            model_params = bucket.get_model_params_for_bucket()
+            for grad_tensor, model_param in zip(gradient_tensors, model_params):
+                optimizer_state.functional_optimizer.step_param(
+                    model_param,
+                    grad_tensor,
+                )
+            return bucket.get_tensor()
+        return fut.then(optimizer_step)
+
+    return hook_then_optimizer_wrapper
 
 def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
@@ -93,7 +137,7 @@ def fp16_compress_wrapper(
             # Decompress in place to reduce the peak memory.
             # See: https://github.com/pytorch/pytorch/issues/45968
             decompressed_tensor.copy_(fut.value()[0])
-            return [decompressed_tensor]
+            return decompressed_tensor
 
         # Decompress after hook has run.
         return fut.then(decompress)

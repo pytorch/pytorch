@@ -41,7 +41,6 @@ C10_EXPORT c10::optional<std::string> findSchemaDifferences(const FunctionSchema
 
   for (size_t i = 0; i < lhs.arguments().size(); ++i) {
     if (*lhs.arguments()[i].type() != *rhs.arguments()[i].type()) {
-      auto res = *lhs.arguments()[i].type() != *rhs.arguments()[i].type();
       return "Type mismatch in argument " + guts::to_string(i+1) + ": " + lhs.arguments()[i].type()->str() +
                " vs " + rhs.arguments()[i].type()->str();
     }
