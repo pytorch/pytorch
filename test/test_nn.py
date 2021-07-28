@@ -4557,7 +4557,7 @@ class TestNN(NNTestCase):
                 input = torch.randn(3, shape[0], dtype=dtype)
 
             for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
-                                                         (False, True)):
+                                                               (False, True)):
                 # right_inverse for Cayley and matrix_exp not implemented for use_trivialization=False
                 # See Note [right_inverse expm cayley]
                 can_initialize = use_trivialization or parametrization == "householder"

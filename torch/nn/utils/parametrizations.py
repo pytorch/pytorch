@@ -276,8 +276,10 @@ def orthogonal(module: Module,
     if not hasattr(OrthMaps, parametrization):
         raise ValueError('parametrization has to be one of "matrix_exp", "cayley", "householder". '
                          f'Got: {parametrization}')
-    parametrization = OrthMaps[parametrization]
-    parametrize.register_parametrization(module, name, _Orthogonal(weight, parametrization, use_trivialization=use_trivialization), unsafe=True)
+    orth = _Orthogonal(weight,
+                       OrthMaps[parametrization],
+                       use_trivialization=use_trivialization)
+    parametrize.register_parametrization(module, name, orth, unsafe=True)
     return module
 
 
