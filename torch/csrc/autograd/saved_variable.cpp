@@ -45,14 +45,16 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     is_output_ = is_output;
     is_inplace_on_view_ = is_inplace_on_view;
 
-    if(is_inplace_on_view) {
+    if (is_inplace_on_view) {
       TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
       weak_grad_fn_ = variable.grad_fn();
     }
 
-    if (get_default_hooks()) {
+    auto maybe_hooks = get_default_hooks();
+
+    if (maybe_hooks) {
       save_metadata(variable);
-      register_hooks_(get_default_hooks(), variable);
+      set_hooks_and_pack_data(std::move(maybe_hooks), variable);
       return;
     }
 
@@ -71,8 +73,8 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     }
 
     save_metadata(variable);
-    // This copy is slightly more expensive.
-    // Only do it if we actually need to.
+
+    // Only do this if we actually need to.
     data_ = variable.tensor_data();
   }
 }
@@ -209,18 +211,8 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   return var;
 }
 
-void SavedVariable::register_hooks_(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data) {
-  TORCH_INTERNAL_ASSERT(hooks);
-  TORCH_CHECK(!hooks_,
-    "Calling register_hooks on a saved tensor whose hooks have already been set. "
-    "Hint: only one pair of hooks is allowed at a time.");
+void SavedVariable::set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data) {
   hooks_ = std::move(hooks);
-
-  // If we didn't save the original variable, we already have all we need to reconstruct it
-  if (saved_original_) {
-    save_metadata(data);
-  }
-
   at::NoGradGuard guard;
   hooks_->call_pack_hook(saved_original_ ? data.tensor_data() : data);
 }
@@ -243,7 +235,11 @@ void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) 
         "Calling register_hooks on a saved tensor with value None is forbidden");
     }
   }
-  register_hooks_(std::move(hooks), data_);
+  // If we didn't save the original variable, we already saved metadata
+  if (saved_original_) {
+    save_metadata(data_);
+  }
+  set_hooks_and_pack_data(std::move(hooks), data_);
   data_.reset();
 }
 
