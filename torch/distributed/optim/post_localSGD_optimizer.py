@@ -40,7 +40,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>  opt = PostLocalSGDOptimizer(
         >>>      model.parameters(),
         >>>      optimizer_class=torch.optim.SGD,
-        >>>      averager=averagers.PeriodicModelAverager(model.parameters(), period=4, warmup_steps=100),
+        >>>      averager=averagers.PeriodicModelAverager(period=4, warmup_steps=100),
         >>>      lr=0.01
         >>>  )
         >>>
@@ -64,18 +64,17 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         averager: averagers.ModelAverager,
         **defaults: Any,
     ):
-        self.local_optimizer = optimizer_class(params, **defaults)
+        self.params = list(params)
+        self.local_optimizer = optimizer_class(iter(self.params), **defaults)
         self.param_groups = self.local_optimizer.param_groups
         self.averager = averager
-
-        self.steps = 0
 
     def step(self):
         r"""
         Performs a single optimization step (parameter update).
         """
         self.local_optimizer.step()
-        self.averager.average_parameters()
+        self.averager.average_parameters(iter(self.params))
 
     def zero_grad(self):
         self.local_optimizer.zero_grad()
