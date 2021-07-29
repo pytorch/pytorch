@@ -2774,9 +2774,9 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = M().eval()
         m = prepare_fx(m, {"": torch.quantization.QConfig(
-            activation = torch.quantization.HistogramObserver.with_args(
-            qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
-        ), weight = torch.quantization.default_per_channel_weight_observer)})
+            activation=torch.quantization.HistogramObserver.with_args(
+                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+            ), weight=torch.quantization.default_per_channel_weight_observer)})
         m = convert_fx(m, is_reference=True)
         m(torch.rand(2, 1, 5, 5))
 
