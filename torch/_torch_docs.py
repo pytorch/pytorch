@@ -6320,7 +6320,7 @@ Returns:
     A named tuple (min, max) containing the minimum and maximum values.
 
 Raises:
-    IndexError
+    RuntimeError
         If any of the dimensions to compute the values over has size 0.
 
 .. note::
@@ -6332,6 +6332,24 @@ Raises:
 
 Example::
 
+    >>> torch.aminmax(torch.tensor([1, -3, 5]))
+    torch.return_types.aminmax(
+    min=tensor(-3),
+    max=tensor(5))
+
+    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
+    torch.return_types.aminmax(
+    min=tensor(nan),
+    max=tensor(nan))
+
+    >>> x = torch.arange(10).view(2, 5)
+    >>> x
+    tensor([[0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9]])
+    >>> x.aminmax(dim=0, keepdim=True)
+    torch.return_types.aminmax(
+    min=tensor([[0, 1, 2, 3, 4]]),
+    max=tensor([[5, 6, 7, 8, 9]]))
 """)
 
 add_docstr(torch.fmin, r"""
