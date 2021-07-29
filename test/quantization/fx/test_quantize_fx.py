@@ -3452,9 +3452,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """ quantization of the output of cat will depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class QuantizedInput(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInput, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -3463,22 +3463,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        class NonQuantizedInput(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInput, self).__init__()
-
-            def forward(self, x, y):
-                return torch.cat([x, y], 1)
-
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.cat)
-        for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
-            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
+        options = itertools.product(self.static_quant_types, [True, False])
+        for quant_type, is_reference in options:
+            if is_reference:
+                converted_node_list = [
+                    ns.call_method("dequantize"),
+                    ns.call_function(torch.cat),
+                    ns.call_function(torch.quantize_per_tensor)
+                ]
+            else:
+                converted_node_list = None
+
+            self.checkGraphModeFxOp(
+                M(),
+                data,
+                quant_type,
+                quantized_node,
+                expected_node_list=converted_node_list,
+                is_reference=is_reference)
 
         # check cat is using the same observer for input and output
-        m = QuantizedInput().eval()
+        m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
         # two inputs and one output of torch.cat are using same observer, so we have
         # 2 observers that's replicated
