@@ -18,6 +18,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <set>
+#include <unordered_set>
 
 struct DisableTorchDispatch {
   DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
@@ -205,7 +206,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     .def("events", &ProfilerResult::events)
     .def("save", &ProfilerResult::save);
 
-  m.def("_enable_profiler", enableProfiler);
+  m.def("_enable_profiler",
+        &enableProfiler,
+        py::arg("config"),
+        py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);
 #endif

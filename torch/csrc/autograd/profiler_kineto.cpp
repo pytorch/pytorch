@@ -221,7 +221,7 @@ KinetoThreadLocalState* getProfilerTLSState() {
   return static_cast<KinetoThreadLocalState*>(state);
 }
 
-void pushProfilingCallbacks() {
+void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
@@ -320,7 +320,8 @@ void pushProfilingCallbacks() {
         }
       })
     .needsInputs(state_ptr->config().report_input_shapes)
-    .needsIds(true));
+    .needsIds(true)
+    .scopes(scopes));
   state_ptr->setCallbackHandle(handle);
 }
 
@@ -429,7 +430,8 @@ void prepareProfiler(
 
 void enableProfiler(
     const ProfilerConfig& config,
-    const std::set<ActivityType>& activities) {
+    const std::set<ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes) {
   if (config.state != ProfilerState::NVTX) {
     TORCH_CHECK(
         config.state == ProfilerState::KINETO ||
@@ -446,7 +448,7 @@ void enableProfiler(
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
   if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
-    pushProfilingCallbacks();
+    pushProfilingCallbacks(scopes);
   }
 
   if (config.state != ProfilerState::NVTX) {

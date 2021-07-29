@@ -296,7 +296,8 @@ struct TORCH_API ProfilerResult {
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
-    const std::set<ActivityType>& activities);
+    const std::set<ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 

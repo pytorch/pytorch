@@ -1,5 +1,3 @@
-#include "ATen/record_function.h"
-#include "torch/csrc/autograd/profiler_kineto.h"
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -2503,6 +2501,76 @@ TEST(RecordDebugHandles, Basic) {
     }
   }
   ASSERT_EQ(my_events, 2);
+}
+
+TEST(RecordDebugHandles, ScopedCallbacks) {
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  auto profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() > 0);
+
+  // Enable the profiler in this thread
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::USER_SCOPE});
+  {
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 0);
+
+  torch::autograd::profiler::prepareProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU});
+  torch::autograd::profiler::enableProfiler(
+      torch::autograd::profiler::ProfilerConfig(
+          torch::autograd::profiler::ProfilerState::KINETO, false, false),
+      {torch::autograd::profiler::ActivityType::CPU},
+      {at::RecordScope::USER_SCOPE});
+  {
+    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  {
+    RECORD_USER_SCOPE_WITH_INPUTS("not_my_function", {});
+    auto a = torch::rand({128, 128});
+    auto b = torch::rand({128, 128});
+    auto c = a + b;
+  }
+  profiler_results_ptr = torch::autograd::profiler::disableProfiler();
+  const auto& kineto_events = profiler_results_ptr->events();
+  for (const auto& e : kineto_events) {
+    if (e.name() == "my_function") {
+      ASSERT_EQ(e.debugHandle(), 42);
+    } else if (e.name() == "not_my_function") {
+      ASSERT_EQ(e.debugHandle(), -1);
+    }
+  }
+  ASSERT_TRUE(profiler_results_ptr->events().size() == 2);
 }
 
 TEST(IValueKWargsTest, Basic) {
