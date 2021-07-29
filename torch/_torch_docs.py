@@ -5712,6 +5712,11 @@ Bader, P.; Blanes, S.; Casas, F.
 Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
 Mathematics 2019, 7, 1174.
 
+.. seealso::
+
+        :func:`~torch.nn.utils.parametrizations.orthogonal` for a parametrization that makes a
+        parameter orthogonal using the matrix exponential.
+
 Args:
     {input}
 

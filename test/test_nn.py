@@ -4544,17 +4544,17 @@ class TestNN(NNTestCase):
             torch.testing.assert_allclose(Q, weight, atol=1e-5, rtol=0.)
 
 
-        for shape, dtype, batched, in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
-                                              (torch.float32, torch.complex64),
-                                              (False, True)):
+        for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
+                                                (torch.float32, torch.complex64),
+                                                (True, False)):
             # Conv2d does not support complex yet
-            if batched and dtype.is_complex:
+            if not use_linear and dtype.is_complex:
                 continue
 
-            if batched:
-                input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
-            else:
+            if use_linear:
                 input = torch.randn(3, shape[0], dtype=dtype)
+            else:
+                input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
 
             for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
                                                                (False, True)):
@@ -4563,16 +4563,17 @@ class TestNN(NNTestCase):
                 can_initialize = use_trivialization or parametrization == "householder"
 
                 # We generate them every time to always start with fresh weights
-                if batched:
-                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
-                else:
+                if use_linear:
                     m = nn.Linear(*shape, dtype=dtype)
+                else:
+                    m = nn.Conv2d(2, 3, shape, dtype=dtype)
 
                 # We do not support householder for complex inputs
                 # See Note [Householder complex]
                 w_init = m.weight.clone()
                 if parametrization == "householder" and m.weight.is_complex():
-                    with self.assertRaisesRegex(ValueError, "householder parametrization does not support complex tensors"):
+                    msg = "householder parametrization does not support complex tensors"
+                    with self.assertRaisesRegex(ValueError, msg):
                         torch.nn.utils.parametrizations.orthogonal(m,
                                                                    "weight",
                                                                    parametrization,
