@@ -6,6 +6,7 @@ on:
     - cron: "*/30 * * * *"
   # Have the ability to trigger this job manually using the API as well
   workflow_dispatch:
+  pull_request:
 
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
