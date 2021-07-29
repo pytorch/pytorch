@@ -1929,11 +1929,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       c10::hash<BucketKey>>
       bucket_size_limit_iterators;
 
-  // Local accumulator type for a single bucket.
-  struct BucketAccumulator {
-    std::vector<size_t> indices;
-    size_t size = 0;
-  };
 
   // Keep vector of indices and size accumulator by tensor type and device.
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
@@ -1971,6 +1966,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
     auto& bucket_size_limit_iterator = bucket_size_limit_iterators[key];
     const auto bucket_size_limit = *bucket_size_limit_iterator;
+    bucket.size_limit = bucket_size_limit;
     if (bucket.size >= bucket_size_limit) {
       result.emplace_back(std::move(bucket.indices));
       bucket = BucketAccumulator();
