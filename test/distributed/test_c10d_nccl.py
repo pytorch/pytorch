@@ -28,7 +28,6 @@ import torch.testing._internal.common_utils as common
 from test_c10d_common import gpus_for_rank, DoubleGpuNet, ConvNet, ModuleForDdpCommHook
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
-from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -49,22 +48,31 @@ from torch.testing._internal.common_utils import (
     sandcastle_skip,
     sandcastle_skip_if,
 )
+from torch.utils.checkpoint import checkpoint
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
 
 if TEST_WITH_TSAN:
-    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    print(
+        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 if TEST_WITH_ASAN:
-    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr
+    )
     sys.exit(0)
+
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     @requires_nccl()
-    @sandcastle_skip_if(torch.cuda.device_count() == 0, "No GPUs available, skipping test")
+    @sandcastle_skip_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
     def test_common_errors(self):
         vars = {
             "WORLD_SIZE": "1",
@@ -164,7 +172,9 @@ class RendezvousEnvTest(TestCase):
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
     @requires_nccl()
     @retry_on_connect_failures
-    @sandcastle_skip_if(torch.cuda.device_count() == 0, "No GPUs available, skipping test")
+    @sandcastle_skip_if(
+        torch.cuda.device_count() == 0, "No GPUs available, skipping test"
+    )
     def test_default_store_timeout_nccl(self):
         self._test_default_store_timeout("nccl")
 
@@ -181,7 +191,9 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         pass
 
     @requires_nccl()
-    @sandcastle_skip_if(torch.cuda.device_count() > 0, "GPUs are available, skipping test")
+    @sandcastle_skip_if(
+        torch.cuda.device_count() > 0, "GPUs are available, skipping test"
+    )
     def test_init_no_gpus(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         with self.assertRaisesRegex(
@@ -1590,10 +1602,7 @@ class DistributedDataParallelTest(
         sgd_momentum = 0.9
         sgd_weight_decay = 0.01
         opt_hook_state = default.OptimizerHookState(
-            _FunctionalSGD,
-            sgd_lr,
-            momentum=sgd_momentum,
-            weight_decay=sgd_weight_decay
+            _FunctionalSGD, sgd_lr, momentum=sgd_momentum, weight_decay=sgd_weight_decay
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
@@ -1610,16 +1619,13 @@ class DistributedDataParallelTest(
         # Run plain model with allreduce hook and separate optimizer step.
         # Verify gradients are the same.
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
-            process_group,
-            default.allreduce_hook,
-            gradient_as_bucket_view,
-            hook_state
+            process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
         sgd = torch.optim.SGD(
             gpu_model_allreduce.parameters(),
             sgd_lr,
             momentum=sgd_momentum,
-            weight_decay=sgd_weight_decay
+            weight_decay=sgd_weight_decay,
         )
         for _ in range(8):
             gpu_model_allreduce.zero_grad()
@@ -1698,7 +1704,6 @@ class DistributedDataParallelTest(
     @skip_if_lt_x_gpu(2)
     def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
         self._test_hook_then_optimizer(gradient_as_bucket_view=True)
-
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
