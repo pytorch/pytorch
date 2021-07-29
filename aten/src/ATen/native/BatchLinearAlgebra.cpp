@@ -3142,8 +3142,7 @@ Tensor& linalg_svdvals_out(const Tensor& input, Tensor& result) {
 
   Tensor singular_values_tmp;
   std::tie(std::ignore, singular_values_tmp, std::ignore) =
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      at::_svd_helper(input, /*full_matrices=*/false, /*compute_uv=*/false);
+      at::_svd_helper(input, /*some=*/true, /*compute_uv=*/false);
 
   at::native::resize_output(result, singular_values_tmp.sizes());
   result.copy_(singular_values_tmp);

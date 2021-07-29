@@ -2986,6 +2986,12 @@ class TestLinalg(TestCase):
         result = torch.linalg.svdvals(a)
         result = torch.linalg.svd(a, full_matrices=False)
 
+        out0 = torch.empty_like(result[0])
+        out1 = torch.empty_like(result[1])
+        out2 = torch.empty_like(result[2])
+        torch.linalg.svdvals(a, out=out0)
+        torch.linalg.svd(a, full_matrices=False, out=(out0, out1, out2))
+
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
