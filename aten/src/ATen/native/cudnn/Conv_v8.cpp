@@ -364,7 +364,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   // We don't care about getting the best ordering of algos if we're roing to run all of them
-  auto sources = get_generator_sources(/*desc,*/ x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT); 
+  auto sources = get_generator_sources(x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   cudnn_frontend::executionPlans_t valid_plans;
   Tensor workspace;
@@ -417,7 +417,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
 auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
-  auto sources = get_generator_sources(/*desc,*/ x, deterministic, allow_tf32, heuristic_mode);
+  auto sources = get_generator_sources(x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto configs = generator.generate_engine_config(opGraph);
@@ -614,7 +614,7 @@ void raw_cudnn_convolution_backward_weight_out(
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
       input, grad_output, grad_weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
-  } else { 
+  } else {
     raw_cudnn_convolution_backward_weight_out_v7(
       grad_weight, grad_output, input,
       padding, stride, dilation, groups,
