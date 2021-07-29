@@ -22,14 +22,12 @@ class BazelJob:
     def gen_tree(self):
 
         template_parts = [
-            "pytorch",
             "linux",
             "bazel",
             self.phase,
         ]
 
         build_env_parts = [
-            "pytorch",
             "linux",
             "xenial",
             "py3.6",

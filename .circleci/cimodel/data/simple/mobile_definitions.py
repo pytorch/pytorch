@@ -26,7 +26,6 @@ class MobileJob:
 
     def gen_tree(self):
         non_phase_parts = [
-            "pytorch",
             "linux",
             "xenial",
             "py3",

@@ -45,7 +45,8 @@ class Conf:
         # previously we also named them in a way to make it obvious
         # if self.is_important and not for_docker:
         #    leading.append("AAA")
-        leading.append("pytorch")
+        # We remove leading "pytorch", see: https://github.com/pytorch/pytorch/issues/62357
+        # leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
         if self.is_vulkan and not for_docker:

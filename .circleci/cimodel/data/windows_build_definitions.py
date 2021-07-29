@@ -31,7 +31,7 @@ class WindowsJob:
             base_phase if self.test_index is None else base_phase + str(self.test_index)
         )
 
-        key_parts = ["pytorch", "windows", base_phase]
+        key_parts = ["win", base_phase]
         if self.multi_gpu:
             key_parts.append('multigpu')
         key_name = "_".join(key_parts)
@@ -43,8 +43,7 @@ class WindowsJob:
         python_version = "3.8"
 
         base_name_parts = [
-            "pytorch",
-            "windows",
+            "win",
             self.vscode_spec.render(),
             "py" + python_version.replace(".", ""),
             target_arch,
@@ -64,7 +63,7 @@ class WindowsJob:
         )
 
         build_environment_string = "-".join(
-            ["pytorch", "win"]
+            ["win"]
             + self.vscode_spec.get_elements()
             + arch_env_elements
             + ["py" + python_version.split(".")[0]]
@@ -103,11 +102,11 @@ class WindowsJob:
 
         if not self.multi_gpu:
             if base_phase == "test":
-                test_name = "-".join(["pytorch", "windows", numbered_phase])
+                test_name = "-".join(["win", numbered_phase])
                 props_dict["test_name"] = test_name
 
                 if is_running_on_cuda:
-                    props_dict["executor"] = "windows-with-nvidia-gpu"
+                    props_dict["executor"] = "win-with-nvidia-gpu"
 
             props_dict["cuda_version"] = (
                 miniutils.quote(str(self.cuda_version))

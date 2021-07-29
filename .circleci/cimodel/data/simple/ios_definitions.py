@@ -31,7 +31,6 @@ class IOSJob:
         build_variant_suffix = "_".join([self.arch_variant.render(), "build"])
 
         return [
-            "pytorch",
             "ios",
         ] + version_parts + [
             build_variant_suffix,
@@ -57,7 +56,7 @@ class IOSJob:
         if self.extra_props:
             props_dict.update(self.extra_props)
 
-        return [{"pytorch_ios_build": props_dict}]
+        return [{"ios_build": props_dict}]
 
 
 WORKFLOW_DATA = [

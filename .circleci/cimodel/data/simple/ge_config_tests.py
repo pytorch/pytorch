@@ -28,7 +28,6 @@ class GeConfigTestJob:
         maybe_cuda_version = self.cuda_version.render_dots_or_parts(with_dots) if self.cuda_version else []
 
         common_parts = [
-            "pytorch",
             "linux",
             "xenial",
         ] + maybe_cuda_version + maybe_py_version + maybe_gcc_version
@@ -62,13 +61,13 @@ WORKFLOW_DATA = [
         MultiPartVersion([5, 4], "gcc"),
         None,
         ["jit_legacy", "test"],
-        ["pytorch_linux_xenial_py3_6_gcc5_4_build"]),
+        ["linux_xenial_py3_6_gcc5_4_build"]),
     GeConfigTestJob(
         None,
         None,
         CudaVersion(10, 2),
         ["cudnn7", "py3", "jit_legacy", "test"],
-        ["pytorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build"],
+        ["linux_xenial_cuda10_2_cudnn7_py3_gcc7_build"],
         use_cuda_docker=True,
     ),
 ]

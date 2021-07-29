@@ -27,7 +27,7 @@ class IOSNightlyJob:
         return common_name_pieces
 
     def gen_job_name(self):
-        return "_".join(["pytorch"] + self.get_common_name_pieces(False))
+        return "_".join(self.get_common_name_pieces(False))
 
     def gen_tree(self):
         extra_requires = [x.gen_job_name() for x in BUILD_CONFIGS] if self.is_upload else []

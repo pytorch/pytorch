@@ -8,7 +8,7 @@ class MacOsJob:
         self.extra_props = dict(extra_props)
 
     def gen_tree(self):
-        non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
+        non_phase_parts = ["macos", self.os_version, "py3"]
 
         extra_name_list = [name for name, exist in self.extra_props.items() if exist]
         full_job_name_list = non_phase_parts + extra_name_list + [
