@@ -18022,6 +18022,87 @@ class TestFunctionalPickle(TestCase):
         # Make sure it does not throw an exception
         s = pickle.dumps(F.softsign)
 
+class TestStateDictHooks(TestCase):
+
+    def test_load_state_dict_pre_hook(self):
+
+        m = nn.Linear(10, 10)
+        m_state_dict = m.state_dict()
+
+        m_load = nn.Linear(10, 10)
+
+        hook_called = 0
+
+        def hook_without_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            self.assertEqual(m_state_dict, state_dict)
+            nonlocal hook_called
+            hook_called += 1
+
+        def hook_with_module(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            self.assertEqual(m_state_dict, state_dict)
+            self.assertTrue(m_load is module)
+            nonlocal hook_called
+            hook_called += 1
+
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_without_module)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(1, hook_called)
+
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(2, hook_called)
+
+    def test_load_state_dict_module_pre_hook(self):
+        hook_called = 0
+
+        # Test with module instance method as hook
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                nonlocal hook_called
+                hook_called += 1
+
+            def my_pre_load_hook_with_module(
+                self,
+                module,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                assert self is module
+                nonlocal hook_called
+                hook_called += 1
+
+        m = MyModule()
+        state_dict = m.state_dict()
+
+        hook_called = 0
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook)
+        m.load_state_dict(state_dict)
+        self.assertEqual(1, hook_called)
+
+        hook_called = 0
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook_with_module, True)
+        m.load_state_dict(state_dict)
+        self.assertEqual(2, hook_called)
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 
