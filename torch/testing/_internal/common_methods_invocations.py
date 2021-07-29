@@ -7915,6 +7915,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
+        gradcheck_nondet_tol=0.0,
     )
 ]
 
