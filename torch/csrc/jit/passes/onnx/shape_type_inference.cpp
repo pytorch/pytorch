@@ -216,6 +216,13 @@ bool IsValidONNXControlflowNode(const Node* n) {
 bool IsValidONNXNode(const Node* n) {
   auto node_kind = n->kind();
 
+  std::string contrib_prefix("com.microsoft");
+  std::string node_kind_str(node_kind.toDisplayString());
+  auto res = std::mismatch(contrib_prefix.begin(), contrib_prefix.end(), node_kind_str.begin());
+  if (res.first == contrib_prefix.end()) {
+    return true;
+  }
+
   if (!node_kind.is_onnx()) {
     // node kind is not ONNX, skipped.
     return false;
@@ -806,6 +813,35 @@ void ProcessSliceNode(Node* n, int opset_version) {
   }
 }
 
+void ProcessSTFTNode(Node* n) {
+  if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+    auto input0_shape_size =
+        ConstantValueMap::GetShape(n->input(0)->debugName())
+            .value()
+            .sizes();
+    if (input0_shape_size.has_value()) {
+      auto input0_shape_value = input0_shape_size.value();
+      std::vector<int64_t> n_fft;
+      std::vector<int64_t> hop_length;
+      if (ConstantValueMap::HasValue(n->input(2)->debugName())) {
+        n_fft = ConstantValueMap::GetValueInto1DInt64Vector(
+            n->input(2)->debugName());
+      }
+      if (ConstantValueMap::HasValue(n->input(3)->debugName())) {
+        hop_length = ConstantValueMap::GetValueInto1DInt64Vector(
+            n->input(3)->debugName());
+      }
+      std::cout << input0_shape_size.value()[0] << std::endl;
+      std::vector<c10::ShapeSymbol> final_shape = {
+        input0_shape_size.value()[0],
+        c10::ShapeSymbol::fromStaticSize((input0_shape_size.value()[1].static_size() - n_fft[0]) / hop_length[0] + 1),
+        c10::ShapeSymbol::fromStaticSize((n_fft[0] >> 1) + 1),        
+        c10::ShapeSymbol::fromStaticSize(2) };
+      UpdateShape(n->output(), final_shape);
+    }
+  }
+}
+
 void ProcessTimeSeriesNode(Node* n) {
   auto input0_shape = ConstantValueMap::GetShape(n->input(0)->debugName());
   auto input1_shape = ConstantValueMap::GetShape(n->input(1)->debugName());
@@ -1105,6 +1141,10 @@ void ComputeConstant(Node* n, int opset_version) {
     default: {
       break;
     }
+  }
+  std::string displayString(n->kind().toDisplayString());
+  if (displayString == "com.microsoft::STFT") {
+    ProcessSTFTNode(n);
   }
   if (n->outputs().size() > 1 ||
       ConstantValueMap::HasShape(n->output(0)->debugName())) {
@@ -1481,6 +1521,10 @@ void UpdateReliable(
   // Assume that the tracer can estimate rank correctly,
   // then the output tensor of Shape should always be reliable.
   if (output->node()->kind() == ::c10::onnx::Shape) {
+    reliable = true;
+  }
+  std::string displayString(output->node()->kind().toDisplayString());
+  if (displayString == "com.microsoft::STFT") {
     reliable = true;
   }
   ConstantValueMap::SetTypeReliable(output->debugName(), reliable);

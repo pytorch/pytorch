@@ -537,6 +537,38 @@ def size(g, self, dim=None):
     return sym_help._size_helper(g, self, dim)
 
 
+def stft(g, self, n_fft, hop_length, win_length, window, normalized, onesided, return_complex):
+    # return g.op("com.microsoft::STFT", self, n_fft, hop_length, win_length, window, normalized, onesided, return_complex)
+    dtype = sym_help._try_get_scalar_type(self)
+    onesided = _parse_arg(onesided, 'i')
+    return_complex = _parse_arg(return_complex, 'b')
+    stft = g.op("com.microsoft::STFT", self, window, sym_help._unsqueeze_helper(g, n_fft, [0]), 
+                sym_help._unsqueeze_helper(g, hop_length, [0]), onesided_i=onesided)
+    return g.op("Transpose", stft, perm_i=(0, 2, 1, 3))
+
+
+def istft(g, self, n_fft, hop_length, win_length, window, center, normalized, onesided, length, return_complex):
+    print('window=', window)
+    if sym_help._try_get_scalar_type(win_length) is None:
+        win_length = n_fft
+    if sym_help._try_get_scalar_type(window) is None:
+        win_length_v = sym_help._maybe_get_const(win_length, "i")
+        print("win_length_v=", win_length_v)
+        window = g.op("Constant", value_t=torch.tensor(numpy.ones(win_length_v, dtype=numpy.float32)))
+    onesided = _parse_arg(onesided, 'i')
+    return g.op("com.microsoft::ISTFT", self, window, sym_help._unsqueeze_helper(g, n_fft, [0]),
+                sym_help._unsqueeze_helper(g, hop_length, [0]), onesided_i=onesided)
+
+
+def view_as_real(g, self):
+    # return g.op("com.microsoft::ViewAsReal", self)
+    return g.op("Identity", self)
+
+
+def view_as_complex(g, self):
+    return g.op("com.microsoft::ViewAsComplex", self)
+
+
 @parse_args("v", "i", "i")
 def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
