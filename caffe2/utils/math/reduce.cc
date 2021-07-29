@@ -18,6 +18,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math/broadcast.h"
 #include "caffe2/utils/math/elementwise.h"
 #include "caffe2/utils/math/utils.h"
 
@@ -257,6 +258,23 @@ void BothEndsReduceL2(
 }
 
 template <typename T, class Reducer>
+void ReduceTensorImplFastpath(
+    const int X_size,
+    const int Y_size,
+    const Reducer& reducer,
+    const T* X,
+    T* Y) {
+  int Y_index = 0;
+  for (int X_index = 0; X_index < X_size; ++X_index) {
+    Y[Y_index] = reducer(Y[Y_index], X[X_index]);
+    Y_index++;
+    if (Y_index >= Y_size) {
+      Y_index = 0;
+    }
+  }
+}
+
+template <typename T, class Reducer>
 void ReduceTensorImpl(
     const int ndim,
     const int* X_dims,
@@ -270,6 +288,10 @@ void ReduceTensorImpl(
   const auto X_size = c10::multiply_integers(X_dims, X_dims + ndim);
   const auto Y_size = c10::multiply_integers(Y_dims, Y_dims + ndim);
   Set<T, CPUContext>(Y_size, init, Y, context);
+  if (allow_broadcast_fastpath && can_use_broadcast_fastpath(ndim, Y_dims)) {
+    ReduceTensorImplFastpath(X_size, Y_size, reducer, X, Y);
+    return;
+  }
   std::vector<int> index(ndim, 0);
   for (int X_index = 0; X_index < X_size; ++X_index) {
     const int Y_index = utils::GetIndexFromDims(ndim, Y_dims, index.data());
