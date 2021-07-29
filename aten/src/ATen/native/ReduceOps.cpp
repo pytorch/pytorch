@@ -130,7 +130,7 @@ void meta_func_cum_ops(
 
   if (result.defined()) {
     out_dtype = dtype.value_or(result.scalar_type());
-    // This check is still here because the inline version of structured kernels
+    // This check is still here because the inplace version of structured kernels
     // does not do any checks on 'set_output'.
     TORCH_CHECK(
         out_dtype == result.scalar_type(),
@@ -218,8 +218,7 @@ void impl_func_cum_ops(
     result.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    auto& result_mut = const_cast<Tensor&>(result);
-    stub(self.device().type(), result_mut, self.to(result.scalar_type()), dim);
+    stub(self.device().type(), result, self.to(result.scalar_type()), dim);
   }
 }
 
