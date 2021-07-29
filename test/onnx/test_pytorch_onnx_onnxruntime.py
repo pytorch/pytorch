@@ -2,6 +2,7 @@ import unittest
 import onnxruntime
 import torch
 import torch.utils.cpp_extension
+import torchvision
 
 import numpy as np
 import io
@@ -9,6 +10,9 @@ import itertools
 import copy
 import os
 import random
+
+import model_defs.word_language_model as word_language_model
+import onnx
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
@@ -23,11 +27,7 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
 from torch import Tensor
-import model_defs.word_language_model as word_language_model
 
-import onnx
-
-import torchvision
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
@@ -37,6 +37,7 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHe
 from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
+from torch.onnx import register_custom_op_symbolic
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -9497,27 +9498,24 @@ class TestONNXRuntime(unittest.TestCase):
             verbose=True,
         )
 
-        class InvalidONNXModel(torch.nn.Module):
+        class CustomAddModule(torch.nn.Module):
             def forward(self, a, b):
                 return torch.ops.custom_namespace.custom_add(a, b)
 
-        def symbolic_custom_add(g, self, other):
+        def invalid_symbolic(g, self, other):
             return g.op("Add", self, other, invalid_attr_i=1)
 
-        from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
+        register_custom_op_symbolic("custom_namespace::custom_add", invalid_symbolic, 9)
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         y = torch.randn(2, 3, 4, requires_grad=False)
 
-        test_model = InvalidONNXModel()
+        test_model = CustomAddModule()
         f = io.BytesIO()
 
-        try:
+        with self.assertRaises(RuntimeError) as cm:
             torch.onnx.export(test_model, (x, y), f)
-            raise Exception("Invalid graph was not detected by ONNX checker.")
-        except RuntimeError:
-            assert len(f.getvalue()) > 0, "ONNX graph was not generated."
+        assert len(f.getvalue()) > 0, "ONNX graph was not generated."
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
