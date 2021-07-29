@@ -39,7 +39,6 @@ jobs:
     defaults:
       run:
         working-directory: pytorch-${{ github.run_id }}
-    needs: []
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-build
     steps:
@@ -97,7 +96,6 @@ jobs:
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: []
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
