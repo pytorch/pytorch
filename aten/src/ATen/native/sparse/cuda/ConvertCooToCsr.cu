@@ -56,20 +56,10 @@ void dispatch(const Tensor& result, const Tensor& input, const int64_t size, con
 
 } // namespace
 
-Tensor& _convert_indices_from_coo_to_csr_out_cuda(const Tensor& self, const int64_t size, const bool out_int32, Tensor& result) {
-  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
-  TORCH_CHECK(result.dim() <= 1, "Output is supposed to be a vector");
-  at::native::resize_output(result, size + 1);
+TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cuda) (
+  const Tensor& self, const int64_t size, const bool out_int32, const Tensor& result
+) {
   dispatch(result, self, size, out_int32);
-  return result;
-}
-
-Tensor _convert_indices_from_coo_to_csr_cuda(const Tensor& self, const int64_t size, const bool out_int32) {
-  ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
-  c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
-  Tensor result = at::empty({size + 1}, options);
-  at::native::_convert_indices_from_coo_to_csr_out_cuda(self, size, out_int32, result);
-  return result;
 }
 
 } // namespace native

@@ -323,12 +323,6 @@ class TestSparseCSR(TestCase):
                 torch.randint(100, (5, 5), device=device),
                 size=100)
 
-        with self.assertRaisesRegex(RuntimeError, "Output is supposed to be a vector"):
-            torch._convert_indices_from_coo_to_csr(
-                torch.randint(100, (5, ), device=device),
-                size=100,
-                out=torch.empty((5, 5), device=device, dtype=torch.long))
-
         size = (5, 5)
         sparse_dim = 2
         nnz = 10
