@@ -240,7 +240,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   if (per_row_fq && running_min.numel() == 0) {
     float inf = std::numeric_limits<float>::infinity();
     running_min.resize_(size).fill_(inf);
-    running_max.resize_(size).fill_(inf);
+    running_max.resize_(size).fill_(-inf);
     scale.resize_(size);
     zero_point.resize_(size);
   }
