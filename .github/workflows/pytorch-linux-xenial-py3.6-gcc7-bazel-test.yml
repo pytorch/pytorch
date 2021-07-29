@@ -29,7 +29,6 @@ jobs:
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
-    needs: []
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -92,7 +91,7 @@ jobs:
           fi
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
-        if: steps.check.outputs.rebuild
+        if: ${{ steps.check.outputs.rebuild }}
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
@@ -163,6 +162,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions

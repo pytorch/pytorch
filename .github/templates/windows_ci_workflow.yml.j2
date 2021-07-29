@@ -51,7 +51,7 @@ jobs:
 {%- if ciflow_config.enabled %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
-    if: !{{ ciflow_config.root_job_condition }}
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
@@ -62,7 +62,9 @@ jobs:
     defaults:
       run:
         working-directory: pytorch-${{ github.run_id }}
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
@@ -126,7 +128,9 @@ jobs:
 {%- else %}
     if: ${{ github.repository_owner == 'pytorch' }}
 {%- endif %}
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
