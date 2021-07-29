@@ -256,7 +256,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(conv_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment))
-			   // TODO: is reusing y's alignment good here?
+                           // TODO: is reusing y's alignment good here?
                            .setyDesc(getTensorDescriptor(y, 'A', key.y_alignment))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
@@ -266,7 +266,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
-			   // TODO: is reusing y's alignment good here?
+                           // TODO: is reusing y's alignment good here?
                            .setyDesc(getTensorDescriptor(y, 'B', key.y_alignment))
                            .setpwDesc(addBiasDesc)
                            .build();
@@ -300,7 +300,7 @@ const auto get_generator_sources(/*const cudnnBackendDescriptorType_t& desc,*/ c
     auto fallback = cudnn_frontend::EngineFallbackListBuilder()
                         .setOperationGraph(opGraph)
                         //.setOperation(desc)
-			//.setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
+                        //.setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                         .build();
     auto &fallback_list = fallback.getFallbackList();
     cudnn_frontend::EngineConfigList filtered_configs;
@@ -387,8 +387,8 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
 auto get_plans_from_find_fused(const cudnnHandle_t handle,
                                const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b,
                                const float alpha, const CacheKeyFused& key,
- 		               const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation,
- 			       const bool deterministic, const bool allow_tf32) {
+                               const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation,
+                               const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), z.data_ptr(), b.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
@@ -554,8 +554,8 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
   if (!benchmark) {
     cudnn_frontend::EngineConfigList configs = get_configs_from_heuristics_fused(handle,
                                                                                  x, y, w, z, b, alpha, key,
-										 padding, stride, dilation,
-										 deterministic, allow_tf32);
+                                                                                 padding, stride, dilation,
+                                                                                 deterministic, allow_tf32);
     try_configs_fused(configs, key, handle, x, y, w, z, b);
   } else {
     cudnn_frontend::executionPlans_t plans = get_plans_from_find_fused(handle,
