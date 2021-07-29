@@ -6116,9 +6116,6 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
                    aliases=('special.log1p',),
-                   # TODO: @krshrimali: Link an issue here;
-                   # log1p gives inf output for huge bfloat16 (and float32) values, should ideally return a value
-                   # a similar error is raised for float32 (test_working_log1p_cpu_float32)
                    domain=(-1, None),
                    dtypes=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -6501,26 +6498,16 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_mode,),
     MvlGammaInfo(variant_test_name='mvlgamma_p_1',
-                 # TODO: fix this (@krshrimali)
-                 # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
-                 # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
-                 # is hence set to 9 to avoid huge input values.
                  domain=(1, None),
                  skips=skips_mvlgamma(),
                  sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_3',
-                 # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
-                 # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
-                 # is hence set to 9 to avoid huge input values.
                  domain=(2, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
                  ),
                  sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     MvlGammaInfo(variant_test_name='mvlgamma_p_5',
-                 # SciPy (reference) computes the operation in double format, hence for huge inputs it will return
-                 # non-inf values while PyTorch will compute in the given dtype, hence inf. The domain's high value
-                 # is hence set to 9 to avoid huge input values.
                  domain=(3, None),
                  skips=skips_mvlgamma(skip_redundant=True) + (
                      SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard', dtypes=(torch.float16,)),
@@ -7035,7 +7022,6 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
                    supports_sparse=True,
-                   # TODO @krshrimali: Link an issue here; gradcheck failures, max per-element difference is nan (slow-mode)
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
