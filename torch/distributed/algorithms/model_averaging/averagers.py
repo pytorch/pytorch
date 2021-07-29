@@ -9,22 +9,20 @@ class ModelAverager(ABC):
     r"""Base class for all model averagers.
 
     Args:
-        params (Iterator[torch.nn.Parameter]): The model parameters to be averaged.
         process_group: The process group to be used for all-reduce.
                        If ``None``, the default process group, which
                        is created by :func:`torch.distributed.init_process_group`,
                        will be used. (default: ``None``)
     """
 
-    def __init__(self, params, process_group=None):
-        self.params = list(params)
+    def __init__(self, process_group=None):
         self.process_group = (
             process_group if process_group is not None else dist.group.WORLD
         )
         self.step = 0
 
     @abstractmethod
-    def average_parameters(self):
+    def average_parameters(self, params):
         raise NotImplementedError
 
 
@@ -70,7 +68,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>  # In the first 100 steps, run global gradient averaging like normal DDP at every step.
         >>>  # After 100 steps, run model averaging every 4 steps.
         >>>  # Note that ``warmup_steps`` must be the same as ``start_localSGD_iter`` used in ``PostLocalSGDState``.
-        >>>  averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=100, period=4)
+        >>>  averager = averagers.PeriodicModelAverager(warmup_steps=100, period=4)
         >>>  for step in range(0, 20):
         >>>     optimizer.zero_grad()
         >>>     loss = loss_fn(output, labels)
@@ -78,7 +76,7 @@ class PeriodicModelAverager(ModelAverager):
         >>>     optimizer.step()
         >>>     # Average parameters globally after ``optimizer.step()``.
         >>>     # Thus, the inter-node communication only occurs periodically after ``warmup_steps``.
-        >>>     averager.average_parameters()
+        >>>     averager.average_parameters(model.parameters())
 
     .. warning ::
         `PeriodicModelAverager` is experimental and subject to change.
@@ -86,12 +84,11 @@ class PeriodicModelAverager(ModelAverager):
 
     def __init__(
         self,
-        params,
         period,
         warmup_steps=0,
         process_group=None,
     ):
-        super().__init__(params, process_group)
+        super().__init__(process_group)
         if warmup_steps < 0:
             raise ValueError("Arg ``warmup_steps`` must be a non-negative number.")
         self.warmup_steps = warmup_steps
@@ -106,7 +103,7 @@ class PeriodicModelAverager(ModelAverager):
             )
         self.period = period
 
-    def average_parameters(self):
+    def average_parameters(self, params):
         r"""
         Averages parameters if ``step`` is no less than ``warmup_steps``
         and it can be divided by ``period``, where ``step`` is increased by 1
@@ -116,5 +113,5 @@ class PeriodicModelAverager(ModelAverager):
             self.step >= self.warmup_steps
             and (self.step - self.warmup_steps) % self.period == 0
         ):
-            utils.average_parameters(iter(self.params), self.process_group)
+            utils.average_parameters(iter(params), self.process_group)
         self.step += 1
