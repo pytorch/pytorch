@@ -1,5 +1,7 @@
-#include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
+
+#include <c10d/Utils.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -38,7 +40,12 @@ constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
-C10_DEFINE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
+C10_DEFINE_TYPED_REGISTRY( // NOLINT
+    TimerRegistry,
+    c10::DeviceType,
+    Timer,
+    std::unique_ptr,
+    c10::Device);
 
 namespace {
 
@@ -307,6 +314,11 @@ bool Reducer::static_graph_after_first_iteration() {
   return static_graph_ && num_iterations_ > 1;
 }
 
+bool Reducer::ddp_graph_static() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return ddp_graph_static_;
+}
+
 void Reducer::initialize_local_used_map() {
   const auto replica_count = replicas_.size();
   const auto variable_count = replicas_[0].size();
@@ -391,8 +403,10 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         if (comm_hook_ == nullptr) {
-          auto wrapped = at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
-          // Divides while copying into the bucket view to save one scan over all the input parameters.
+          auto wrapped =
+              at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          // Divides while copying into the bucket view to save one scan over
+          // all the input parameters.
           at::mul_out(bucket_view, grad, wrapped);
         } else {
           bucket_view.copy_(grad);
@@ -440,7 +454,8 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
     // If no DDP comm hook is registered,
-    // the allreduce only sums up the value, and a separate division is required.
+    // the allreduce only sums up the value, and a separate division is
+    // required.
     if (comm_hook_ == nullptr) {
       replica.contents.div_(div_factor_);
     }
@@ -458,14 +473,13 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
-      i,
-      return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
+        i,
+        return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
                             : bucket.replicas[0].contents,
-      bucket.replicas[0].offsets,
-      bucket.replicas[0].lengths,
-      bucket.replicas[0].sizes_vec,
-      variables_for_bucket
-    );
+        bucket.replicas[0].offsets,
+        bucket.replicas[0].lengths,
+        bucket.replicas[0].sizes_vec,
+        variables_for_bucket);
   }
   return gradBuckets;
 }
@@ -874,7 +888,7 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   if (has_rebuilt_bucket_ &&
       cached_variables_for_bucket_.find(bucket_index) !=
           cached_variables_for_bucket_.end()) {
-     return cached_variables_for_bucket_[bucket_index];
+    return cached_variables_for_bucket_[bucket_index];
   }
   std::vector<at::Tensor> variables_for_bucket;
   variables_for_bucket.reserve(bucket.variable_indices.size());
@@ -981,7 +995,6 @@ void Reducer::initialize_buckets(
       }
     }
 
-    // Iterate over model replicas.
     BucketReplica replica;
     size_t replica_index = 0;
     if (bucket.expect_sparse_gradient) {
@@ -1239,6 +1252,18 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
+      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+        const auto param_info = param_names_.find(it.second);
+        TORCH_INTERNAL_ASSERT(
+            param_info != param_names_.end(),
+            "Did not find variable index ",
+            it.second,
+            " in DDP parameter name mapping!");
+        const auto param_name = param_info->second;
+        LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                  << "Parameter " << param_name << " at index " << it.second
+                  << " is marked as unused.";
+      }
       unused_parameters_.push_back(it.second);
     }
   }
@@ -1254,6 +1279,14 @@ void Reducer::search_unused_parameters(
         "has any unused parameters in the forward pass, consider turning this "
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
+  }
+  if (!static_graph_ && ddp_graph_static_) {
+    if (num_iterations_ > 1) {
+      // Graph is still static if the set of unused parameters did not change.
+      ddp_graph_static_ =
+          prev_iteration_unused_parameters_ == unused_parameters_;
+    }
+    prev_iteration_unused_parameters_ = unused_parameters_;
   }
 }
 
@@ -1454,15 +1487,13 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    for (const auto i : c10::irange(future_result.size())) {
-      auto& replica = bucket.replicas[i];
-      if (bucket.expect_sparse_gradient) {
-        replica.contents.copy_(future_result[i]);
-      } else {
-        // Reinitialize only `bucket_views_out` with the future_result by
-        // following the same logic in `initialize_buckets`.
-        populate_bucket_views_out(replica, future_result[i]);
-      }
+    auto& replica = bucket.replicas[0];
+    if (bucket.expect_sparse_gradient) {
+      replica.contents.copy_(future_result);
+    } else {
+      // Reinitialize only `bucket_views_out` with the future_result by
+      // following the same logic in `initialize_buckets`.
+      populate_bucket_views_out(replica, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass
@@ -1637,11 +1668,13 @@ bool Reducer::rebuild_buckets() {
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(kDefaultFirstBucketBytes);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  rebuilt_bucket_indices = compute_bucket_assignment_by_size(
-      rebuilt_params_,
-      bucket_size_limits,
-      expect_sparse_gradients_[0],
-      rebuilt_param_indices_);
+  std::vector<size_t> per_bucket_size_limits;
+  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+      compute_bucket_assignment_by_size(
+          rebuilt_params_,
+          bucket_size_limits,
+          expect_sparse_gradients_[0],
+          rebuilt_param_indices_);
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // Broadcast the newly rebuilt bucket indices from rank 0 in default.
@@ -1874,7 +1907,8 @@ inline bool operator==(const BucketKey& lhs, const BucketKey& rhs) {
 
 } // namespace
 
-std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
@@ -1885,8 +1919,13 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
   TORCH_INTERNAL_ASSERT(tensors.size() > 0);
-
-  std::vector<std::vector<size_t>> result;
+  // Store bucket indices and their sizes together, because we later sort the
+  // resulting indices by minimum tensor index and want to keep sizes
+  // consistent.
+  std::vector<std::tuple<std::vector<size_t>, size_t>> result;
+  // Sparse tensors go in their own bucket, so they do not have an enforced size
+  // limit.
+  size_t kNoSizeLimit = 0;
   result.reserve(tensors.size());
 
   // Keep iterator into the size_limit vector by tensor type and device.
@@ -1897,11 +1936,6 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
       c10::hash<BucketKey>>
       bucket_size_limit_iterators;
 
-  // Local accumulator type for a single bucket.
-  struct BucketAccumulator {
-    std::vector<size_t> indices;
-    size_t size = 0;
-  };
 
   // Keep vector of indices and size accumulator by tensor type and device.
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
@@ -1923,8 +1957,8 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
-      result.push_back({tensor_index});
-      continue;
+          result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
+          continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
@@ -1939,8 +1973,9 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
 
     auto& bucket_size_limit_iterator = bucket_size_limit_iterators[key];
     const auto bucket_size_limit = *bucket_size_limit_iterator;
+    bucket.size_limit = bucket_size_limit;
     if (bucket.size >= bucket_size_limit) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
       bucket = BucketAccumulator();
 
       // Advance to the next bucket size limit for this type/device.
@@ -1955,7 +1990,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   for (auto& it : buckets) {
     auto& bucket = it.second;
     if (!bucket.indices.empty()) {
-      result.emplace_back(std::move(bucket.indices));
+      result.emplace_back(std::move(bucket.indices), bucket.size_limit);
     }
   }
 
@@ -1970,14 +2005,26 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
     std::sort(
         result.begin(),
         result.end(),
-        [](const std::vector<size_t>& a, const std::vector<size_t>& b) {
-          const auto amin = std::min_element(a.begin(), a.end());
-          const auto bmin = std::min_element(b.begin(), b.end());
+        [](const std::tuple<std::vector<size_t>, size_t>& a, const std::tuple<std::vector<size_t>, size_t>& b) {
+          auto indices_a = std::get<0>(a);
+          auto indices_b = std::get<0>(b);
+          const auto amin = std::min_element(indices_a.begin(), indices_a.end());
+          const auto bmin = std::min_element(indices_b.begin(), indices_b.end());
           return *amin < *bmin;
         });
   }
 
-  return result;
+  // Return bucket indices and size limits as separate entries in tuple, as some
+  // APIs only need to consume bucket indices.
+  std::vector<std::vector<size_t>> bucket_indices;
+  bucket_indices.reserve(result.size());
+  std::vector<size_t> per_bucket_size_limits;
+  per_bucket_size_limits.reserve(result.size());
+  for (const auto & bucket_indices_with_size : result) {
+    bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
+    per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
+  }
+  return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
 
 // Verifies corresponding params in replica 0 have the same sizes/strides
