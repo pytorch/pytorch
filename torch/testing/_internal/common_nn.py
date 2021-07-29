@@ -5023,6 +5023,34 @@ for regression_criterion, reduction in product(regression_criterion_no_batch,
     criterion_tests.append(regression_test_info)
 
 
+# Check that classification criterion work with no batch dimensions
+# List of tuples of (name, input_fn, target_fn)
+classification_criterion_no_batch = [
+    ('BCELoss', lambda: torch.sigmoid(torch.randn(9)), lambda: torch.randn(9)),
+    ('BCEWithLogitsLoss', lambda: torch.randn(9), lambda: torch.randn(9)),
+    ('HingeEmbeddingLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+    ('MultiLabelMarginLoss', lambda: torch.randn(4), lambda: torch.tensor([3, 0, -1, 1])),
+    ('SoftMarginLoss', lambda: torch.randn(9), lambda: torch.tensor([-1, 1, 1] * 3)),
+]
+classification_criterion_no_batch_extra_info: Dict[str, dict] = {
+    'MultiLabelMarginLoss': {'check_gradgrad': False},
+}
+reductions = ['none', 'mean', 'sum']
+for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
+                                                      reductions):
+    classification_test_info = dict(
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args: getattr(nn, name)(reduction=reduction),
+        input_fn=input_fn,
+        target_fn=target_fn,
+        reference_fn=single_batch_reference_criterion_fn,
+        test_cpp_api_parity=False,
+    )
+    extra_info = classification_criterion_no_batch_extra_info.get(name, {})
+    classification_test_info.update(extra_info)
+    criterion_tests.append(classification_test_info)
+
+
 class NNTestCase(TestCase):
 
     # _forward is defined in classes inheriting from NNTestCase
