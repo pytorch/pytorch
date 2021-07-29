@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/Resize.h>
 #include <ATen/cuda/CUDAContext.h>
 
 namespace at {
@@ -58,7 +59,7 @@ void dispatch(const Tensor& result, const Tensor& input, const int64_t size, con
 Tensor& _convert_indices_from_coo_to_csr_out_cuda(const Tensor& self, const int64_t size, const bool out_int32, Tensor& result) {
   TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
   TORCH_CHECK(result.dim() <= 1, "Output is supposed to be a vector");
-  at::native::resize_output(result, {size + 1});
+  at::native::resize_output(result, size + 1);
   dispatch(result, self, size, out_int32);
   return result;
 }
