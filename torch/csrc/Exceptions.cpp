@@ -10,7 +10,7 @@
 #include <torch/csrc/THP.h>
 
 PyObject *THPException_FatalError;
-PyObject *THPException_CUDAOutOfMemoryError;
+PyObject *THPException_GPUOutOfMemoryError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
@@ -18,9 +18,9 @@ bool THPException_init(PyObject *module)
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
-  ASSERT_TRUE(THPException_CUDAOutOfMemoryError = PyErr_NewExceptionWithDoc(
-    "torch.CUDAOutOfMemoryError", "CUDA out of memory.", PyExc_RuntimeError, nullptr));
-  ASSERT_TRUE(PyModule_AddObject(module, "CUDAOutOfMemoryError", THPException_CUDAOutOfMemoryError) == 0);
+  ASSERT_TRUE(THPException_GPUOutOfMemoryError = PyErr_NewExceptionWithDoc(
+    "torch.GPUOutOfMemoryError", "GPU out of memory.", PyExc_RuntimeError, nullptr));
+  ASSERT_TRUE(PyModule_AddObject(module, "GPUOutOfMemoryError", THPException_GPUOutOfMemoryError) == 0);
   return true;
 }
 

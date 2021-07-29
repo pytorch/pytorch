@@ -210,10 +210,10 @@ class C10_API EnforceFiniteError : public Error {
   using Error::Error;
 };
 
-// Used in ATen for CUDA out of memory errors. These turn into
-// CUDAOutOfMemoryError when they cross to Python. CUDAOutOfMemoryError
+// Used in ATen for GPU out of memory errors. These turn into
+// GPUOutOfMemoryError when they cross to Python. GPUOutOfMemoryError
 // is a subclass of RuntimeError.
-class C10_API CUDAOutOfMemoryError : public Error {
+class C10_API GPUOutOfMemoryError : public Error {
   using Error::Error;
 };
 

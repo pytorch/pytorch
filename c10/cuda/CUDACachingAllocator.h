@@ -4,12 +4,17 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 #include <array>
 #include <mutex>
 
 namespace c10 {
+
+class C10_CUDA_API CUDAOutOfMemoryError : public GPUOutOfMemoryError {
+  using GPUOutOfMemoryError::GPUOutOfMemoryError;
+};
 
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.

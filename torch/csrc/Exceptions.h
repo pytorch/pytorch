@@ -77,10 +77,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
-    catch (const c10::CUDAOutOfMemoryError& e) {                     \
+    catch (const c10::GPUOutOfMemoryError& e) {                     \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
-      PyErr_SetString(THPException_CUDAOutOfMemoryError, torch::processErrorMsg(msg)); \
+      PyErr_SetString(THPException_GPUOutOfMemoryError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
@@ -133,7 +133,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
-extern PyObject *THPException_CUDAOutOfMemoryError;
+extern PyObject *THPException_GPUOutOfMemoryError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.

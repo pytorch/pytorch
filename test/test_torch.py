@@ -563,7 +563,7 @@ class AbstractTestCases:
         @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
         def test_memory_error_cuda(self):
             # Will always raise an error because tensor is greater than 1EB of memory.
-            self.assertRaises(torch.CUDAOutOfMemoryError,
+            self.assertRaises(torch.GPUOutOfMemoryError,
                               lambda: torch.empty(int(1e18), device='cuda', dtype=torch.float32))
 
         def test_slice(self):
