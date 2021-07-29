@@ -846,7 +846,12 @@ void raw_cudnn_convolution_backward_weight_out_v7(
   TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
 }
 
+#if !HAS_CUDNN_V8()
 void raw_cudnn_convolution_add_relu_out(
+#else
+void raw_cudnn_convolution_add_relu_out_v7(
+#endif
+
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,

@@ -248,7 +248,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   const float alpha2 = alpha;
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                    .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
-                   .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+                   .setyDesc(getTensorDescriptor(y, 'C', key.y_alignment))
                    .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
                    .setAlpha(alpha1)
                    .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type()))
@@ -257,17 +257,17 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
                            .setxDesc(conv_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment))
 			   // TODO: is reusing y's alignment good here?
-                           .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+                           .setyDesc(getTensorDescriptor(y, 'A', key.y_alignment))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
                            .setAlpha2(alpha2)
                            .build();
-  auto bias_ = b.view({1, b.numel(), 1, 1});
+  // auto bias_ = b.view({1, b.numel(), 1, 1});
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
-                           .setbDesc(getTensorDescriptor(bias_, 'b', key.b_alignment))
+                           .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
 			   // TODO: is reusing y's alignment good here?
-                           .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
+                           .setyDesc(getTensorDescriptor(y, 'B', key.y_alignment))
                            .setpwDesc(addBiasDesc)
                            .build();
   auto act_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
@@ -439,17 +439,16 @@ void try_configs_fused(cudnn_frontend::EngineConfigList& configs, const CacheKey
                     .setHandle(handle)
                     .setEngineConfig(config)
                     .build();
-      run_conv_plan_fused(handle, x, y, w, z, b.view({1, b.numel(), 1, 1}), plan);
+      run_conv_plan_fused(handle, x, y, w, z, b, plan);
       benchmark_cache_fused.emplace(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException &e) {std::cout << "exception " << e.what() << std::endl;} catch(CuDNNError &e) {std::cout << e.what_without_backtrace() << std::endl;}
+    } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
       catch (c10::CUDAOutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
     }
   }
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
-
 
 void run_single_conv(const cudnnBackendDescriptorType_t operation,
   const Tensor& x, const Tensor& y, const Tensor& w,
@@ -586,7 +585,9 @@ void raw_cudnn_convolution_add_relu_out(
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
   if (use_v8()) {
-    run_single_conv_fused (input, output, weight, z, bias,
+    //auto bias_ = bias.repeat({output.size(0), 1, 1, 1});
+    auto bias_ = bias.view({1, bias.numel(), 1, 1});
+    run_single_conv_fused (input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);
   } else {
