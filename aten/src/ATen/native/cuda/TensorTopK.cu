@@ -2,6 +2,7 @@
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/LegacyTHFunctionsCUDA.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
@@ -301,7 +302,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
       Tensor sortedIndices = at::empty_like(indices);
       Tensor sortedValues = at::empty_like(values);
-      sort_out_cuda(values, dim, largest, sortedValues, sortedIndices);
+      at::cuda::sort_out(sortedValues, sortedIndices, values, dim, largest);
       indices.copy_(indices.gather(dim, sortedIndices));
       values.copy_(sortedValues);
     }
