@@ -164,7 +164,7 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void minmax_allreduce_kernel(
+static void aminmax_allreduce_kernel(
     const Tensor& input,
     Tensor& min_result,
     Tensor& max_result) {
@@ -196,7 +196,7 @@ static void minmax_allreduce_kernel(
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "minmax_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "aminmax_cpu", [&] {
       using Vec = Vectorized<vec_scalar_t<scalar_t>>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
@@ -219,6 +219,6 @@ static void minmax_allreduce_kernel(
 
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(minmax_allreduce_stub, &minmax_allreduce_kernel);
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel);
 
 }}

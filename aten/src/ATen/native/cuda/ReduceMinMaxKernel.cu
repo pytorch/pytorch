@@ -162,12 +162,12 @@ void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
   ));
 }
 
-void minmax_allreduce_kernel_impl(const Tensor& input, Tensor& min_result, Tensor& max_result) {
+void aminmax_allreduce_kernel_impl(const Tensor& input, Tensor& min_result, Tensor& max_result) {
   auto dtype = input.scalar_type();
-  auto iter = make_reduction("minmax_cuda", min_result, max_result, input,
+  auto iter = make_reduction("aminmax_cuda", min_result, max_result, input,
                              std::vector<int64_t>{}, false, dtype);
   TORCH_CHECK(iter.numel() > 0, "min_max on a tensor with no elements is not defined.");
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "minmax_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "aminmax_cuda", [&] {
     _min_max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
@@ -181,6 +181,6 @@ REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(minmax_stub, &minmax_kernel_impl);
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(minmax_allreduce_stub, &minmax_allreduce_kernel_impl);
+REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl);
 
 }} // namespace at::native

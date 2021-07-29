@@ -1880,7 +1880,7 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
 
 # TODO (@heitorschueroff) Once minmax supports multiple dims this should
 # be combined with the above test.
-def sample_inputs_minmax(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), (), {}),
         ((S, S, S), (), {'dim': 1}),
@@ -4931,6 +4931,8 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestGradients', 'test_inplace_forward_mode_AD',
+                                dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
@@ -6389,12 +6391,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
-    OpInfo('minmax',
+    OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_minmax,
+           sample_inputs_func=sample_inputs_aminmax,
            skips=(
                # FIXME: minmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),

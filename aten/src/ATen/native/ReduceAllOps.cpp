@@ -25,9 +25,9 @@ Tensor max(const Tensor &self) {
   return result;
 }
 
-// DEPRECATED: Use at::minmax instead
+// DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
-  return at::minmax(self);
+  return at::aminmax(self);
 }
 
 }} // namesapce at::native

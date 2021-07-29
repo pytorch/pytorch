@@ -6295,19 +6295,13 @@ Example::
     tensor([1, 0, -1])
 """.format(**common_args))
 
-add_docstr(torch.minmax, r"""
-minmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
+add_docstr(torch.aminmax, r"""
+aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
 
-Computes the minimum and maximum values of the input tensor :attr:`x`.
-
-.. warning::
-    Despite its name, this function is equivalent to calling :func:`torch.amax`
-    and :func:`torch.amin` separately for the input tensor :attr:`x`. :func:`torch.max`
-    and :func:`torch.min` will have their behavior updated to the same as :func:`amax`
-    and :func:`torch.amin` in a future PyTorch release.
+Computes the minimum and maximum values of the :attr:`input` tensor.
 
 Args:
-    x: Tensor
+    input: Tensor
         the input tensor
 
 Keyword Args:
@@ -6326,7 +6320,7 @@ Returns:
     A named tuple (min, max) containing the minimum and maximum values.
 
 Raises:
-    ValueError
+    IndexError
         If any of the dimensions to compute the values over has size 0.
 
 .. note::

@@ -98,6 +98,7 @@ class TestNamedTupleAPI(TestCase):
                torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
             op(operators=['_det_lu_based_helper'],
                input=(), names=('det', 'lu', 'pivs'), hasout=False),
+            op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
         ]
 
         def get_func(f):

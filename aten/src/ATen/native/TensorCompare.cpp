@@ -481,9 +481,9 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   }
 }
 
-// DEPRECATED: Use at::minmax instead
+// DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
-  return at::minmax(self, dim, keepdim);
+  return at::aminmax(self, dim, keepdim);
 }
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,
