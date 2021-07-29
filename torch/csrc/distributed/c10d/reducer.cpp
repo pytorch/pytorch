@@ -1,5 +1,7 @@
-#include <c10d/default_comm_hooks.hpp>
 #include <c10d/reducer.hpp>
+
+#include <c10d/Utils.hpp>
+#include <c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -310,6 +312,11 @@ bool Reducer::static_graph_first_iteration() {
 
 bool Reducer::static_graph_after_first_iteration() {
   return static_graph_ && num_iterations_ > 1;
+}
+
+bool Reducer::ddp_graph_static() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return ddp_graph_static_;
 }
 
 void Reducer::initialize_local_used_map() {
@@ -1246,6 +1253,18 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
+      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+        const auto param_info = param_names_.find(it.second);
+        TORCH_INTERNAL_ASSERT(
+            param_info != param_names_.end(),
+            "Did not find variable index ",
+            it.second,
+            " in DDP parameter name mapping!");
+        const auto param_name = param_info->second;
+        LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                  << "Parameter " << param_name << " at index " << it.second
+                  << " is marked as unused.";
+      }
       unused_parameters_.push_back(it.second);
     }
   }
@@ -1261,6 +1280,14 @@ void Reducer::search_unused_parameters(
         "has any unused parameters in the forward pass, consider turning this "
         "flag off. Note that this warning may be a false positive if your model "
         "has flow control causing later iterations to have unused parameters.");
+  }
+  if (!static_graph_ && ddp_graph_static_) {
+    if (num_iterations_ > 1) {
+      // Graph is still static if the set of unused parameters did not change.
+      ddp_graph_static_ =
+          prev_iteration_unused_parameters_ == unused_parameters_;
+    }
+    prev_iteration_unused_parameters_ = unused_parameters_;
   }
 }
 

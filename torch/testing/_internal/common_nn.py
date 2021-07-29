@@ -2245,6 +2245,14 @@ new_module_tests = [
         module_name='ReflectionPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 8, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2254,6 +2262,14 @@ new_module_tests = [
         constructor_args=((1, 2, 0, 2, 1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
         input_size=(2, 3, 8, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad3d',
+        constructor_args=((1, 2, 0, 2, 1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad3dOptions({1, 2, 0, 2, 1, 2})',
+        input_size=(3, 8, 8, 8),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ReflectionPad3d',
@@ -2295,6 +2311,14 @@ new_module_tests = [
         module_name='ReplicationPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ReplicationPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
         input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
         skip_half=True,
         desc='complex'
@@ -2304,6 +2328,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 4, 4),
+    ),
+    dict(
+        module_name='ZeroPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
+        input_size=(3, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ZeroPad2d',
@@ -2654,6 +2686,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 3, 2, 1),),
         cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
         input_size=(2, 3, 2, 2, 2),
+    ),
+    dict(
+        module_name='ReplicationPad3d',
+        constructor_args=((1, 2, 3, 3, 2, 1),),
+        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+        input_size=(3, 2, 2, 2),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='ReplicationPad3d',
@@ -3201,6 +3241,13 @@ new_module_tests = [
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5),
     ),
     dict(
+        module_name='AdaptiveMaxPool1d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool1dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5),
+        desc='no_batch_dim',
+    ),
+    dict(
         module_name='AdaptiveMaxPool2d',
         constructor_args=(3,),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
@@ -3216,6 +3263,14 @@ new_module_tests = [
     ),
     dict(
         module_name='AdaptiveMaxPool2d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool2d',
         constructor_args=((3, None),),
         cpp_constructor_args='torch::nn::AdaptiveMaxPool2dOptions({3, c10::nullopt})',
         input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
@@ -3227,6 +3282,14 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='single',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::AdaptiveMaxPool3dOptions(3)',
+        input_fn=lambda: _rand_tensor_non_equal(3, 5, 6, 7),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
