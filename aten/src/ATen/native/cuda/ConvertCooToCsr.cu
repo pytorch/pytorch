@@ -23,7 +23,7 @@ __global__ void convert_indices_from_coo_to_csr_cuda_kernel(output_t* data_out, 
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_coo_to_csr_cuda(Tensor& result, const Tensor& input, const int64_t size) {
+void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
@@ -41,7 +41,7 @@ void convert_indices_from_coo_to_csr_cuda(Tensor& result, const Tensor& input, c
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void dispatch(Tensor& result, const Tensor& input, const int64_t size, const bool out_int32) {
+void dispatch(const Tensor& result, const Tensor& input, const int64_t size, const bool out_int32) {
   if (!out_int32) {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cuda", [&] {
       convert_indices_from_coo_to_csr_cuda<scalar_t, int64_t>(result, input, size);
