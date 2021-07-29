@@ -6385,6 +6385,7 @@ op_db: List[OpInfo] = [
     OpInfo('softmax',
            aliases=('nn.functional.softmax',),
            aten_name='softmax',
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_softmax_variant,
            assert_autodiffed=True,
