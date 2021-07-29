@@ -4548,13 +4548,22 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
-    def make_tensor_(shape, *, low, high):
+    def make_input(shape, *, low, high):
         return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
 
+    shapes = ((), (S,), (L, M, S))
+    num_classess = (-1, 10)
+
     return [
-        SampleInput(make_tensor_((S,), low=0, high=10)),
-        SampleInput(make_tensor_((S,), low=0, high=5), kwargs=dict(num_classes=10)),
-        SampleInput(make_tensor_((L, M, S), low=0, high=10)),
+        SampleInput(
+            make_input(
+                shape,
+                low=0,
+                high=10 if num_classes == -1 else 5,
+            ),
+            kwargs=dict(num_classes=num_classes),
+        )
+        for shape, num_classes in itertools.product(shapes, num_classess)
     ]
 
 foreach_unary_op_db: List[OpInfo] = [
