@@ -122,7 +122,7 @@ $1 = torch._ops.aten.mul($0, $0)
 $2 = input('grad_y')
 $3 = torch._ops.aten.mul($2, $0)
 $4 = torch._ops.aten.mul($2, $0)
-$5 = torch._ops.aten.add($4, $3, 1)''')
+$5 = torch._ops.aten.add($4, $3)''')
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -172,9 +172,9 @@ $2 = torch._ops.aten.abs($0, $1)''')
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 return "arf"
 
-        self.assertExpectedRaisesInline(
-            RuntimeError, lambda: A(torch.zeros(1)).neg(),
-            """Unable to cast Python instance of type <class 'str'> to C++ type 'at::Tensor'"""
+        # Wobbles depending on NDEBUG mode of pybind11
+        self.assertRaisesRegexp(
+            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
         )
         self.assertExpectedRaisesInline(
             RuntimeError, lambda: A(torch.zeros(1)).detach(),
@@ -250,7 +250,7 @@ $2 = torch._ops.aten.pow($0, 2)
 $3 = input('grad_output')
 $4 = torch._ops.aten.mul($3, tensor(2))
 $5 = torch._ops.aten.mul($4, $0)
-$6 = torch._ops.aten.add_($1, $5, 1)''')
+$6 = torch._ops.aten.add_($1, $5)''')
 
 
 if __name__ == '__main__':
