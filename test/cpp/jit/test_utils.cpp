@@ -236,7 +236,6 @@ inline c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 }
 
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg({
     // This operator is intended to be used in JIT analysis and transformation
     // pass unit tests in which Values with type Tensor are often required. It

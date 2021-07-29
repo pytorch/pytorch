@@ -524,13 +524,9 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv2d_params = register_conv_params<2>();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto conv3d_params = register_conv_params<3>();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto linear_params = register_linear_params();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto embedding_params = register_embedding_params();
 
 } // namespace
