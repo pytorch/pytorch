@@ -132,7 +132,9 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
@@ -395,9 +397,9 @@ test_benchmarks() {
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
     # TODO: Enable these for GHA once we have credentials for forked pull requests
     if [[ -z "${GITHUB_ACTIONS}" ]]; then
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     fi
     assert_git_not_dirty
   fi
