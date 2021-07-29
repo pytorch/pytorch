@@ -38,7 +38,6 @@ env:
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  SQUID_PROXY: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
 
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
@@ -48,7 +47,7 @@ jobs:
 {%- if ciflow_config.enabled %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
-    if: !{{ ciflow_config.root_job_condition }}
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
@@ -56,7 +55,9 @@ jobs:
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -119,7 +120,7 @@ jobs:
           fi
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
-        if: steps.check.outputs.rebuild
+        if: ${{ steps.check.outputs.rebuild }}
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
@@ -167,7 +168,6 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
-            -e http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -177,6 +177,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -232,7 +235,9 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
@@ -344,7 +349,6 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="$SQUID_PROXY" -e https_proxy="$SQUID_PROXY" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -524,7 +528,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         name: Upload Docs Preview
         with:
           name: deploy
@@ -532,7 +536,7 @@ jobs:
           if-no-files-found: error
           path: pytorch.github.io/docs/merge
       - name: Show Docs Preview URL (Click Me)
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
