@@ -914,6 +914,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   int64_t dim,
   const Tensor& input,
   const Tensor& grad_input) {
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
      TORCH_CHECK((grad.scalar_type() == ScalarType::Float && input.scalar_type() == ScalarType::Half),
                  "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
