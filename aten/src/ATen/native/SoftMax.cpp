@@ -44,6 +44,10 @@ TORCH_META_FUNC(_log_softmax_backward_data)
   auto grad_ = grad.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
 
+  TensorOptions options(grad_.options());
+  set_output(
+      grad_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+
   if (grad_.dim() == 0) {
     grad_ = grad_.view(1);
   }
@@ -51,10 +55,6 @@ TORCH_META_FUNC(_log_softmax_backward_data)
   TORCH_CHECK(
       dim_ >= 0 && dim_ < grad_.dim(),
       "dim must be non-negative and less than input dimensions");
-
-  TensorOptions options(grad_.options());
-  set_output(
-      grad_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 }
 
