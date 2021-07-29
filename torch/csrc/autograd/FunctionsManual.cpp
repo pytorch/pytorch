@@ -3579,14 +3579,8 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
       /*unitriangular=*/true
     ));
 
-    // we cannot kill the diagonal of L_grad in-place as this varible
-    // is needed in the triangular_solve's (double) backward,
-    // hence we need a tensor of diag(L_grad) that is going to be
-    // subtracted from L_grad
-    auto L_grad_diag_embed = at::diag_embed(L_grad.diagonal(0, -2, -1));
-
     // LU_data_grad = L_grad * 1_L + U_grad * 1_U
-    LU_data_grad = L_grad.tril() - L_grad_diag_embed + U_grad.triu();
+    LU_data_grad = L_grad.tril(-1) + U_grad.triu();
   }
 
   // self_grad = [grad^H U^{-1} L^{-1} P^T]^H = [U^{-1} L^{-1} P^T]^H grad
