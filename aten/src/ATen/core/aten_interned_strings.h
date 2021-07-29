@@ -482,6 +482,7 @@ _(aten, nanmedian) \
 _(aten, meshgrid) \
 _(aten, min) \
 _(aten, min_values) \
+_(aten, minmax) \
 _(aten, miopen_batch_norm) \
 _(aten, miopen_batch_norm_backward) \
 _(aten, miopen_convolution) \

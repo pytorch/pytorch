@@ -118,6 +118,65 @@ TORCH_META_FUNC(argmin)
 
 } // namespace meta
 
+namespace meta {
+
+TORCH_META_FUNC(minmax)
+(const Tensor& self, c10::optional<int64_t> dim_opt, bool keepdim) {
+  DimVector shape;
+  if (dim_opt.has_value()) {
+    auto dim = maybe_wrap_dim(dim_opt.value(), self.ndimension());
+    native::zero_numel_check_dims(self, dim, "minmax");
+    shape = get_reduction_shape(self, dim, keepdim);
+  } else if (keepdim) {
+    TORCH_CHECK(
+        self.numel() > 0,
+        "minmax(): cannot compute minmax over an empty dimension as the "
+        "operation has no identity.");
+    shape = DimVector(self.ndimension(), 1);
+  }
+  const auto options = self.options();
+  const auto out0 = this->maybe_get_output(0);
+  const auto out1 = this->maybe_get_output(1);
+  this->set_output(
+      0,
+      shape,
+      options.dtype(out0.defined() ? out0.scalar_type() : self.scalar_type()));
+  this->set_output(
+      1,
+      shape,
+      options.dtype(out1.defined() ? out1.scalar_type() : self.scalar_type()));
+}
+
+} // namespace meta
+
+namespace native {
+
+DEFINE_DISPATCH(minmax_stub);
+DEFINE_DISPATCH(minmax_allreduce_stub);
+
+TORCH_IMPL_FUNC(minmax_out)
+(const Tensor& self,
+ c10::optional<int64_t> dim_opt,
+ bool keepdim,
+ const Tensor& min,
+ const Tensor& max) {
+  auto mutable_min = const_cast<Tensor&>(min);
+  auto mutable_max = const_cast<Tensor&>(max);
+  if (dim_opt.has_value()) {
+    minmax_stub(
+        self.device().type(),
+        self,
+        maybe_wrap_dim(dim_opt.value(), self.ndimension()),
+        keepdim,
+        mutable_min,
+        mutable_max);
+  } else {
+    minmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
+  }
+}
+
+} // namespace native
+
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
@@ -1855,4 +1914,5 @@ Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const
   return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -39,6 +39,9 @@ DECLARE_DISPATCH(cum_fn, cumsum_stub);
 DECLARE_DISPATCH(cum_fn, cumprod_stub);
 DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
 
+DECLARE_DISPATCH(void (*)(const Tensor&, int64_t, bool, Tensor&, Tensor&), minmax_stub);
+DECLARE_DISPATCH(void (*)(const Tensor&, Tensor&, Tensor&), minmax_allreduce_stub);
+
 // Used in cuda/Normalization.cu
 TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,

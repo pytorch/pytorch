@@ -616,6 +616,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.meshgrid: lambda *tensors, **kwargs: -1,
         torch.min: lambda input, out=None: -1,
         torch.minimum: lambda input, other, out=None: -1,
+        torch.minmax: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.fmin: lambda input, other, out=None: -1,
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),

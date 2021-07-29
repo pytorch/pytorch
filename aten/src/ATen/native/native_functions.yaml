@@ -2701,15 +2701,28 @@
 
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
+# DEPRECATED: Use torch.minmax instead
 - func: _aminmax(Tensor self) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU, CUDA: _aminmax_all
 
+# DEPRECATED: Use torch.minmax instead
 - func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU, CUDA: _aminmax
+
+- func: minmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
+  device_check: NoCheck
+  structured_delegate: minmax.out
+  variants: function, method
+
+- func: minmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)
+  device_check: NoCheck
+  structured: true
+  dispatch:
+    CPU, CUDA: minmax_out
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
