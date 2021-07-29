@@ -516,7 +516,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         # TODO: is_reference option for conv module
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes:
+        if not is_reference and dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by Conv "
@@ -742,7 +742,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes:
+        if not is_reference and dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by Linear "
