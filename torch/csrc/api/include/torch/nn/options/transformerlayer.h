@@ -8,6 +8,8 @@
 namespace torch {
 namespace nn {
 
+using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU, std::function<Tensor(const Tensor&)> >;
+
 /// Options for the `TransformerEncoderLayer`
 ///
 /// Example:
@@ -15,8 +17,6 @@ namespace nn {
 /// auto options = TransformerEncoderLayer(512, 8).dropout(0.2);
 /// ```
 struct TORCH_API TransformerEncoderLayerOptions {
-
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU, std::function<Tensor(const Tensor&)> >;
 
   /* implicit */ TransformerEncoderLayerOptions(int64_t d_model, int64_t nhead);
 
@@ -46,8 +46,6 @@ struct TORCH_API TransformerEncoderLayerOptions {
 /// TransformerDecoderLayer model(TransformerDecoderLayerOptions(512, 8).dropout(0.2));
 /// ```
 struct TORCH_API TransformerDecoderLayerOptions {
-
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU, std::function<Tensor(const Tensor&)> >;
 
   TransformerDecoderLayerOptions(int64_t d_model, int64_t nhead);
 
