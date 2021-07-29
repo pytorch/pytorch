@@ -1269,13 +1269,24 @@ class Module:
                 destination = hook_result
         return destination
 
-    def _register_load_state_dict_pre_hook(self, hook):
+    def _register_load_state_dict_pre_hook(self, hook, with_module=False):
         r"""These hooks will be called with arguments: `state_dict`, `prefix`,
         `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
         `error_msgs`, before loading `state_dict` into `self`. These arguments
         are exactly the same as those of `_load_from_state_dict`.
+
+        If ``with_module`` is ``True``, then the first argument to the hook is
+        an instance of the module.
+
+        Arguments:
+            hook (Callable): Callable hook that will be invoked before
+                loading the state dict.
+            with_module (bool, optional): Whether or not to pass the module
+                instance to the hook as the first parameter.
         """
         handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        if with_module:
+            hook = functools.partial(hook, self)
         self._load_state_dict_pre_hooks[handle.id] = hook
         return handle
 
