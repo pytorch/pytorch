@@ -1,7 +1,6 @@
 import inspect
 import typing
 import pathlib
-import torch
 from typing import Optional, Iterable, List, Dict
 from collections import defaultdict
 from types import CodeType
@@ -15,6 +14,25 @@ try:
     from monkeytype.tracing import CallTrace, CodeFilter  # type: ignore[import]
 except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
+
+def get_type(type):
+    """
+    Helper function which converts the given type to a torchScript acceptable format.
+    """
+    if inspect.getmodule(type) == typing:
+        # If the type is a type imported from typing
+        # like Tuple, List, Dict then replace `typing.`
+        # with a null string. This needs to be done since
+        # typing.List is not accepted by TorchScript.
+        type_to_string = str(type)
+        return type_to_string.replace(type.__module__ + '.', ' ') + ','
+    elif 'torch' in type.__module__:
+        # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
+        # for the type which is obtained by combining the module name and type name.
+        return type.__module__ + '.' + type.__name__ + ','
+    else:
+        # For all other types use the name for the type.
+        return type.__name__ + ','
 
 def get_optional_of_element_type(types: str):
     """
@@ -88,30 +106,17 @@ if _IS_MONKEYTYPE_INSTALLED:
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
             for arg, types in all_args.items():
-                _all_type = " "
-                for _type in types:
-                    # If the type is a type imported from typing
-                    # like Tuple, List, Dict then replace "typing."
-                    # with a null string.
-                    if inspect.getmodule(_type) == typing:
-                        _type_to_string = str(_type)
-                        _all_type += _type_to_string.replace('typing.', '') + ','
-                    elif _type is torch.nn.parameter.Parameter:
-                        # Check if the type is torch.nn.parameter.Parameter,
-                        # use the entire quaalified name `torch.nn.parameter.Parameter`
-                        # for type
-                        _all_type += 'torch.nn.parameter.Parameter' + ','
-                    else:
-                        _all_type += _type.__name__ + ','
-                _all_type = _all_type.lstrip(" ")  # Remove any trailing spaces
+                all_type = " "
+                for type in types:
+                    all_type += get_type(type)
 
-                if len(types) == 2 and 'NoneType' in _all_type:
+                if len(types) == 2 and 'NoneType' in all_type:
                     # TODO: To remove this check once Union suppport in TorchScript lands.
-                    all_args[arg] = {get_optional_of_element_type(_all_type)}
+                    all_args[arg] = {get_optional_of_element_type(all_type)}
                 elif len(types) > 1:
                     all_args[arg] = {'Any'}
                 else:
-                    all_args[arg] = {_all_type[:-1]}
+                    all_args[arg] = {all_type[:-1]}
             return all_args
 
         def get_args_types(self, qualified_name: str) -> Dict:
