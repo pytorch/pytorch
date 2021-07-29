@@ -920,7 +920,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
                  "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
   }
   auto res = host_softmax_backward<LogSoftMaxBackwardEpilogue,true>(grad, output, dim, half_to_float);
-  input_grad.copy_(res);
+  grad_input.copy_(res);
 }
 
 Tensor softmax_cuda(const Tensor &input, const int64_t dim, const bool half_to_float){

@@ -40,7 +40,7 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
- const Tensor& input_){
+ const Tensor& input){
   auto grad_ = grad.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
 
