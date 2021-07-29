@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -975,11 +976,11 @@ class DistributedTest:
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=warmup_steps, period=period)
+                averager = averagers.PeriodicModelAverager(warmup_steps=warmup_steps, period=period)
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
-                    averager.average_parameters()
+                    averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
                     else:
@@ -4476,6 +4477,61 @@ class DistributedTest:
             )
             self._barrier()
 
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @unittest.skipIf(
+            IS_WINDOWS,
+            "PostLocalSGDOptimizer not yet supported with Windows."
+        )
+        def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
+            learning_rate = 0.03
+            period = 4
+            warmup_steps = 10
+            torch.cuda.set_device(self.rank)
+            net = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(DDP_NET).cuda(),
+                device_ids=[self.rank],
+                gradient_as_bucket_view=grad_is_view
+            )
+            opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+            averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
+
+            post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(DDP_NET).cuda(),
+                device_ids=[self.rank],
+                gradient_as_bucket_view=grad_is_view
+            )
+            post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
+                params=post_localSGD_net.parameters(),
+                optimizer_class=torch.optim.SGD,
+                averager=averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps),
+                lr=learning_rate,
+            )
+
+            input = torch.randn(dist.get_world_size() * 2, 2).cuda()
+            target = torch.randn(dist.get_world_size() * 2, 4).cuda()
+            loss_fn = nn.MSELoss()
+
+            for _ in range(20):
+                opt.zero_grad()
+                output = net(input)
+                loss = loss_fn(output, target)
+                loss.backward()
+                opt.step()
+                averager.average_parameters(net.parameters())
+
+                post_localSGD_opt.zero_grad()
+                post_localSGD_output = post_localSGD_net(input)
+                post_localSGD_loss = loss_fn(post_localSGD_output, target)
+                post_localSGD_loss.backward()
+                post_localSGD_opt.step()
+
+                for p1, p2 in zip(net.parameters(), post_localSGD_net.parameters()):
+                    self.assertEqual(p1.data, p2.data)
+
         @unittest.skipIf(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
@@ -7469,12 +7525,7 @@ class DistributedTest:
                 loss.backward()
             self.assertFalse(ddp.reducer._ddp_graph_static())
 
-        @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        def test_ddp_new_tensor_in_fwd(self):
+        def _test_ddp_new_tensor_in_fwd(self, static_graph):
             # Test from https://github.com/pytorch/pytorch/issues/60733
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7510,6 +7561,9 @@ class DistributedTest:
                     find_unused_parameters=find_unused,
                 )
 
+                if static_graph:
+                    ddp._set_static_graph()
+
                 opt = [None for _ in range(3)]
                 for i in range(2):
                     ddp.zero_grad()
@@ -7526,3 +7580,19 @@ class DistributedTest:
                         else:
                             self.assertEqual(opt[i]["tensor"].grad_fn, None)
                     out.mean().backward()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_new_tensor_in_fwd(self):
+            return self._test_ddp_new_tensor_in_fwd(static_graph=False)
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        def test_ddp_new_tensor_in_fwd_static_graph(self):
+            return self._test_ddp_new_tensor_in_fwd(static_graph=True)
