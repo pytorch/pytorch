@@ -25,14 +25,14 @@ def get_type(type):
         # with a null string. This needs to be done since
         # typing.List is not accepted by TorchScript.
         type_to_string = str(type)
-        return type_to_string.replace(type.__module__ + '.', ' ') + ','
-    elif 'torch' in type.__module__:
+        return type_to_string.replace(type.__module__ + '.', ' ')
+    elif type.__module__.startswith('torch'):
         # If the type is a subtype of torch module, then TorchScript expects a fully qualified name
         # for the type which is obtained by combining the module name and type name.
-        return type.__module__ + '.' + type.__name__ + ','
+        return type.__module__ + '.' + type.__name__
     else:
         # For all other types use the name for the type.
-        return type.__name__ + ','
+        return type.__name__
 
 def get_optional_of_element_type(types: str):
     """
@@ -106,21 +106,20 @@ if _IS_MONKEYTYPE_INSTALLED:
             # then consolidate the type to `Any` and replace the entry
             # by type `Any`.
             for arg, types in all_args.items():
-                all_type = " "
+                all_type = []
                 for type in types:
-                    all_type += get_type(type)
-<<<<<<< HEAD
-=======
-                all_type = all_type.lstrip(" ")  # Remove any trailing spaces
->>>>>>> 94359b99c7 (Cleans up related to type refinements)
+                    all_type.append(get_type(type))
 
-                if len(types) == 2 and 'NoneType' in all_type:
+                # Conctenate all the types
+                merged_type = ','.join(all_type)
+
+                if len(types) == 2 and 'NoneType' in merged_type:
                     # TODO: To remove this check once Union suppport in TorchScript lands.
-                    all_args[arg] = {get_optional_of_element_type(all_type)}
+                    all_args[arg] = {get_optional_of_element_type(merged_type)}
                 elif len(types) > 1:
                     all_args[arg] = {'Any'}
                 else:
-                    all_args[arg] = {all_type[:-1]}
+                    all_args[arg] = {merged_type}
             return all_args
 
         def get_args_types(self, qualified_name: str) -> Dict:
