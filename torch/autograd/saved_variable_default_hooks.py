@@ -9,7 +9,7 @@ def reset_saved_tensors_default_hooks():
 def set_save_on_cpu_hooks(pin_memory=False):
     """Sets pack_to_cpu / unpack_from_cpu hooks for saved tensors.
 
-    When these are set, intermediary results saved in the graph during
+    When these hooks are set, intermediary results saved in the graph during
     the forward pass will be moved to CPU, then copied back to the original device
     when needed for the backward pass. If the graph was already on CPU, no tensor copy
     is performed.
