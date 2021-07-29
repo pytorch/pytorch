@@ -23,6 +23,10 @@ from ..utils import (
     activation_dtype,
 )
 
+from ..quantize import (
+    is_activation_post_process,
+)
+
 from .pattern_utils import (
     register_quant_pattern,
     get_default_output_activation_post_process_map,
@@ -87,9 +91,11 @@ class QuantizeHandler(ABC):
         if maybe_eq_node is not None:
             last_node = maybe_eq_node
 
-        maybe_obs_node = maybe_get_next_module(last_node, modules, object)
-        if maybe_obs_node is not None:
-            return modules[str(maybe_obs_node.target)]
+        for maybe_obs_node, _ in last_node.users.items():
+            if maybe_obs_node.op == 'call_module':
+                maybe_obs = modules[str(maybe_obs_node.target)]
+                if is_activation_post_process(maybe_obs):
+                    return maybe_obs
 
         return None
 

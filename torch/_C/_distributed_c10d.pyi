@@ -380,7 +380,7 @@ def _compute_bucket_assignment_by_size(
     bucket_size: int,
     expect_sparse_gradient: List[bool],
     tensor_indices: List[int],
-) -> List[List[int]]: ...
+) -> Tuple[List[List[int]], List[int]]: ...
 def _broadcast_coalesced(
     process_group: ProcessGroup,
     tensors: List[Tensor],

@@ -3850,7 +3850,7 @@ new_module_tests = [
     ),
     dict(
         module_name='TransformerEncoderLayer',
-        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        constructor_args=(4, 2, 8, 0.0, F.gelu),
         cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
@@ -3875,7 +3875,7 @@ new_module_tests = [
     ),
     dict(
         module_name='TransformerDecoderLayer',
-        constructor_args=(4, 2, 8, 0.0, 'gelu'),
+        constructor_args=(4, 2, 8, 0.0, F.gelu),
         cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
@@ -3888,7 +3888,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Transformer',
-        constructor_args=(4, 2, 2, 2, 8, 0.0, "relu"),
+        constructor_args=(4, 2, 2, 2, 8, 0.0, F.relu),
         cpp_constructor_args='''torch::nn::TransformerOptions()
                                 .d_model(4)
                                 .nhead(2)

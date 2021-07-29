@@ -325,7 +325,7 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
 def maybe_get_following_observer(
     node: Node,
     modules: Dict[str, nn.Module],
-    target_observer_type: None,
+    target_observer_type: Any = object,
 ) -> Optional[Node]:
     """ Loops through the graph forwards and finds the next observer node with
     the given type. We will skip nodes such as relu and pooling.
