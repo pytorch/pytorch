@@ -321,25 +321,32 @@ class TransformerEncoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        if self.norm_first:
-            src = self.norm1(src)
-            src2 = self.self_attn(src, src, src, attn_mask=src_mask,
-                                  key_padding_mask=src_key_padding_mask)[0]
-            src = src + self.dropout1(src2)
-            src = self.norm2(src)
-            src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-            src = src + self.dropout2(src2)
-            return src
 
-        # norm last
-        src2 = self.self_attn(src, src, src, attn_mask=src_mask,
-                              key_padding_mask=src_key_padding_mask)[0]
-        src = src + self.dropout1(src2)
-        src = self.norm1(src)
-        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
-        src = src + self.dropout2(src2)
-        src = self.norm2(src)
-        return src
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
+
+        x = src
+        if self.norm_first:
+            x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask)
+            x = x + self._ff_block(self.norm2(x))
+        else:
+            x = self.norm1(x + self._sa_block(x, src_mask, src_key_padding_mask))
+            x = self.norm2(x + self._ff_block(x))
+
+        return x
+
+    # self-attention block
+    def _sa_block(self, x: Tensor,
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.self_attn(x, x, x,
+                           attn_mask=attn_mask,
+                           key_padding_mask=key_padding_mask,
+                           need_weights=False)[0]
+        return self.dropout1(x)
+
+    # feed forward block
+    def _ff_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout2(x)
 
 
 class TransformerDecoderLayer(Module):
@@ -421,33 +428,42 @@ class TransformerDecoderLayer(Module):
         Shape:
             see the docs in Transformer class.
         """
-        if self.norm_first:
-            tgt = self.norm1(tgt)
-            tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
-                                  key_padding_mask=tgt_key_padding_mask)[0]
-            tgt = tgt + self.dropout1(tgt2)
-            tgt = self.norm2(tgt)
-            tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                       key_padding_mask=memory_key_padding_mask)[0]
-            tgt = tgt + self.dropout2(tgt2)
-            tgt = self.norm3(tgt)
-            tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-            tgt = tgt + self.dropout3(tgt2)
-            return tgt
+        # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        # norm last
-        tgt2 = self.self_attn(tgt, tgt, tgt, attn_mask=tgt_mask,
-                              key_padding_mask=tgt_key_padding_mask)[0]
-        tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
-        tgt2 = self.multihead_attn(tgt, memory, memory, attn_mask=memory_mask,
-                                   key_padding_mask=memory_key_padding_mask)[0]
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        tgt = tgt + self.dropout3(tgt2)
-        tgt = self.norm3(tgt)
-        return tgt
+        x = tgt
+        if self.norm_first:
+            x = x + self._sa_block(self.norm1(x), tgt_mask, tgt_key_padding_mask)
+            x = x + self._mha_block(self.norm2(x), memory, memory_mask, memory_key_padding_mask)
+            x = x + self._ff_block(self.norm3(x))
+        else:
+            x = self.norm1(x + self._sa_block(x, tgt_mask, tgt_key_padding_mask))
+            x = self.norm2(x + self._mha_block(x, memory, memory_mask, memory_key_padding_mask))
+            x = self.norm3(x + self._ff_block(x))
+
+        return x
+
+    # self-attention block
+    def _sa_block(self, x: Tensor,
+                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.self_attn(x, x, x,
+                           attn_mask=attn_mask,
+                           key_padding_mask=key_padding_mask,
+                           need_weights=False)[0]
+        return self.dropout1(x)
+
+    # multihead attention block
+    def _mha_block(self, x: Tensor, mem: Tensor,
+                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
+        x = self.multihead_attn(x, mem, mem,
+                                attn_mask=attn_mask,
+                                key_padding_mask=key_padding_mask,
+                                need_weights=False)[0]
+        return self.dropout2(x)
+
+    # feed forward block
+    def _ff_block(self, x: Tensor) -> Tensor:
+        x = self.linear2(self.dropout(self.activation(self.linear1(x))))
+        return self.dropout3(x)
 
 
 def _get_clones(module, N):

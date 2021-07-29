@@ -25,6 +25,7 @@ __all__ = [
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "double_types",
     "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
@@ -35,12 +36,7 @@ __all__ = [
     "integral_types",
     "integral_types_and",
     "make_non_contiguous",
-    "rand_like",
-    "randn_like",
 ]
-
-rand_like = torch.rand_like
-randn_like = torch.randn_like
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
@@ -340,6 +336,10 @@ def floating_and_complex_types():
 
 def floating_and_complex_types_and(*dtypes):
     return _floating_and_complex_types + _validate_dtypes(*dtypes)
+
+_double_types = _dispatch_dtypes((torch.float64, torch.complex128))
+def double_types():
+    return _double_types
 
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():
