@@ -976,7 +976,7 @@ class DistributedTest:
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(warmup_steps=warmup_steps, period=period)
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
