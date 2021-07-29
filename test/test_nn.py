@@ -4637,6 +4637,20 @@ class TestNN(NNTestCase):
                     opt.step()
                     assert_is_orthogonal(m.weight)
 
+    def test_orthogonal_errors(self):
+        m = nn.Linear(3, 4)
+        with self.assertRaisesRegex(ValueError, "has to be one of"):
+            torch.nn.utils.parametrizations.orthogonal(m, "weight", "foo")
+
+        with self.assertRaisesRegex(ValueError, "Expected a matrix"):
+            torch.nn.utils.parametrizations.orthogonal(m, "bias")
+
+        torch.nn.utils.parametrizations.orthogonal(m, "weight")
+        with self.assertRaisesRegex(ValueError, "matrices of shape"):
+            m.weight = torch.randn(5, 5)
+        torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
+
+
     def test_threshold_int(self):
         x = torch.tensor([-3, -2, -1, 0, 1, 2, 3])
         expected = torch.tensor([99, 99, 99, 99, 1, 2, 3])

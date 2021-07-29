@@ -39,7 +39,7 @@ class _Orthogonal(Module):
 
     def __init__(self,
                  weight,
-                 parametrization: OrthMaps,
+                 orthogonal_map: OrthMaps,
                  *,
                  use_trivialization=True) -> None:
         super().__init__()
@@ -56,32 +56,22 @@ class _Orthogonal(Module):
         # not every combination of `(A, tau)` gives a unitary matrix, meaning that if we optimise
         # them as independent tensors we would not maintain the constraint
         # An equivalent reasoning holds for rectangular matrices
-        if weight.is_complex() and parametrization == OrthMaps.householder:
+        if weight.is_complex() and orthogonal_map == OrthMaps.householder:
             raise ValueError("The householder parametrization does not support complex tensors.")
 
-        # We could implement this for 1-dim tensors as the maps on the sphere
-        # but I believe it'd bite more people than it'd help
-        if weight.ndim < 2:
-            raise ValueError("Expected a matrix or batch of matrices. "
-                             f"Got a tensor of {weight.ndim} dimensions.")
-
         self.shape = weight.shape
-        self.parametrization = parametrization
+        self.orthogonal_map = orthogonal_map
         if use_trivialization:
             self.register_buffer("base", None)
 
     def forward(self, X: torch.Tensor) -> torch.Tensor:
-        if X.shape != self.shape:
-            raise ValueError(f"Expected a matrix or batch of matrices of shape {self.shape}. "
-                             f"Got a tensor of shape {X.shape}.")
-
         n, k = X.size(-2), X.size(-1)
         transposed = n < k
         if transposed:
             X = X.transpose(-2, -1)
             n, k = k, n
         # Here n > k and X is a tall matrix
-        if self.parametrization == OrthMaps.matrix_exp or self.parametrization == OrthMaps.cayley:
+        if self.orthogonal_map == OrthMaps.matrix_exp or self.orthogonal_map == OrthMaps.cayley:
             # We just need n x k - k(k-1)/2 parameters
             X = X.tril()
             if n != k:
@@ -89,9 +79,9 @@ class _Orthogonal(Module):
                 X = torch.cat([X, X.new_zeros(n, n - k).expand(*X.shape[:-2], -1, -1)], dim=-1)
             A = X - X.transpose(-2, -1).conj()
             # A is skew-symmetric (or skew-hermitian)
-            if self.parametrization == OrthMaps.matrix_exp:
+            if self.orthogonal_map == OrthMaps.matrix_exp:
                 Q = torch.matrix_exp(A)
-            elif self.parametrization == OrthMaps.cayley:
+            elif self.orthogonal_map == OrthMaps.cayley:
                 # Computes the Cayley retraction (I+A/2)(I-A/2)^{-1}
                 Id = torch.eye(n, dtype=A.dtype, device=A.device)
                 Q = torch.linalg.solve(torch.add(Id, A, alpha=-0.5), torch.add(Id, A, alpha=0.5))
@@ -139,7 +129,7 @@ class _Orthogonal(Module):
             # gives the original tensor. It is not clear how to do this.
             # Perhaps via some algebraic manipulation involving the QR like that of
             # Corollary 2.2 in Edelman, Arias and Smith?
-            if self.parametrization == OrthMaps.cayley or self.parametrization == OrthMaps.matrix_exp:
+            if self.orthogonal_map == OrthMaps.cayley or self.orthogonal_map == OrthMaps.matrix_exp:
                 raise NotImplementedError("It is not possible to assign to the matrix exponential "
                                           "or the Cayley parametrizations when use_trivialization=False.")
 
@@ -180,7 +170,7 @@ class _Orthogonal(Module):
 
 def orthogonal(module: Module,
                name: str = 'weight',
-               parametrization: Optional[str] = None,
+               orthogonal_map: Optional[str] = None,
                *,
                use_trivialization: bool = True) -> Module:
     r"""Applies an orthogonal or unitary paramtrization to a matrix or a batch of matrices.
@@ -203,7 +193,7 @@ def orthogonal(module: Module,
 
     If the tensor has more than two dimensions, we consider it as a batch of matrices of shape `(..., m, n)`.
 
-    The matrix :math:`Q` may be parametrized via three different ``parametrization``s in terms of the original tensor:
+    The matrix :math:`Q` may be parametrized via three different ``orthogonal_map``s in terms of the original tensor:
 
     - ``"matrix_exp"``/``"cayley"``:
       the :func:`~torch.matrix_exp` :math:`Q = \exp(A)` and the `Cayley map`_
@@ -229,7 +219,7 @@ def orthogonal(module: Module,
         If the original tensor is not parametrized and ``use_trivialization=True`` (default), the initial value
         of ``Q`` is that of the original tensor if it is orthogonal (or unitary in the complex case)
         and it is orthogonalized via the QR decomposition otherwise (see :func:`torch.linalg.qr`).
-        Same happens when it is not parametrized and ``parametrization="householder"`` even when ``use_trivialization=False``.
+        Same happens when it is not parametrized and ``orthogonal_map="householder"`` even when ``use_trivialization=False``.
         Otherwise, the initial value is the result of the composition of all the registered
         parametrizations applied to the original tensor.
 
@@ -239,7 +229,7 @@ def orthogonal(module: Module,
     Args:
         module (nn.Module): module on which to register the parametrization.
         name (str, optional): name of the tensor to make orthogonal. Default: ``"weight"``.
-        parametrization (str, optional): One of the following: ``"matrix_exp"``, ``"cayley"``, ``"householder"``.
+        orthogonal_map (str, optional): One of the following: ``"matrix_exp"``, ``"cayley"``, ``"householder"``.
             Default: ``"matrix_exp"`` if the matrix is square or complex, ``"householder"`` otherwise.
         use_trivialization (bool, optional): whether to use the dynamic trivialization framework.
             Default: ``True``.
@@ -264,20 +254,27 @@ def orthogonal(module: Module,
         >>> torch.dist(Q.T @ Q, torch.eye(20))
         tensor(4.9332e-07)
     """
-    if not hasattr(module, name):
+    weight = getattr(module, name, None)
+    if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no attribute with name '{}'".format(module, name)
+            "Module '{}' has no parameter of buffer with name '{}'".format(module, name)
         )
-    # getattr should get the correct parametrized weight if there is already a parametrization registered
-    weight = getattr(module, name)
-    if parametrization is None:
-        parametrization = "matrix_exp" if weight.size(-2) == weight.size(-1) or weight.is_complex() else "householder"
 
-    if not hasattr(OrthMaps, parametrization):
-        raise ValueError('parametrization has to be one of "matrix_exp", "cayley", "householder". '
-                         f'Got: {parametrization}')
+    # We could implement this for 1-dim tensors as the maps on the sphere
+    # but I believe it'd bite more people than it'd help
+    if weight.ndim < 2:
+        raise ValueError("Expected a matrix or batch of matrices. "
+                         f"Got a tensor of {weight.ndim} dimensions.")
+
+    if orthogonal_map is None:
+        orthogonal_map = "matrix_exp" if weight.size(-2) == weight.size(-1) or weight.is_complex() else "householder"
+
+    orth_enum = getattr(OrthMaps, orthogonal_map, None)
+    if orth_enum is None:
+        raise ValueError('orthogonal_map has to be one of "matrix_exp", "cayley", "householder". '
+                         f'Got: {orthogonal_map}')
     orth = _Orthogonal(weight,
-                       OrthMaps[parametrization],
+                       orth_enum,
                        use_trivialization=use_trivialization)
     parametrize.register_parametrization(module, name, orth, unsafe=True)
     return module
@@ -471,13 +468,11 @@ def spectral_norm(module: Module,
         >>> torch.linalg.matrix_norm(snm.weight, 2)
         tensor(1.0000, grad_fn=<CopyBackwards>)
     """
-    if not hasattr(module, name):
+    weight = getattr(module, name, None)
+    if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no attribute with name '{}'".format(module, name)
+            "Module '{}' has no parameter of buffer with name '{}'".format(module, name)
         )
-    # getattr should get the correct parametrized weight if there
-    # is already a parametrization registered
-    weight = getattr(module, name)
 
     if dim is None:
         if isinstance(module, (torch.nn.ConvTranspose1d,
