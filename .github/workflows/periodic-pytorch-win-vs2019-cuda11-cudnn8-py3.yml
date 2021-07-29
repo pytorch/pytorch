@@ -222,6 +222,11 @@ jobs:
       fail-fast: false
     # TODO: Make this into a composite step
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
