@@ -109,6 +109,10 @@ if _IS_MONKEYTYPE_INSTALLED:
                 all_type = " "
                 for type in types:
                     all_type += get_type(type)
+<<<<<<< HEAD
+=======
+                all_type = all_type.lstrip(" ")  # Remove any trailing spaces
+>>>>>>> 94359b99c7 (Cleans up related to type refinements)
 
                 if len(types) == 2 and 'NoneType' in all_type:
                     # TODO: To remove this check once Union suppport in TorchScript lands.
