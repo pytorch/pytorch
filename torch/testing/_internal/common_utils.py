@@ -2002,7 +2002,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         result = high * rand_val + low * (1 - rand_val)
     elif dtype in complex_types():
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
+        ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
         real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
         imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
