@@ -6,7 +6,6 @@
 #include <libgen.h>
 #include <unistd.h>
 
-
 struct InterpreterSymbol {
   const char* start_sym;
   const char* end_sym;
@@ -19,40 +18,44 @@ struct InterpreterSymbol {
 // to simply copy the contents of this symbol to disk and dlopen it to create an
 // instance of python.
 
-
 namespace torch {
 namespace deploy {
 
-const std::initializer_list<InterpreterSymbol>interpreter_search_path = {
-  {"_binary_libtorch_deployinterpreter_all_so_start", "_binary_libtorch_deployinterpreter_all_so_end", true},
-  {"_binary_libtorch_deployinterpreter_cuda_so_start", "_binary_libtorch_deployinterpreter_cuda_so_end", false},
-  {"_binary_libtorch_deployinterpreter_cpu_so_start", "_binary_libtorch_deployinterpreter_cpu_so_end", false},
+const std::initializer_list<InterpreterSymbol> interpreter_search_path = {
+    {"_binary_libtorch_deployinterpreter_all_so_start",
+     "_binary_libtorch_deployinterpreter_all_so_end",
+     true},
+    {"_binary_libtorch_deployinterpreter_cuda_so_start",
+     "_binary_libtorch_deployinterpreter_cuda_so_end",
+     false},
+    {"_binary_libtorch_deployinterpreter_cpu_so_start",
+     "_binary_libtorch_deployinterpreter_cpu_so_end",
+     false},
 };
-
 
 static bool writeDeployInterpreter(FILE* dst) {
   TORCH_INTERNAL_ASSERT(dst);
   const char* lib_start = nullptr;
   const char* lib_end = nullptr;
   bool custom_loader = false;
-  for (const auto& s: interpreter_search_path) {
-    lib_start = (const char*) dlsym(nullptr, s.start_sym);
+  for (const auto& s : interpreter_search_path) {
+    lib_start = (const char*)dlsym(nullptr, s.start_sym);
     if (lib_start) {
-      lib_end = (const char*) dlsym(nullptr, s.end_sym);
+      lib_end = (const char*)dlsym(nullptr, s.end_sym);
       custom_loader = s.custom_loader;
       break;
     }
   }
   TORCH_CHECK(
       lib_start != nullptr && lib_end != nullptr,
-      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=", torch::cuda::is_available());
+      "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
+      torch::cuda::is_available());
 
   size_t size = lib_end - lib_start;
   size_t written = fwrite(lib_start, 1, size, dst);
   TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
   return custom_loader;
 }
-
 
 InterpreterManager::InterpreterManager(size_t n_interp) : resources_(n_interp) {
   TORCH_DEPLOY_TRY
@@ -180,10 +183,11 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // note: if you want better debugging symbols for things inside
   // new_intepreter_impl, comment out this line so that the so lasts long enough
   // for the debugger to see it.
-  unlink(library_name_.c_str());
+  // unlink(library_name_.c_str());
 
   if (custom_loader_) {
-    auto deploy_set_self_ptr = (void (*)(void*))dlsym(handle_, "deploy_set_self");
+    auto deploy_set_self_ptr =
+        (void (*)(void*))dlsym(handle_, "deploy_set_self");
     AT_ASSERT(deploy_set_self_ptr);
     deploy_set_self_ptr(handle_);
   }

@@ -938,10 +938,14 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
         void* seg_addr = mmap64(
             reinterpret_cast<void*>(seg_page_start),
             file_length,
-            prot,
+            prot | PROT_WRITE, // initially everything is writable to do
+                               // relocations
             MAP_FIXED | MAP_PRIVATE,
             contents_.fd(),
             file_page_start);
+        fixup_prot_.emplace_back([=]() {
+          mprotect(reinterpret_cast<void*>(seg_page_start), file_length, prot);
+        });
         if (seg_addr == MAP_FAILED) {
           DEPLOY_ERROR(
               "couldn't map \"{}\" segment {}: {}",
@@ -968,13 +972,17 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
       // map for all extra pages.
       if (seg_page_end > seg_file_end) {
         size_t zeromap_size = seg_page_end - seg_file_end;
+        int prot = PFLAGS_TO_PROT(phdr->p_flags);
         void* zeromap = mmap(
             reinterpret_cast<void*>(seg_file_end),
             zeromap_size,
-            PFLAGS_TO_PROT(phdr->p_flags),
+            prot | PROT_WRITE,
             MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
             -1,
             0);
+        fixup_prot_.emplace_back([=]() {
+          mprotect(reinterpret_cast<void*>(seg_file_end), zeromap_size, prot);
+        });
         if (zeromap == MAP_FAILED) {
           DEPLOY_ERROR(
               "couldn't zero fill \"{}\" gap: {}",
@@ -1170,12 +1178,20 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     __deploy_register_code();
   }
 
+  // remove the extra write flags from read-only sections
+  void protect() {
+    for (const auto& fixup : fixup_prot_) {
+      fixup();
+    }
+  }
+
   void load() override {
     check_library_format();
     reserve_address_space();
     load_segments();
     read_dynamic_section();
     relocate();
+    protect();
     __register_frame(eh_frame_);
     eh_frame_registered_ = true;
     register_debug_info();
@@ -1260,6 +1276,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   size_t tls_mem_size_ = 0;
 
   std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
+  std::vector<std::function<void(void)>> fixup_prot_;
 };
 
 std::shared_ptr<CustomLibrary> CustomLibrary::create(
