@@ -614,7 +614,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
-#endif
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 
@@ -740,7 +740,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
 }
-#endif
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
@@ -921,7 +921,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
   AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
-#endif
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
@@ -1299,9 +1299,7 @@ TEST(LiteInterpreterTest, DefaultArgsPinvSpecifyDefault) {
   inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
-#endif
 
-#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, TestExceptionStackWithTwoLevelModuleHierarchy) {
   Module a("A");
   a.define(R"(
@@ -1351,7 +1349,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
-#endif
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 static auto reg =
