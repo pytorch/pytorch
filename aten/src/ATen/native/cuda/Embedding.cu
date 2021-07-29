@@ -13,6 +13,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/iterator/constant_iterator.h>
 #include <thrust/unique.h>
+#include <thrust/device_ptr.h>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -332,6 +333,9 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       sorted_indices, count, num_weights, padding_idx);
 }
 
+template<typename index_t>
+int embedding_renorm_cuda_unique_copy(Tensor &indices_contig, Tensor &unique_indices);
+
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
                                 double max_norm, double norm_type) {
   auto self_arg = TensorArg(self, "self", 1);
@@ -340,20 +344,14 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cuda_", [&] () {
-    using device_ptr = thrust::device_ptr<index_t>;
 
     auto num_indices = indices.numel();
     auto indices_contig = std::get<0>(indices.sort()).contiguous();
-    auto indices_data = device_ptr(indices_contig.data_ptr<index_t>());
-
     auto unique_indices = at::empty(indices.numel(), indices.options());
-    auto unique_data = device_ptr(unique_indices.data_ptr<index_t>());
-    auto end = thrust::unique_copy(policy, indices_data, indices_data + num_indices, unique_data);
-    auto num_unique_indices = static_cast<int>(end - unique_data);
+
+    auto num_unique_indices = embedding_renorm_cuda_unique_copy<index_t>(indices_contig, unique_indices);
 
     dim3 grid(num_unique_indices);
     dim3 block(128);
