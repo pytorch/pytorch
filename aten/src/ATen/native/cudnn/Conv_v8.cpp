@@ -644,20 +644,9 @@ void raw_cudnn_convolution_add_relu_out(
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);
   } else {
-   raw_cudnn_convolution_add_relu_out_v7(
-   output,
-   input,
-   weight,
-   z,
-   alpha,
-   bias,
-   stride,
-   padding,
-   dilation,
-   groups,
-   benchmark,
-   deterministic,
-   allow_tf32);
+   raw_cudnn_convolution_add_relu_out_v7(output, input, weight, z,
+                                         alpha, bias, stride, padding, dilation,
+                                         groups, benchmark, deterministic, allow_tf32);
   }
 }
 
