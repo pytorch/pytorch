@@ -1,9 +1,9 @@
 import inspect
 import sys
 
-from .dispatcher import Dispatcher, MethodDispatcher, ambiguity_warn
+from .dispatcher import Dispatcher, MethodDispatcher
 
-global_namespace = dict()
+global_namespace = dict()  # type: ignore[var-annotated]
 
 
 def dispatch(*types, **kwargs):
@@ -46,8 +46,8 @@ def dispatch(*types, **kwargs):
         name = func.__name__
 
         if ismethod(func):
-            dispatcher = inspect.currentframe().f_back.f_locals.get(
-                name,
+            dispatcher = inspect.currentframe().f_back.f_locals.get(  # type: ignore[union-attr]
+                name,  # type: ignore[union-attr]
                 MethodDispatcher(name),
             )
         else:
@@ -72,5 +72,5 @@ def ismethod(func):
         if sys.version_info.major < 3:
             spec = inspect.getargspec(func)
         else:
-            spec = inspect.getfullargspec(func)
+            spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
         return spec and spec.args and spec.args[0] == 'self'

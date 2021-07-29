@@ -100,9 +100,7 @@ def edge(a, b, tie_breaker=hash):
     """
     # A either supercedes B and B does not supercede A or if B does then call
     # tie_breaker
-    return supercedes(a, b) and (
-            not supercedes(b, a) or tie_breaker(a) > tie_breaker(b)
-    )
+    return supercedes(a, b) and (not supercedes(b, a) or tie_breaker(a) > tie_breaker(b))
 
 
 def ordering(signatures):
@@ -115,5 +113,5 @@ def ordering(signatures):
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = dict((k, [b for a, b in v]) for k, v in edges.items())
+    edges = dict((k, [b for a, b in v]) for k, v in edges.items())  # type: ignore[assignment, attr-defined]
     return _toposort(edges)

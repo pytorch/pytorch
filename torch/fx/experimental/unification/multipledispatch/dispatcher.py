@@ -137,7 +137,7 @@ class Dispatcher(object):
         [3, 2, 1]
         """
         def _df(func):
-            self.add(types, func, **kwargs)
+            self.add(types, func, **kwargs)   # type: ignore[call-arg]
             return func
         return _df
 
@@ -270,9 +270,7 @@ class Dispatcher(object):
             raise NotImplementedError(
                 "Matching functions for "
                 "%s: <%s> found, but none completed successfully" % (
-                    self.name, str_signature(types),
-                ),
-                )
+                    self.name, str_signature(types),),)
 
     def __str__(self):
         return "<dispatched %s>" % self.name

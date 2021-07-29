@@ -5,14 +5,14 @@ from .utils import typename
 
 class VariadicSignatureType(type):
     # checking if subclass is a subclass of self
-    def __subclasscheck__(self, subclass):
+    def __subclasscheck__(cls, subclass):
         other_type = (subclass.variadic_type if isvariadic(subclass)
                       else (subclass,))
-        return subclass is self or all(
-            issubclass(other, self.variadic_type) for other in other_type
+        return subclass is cls or all(
+            issubclass(other, cls.variadic_type) for other in other_type  # type: ignore[attr-defined]
         )
 
-    def __eq__(self, other):
+    def __eq__(cls, other):
         """
         Return True if other has the same variadic type
         Parameters
@@ -25,10 +25,10 @@ class VariadicSignatureType(type):
             Whether or not `other` is equal to `self`
         """
         return (isvariadic(other) and
-                set(self.variadic_type) == set(other.variadic_type))
+                set(cls.variadic_type) == set(other.variadic_type))  # type: ignore[attr-defined]
 
-    def __hash__(self):
-        return hash((type(self), frozenset(self.variadic_type)))
+    def __hash__(cls):
+        return hash((type(cls), frozenset(cls.variadic_type)))  # type: ignore[attr-defined]
 
 
 def isvariadic(obj):
@@ -56,7 +56,7 @@ class VariadicSignatureMeta(type):
     generate a new type for Variadic signatures. See the Variadic class for
     examples of how this behaves.
     """
-    def __getitem__(self, variadic_type):
+    def __getitem__(cls, variadic_type):
         if not (isinstance(variadic_type, (type, tuple)) or type(variadic_type)):
             raise ValueError("Variadic types must be type or tuple of types"
                              " (Variadic[int] or Variadic[(int, float)]")

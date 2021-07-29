@@ -70,7 +70,7 @@ def reverse_dict(d):
         dict order. So this function output order should be considered
         as undeterministic.
     """
-    result = OrderedDict()
+    result = OrderedDict()  # type: ignore[var-annotated]
     for key in d:
         for val in d[key]:
             result[val] = result.get(val, tuple()) + (key, )
@@ -91,7 +91,7 @@ def groupby(func, seq):
         ``countby``
     """
 
-    d = OrderedDict()
+    d = OrderedDict()  # type: ignore[var-annotated]
     for item in seq:
         key = func(item)
         if key not in d:
