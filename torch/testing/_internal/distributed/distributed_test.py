@@ -4248,7 +4248,11 @@ class DistributedTest:
                 group_id: object, bucket: dist.GradBucket
             ) -> torch._C.Future:
                 tensors = [bucket.get_tensor() / world_size]
-                return group_id.allreduce(tensors).get_future()
+                return (
+                    group_id.allreduce(tensors)
+                    .get_future()
+                    .then(lambda fut: fut.value()[0])
+                )
 
             self._test_accumulate_gradients_no_sync(
                 num_iters=4, ddp_comm_hook=allreduce_hook

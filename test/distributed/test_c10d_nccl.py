@@ -1538,7 +1538,11 @@ class DistributedDataParallelTest(
 
         def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
             tensors = [bucket.get_tensor() / self.world_size]
-            return process_group.allreduce(tensors).get_future()
+            return (
+                process_group.allreduce(tensors)
+                .get_future()
+                .then(lambda fut: fut.value()[0])
+            )
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(
