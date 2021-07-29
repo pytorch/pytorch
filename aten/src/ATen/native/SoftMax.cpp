@@ -22,6 +22,10 @@ TORCH_META_FUNC(_log_softmax) (
   auto input_ = input.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, input.dim());
 
+  TensorOptions options(input_.options());
+  set_output(
+      input_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+
   if (input_.dim() == 0) {
     input_ = input_.view(1);
   }
@@ -29,9 +33,6 @@ TORCH_META_FUNC(_log_softmax) (
   TORCH_CHECK(
       dim_ >= 0 && dim_ < input_.dim(),
       "dim must be non-negative and less than input dimensions");
-
-  TensorOptions options(input_.options());
-  set_output(input_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 }
 

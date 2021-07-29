@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
@@ -380,7 +381,8 @@ void cuda_sparse_coo_softmax(
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cuda(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cuda::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
       auto new_values = softmax_cuda(values, dim - sparse_dim + 1, false);
