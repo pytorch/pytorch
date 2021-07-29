@@ -9,13 +9,13 @@ TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_si
   int ndim = input.ndimension();
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(input.size(i) > 0,
-        "adaptive_max_pool2d(): Expected input to have non-empty spatial dimensions, "
+        "adaptive_max_pool2d(): Expected input to have non-zero dimensions for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i,
         " being empty");
   }
 
   TORCH_CHECK(ndim == 3 || ndim == 4,
-    "adaptive_max_pool2d(): Expected non-empty 3D or 4D tensor with optional 0-dim batch size, but got: ",
+    "adaptive_max_pool2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got: ",
     input.sizes());
 
   TORCH_CHECK(output_size.size() == 2,
@@ -51,11 +51,11 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
 (const Tensor& grad_output, const Tensor& input, const Tensor& indices) {
   int64_t ndim = grad_output.ndimension();
   TORCH_CHECK(ndim == 3 || ndim == 4,
-    "adaptive_max_pooling2d_backward(): Expected grad_output to have non-empty dimension with optional 0-dim batch size, but got: ",
+    "adaptive_max_pooling2d_backward(): Expected 3D or 4D grad_output, but got: ",
     grad_output.sizes());
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(grad_output.size(i) > 0,
-      "adaptive_max_pooling2d_backward(): expected grad_output to have non-empty spatial dimensions, "
+      "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero dimensions for non-batch dimensions, "
       "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i,
       " being empty");
   }
