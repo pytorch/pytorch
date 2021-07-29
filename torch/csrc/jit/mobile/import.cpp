@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -169,7 +170,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
+    for (const auto i : c10::irange(ndict)) {
       std::stringstream name;
       name << it->key();
       cls->addOrCheckAttribute(name.str(), it->key().type());
@@ -323,7 +324,7 @@ void BytecodeDeserializer::parseMethods(
   }
 
   // Process all methods in this mobile module.
-  for (size_t i = method_i_start; i < vals.size(); ++i) {
+  for (const auto i : c10::irange(method_i_start, vals.size())) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -380,8 +381,8 @@ void BytecodeDeserializer::parseMethods(
           "The numbers of instructions and debug handles strings do not match.");
     }
 
-    for (size_t i = 0; i < ins_list.size(); ++i) {
-      auto ins_item = ins_list[i].toTuple()->elements();
+    for (const auto j : c10::irange(ins_list.size())) {
+      auto ins_item = ins_list[j].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -390,7 +391,7 @@ void BytecodeDeserializer::parseMethods(
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       if (has_debug_handles) {
-        int64_t debug_handle = debug_handles_list[i].toInt();
+        int64_t debug_handle = debug_handles_list[j].toInt();
         function->append_instruction(op_code, X, N, debug_handle);
       } else {
         function->append_instruction(op_code, X, N);
