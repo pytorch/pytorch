@@ -3571,12 +3571,12 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
 
     // L_grad = L^{-H} X^H
     auto L_grad = std::get<0>(at::triangular_solve(
-      X.transpose(-2, -1).conj(),
-      L.transpose(-2, -1).conj(),
-      /*upper=*/true,
-      /*transpose=*/false,
+      X.transpose(-2, -1),
+      L,
+      /*upper=*/false,
+      /*transpose=*/true,
       /*unitriangular=*/true
-    ));
+    )).conj();
 
     // LU_data_grad = L_grad * 1_L + U_grad * 1_U
     LU_data_grad = L_grad.tril(-1) + U_grad.triu();
