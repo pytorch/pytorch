@@ -103,12 +103,8 @@ class _SpectralNorm(Module):
             if self.training:
                 self._power_method(weight_mat, self.n_power_iterations)
             # See above on why we need to clone
-            if self.n_power_iterations > 0:
-                u = self._u.clone(memory_format=torch.contiguous_format)
-                v = self._v.clone(memory_format=torch.contiguous_format)
-            else:
-                u = self._u
-                v = self._v
+            u = self._u.clone(memory_format=torch.contiguous_format)
+            v = self._v.clone(memory_format=torch.contiguous_format)
             # The proper way of computing this should be through F.bilinear, but
             # it seems to have some efficiency issues:
             # https://github.com/pytorch/pytorch/issues/58093
