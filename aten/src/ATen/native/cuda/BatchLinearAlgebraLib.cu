@@ -493,28 +493,21 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     VT_working_copy.transpose_(-2, -1);
   }
 
+  // heuristic for using `gesvdjBatched` over `gesvdj`
+  if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
+    apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
+  } else {
+    apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
+  }
+
   // gesvdjBatched fails with illegal memory access and
   // gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
   // if matrices for U and VT are not allocated
   // even though the result of computation is not used we need to allocate this memory
-  Tensor U_tmp = U_working_copy;
-  Tensor VT_tmp = VT_working_copy;
+  // now resize the temporary tensors to 0
   if (!compute_uv) {
-    auto sizes = self.sizes().vec();
-    auto m = self.size(-2);
-    auto n = self.size(-1);
-    sizes[self.dim() - 1] = m;
-    U_tmp = at::empty(sizes, U_working_copy.options());
-    sizes[self.dim() - 2] = n;
-    sizes[self.dim() - 1] = some ? std::min(m, n) : n;
-    VT_tmp = at::empty(sizes, VT_working_copy.options());
-  }
-
-  // heuristic for using `gesvdjBatched` over `gesvdj`
-  if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
-    apply_svd_lib_gesvdjBatched(self, U_tmp, S_working_copy, VT_tmp, infos, compute_uv);
-  } else {
-    apply_svd_lib_gesvdj(self, U_tmp, S_working_copy, VT_tmp, infos, compute_uv, some);
+    U_working_copy.resize_({0});
+    VT_working_copy.resize_({0});
   }
 
   // A device-host sync will be performed.

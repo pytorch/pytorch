@@ -393,7 +393,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   u_strides[input.dim() - 1] = m;
   u_strides[input.dim() - 2] = 1;
 
-  Tensor U_empty = compute_uv
+  // cuSOLVER's gesvdjBatched fails with illegal memory access and
+  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
+  // if matrices for U and VT are not allocated
+  // even though the result of computation is not used we need to allocate this memory
+
+  Tensor U_empty = (compute_uv || svd_use_cusolver)
       ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));
 
@@ -405,7 +410,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
     vt_strides[input.dim() - 2] = 1;
   }
-  Tensor VT_empty = compute_uv
+  Tensor VT_empty = (compute_uv || svd_use_cusolver)
       ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
       : at::empty({0}, input.options().device(usvt_device));
 
