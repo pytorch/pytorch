@@ -3,6 +3,7 @@
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/ConvShared.h>
+#include <ATen/native/Resize.h>
 
 // NOTE [cuDNN API version]
 //
@@ -572,9 +573,14 @@ Tensor& cudnn_convolution_add_relu_out(
     int64_t groups,
     Tensor& output_t
     ) {
-  if (output_t.numel() == 0) {
-    return output_t;
-  }
+  at::native::resize_output(
+      output_t,
+      conv_output_size(
+        input_t.sizes(),
+        weight_t.sizes(),
+        padding, stride, dilation
+      )
+  );
 
   raw_cudnn_convolution_add_relu_out(
       output_t,
