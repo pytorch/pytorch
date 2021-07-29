@@ -741,6 +741,16 @@ class TestSerialization(TestCase, SerializationMixin):
             torch.save(model, path)
             torch.load(path)
 
+    def test_meta_serialization(self):
+        big_model = torch.nn.Conv2d(20000, 320000, kernel_size=3, device='meta')
+
+        with BytesIOContext() as f:
+            torch.save(big_model, f)
+            f.seek(0)
+            state = torch.load(f)
+
+        self.assertEqual(state.weight.size(), big_model.weight.size())
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super(TestSerialization, self).run(*args, **kwargs)
