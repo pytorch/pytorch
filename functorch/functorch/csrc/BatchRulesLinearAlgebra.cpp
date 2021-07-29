@@ -117,7 +117,10 @@ Tensor linear_decomp(
   if (bias_opt) {
     // NB: It's too much work to figure out how to actually fuse the bias so
     // we're not going to.
-    result.add_(*bias_opt);
+    // TODO: if the result isn't batched but bias is, then we need to do the following.
+    // Otherwise, it can just be in-place. We should write a more nuanced
+    // decomposition rule
+    return result.add(*bias_opt);
   }
   return result;
 }
