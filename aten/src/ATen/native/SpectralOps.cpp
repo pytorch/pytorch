@@ -625,6 +625,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
             const optional<int64_t> win_lengthOpt, const c10::optional<Tensor>& window_opt,
             const bool normalized, const optional<bool> onesidedOpt,
             const bool return_complex) {
+  TORCH_CHECK(return_complex, "stft requires return_complex=True")
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
@@ -639,8 +640,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
       SS << "None"; \
     } \
     SS << ", normalized=" << normalized << ", onesided="; \
-    write_opt(SS, onesidedOpt) << ", return_complex="; \
-    SS <<  return_complex << ") "
+    write_opt(SS, onesidedOpt) << ") "
 
   TORCH_CHECK(!window.defined() || window.device() == self.device(),
               "stft input and window must be on the same device but got self on ",
@@ -650,7 +650,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
 
-  TORCH_CHECK(return_complex, "stft requires return_complex=True")
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
