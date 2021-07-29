@@ -149,7 +149,9 @@ class _ObserverBase(ObserverBase):
     # Version 3
     #   for HistogramObserver only, changed the shape of uninitialized
     #   min_val and max_val buffers from torch.Size([0]) to torch.Size([])
-    _version = 2
+    #   for PerChannelObservers, changed the name of the buffers from min_vals
+    #   to min_val and from max_vals to max_val.
+    _version = 3
 
     eps: torch.Tensor
 
@@ -608,7 +610,6 @@ class PerChannelMinMaxObserver(_ObserverBase):
     """
     min_val: torch.Tensor
     max_val: torch.Tensor
-    _version = 3
 
     def __init__(
         self,
@@ -692,8 +693,12 @@ class PerChannelMinMaxObserver(_ObserverBase):
         version = local_metadata.get("version", None)
         if version is None or version < 3:
             local_state = ["min_vals", "max_vals"]
+            expected_min_name = "min_vals"
+            expected_max_name = "max_vals"
         else:
             local_state = ["min_val", "max_val"]
+            expected_min_name = "min_val"
+            expected_max_name = "max_val"
         for name in local_state:
             key = prefix + name
             if key in state_dict:
@@ -702,17 +707,21 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 # of size N into uninitialized buffers of size 0. The
                 # buffers are resized here, and the values are copied in
                 # the default state_dict loading code of the parent.
-                if name == "min_val" or name == "min_vals":
+                if name == expected_min_name:
                     self.min_val.resize_(val.shape)
-                else:
+                elif name == expected_max_name:
                     self.max_val.resize_(val.shape)
+                else:
+                    warnings.warn("Observer load_from_state_dict got unexpected name ", name)
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
-                    if name == "min_val" or name == "min_vals":
+                    if name == expected_min_name:
                         self.min_val.copy_(val)
-                    else:
+                    elif name == expected_max_name:
                         self.max_val.copy_(val)
+                    else:
+                        warnings.warn("Observer load_from_state_dict got unexpected name ", name)
             elif strict:
                 missing_keys.append(key)
 
