@@ -7465,17 +7465,17 @@ else:
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             min_val, max_val = torch.aminmax(t)
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val = torch.aminmax(t, dim=0)[0]
+            min_val = torch.aminmax(t, dim=0).min
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            max_val = torch.aminmax(t, dim=0)[1]
+            max_val = torch.aminmax(t, dim=0).max
         # Test aminmax() with a multi-element tensor
         x = torch.tensor([(1 + 1j), (2 + 3j)], device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             min_val, max_val = torch.aminmax(x)
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            min_val = torch.aminmax(x, dim=0)[0]
+            min_val = torch.aminmax(x, dim=0).min
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
-            max_val = torch.aminmax(x, dim=0)[1]
+            max_val = torch.aminmax(x, dim=0).max
 
         # Tests clamp variants with complex inputs
         # Note: whether PyTorch should support clamp on complex

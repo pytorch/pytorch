@@ -672,15 +672,15 @@ class TestReductions(TestCase):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
             if dim is None:
-                return torch.aminmax(x)[0]
+                return torch.aminmax(x).min
             else:
-                return torch.aminmax(x, dim, keepdims)[0]
+                return torch.aminmax(x, dim=dim, keepdim=keepdims).min
 
         def _amax_wrapper(x, dim=None, keepdims=False):
             if dim is None:
-                return torch.aminmax(x)[1]
+                return torch.aminmax(x).max
             else:
-                return torch.aminmax(x, dim, keepdims)[1]
+                return torch.aminmax(x, dim=dim, keepdim=keepdims).max
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)

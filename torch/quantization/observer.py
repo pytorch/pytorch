@@ -660,9 +660,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch.aminmax(y, 1)
+            min_vals, max_vals = torch.aminmax(y, dim=1)
         else:
-            min_vals_cur, max_vals_cur = torch.aminmax(y, 1)
+            min_vals_cur, max_vals_cur = torch.aminmax(y, dim=1)
             min_vals = torch.min(min_vals_cur, min_vals)
             max_vals = torch.max(max_vals_cur, max_vals)
         self.min_vals.resize_(min_vals.shape)
@@ -816,9 +816,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         y = x.permute(new_axis_list)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch.aminmax(y, 1)
+            min_vals, max_vals = torch.aminmax(y, dim=1)
         else:
-            min_vals_cur, max_vals_cur = torch.aminmax(y, 1)
+            min_vals_cur, max_vals_cur = torch.aminmax(y, dim=1)
             min_vals = min_vals + self.averaging_constant * (min_vals_cur - min_vals)
             max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
         self.min_vals.resize_(min_vals.shape)
