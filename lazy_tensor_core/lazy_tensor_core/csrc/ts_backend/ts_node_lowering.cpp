@@ -44,8 +44,6 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-using namespace lazy_tensors;
-
 class TSNodeLowering : public NodeLowering {
  public:
   TSNodeLowering(const std::string& name, ts_backend::TSLoweringContext* loctx)
@@ -60,12 +58,12 @@ class TSNodeLowering : public NodeLowering {
       return false;
     }
     LTC_CHECK_EQ(node->num_outputs(), ops.size());
-    if (lazy_tensors::sys_util::GetEnvBool("LTC_IR_TS_SHAPE_TYPES", false)) {
+    if (!lazy_tensors::sys_util::GetEnvBool("LTC_IR_TS_SHAPE_TYPES", false)) {
       for (size_t i = 0; i < ops.size(); ++i) {
         loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
       }
     } else {
-      auto type_transformer = [](const Shape& shape, const at::TypePtr& type) {
+      auto type_transformer = [](const lazy_tensors::Shape& shape, const at::TypePtr& type) {
         return type->expect<at::TensorType>()
             ->withScalarType(TensorTypeFromLtcType(shape.element_type()))
             ->withSizesStrides(shape.as_sizes(), ComputeShapeStrides(shape));
