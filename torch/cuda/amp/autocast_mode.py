@@ -11,10 +11,7 @@ from torch._six import string_classes
 class autocast(torch.autocast):
     r"""
     See :class:`torch.autocast`.
-    :class:`torch.cuda.amp.autocast` simply sets device='cuda'
-    Args:
-        enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
-        fast_dtype(torch_dtype, optional, default=torch.float16):  Whether to use torch.float16 or torch.bfloat16
+    ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
     """
     def __init__(self, enabled=True, fast_dtype=torch.float16):
         super().__init__("cuda", enabled=enabled, fast_dtype=fast_dtype)
