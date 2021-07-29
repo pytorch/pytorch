@@ -3466,9 +3466,8 @@ Tensor i1e_backward(
   });
 }
 
-// lu_solve is a map (LU, B) -> (PLU)^{-1} B,
-// where LU = L + U - I and P is a permutation matrix.
-// Note that the map is not differentiable wrt P!
+// lu_solve is a map (LU, P, B) -> (PLU)^{-1} B,
+// where LU = L + U - I and P is a permutation matrix, and is fixed.
 //
 // Let 1 = ones_like(LU),
 // 1_U = 1.triu(),
@@ -3554,12 +3553,12 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
 
     // X <- X U^{-1}
     X = std::get<0>(at::triangular_solve(
-      X.transpose(-2, -1).conj(),
-      U.transpose(-2, -1).conj(),
+      X.transpose(-2, -1),
+      U,
       /*upper=*/false,
-      /*transpose=*/false,
+      /*transpose=*/true,
       /*unitriangular=*/false
-    )).transpose(-2, -1).conj();
+    )).transpose(-2, -1);
 
     // U_grad = [U^{-1} X]^H
     auto U_grad = std::get<0>(at::triangular_solve(
