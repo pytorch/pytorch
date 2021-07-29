@@ -11,8 +11,8 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
-TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
+TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
 
 BUILD_DIR="build"
@@ -193,7 +193,7 @@ test_aten() {
       # Rename the build folder when running test to ensure it
       # is not depended on the folder
       mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_TEST_PATH"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
     else
       echo "Running test with the build folder"
       TEST_BASE_DIR="$BUILD_BIN_DIR"
@@ -202,11 +202,15 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch* "$TEST_BASE_DIR"
+    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
+      SUDO=sudo
+    fi
+
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
     ls "$TEST_BASE_DIR"
     aten/tools/run_tests.sh "$TEST_BASE_DIR"
@@ -248,12 +252,12 @@ test_libtorch() {
       # Rename the build folder when running test to ensure it
       # is not depended on the folder
       mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_BIN_PATH"
-      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libjitbackend_test.so "$TEST_BASE_DIR"
-      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch_cpu.so "$TEST_BASE_DIR"
-      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libtorch.so "$TEST_BASE_DIR"
-      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10.so "$TEST_BASE_DIR"
-      ${SUDO} ln -sf "$TORCH_LIB_PATH"/libbackend_with_compiler.so "$TEST_BASE_DIR"
+      TEST_BASE_DIR="$TORCH_BIN_DIR"
+      ${SUDO} ln -sf "$TORCH_LIB_DIR"/libjitbackend_test.so "$TEST_BASE_DIR"
+      ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch_cpu.so "$TEST_BASE_DIR"
+      ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch.so "$TEST_BASE_DIR"
+      ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10.so "$TEST_BASE_DIR"
+      ${SUDO} ln -sf "$TORCH_LIB_DIR"/libbackend_with_compiler.so "$TEST_BASE_DIR"
     else
       echo "Testing libtorch with the build folder"
       TEST_BASE_DIR="$BUILD_BIN_DIR"
