@@ -136,7 +136,7 @@ void _calculate_moving_average(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
   if (per_row_fq) {
-    std::tie(x_min, x_max) = at::_aminmax(x, 1);
+    std::tie(x_min, x_max) = at::aminmax(x, 1);
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     int num_threads = std::min(size, (int64_t)512);
@@ -153,7 +153,7 @@ void _calculate_moving_average(
         size);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    std::tie(x_min, x_max) = at::_aminmax(x);
+    std::tie(x_min, x_max) = at::aminmax(x);
     float* x_min_data = x_min.data_ptr<float>();
     float* x_max_data = x_max.data_ptr<float>();
     // Moving Average Min/Max observer for activations

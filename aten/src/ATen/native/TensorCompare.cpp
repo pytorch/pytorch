@@ -483,6 +483,9 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
 
 // DEPRECATED: Use at::aminmax instead
 std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_WARN_ONCE(
+      "torch._aminmax(...) is deprecated and will be removed in a future PyTorch release."
+      "Use torch.aminmax(...) instead.");
   return at::aminmax(self, dim, keepdim);
 }
 

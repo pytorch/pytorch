@@ -98,7 +98,7 @@ std::pair<double, double> select_outer_bin_edges(const Tensor& input, c10::optio
         rightmost_edge = range.value()[1];
     } else if (input.numel() > 0) {
         // non-empty input
-        auto extrema = _aminmax(input);
+        auto extrema = at::aminmax(input);
         leftmost_edge = std::get<0>(extrema).item<double>();
         rightmost_edge = std::get<1>(extrema).item<double>();
     }
@@ -127,7 +127,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double rightmost_edge = max.to<double>();
 
     if (leftmost_edge == rightmost_edge) {
-        auto extrema = _aminmax(input);
+        auto extrema = at::aminmax(input);
         leftmost_edge = std::get<0>(extrema).item<double>();
         rightmost_edge = std::get<1>(extrema).item<double>();
     }
