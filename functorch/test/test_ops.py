@@ -270,7 +270,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
-            'nn.functional.linear',
             'nn.functional.pad.circular',
             'broadcast_to',
             'dsplit',
@@ -314,7 +313,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vjpvmap(self, device, dtype, op):
         op_skip = {
-            'nn.functional.linear',
             'nn.functional.pad.circular',
             '__getitem__',
             '__rpow__',
