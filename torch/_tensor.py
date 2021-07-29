@@ -445,13 +445,8 @@ class Tensor(torch._C._TensorBase):
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
              center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
-             onesided: Optional[bool] = None, return_complex: Optional[bool] = True):
-        r"""See :func:`torch.stft`
-
-        .. warning::
-          This function changed signature at version 0.4.1. Calling with
-          the previous signature may cause error or return incorrect result.
-        """
+             onesided: Optional[bool] = None, return_complex: bool = True):
+        r"""See :func:`torch.stft`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.stft, (self,), self, n_fft, hop_length=hop_length,
