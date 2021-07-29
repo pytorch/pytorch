@@ -160,6 +160,23 @@ ReplicatedObj InterpreterSession::create_movable(Obj obj) {
   TORCH_DEPLOY_SAFE_CATCH_RETHROW
 }
 
+using dlopen_t = void* (*)(const char*, int);
+
+// ASAN overrides dlopen and errors when it sees the RTLD_DEEPBIND flags because
+// it thinks that the library being loaded will not link against it overrides
+// for things like malloc/free. However, our specially crafted library doesn't
+// have any DT_NEEDED entries -- all undefined symbols will be resolved from the
+// processes link map. So it is actually safe to use RTLD_DEEPBIND with asan. We
+// have to get around its check though, so we do it by finding the real dlopen
+// function.
+static dlopen_t find_real_dlopen() {
+  void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  TORCH_INTERNAL_ASSERT(libc);
+  auto dlopen_ = (dlopen_t)dlsym(libc, "dlopen");
+  TORCH_INTERNAL_ASSERT(libc);
+  return dlopen_;
+}
+
 Interpreter::Interpreter(InterpreterManager* manager)
     : handle_(nullptr), manager_(manager) {
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -175,7 +192,15 @@ Interpreter::Interpreter(InterpreterManager* manager)
   if (custom_loader_) {
     flags |= RTLD_DEEPBIND;
   }
+  void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
+  TORCH_INTERNAL_ASSERT(libc);
+#ifdef FBCODE_CAFFE2
+  static dlopen_t dlopen_ = find_real_dlopen();
+  handle_ = dlopen_(library_name, flags);
+#else
   handle_ = dlopen(library_name, flags);
+#endif
+
   if (!handle_) {
     throw std::runtime_error(dlerror());
   }
