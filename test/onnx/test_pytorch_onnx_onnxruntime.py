@@ -9507,15 +9507,16 @@ class TestONNXRuntime(unittest.TestCase):
 
         register_custom_op_symbolic("custom_namespace::custom_add", invalid_symbolic, 9)
 
-        x = torch.randn(2, 3, 4, requires_grad=False)
-        y = torch.randn(2, 3, 4, requires_grad=False)
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(2, 3, 4)
 
         test_model = CustomAddModule()
         f = io.BytesIO()
 
         with self.assertRaises(RuntimeError) as cm:
             torch.onnx.export(test_model, (x, y), f)
-        assert len(f.getvalue()) > 0, "ONNX graph was not generated."
+
+        self.assertTrue(f.getvalue(), "ONNX graph was not generated")
 
 
 def make_test(name, base, layer, bidirectional, initial_state,

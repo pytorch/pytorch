@@ -743,8 +743,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             else:
                 raise RuntimeError("Unknown export type")
 
-            # Only run checker if we are using ONNX export type and
-            # large model format export in not enabled.
+            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
+            # we can skip this check.
             # If large model format export is enabled, proto will only contain data location instead of
             # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
             # string in memory.
