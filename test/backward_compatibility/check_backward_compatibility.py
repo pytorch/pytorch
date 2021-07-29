@@ -112,6 +112,7 @@ allow_list = [
     ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
     ("aten::_cumsum", datetime.date(2021, 8, 31)),
     ("aten::_cumprod", datetime.date(2021, 8, 31)),
+    ("aten::stft", datetime.date(2021, 10, 31)),
 ]
 
 def allow_listed(schema, allow_list):
