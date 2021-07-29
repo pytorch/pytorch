@@ -9,14 +9,10 @@ from tools.linter.lint import Linter
 class Shellcheck(Linter):
     name = "shellcheck"
     exe = shutil.which(name)
-    options = { **Linter.options, "glob": ["*.sh"] }
+    options = argparse.Namespace(paths=["."], glob=["*.sh"], regex=[])
 
     def build_parser(self, parser):
         return parser
 
     async def run(self, files, options=None):
-        return await run_cmd([
-            self.exe,
-            "--external-sources",
-            *files
-        ])
+        return await run_cmd([self.exe, "--external-sources", *files])

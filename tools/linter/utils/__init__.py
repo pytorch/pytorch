@@ -3,6 +3,7 @@ import re
 import asyncio
 import shlex
 import os
+import sys
 from argparse import Action
 from typing import List
 
@@ -29,9 +30,10 @@ class CommandResult:
     def __repr__(self) -> str:
         return (
             f"returncode: {self.returncode}\n"
-            + f"stdout: {self.stdout}\n"
-            + f"stderr: {self.stderr}"
+            + f"stdout:\n{indent(self.stdout, 4)}\n"
+            + f"stderr:\n{indent(self.stderr, 4)}"
         )
+
 
 class ProgressMeter:
     def __init__(
@@ -101,9 +103,7 @@ class ProgressMeter:
         self._flush()
 
     def print(self, msg: str) -> None:
-        if QUIET:
-            return
-        elif self.disable_progress_bar:
+        if self.disable_progress_bar:
             print(msg)
         else:
             self._write(
@@ -122,11 +122,14 @@ class Glob2RegexAction(Action):
         super().__init__(option_strings, dest, **kwargs)
 
     def __call__(self, parser, namespace, value, option_string):
-        setattr(namespace, self.dest, getattr(namespace, self.dest, []) + [glob2regex(value)])
+        setattr(
+            namespace,
+            self.dest,
+            getattr(namespace, self.dest, []) + [glob2regex(value)],
+        )
 
 
-# TODO check = False
-async def run_cmd(cmd: List[str], on_completed=None, on_completed_args=[]):
+async def run_cmd(cmd: List[str], on_completed=None, on_completed_args=None):
     proc = await asyncio.create_subprocess_shell(
         " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
         stdout=asyncio.subprocess.PIPE,
@@ -139,6 +142,8 @@ async def run_cmd(cmd: List[str], on_completed=None, on_completed_args=[]):
         stderr=output[1].decode("utf-8").strip(),
     )
     if on_completed:
+        if not on_completed_args:
+            on_completed_args = []
         on_completed(result, *on_completed_args)
     return result
 
@@ -183,7 +188,7 @@ def kebab2snake(s: str) -> str:
 
 
 def kebab2camel(s: str) -> str:
-    return "".join([ w.title() for w in s.split("-") ])
+    return "".join([w.title() for w in s.split("-")])
 
 
 class Color:
@@ -194,3 +199,8 @@ class Color:
 
 def color(s: str, color: Color) -> str:
     return f"{color}{s}{Color.reset}"
+
+
+def indent(text, amt):
+    padding = amt * " "
+    return "".join(padding + line for line in text.splitlines(True))

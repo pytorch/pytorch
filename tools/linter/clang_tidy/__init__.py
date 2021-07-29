@@ -8,8 +8,8 @@ from typing import List
 from tools.linter.lint import Linter
 from tools.linter.utils import CommandResult
 from tools.linter.clang_tidy.run import run
-from tools.linter.install.clang_tidy import INSTALLATION_PATH
 from tools.linter.clang_tidy.generate_build_files import generate_build_files
+from tools.linter.install.clang_tidy import INSTALLATION_PATH
 
 
 def clang_search_dirs() -> List[str]:
@@ -51,10 +51,9 @@ def clang_search_dirs() -> List[str]:
 class ClangTidy(Linter):
     name = "clang-tidy"
     exe = INSTALLATION_PATH
-    options = {
-        **Linter.options,
-        "glob": [
-            "*", # catch-all
+    options = argparse.Namespace(
+        # required options
+        glob=[
             # The negative filters below are to exclude files that include onnx_pb.h or
             # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
             # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
@@ -79,81 +78,97 @@ class ClangTidy(Linter):
             "-torch/csrc/deploy/interpreter/interpreter_impl.h",
             "-torch/csrc/deploy/interpreter/test_main.cpp",
         ],
-        "paths": ["torch/csrc/"],
-        "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
-        "clang-tidy-exe": exe,
-        "compile-commands-dir": "build",
-        "config-file": ".clang-tidy-oss",
-        "disable-progress-bar": False,
-    }
+        paths=["torch/csrc/"],
+        regex=[r"^.*\.c(c|pp)?$"],
+        # clang-tidy specific options
+        clang_tidy_exe=exe,
+        compile_commands_dir="build",
+        diff_file=None,
+        dry_run=None,
+        quiet=False,
+        config_file=".clang-tidy-oss",
+        print_include_paths=False,
+        include_dir=["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
+        suppress_diagnostics=False,
+        disable_progress_bar=False,
+        extra_args=[],
+    )
 
     def build_parser(self, parser):
         parser.add_argument(
             "-e",
             "--clang-tidy-exe",
-            default=self.options["clang-tidy-exe"],
+            default=self.options.clang_tidy_exe,
             help="Path to clang-tidy executable",
         )
         parser.add_argument(
             "-c",
             "--compile-commands-dir",
-            default=self.options["compile-commands-dir"],
+            default=self.options.compile_commands_dir,
             help="Path to the folder containing compile_commands.json",
         )
         parser.add_argument(
             "--diff-file",
+            default=self.options.diff_file,
             help="File containing diff to use for determining files to lint and line filters",
         )
         parser.add_argument(
             "-n",
             "--dry-run",
+            default=self.options.dry_run,
             action="store_true",
             help="Only show the command to be executed, without running it",
         )
-        parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-        parser.add_argument("-q", "--quiet", action="store_true", help="Don't print output")
+        parser.add_argument(
+            "-q",
+            "--quiet",
+            action="store_true",
+            default=self.options.quiet,
+            help="Don't print output",
+        )
         parser.add_argument(
             "--config-file",
-            default=self.options["config-file"],
+            default=self.options.config_file,
             help="Path to a clang-tidy config file. Defaults to '.clang-tidy'.",
         )
         parser.add_argument(
             "--print-include-paths",
             action="store_true",
+            default=self.options.print_include_paths,
             help="Print the search paths used for include directives",
         )
         parser.add_argument(
             "-I",
             "--include-dir",
             action="append",
-            default=self.options["include-dir"],
+            default=self.options.include_dir,
             help="Add the specified directory to the search path for include files",
         )
         parser.add_argument(
             "-s",
             "--suppress-diagnostics",
             action="store_true",
+            default=self.options.suppress_diagnostics,
             help="Add NOLINT to suppress clang-tidy violations",
         )
         parser.add_argument(
             "--disable-progress-bar",
             action="store_true",
-            default=self.options["disable-progress-bar"],
+            default=self.options.disable_progress_bar,
             help="Disable the progress bar",
         )
-        # parser.add_argument(
-        #     "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
-        # )
+        parser.add_argument(
+            "--extra_args",
+            nargs="*",
+            help="Extra arguments to forward to clang-tidy",
+            default=self.options.extra_args,
+        )
         return parser
 
-    def run(self, options=None) -> CommandResult:
+    async def run(self, files, options=options) -> CommandResult:
         if not pathlib.Path("build").exists():
             generate_build_files()
 
-        # TODO handle option merging correctly
-        if options:
-            self.options.update(options)
+        result, _ = await run(files, options)
 
-        # result, _ = run(options)
-
-        print("ran clang-tidy")
+        return result
