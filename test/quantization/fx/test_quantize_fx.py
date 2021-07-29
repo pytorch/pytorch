@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -499,7 +498,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv1d,
                 conv1d_module_args,
                 (conv1d_input,),
-                ns.call_module(nnqr.Conv1d if is_reference else nnq.Conv1d),
+                ns.call_module(nn.Conv1d if is_reference else nnq.Conv1d),
                 None
             ),
             (
@@ -507,7 +506,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv2d,
                 conv2d_module_args,
                 (conv2d_input,),
-                ns.call_module(nnqr.Conv2d if is_reference else nnq.Conv2d),
+                ns.call_module(nn.Conv2d if is_reference else nnq.Conv2d),
                 None
             ),
             (
@@ -515,7 +514,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 Conv3d,
                 conv3d_module_args,
                 (conv3d_input,),
-                ns.call_module(nnqr.Conv3d if is_reference else nnq.Conv3d),
+                ns.call_module(nn.Conv3d if is_reference else nnq.Conv3d),
                 None
             ),
             (
@@ -657,7 +656,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 x = self.dequant(x)
                 return x
 
-        options = itertools.product([1, 2, 3], [True, False], self.static_quant_types)
+        # TODO: add 1d support
+        options = itertools.product([2, 3], [True, False], self.static_quant_types)
         for dim, has_relu, quant_type in options:
             expected_node = ns.call_module(
                 quantized_conv_relus[dim] if has_relu
@@ -3484,15 +3484,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            # 1: ns.call_module(nnq.BatchNorm1d),
-            2: ns.call_module(nnq.BatchNorm2d),
-            3: ns.call_module(nnq.BatchNorm3d),
+            False: {
+                # 1: ns.call_module(nnq.BatchNorm1d),
+                2: ns.call_module(nnq.BatchNorm2d),
+                3: ns.call_module(nnq.BatchNorm3d),
+            },
+            True: {
+                # 1: ns.call_module(nn.BatchNorm1d),
+                2: ns.call_module(nn.BatchNorm2d),
+                3: ns.call_module(nn.BatchNorm3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             model = self.checkGraphModeFxOp(
-                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[dim])
+                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
@@ -3523,17 +3530,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            2: ns.call_module(nniq.BNReLU2d),
-            3: ns.call_module(nniq.BNReLU3d),
+            True: {
+                2: ns.call_module(nni.BNReLU2d),
+                3: ns.call_module(nni.BNReLU3d),
+            },
+            False: {
+                2: ns.call_module(nniq.BNReLU2d),
+                3: ns.call_module(nniq.BNReLU3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False),
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 self.checkGraphModeFxOp(
                     instance, self.img_data_dict[dim], quant_type,
-                    quantized_nodes[dim])
+                    quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     def _test_activation_impl(
             self, float_module, float_op, quantized_module, quantized_op):
