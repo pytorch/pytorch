@@ -225,6 +225,9 @@ __global__ void renorm_kernel(
 
 } // anonymous namespace
 
+template<typename index_t>
+void embedding_dense_backward_cuda_scan(Tensor &sorted_indices, Tensor &count);
+
 Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indices,
                                int64_t num_weights, int64_t padding_idx,
                                bool scale_grad_by_freq) {
@@ -297,35 +300,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-      auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-      auto policy = thrust::cuda::par(allocator).on(stream);
-
-      // Compute an increasing sequence per unique item in sortedIndices:
-      // sorted: 2 5 5 5 7 7 8 9 9
-      //  count: 1 1 2 3 1 2 1 1 2
-      auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
-      auto count_data = device_ptr(count.data_ptr<index_t>());
-      thrust::inclusive_scan_by_key(
-        policy,
-        sorted_data,
-        sorted_data + num_indices,
-        thrust::make_constant_iterator(1),
-        count_data
-      );
-
-      // Take the maximum of each count per unique key in reverse:
-      // sorted: 2 5 5 5 7 7 8 9 9
-      //  count: 1 3 3 3 2 2 1 2 2
-      thrust::inclusive_scan_by_key(
-        policy,
-        thrust::make_reverse_iterator(sorted_data + num_indices),
-        thrust::make_reverse_iterator(sorted_data),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::make_reverse_iterator(count_data + num_indices),
-        thrust::equal_to<index_t>(),
-        thrust::maximum<index_t>()
-      );
+      embedding_dense_backward_cuda_scan<index_t>(sorted_indices, count);
     }
   });
 
