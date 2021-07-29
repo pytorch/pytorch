@@ -647,7 +647,7 @@ Tensor& subtract_(Tensor& self, const Scalar& other, const Scalar& alpha) {
 }
 
 Tensor rsub(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  return at::sub(other, self, alpha); // redispatch!
+  return at::sub(other.mul(alpha), self); // redispatch!
 }
 
 // TODO: Make this structured to undo the perf regression from native:: removal
