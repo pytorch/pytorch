@@ -2720,7 +2720,7 @@
 
 - func: minmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)
   device_check: NoCheck
-  structured: true
+  structured: True
   dispatch:
     CPU, CUDA: minmax_out
 
