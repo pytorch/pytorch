@@ -499,7 +499,7 @@ def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
         debug_mode(str or int): if "default" or 0, don't error or warn on synchronizing operations,
             if "warn" or 1, warn on synchronizing operations, if "error" or 2, error out synchronizing operations.
 
-    Note:
+    Warning:
         This is an experimental feature, and not all synchronizing operations will trigger warning or error. In
         particular, operations in torch.distributed and torch.sparse namespaces are not covered yet.
     """

@@ -500,6 +500,10 @@ class DeterministicGuard:
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
 
+# Context manager for setting cuda sync debug mode and reset it
+# to original value
+# we are not exposing it to the core because sync debug mode is
+# global and thus not thread safe
 class CudaSyncGuard:
     def __init__(self, sync_debug_mode):
         self.mode = sync_debug_mode

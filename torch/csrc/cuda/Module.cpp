@@ -441,23 +441,30 @@ PyObject * THCPModule_memorySnapshot(PyObject *_unused, PyObject *noargs)
 
 PyObject * THCPModule_cudaSetSyncDebugMode(PyObject * _unused, PyObject * arg){
   HANDLE_TH_ERRORS
+  TORCH_WARN_ONCE("Synchronization debug mode is a prototype feature and does not yet detect all " \
+  "synchronizing operations");
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_warn_on_synchronization");
-  int64_t level = THPUtils_unpackLong(arg);
-  TORCH_CHECK(level >=0 && level <=2, "invalid value of debug_mode, expected one of 0,1,2");
-  c10::cuda::SyncWarningLevel l = (level == 0) ? c10::cuda::SyncWarningLevel::L_DISABLED :
-  (level == 1) ? c10::cuda::SyncWarningLevel::L_WARN : c10::cuda::SyncWarningLevel::L_ERROR;
-  c10::cuda::warning_state().set_sync_warning_level(l);
+  int64_t debug_mode = THPUtils_unpackLong(arg);
+  TORCH_CHECK(debug_mode >=0 && debug_mode <=2, "invalid value of debug_mode, expected one of 0,1,2");
+  c10::cuda::SyncDebugMode l;
+  switch (debug_mode) {
+    case 0: l = c10::cuda::SyncDebugMode::L_DISABLED; break;
+    case 1: l = c10::cuda::SyncDebugMode::L_WARN; break;
+    case 2: l = c10::cuda::SyncDebugMode::L_ERROR; break;
+    default: l = c10::cuda::SyncDebugMode::L_DISABLED; break; // can't happen
+  }
+  c10::cuda::warning_state().set_sync_debug_mode(l);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 PyObject * THCPModule_cudaGetSyncDebugMode(PyObject *self, PyObject *noargs){
   HANDLE_TH_ERRORS
-  auto warning_level = c10::cuda::warning_state().get_sync_warning_level();
-  switch (warning_level){
-    case c10::cuda::SyncWarningLevel::L_DISABLED: return THPUtils_packInt32(0);
-    case c10::cuda::SyncWarningLevel::L_WARN: return THPUtils_packInt32(1);
-    case c10::cuda::SyncWarningLevel::L_ERROR: return THPUtils_packInt32(2);
+  auto debug_mode = c10::cuda::warning_state().get_sync_debug_mode();
+  switch (debug_mode){
+    case c10::cuda::SyncDebugMode::L_DISABLED: return THPUtils_packInt32(0);
+    case c10::cuda::SyncDebugMode::L_WARN: return THPUtils_packInt32(1);
+    case c10::cuda::SyncDebugMode::L_ERROR: return THPUtils_packInt32(2);
     default: return THPUtils_packInt32(-1); // can't happen
   }
   END_HANDLE_TH_ERRORS

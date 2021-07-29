@@ -37,20 +37,24 @@ C10_CUDA_API void device_synchronize();
 
 C10_CUDA_API void warn_or_error_on_sync();
 
-enum class SyncWarningLevel { L_DISABLED = 0, L_WARN, L_ERROR };
+enum class SyncDebugMode { L_DISABLED = 0, L_WARN, L_ERROR };
 
+//this is a holder for c10 global state (similar to at GlobalContext)
+//currently it's used to store cuda synchronization warning state,
+//but can be expanded to hold other related global state, e.g. to
+//record stream usage
 class WarningState {
  public:
-  void set_sync_warning_level(SyncWarningLevel l) {
-    sync_warning_level = l;
+  void set_sync_debug_mode(SyncDebugMode l) {
+    sync_debug_mode = l;
   }
 
-  SyncWarningLevel get_sync_warning_level() {
-    return sync_warning_level;
+  SyncDebugMode get_sync_debug_mode() {
+    return sync_debug_mode;
   }
 
  private:
-  SyncWarningLevel sync_warning_level = SyncWarningLevel::L_DISABLED;
+  SyncDebugMode sync_debug_mode = SyncDebugMode::L_DISABLED;
 };
 
 C10_CUDA_API __inline__ WarningState& warning_state() {
@@ -66,8 +70,8 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     cudaMemcpyKind kind,
     cudaStream_t stream) {
   if (C10_UNLIKELY(
-          warning_state().get_sync_warning_level() !=
-          SyncWarningLevel::L_DISABLED)) {
+          warning_state().get_sync_debug_mode() !=
+          SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
 #if defined(HIP_VERSION) && (HIP_VERSION >= 301)
@@ -80,8 +84,8 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
   if (C10_UNLIKELY(
-          warning_state().get_sync_warning_level() !=
-          SyncWarningLevel::L_DISABLED)) {
+          warning_state().get_sync_debug_mode() !=
+          SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
