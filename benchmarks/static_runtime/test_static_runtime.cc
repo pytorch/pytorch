@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-#include "caffe2/benchmarks/static_runtime/test_utils.h"
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 #include "test_utils.h"
@@ -588,6 +587,19 @@ TEST(StaticRuntime, IndividualOps_to) {
   // TODO: check if fbgemm is enabled properly in this case
   // half->float, NCHW->NHWC
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
+}
+
+TEST(StaticRuntime, IndividualOps_Full) {
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{4, 5};
+  std::vector<IValue> args{
+    size0, 4, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{
+    size1, 5, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(full_script, args);
+  testStaticRuntime(full_script, args, args2);
 }
 
 TEST(StaticRuntime, IndividualOps_FullLike) {

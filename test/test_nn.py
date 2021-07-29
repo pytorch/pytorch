@@ -6777,14 +6777,13 @@ class TestNN(NNTestCase):
         dim_feedforward = 16
         dropout = 0.0
         bsz = 2
-        activation = "gelu"
 
-        for batch_first in (True, False):
+        for activation, batch_first in product(('gelu', F.gelu, nn.GELU()), (True, False)):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
-            model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation,
-                                               batch_first=batch_first)
+            model = nn.TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                               activation, batch_first=batch_first)
 
             # set constant weights of the model
             for idx, p in enumerate(model.parameters()):
@@ -6993,14 +6992,13 @@ class TestNN(NNTestCase):
         bsz = 2
         seq_length = 5
         tgt_length = 3
-        activation = "gelu"
 
-        for batch_first in (True, False):
+        for activation, batch_first in product(('gelu', F.gelu, nn.GELU()), (True, False)):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
-            model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation,
-                                               batch_first=batch_first)
+            model = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout,
+                                               activation, batch_first=batch_first)
 
             # set constant weights of the model
             for idx, p in enumerate(model.parameters()):
@@ -7094,7 +7092,7 @@ class TestNN(NNTestCase):
             return layer
 
         # this is a deterministic test for TransformerEncoder
-        activation = "relu"
+        activation = F.relu
         use_cuda = torch.cuda.is_available()
         device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -7257,7 +7255,7 @@ class TestNN(NNTestCase):
         for batch_first in (False, True):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
-            activation = "relu"
+            activation = F.relu
             use_cuda = torch.cuda.is_available()
             device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -7662,7 +7660,7 @@ class TestNN(NNTestCase):
         bsz = 3
         seq_len = 35
         tgt_len = 15
-        activations = ["relu", "gelu"]
+        activations = [F.relu, F.gelu]
 
         wrong_bsz = 7
         wrong_d_model = 63
@@ -7811,7 +7809,7 @@ class TestNN(NNTestCase):
         bsz = 3
         seq_len = 35
         tgt_len = 15
-        activations = ["relu", "gelu"]
+        activations = [F.relu, F.gelu]
 
         wrong_activation = "abc"
 
@@ -11890,6 +11888,13 @@ add_test(NewModuleTest(
     fullname='MaxUnpool3d_net',
     check_gradgrad=False,))
 
+add_test(NewModuleTest(
+    constructor=lambda: UnpoolingNet(
+        nn.MaxPool1d(2, return_indices=True),
+        nn.MaxUnpool1d(2)),
+    input_size=(1, 4),
+    reference_fn=single_batch_reference_fn,
+    fullname='MaxUnpool1d_net_no_batch_dim',))
 add_test(NewModuleTest(
     constructor=lambda: UnpoolingNet(
         nn.MaxPool2d(2, return_indices=True),
@@ -16059,6 +16064,12 @@ class TestNNDeviceType(NNTestCase):
     def test_maxpool_indices_no_batch_dim(self, device, dtype):
         """Check that indices with no batch dim is consistent with a single batch."""
         max_pool_cases = [
+            (nn.MaxPool1d(3, return_indices=True),
+             torch.randn(3, 5, device=device, dtype=dtype)),
+            (nn.MaxPool2d(3, return_indices=True),
+             torch.randn(3, 5, 6, device=device, dtype=dtype)),
+            (nn.MaxPool3d(3, return_indices=True),
+             torch.randn(3, 5, 6, 7, device=device, dtype=dtype)),
             (nn.AdaptiveMaxPool1d(3, return_indices=True),
              torch.randn(3, 5, device=device, dtype=dtype)),
             (nn.AdaptiveMaxPool2d(3, return_indices=True),
@@ -16429,9 +16440,10 @@ class TestNNDeviceType(NNTestCase):
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool2d((3, 5)), device, inp_dims=(8, 4, 16, 16), prec=0.05)
         self._test_bfloat16_ops(torch.nn.AdaptiveAvgPool3d((3, 5, 7)), device, inp_dims=(8, 4, 16, 16, 16), prec=0.05)
 
-    @onlyCUDA
+    @onlyOnCPUAndCUDA
     def test_softmax_bfloat16(self, device):
-        self._test_bfloat16_ops(torch.nn.Softmax(dim=1), device, inp_dims=(16, 32), prec=1e-2)
+        for dim in [0, 1, 2, 3]:
+            self._test_bfloat16_ops(torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=1e-2)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -18007,6 +18019,87 @@ class TestFunctionalPickle(TestCase):
     def test_pickle_softsign(self):
         # Make sure it does not throw an exception
         s = pickle.dumps(F.softsign)
+
+class TestStateDictHooks(TestCase):
+
+    def test_load_state_dict_pre_hook(self):
+
+        m = nn.Linear(10, 10)
+        m_state_dict = m.state_dict()
+
+        m_load = nn.Linear(10, 10)
+
+        hook_called = 0
+
+        def hook_without_module(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            self.assertEqual(m_state_dict, state_dict)
+            nonlocal hook_called
+            hook_called += 1
+
+        def hook_with_module(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            self.assertEqual(m_state_dict, state_dict)
+            self.assertTrue(m_load is module)
+            nonlocal hook_called
+            hook_called += 1
+
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_without_module)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(1, hook_called)
+
+        hook_called = 0
+        m_load._register_load_state_dict_pre_hook(hook_with_module, True)
+        m_load.load_state_dict(m_state_dict)
+        self.assertEqual(2, hook_called)
+
+    def test_load_state_dict_module_pre_hook(self):
+        hook_called = 0
+
+        # Test with module instance method as hook
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.foo = torch.nn.Parameter(torch.rand(10))
+
+            def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                nonlocal hook_called
+                hook_called += 1
+
+            def my_pre_load_hook_with_module(
+                self,
+                module,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ):
+                assert [] == error_msgs
+                assert [] == unexpected_keys
+                assert [] == missing_keys
+                assert strict
+                assert self is module
+                nonlocal hook_called
+                hook_called += 1
+
+        m = MyModule()
+        state_dict = m.state_dict()
+
+        hook_called = 0
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook)
+        m.load_state_dict(state_dict)
+        self.assertEqual(1, hook_called)
+
+        hook_called = 0
+        m._register_load_state_dict_pre_hook(m.my_pre_load_hook_with_module, True)
+        m.load_state_dict(state_dict)
+        self.assertEqual(2, hook_called)
 
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
