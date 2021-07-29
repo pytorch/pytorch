@@ -981,9 +981,7 @@ class DistributedTest:
             )
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(
-                    model.parameters(), warmup_steps=warmup_steps, period=period
-                )
+                averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
