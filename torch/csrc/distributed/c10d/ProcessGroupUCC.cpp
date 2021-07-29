@@ -6,10 +6,8 @@ namespace {
 
 static void check_tensor(const std::vector<at::Tensor>& tensors) {
   TORCH_CHECK(tensors.size() == 1, "ProcessGroupUCC takes 1 tensor");
-  TORCH_CHECK(tensors[0].is_contiguous(), "ProcessGroupUCC input tensor has to be contiguous");
+  TORCH_CHECK(tensors[0].is_non_overlapping_and_dense(), "ProcessGroupUCC input tensor has to be non-overlapping and dense");
   TORCH_CHECK(!tensors[0].is_sparse(), "ProcessGroupUCC input tensor has to be dense");
-  // TODO: check cuda
-  // TODO: check non-overlapping and dense instead of contiguous
 }
 
 } // namespace
