@@ -86,7 +86,7 @@ void adaptive_avg_pool3d_out_cpu_template(
   for (int64_t i = 1; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
-        "adaptive_avg_pool3d(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ",
         input.sizes(),
         " with dimension ",
@@ -97,7 +97,8 @@ void adaptive_avg_pool3d_out_cpu_template(
 
   TORCH_CHECK(
       (input.ndimension() == 4 || input.ndimension() == 5),
-      "Expected non-empty vector or matrix with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pool3d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ",
+      input.sizes());
   TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 

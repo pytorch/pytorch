@@ -336,14 +336,14 @@ void adaptive_avg_pool3d_out_cuda_template(
   for (int64_t i = 1; i < input_.ndimension(); i++) {
     TORCH_CHECK(
         input_.size(i) > 0,
-        "adaptive_avg_pool3d_cuda(): expected input to have non-empty spatial dimensions, "
+        "adaptive_avg_pool3d_cuda(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input_.sizes(),
         " with dimension ", i, " being empty");
   }
 
   TORCH_CHECK(
       (input_.ndimension() == 4 || input_.ndimension() == 5),
-      "Expected non-empty 4D or 5D vector or matrix with optional 0-dim batch size, but got",
+      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor with optional 0-dim batch size, but got",
       input_.sizes());
 
   // the jit sometimes passes output_size.size() == 1
