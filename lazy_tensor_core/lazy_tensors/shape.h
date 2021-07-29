@@ -92,6 +92,13 @@ class Shape {
     return MakeSpan(dimensions_);
   }
 
+  std::vector<int64_t> as_sizes() const {
+    if (dynamic_mode_.load()) {
+      throw std::runtime_error("Exact sizes not known");
+    }
+    return dimensions_;
+  }
+
   int tuple_shapes_size() const { return element_shapes_.size(); }
 
   const Shape& tuple_shapes(int index) const {
