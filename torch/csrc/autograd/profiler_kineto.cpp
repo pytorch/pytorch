@@ -230,8 +230,17 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
+// Assumption: Total threads number will not exceed 2^16-1, and total ops will not exceed 2^48 -1.
+#define GET_FORWARD_THREAD_KEY(tid, seqNr) \
+  (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)))
+
   void finalizeCPUTrace() {
     TORCH_INTERNAL_ASSERT(cpu_trace->activities.size() == kineto_events_.size());
+    // startThreadId_seqNum to pointer of activity.
+    // Low-16bits of startThreadId and low-48bits seqNum are concatenated into one uint64_t variable as key.
+    std::unordered_map<uint64_t, libkineto::GenericTraceActivity*> tidSeq2activity;
+    uint64_t fwd_bwd_link_id = 1;
+
     for (size_t idx = 0; idx < cpu_trace->activities.size(); ++idx) {
       auto& kineto_event = kineto_events_[idx];
       auto& activity = cpu_trace->activities[idx];
@@ -258,6 +267,37 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         activity.addMetadata(
             "Sequence number",
             std::to_string(kineto_event.sequenceNr()));
+
+        if (kineto_event.fwdThreadId() > 0) {
+          // act is backward op.
+          uint64_t key = GET_FORWARD_THREAD_KEY(kineto_event.fwdThreadId(), kineto_event.sequenceNr());
+          auto iter = tidSeq2activity.find(key);
+          if (iter != tidSeq2activity.end()) {
+            activity.linkedAct = iter->second;
+            iter->second->linkedAct = &activity;
+            activity.linkId = GENERATE_FORWARD_BACKWARD_LINK(fwd_bwd_link_id, LINK_FORWARD_BACKWARD_TAIL);
+            iter->second->linkId = GENERATE_FORWARD_BACKWARD_LINK(fwd_bwd_link_id, LINK_FORWARD_BACKWARD_HEAD);
+            ++fwd_bwd_link_id;
+          }
+        }
+        else if (kineto_event.startThreadId() != 0) {
+          // act is forward op.
+          uint64_t key = GET_FORWARD_THREAD_KEY(kineto_event.startThreadId(), kineto_event.sequenceNr());
+          // Assumption: Among all ops with same sequence number,
+          // the one with biggest start time is most likely launching backward op.
+          auto iter = tidSeq2activity.find(key);
+          if (iter == tidSeq2activity.end()) {          
+            tidSeq2activity[key] = &activity;
+          }
+          else {
+            // Now the sequence number is only incremented on creating a "Node" object for backward pass,
+            // by calling "at::sequence_number::get_and_increment()".
+            // Among all ops with same sequence number, the one with biggest startTime is the one launching backward op.
+            if (activity.startTime >= iter->second->startTime) {
+              tidSeq2activity[key] = &activity;
+            }
+          }
+        }
       }
     }
   }
