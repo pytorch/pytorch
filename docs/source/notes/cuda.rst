@@ -468,7 +468,7 @@ also preserve :class:`torch.device` and :class:`torch.dtype` of a Tensor).
 Use pinned memory buffers
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. warning:
+.. warning::
 
     This is an advanced tip. You overuse of pinned memory can cause serious
     problems if you'll be running low on RAM, and you should be aware that
