@@ -1,5 +1,3 @@
-#include "ATen/record_function.h"
-#include "torch/csrc/autograd/profiler_kineto.h"
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
