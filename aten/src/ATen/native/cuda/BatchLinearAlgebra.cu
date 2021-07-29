@@ -2909,6 +2909,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   auto m = lu.size(-2);
   auto b2 = b.size(-1);
   bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
+  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/59148
 #ifdef USE_CUSOLVER
   if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
     lu_solve_looped_cusolver(b, lu, pivots, _get_cublas_trans(trans));
