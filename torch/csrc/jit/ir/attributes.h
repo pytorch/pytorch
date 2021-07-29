@@ -58,7 +58,7 @@ static inline const char* toString(AttributeKind kind) {
   return names[int(kind)];
 }
 
-struct AttributeValue {
+struct TORCH_API AttributeValue {
   AttributeValue(Symbol name) : name(name) {}
   using Ptr = std::unique_ptr<AttributeValue>;
   Symbol name;
@@ -68,7 +68,7 @@ struct AttributeValue {
 };
 
 template <typename T, AttributeKind Kind>
-struct ScalarAttributeValue : public AttributeValue {
+struct TORCH_API ScalarAttributeValue : public AttributeValue {
   using ConstructorType = T;
   using ValueType = T;
   ScalarAttributeValue(Symbol name, ConstructorType value_)
@@ -88,7 +88,7 @@ struct ScalarAttributeValue : public AttributeValue {
 };
 
 template <typename T, AttributeKind Kind>
-struct VectorAttributeValue : public AttributeValue {
+struct TORCH_API VectorAttributeValue : public AttributeValue {
   using ConstructorType = std::vector<T>;
   using ValueType = std::vector<T>;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
