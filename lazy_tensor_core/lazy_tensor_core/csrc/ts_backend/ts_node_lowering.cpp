@@ -52,39 +52,40 @@ class TSNodeLowering : public NodeLowering {
                               name, loctx->graph(), nullptr)
                         : nullptr) {}
 
+  void RefineTypesInLoweredOp(torch::jit::Value* op,
+                          const lazy_tensors::Shape& shape) {
+    auto type_transformer = [&](const at::TypePtr& type) {
+      return type->expect<at::TensorType>()
+          ->withScalarType(TensorTypeFromLtcType(shape.element_type()))
+          ->withSizesStrides(shape.as_sizes(), ComputeShapeStrides(shape));
+    };
+    if (shape.IsArray()) {
+      op->setType(type_transformer(op->type()));
+    } else if (shape.IsTuple()) {
+      at::ArrayRef<at::TypePtr> els =
+          op->type()->expect<at::TupleType>()->elements();
+      std::vector<at::TypePtr> contained_types = {};
+      for (int j = 0; j < shape.tuple_shapes_size(); ++j) {
+        contained_types.emplace_back(type_transformer(els.at(j)));
+      }
+      op->setType(op->type()->withContained(contained_types));
+    } else {
+      LTC_LOG(FATAL) << op->type() << " Not supported.";
+    }
+  }
+
   bool Lower(const ir::Node* node) override {
     TSOpVector ops = LowerToTS(node);
     if (ops.empty()) {
       return false;
     }
     LTC_CHECK_EQ(node->num_outputs(), ops.size());
-    if (!lazy_tensors::sys_util::GetEnvBool("LTC_IR_TS_SHAPE_TYPES", false)) {
-      for (size_t i = 0; i < ops.size(); ++i) {
-        loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
+    auto static_shape_mode = !lazy_tensors::Shape::IsDynamicMode();
+    for (size_t i = 0; i < ops.size(); ++i) {
+      if (static_shape_mode) {
+        RefineTypesInLoweredOp(ops[i], node->shape(i));
       }
-    } else {
-      auto type_transformer = [](const lazy_tensors::Shape& shape, const at::TypePtr& type) {
-        return type->expect<at::TensorType>()
-            ->withScalarType(TensorTypeFromLtcType(shape.element_type()))
-            ->withSizesStrides(shape.as_sizes(), ComputeShapeStrides(shape));
-      };
-      for (size_t i = 0; i < ops.size(); ++i) {
-        auto shape = node->shape(i);
-        if (shape.IsArray()) {
-          ops[i]->setType(type_transformer(shape, ops[i]->type()));
-        } else if (shape.IsTuple()) {
-          at::ArrayRef<at::TypePtr> els =
-              ops[i]->type()->expect<at::TupleType>()->elements();
-          std::vector<at::TypePtr> contained_types;
-          for (int j = 0; j < shape.tuple_shapes_size(); ++j) {
-            contained_types.emplace_back(type_transformer(shape, els.at(j)));
-          }
-          ops[i]->setType(ops[i]->type()->withContained(contained_types));
-        } else {
-          LTC_LOG(FATAL) << ops[i]->type() << " Not supported.";
-        }
-        loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
-      }
+      loctx()->AssignOutputOp(ir::Output(node, i), ops[i]);
     }
     return true;
   }
