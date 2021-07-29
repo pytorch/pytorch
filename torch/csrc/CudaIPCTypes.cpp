@@ -48,7 +48,6 @@ struct CudaIPCGlobalEntities {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CudaIPCGlobalEntities cuda_ipc_global_entities;
 
 CudaIPCSentDataLimbo::~CudaIPCSentDataLimbo() {
@@ -161,7 +160,7 @@ CudaIPCSentData::CudaIPCSentData(
     event_sync_required_ = true;
   } else {
     auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::stream_synchronize(stream);
     event_ = nullptr;
     event_sync_required_ = false;
   }
@@ -169,7 +168,7 @@ CudaIPCSentData::CudaIPCSentData(
   // cuIpcGetEventHandle with HIP is not supported, so we have to sync
   // stream instead of passing event
   auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  at::cuda::stream_synchronize(stream);
   event_sync_required_ = false;
 #endif
 }
@@ -238,7 +237,6 @@ bool CudaIPCCollect() {
 
 namespace c10 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10

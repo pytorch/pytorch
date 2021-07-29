@@ -136,6 +136,16 @@ class Tensor(torch._C._TensorBase):
                        str(self.device),
                        self.requires_grad)
             return (torch._utils._rebuild_mlc_tensor, arg_mlc)
+        if self.device.type == 'meta':
+            # NB: This implementation BREAKS storage sharing.  Current
+            # hypothesis is that no one cares for meta tensors.
+            arg_meta = (
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]]
