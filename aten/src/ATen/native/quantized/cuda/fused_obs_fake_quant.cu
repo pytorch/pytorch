@@ -237,6 +237,13 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
     bool symmetric_quant) {
   const auto x_contig = x.contiguous();
   int64_t size = per_row_fq ? x.size(0) : 1;
+  if (per_row_fq && running_min.numel() == 0) {
+    float inf = std::numeric_limits<float>::infinity();
+    running_min.resize_(size).fill_(inf);
+    running_max.resize_(size).fill_(inf);
+    scale.resize_(size);
+    zero_point.resize_(size);
+  }
   _calculate_moving_average(
       x_contig,
       observer_on,

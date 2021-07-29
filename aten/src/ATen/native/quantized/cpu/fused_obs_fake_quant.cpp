@@ -23,14 +23,6 @@ void calculate_moving_average(
         ch_axis == 0,
         "Per-channel FakeQuant in fused_moving_avg_obs_fake_quant is only supported on axis == 0");
     std::tie(x_min, x_max) = at::_aminmax(x, 1);
-    if (running_min.numel() == 0) {
-      float inf = std::numeric_limits<float>::infinity();
-      running_min.resize_(x_min.sizes().vec()).fill_(inf);
-      running_max.resize_(x_max.sizes().vec()).fill_(inf);
-    } else {
-      running_min.resize_(x_min.sizes().vec());
-      running_max.resize_(x_max.sizes().vec());
-    }
   } else {
     std::tie(x_min, x_max) = at::_aminmax(x);
   }
@@ -67,8 +59,6 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
   if (per_row_fake_quant) {
     float* x_min_data = inp_running_min.data_ptr<float>();
     float* x_max_data = inp_running_max.data_ptr<float>();
-    scale.resize_(inp_running_min.sizes().vec());
-    zero_point.resize_(inp_running_min.sizes().vec());
     for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
       fbgemm::TensorQuantizationParams x_qparams{};
@@ -155,6 +145,14 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     bool symmetric_quant) {
   // Calculate min/max
   auto observe = observer_on.item().toInt();
+  int64_t size = per_row_fake_quant ? self.size(0) : 1;
+  if (per_row_fake_quant && running_min.numel() == 0) {
+    float inf = std::numeric_limits<float>::infinity();
+    running_min.resize_(size).fill_(inf);
+    running_max.resize_(size).fill_(inf);
+    scale.resize_(size);
+    zero_point.resize_(size);
+  }
   if (observe) {
     calculate_moving_average(
         self,
