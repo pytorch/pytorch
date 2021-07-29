@@ -48,7 +48,8 @@ struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
   }
 };
 
-// USAGE: BASIC_UNARY_BATCH_RULE(at::cholesky_inverse)
+// USAGE: BASIC_UNARY_BATCH_RULE(at::sin)
+// INCORRECT USAGE: BASIC_UNARY_BATCH_RULE(&at::sin)
 // It is important that this macro is not passed a function pointer!!
 #define BASIC_UNARY_BATCH_RULE(fn) SINGLE_ARG(\
     BasicUnaryBatchRuleHelper<\
@@ -56,11 +57,28 @@ struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> variadic_bdims_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  return std::make_tuple(Func(self_, std::forward<ExtraArgs>(extra_args)...), self_bdim.has_value() ? optional<int64_t>{0} : nullopt);
-}
+template <typename A, A a, typename C>
+struct VariadicBdimsBatchRuleHelper;
+
+template <typename F, F Func, typename A, typename... T>
+struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& tensor,
+      optional<int64_t> batch_dim,
+      T... extra_args) {
+    auto tensor_ = moveBatchDimToFront(tensor, batch_dim);
+    return std::make_tuple(Func(tensor_, std::forward<T>(extra_args)...), 0);
+  }
+};
+
+// USAGE: VARIADIC_BDIMS_BATCH_RULE(at::cholesky_inverse)
+// INCORRECT USAGE: VARIADIC_BDIMS_BATCH_RULE(&at::cholesky_inverse)
+// It is important that this macro is not passed a function pointer!!
+#define VARIADIC_BDIMS_BATCH_RULE(fn) SINGLE_ARG(\
+    VariadicBdimsBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> existing_bdim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {

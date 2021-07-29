@@ -263,8 +263,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(meshgrid);
   OP_DECOMPOSE(narrow);
   m.impl("trace", trace_decomp);
-  VMAP_SUPPORT("tril", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(tril)), &at::tril, int64_t>));
-  VMAP_SUPPORT("triu", SINGLE_ARG(variadic_bdims_batch_rule<decltype(&ATEN_FN(triu)), &at::triu, int64_t>));
+  VMAP_SUPPORT("tril", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
+  VMAP_SUPPORT("triu", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
   VMAP_SUPPORT("repeat", repeat_batch_rule);
   VMAP_SUPPORT("_unsafe_view", _unsafe_view_batch_rule);
   VMAP_SUPPORT("unsqueeze", unsqueeze_batch_rule);
