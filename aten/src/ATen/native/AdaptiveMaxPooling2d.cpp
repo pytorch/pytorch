@@ -9,7 +9,7 @@ TORCH_META_FUNC(adaptive_max_pool2d) (const Tensor& input, IntArrayRef output_si
   int ndim = input.ndimension();
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(input.size(i) > 0,
-        "adaptive_max_pool2d(): Expected input to have non-zero dimensions for non-batch dimensions, "
+        "adaptive_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i,
         " being empty");
   }
@@ -55,7 +55,7 @@ TORCH_META_FUNC(adaptive_max_pool2d_backward)
     grad_output.sizes());
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(grad_output.size(i) > 0,
-      "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero dimensions for non-batch dimensions, "
+      "adaptive_max_pooling2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
       "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i,
       " being empty");
   }

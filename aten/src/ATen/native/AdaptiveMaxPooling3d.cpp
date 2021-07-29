@@ -15,7 +15,7 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(
         input.size(i) > 0,
-        "adaptive_max_pool3d(): Expected input to have non-zero dimensions for non-batch dimension, "
+        "adaptive_max_pool3d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ",
         input.sizes(),
         " with dimension ",
