@@ -726,13 +726,11 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  Tensor result;
-  if (!self.is_sparse()) {
-    result = at::empty({0}, other.options().dtype(commonDtype));
-  }
-  else {
-    result = at::empty({0}, self.options().dtype(commonDtype));
-  }
+  // This code path is hit when doing `Tensor(2.) * other`, which will actually
+  // be mul(dense, sparse). Make sure we use the sparse exemplar for result.
+  auto result_options = self.is_sparse() ?
+    self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
+  Tensor result = at::empty({0}, result_options);
   return at::mul_out(result, self, other);  // redispatch!
 }
 
