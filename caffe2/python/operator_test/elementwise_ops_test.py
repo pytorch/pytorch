@@ -415,27 +415,48 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=div_gradient,
         )
 
-    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_add_gradient_inplace(self, n, m, gc, dc, seed):
+    def test_add_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
         np.random.seed(seed)
 
         def add_gradient(dC, _A, _B):
-            return [dC, dC]
+            dA, dB = dC, dC
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
 
         A = np.random.rand(n, m).astype(np.float32)
-        B = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32)
+        else:
+            B = np.random.rand(n, m).astype(np.float32)
         dC = np.random.rand(n, m).astype(np.float32)
         op_dA_inplace = core.CreateOperator(
             "AddGradient",
             ["dC", "A", "B"],
-            ["dC", "dB"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
         )
         op_dB_inplace = core.CreateOperator(
             "AddGradient",
             ["dC", "A", "B"],
-            ["dA", "dC"],
+            ["dA", "dC" if inplace else "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
         )
 
         self.assertReferenceChecks(
@@ -452,27 +473,48 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=add_gradient,
         )
 
-    @given(n=st.integers(1, 6), m=st.integers(4, 6),
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
            seed=st.integers(0, 1000), **hu.gcs)
     @settings(deadline=10000)
-    def test_sub_gradient_inplace(self, n, m, gc, dc, seed):
+    def test_sub_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
         np.random.seed(seed)
 
         def sub_gradient(dC, _A, _B):
-            return [dC, -dC]
+            dA, dB = dC, -dC
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
 
         A = np.random.rand(n, m).astype(np.float32)
-        B = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32)
+        else:
+            B = np.random.rand(n, m).astype(np.float32)
         dC = np.random.rand(n, m).astype(np.float32)
         op_dA_inplace = core.CreateOperator(
             "SubGradient",
             ["dC", "A", "B"],
-            ["dC", "dB"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
         )
         op_dB_inplace = core.CreateOperator(
             "SubGradient",
             ["dC", "A", "B"],
-            ["dA", "dC"],
+            ["dA", "dC" if inplace else "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
         )
 
         self.assertReferenceChecks(
