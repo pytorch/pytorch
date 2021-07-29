@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -4475,6 +4476,61 @@ class DistributedTest:
                 5 if affine else 2,
             )
             self._barrier()
+
+        @skip_if_lt_x_gpu(2)
+        @unittest.skipIf(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only NCCL and GLOO backend support DistributedDataParallel",
+        )
+        @unittest.skipIf(
+            IS_WINDOWS,
+            "PostLocalSGDOptimizer not yet supported with Windows."
+        )
+        def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
+            learning_rate = 0.03
+            period = 4
+            warmup_steps = 10
+            torch.cuda.set_device(self.rank)
+            net = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(DDP_NET).cuda(),
+                device_ids=[self.rank],
+                gradient_as_bucket_view=grad_is_view
+            )
+            opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
+            averager = averagers.PeriodicModelAverager(net.parameters(), period=period, warmup_steps=warmup_steps)
+
+            post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(DDP_NET).cuda(),
+                device_ids=[self.rank],
+                gradient_as_bucket_view=grad_is_view
+            )
+            post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
+                params=post_localSGD_net.parameters(),
+                optimizer_class=torch.optim.SGD,
+                averager=averagers.PeriodicModelAverager(post_localSGD_net.parameters(), period=period, warmup_steps=warmup_steps),
+                lr=learning_rate,
+            )
+
+            input = torch.randn(dist.get_world_size() * 2, 2).cuda()
+            target = torch.randn(dist.get_world_size() * 2, 4).cuda()
+            loss_fn = nn.MSELoss()
+
+            for idx in range(20):
+                opt.zero_grad()
+                output = net(input)
+                loss = loss_fn(output, target)
+                loss.backward()
+                opt.step()
+                averager.average_parameters()
+
+                post_localSGD_opt.zero_grad()
+                post_localSGD_output = post_localSGD_net(input)
+                post_localSGD_loss = loss_fn(post_localSGD_output, target)
+                post_localSGD_loss.backward()
+                post_localSGD_opt.step()
+
+                for p1, p2 in zip(net.parameters(), post_localSGD_net.parameters()):
+                    self.assertEqual(p1.data, p2.data)
 
         @unittest.skipIf(
             BACKEND != "nccl" and BACKEND != "gloo",
