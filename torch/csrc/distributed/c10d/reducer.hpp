@@ -51,6 +51,13 @@ class TORCH_API Timer {
   virtual ~Timer() = default;
 };
 
+// Local accumulator type for a single bucket.
+struct BucketAccumulator {
+  std::vector<size_t> indices;
+  size_t size = 0;
+  size_t size_limit = 0;
+};
+
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {
@@ -534,7 +541,8 @@ class TORCH_API Reducer {
 // The index of tensors[i] assigned to bucket is tensor_indices[i],
 // when tensor_indices is empty, the index of tensors[i] assigned to
 // bucket is i.
-TORCH_API std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+TORCH_API std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},

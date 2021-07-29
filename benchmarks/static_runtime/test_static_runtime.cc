@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-#include "caffe2/benchmarks/static_runtime/test_utils.h"
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
 #include "test_utils.h"
