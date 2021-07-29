@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 
+#include <bits/stdint-intn.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -118,6 +119,24 @@ const std::map<std::string, at::Tensor> Module::named_parameters() const {
   const std::string name = "";
   slot_named_params_recurse(object_, &params, name);
   return params;
+}
+
+std::string Module::getModuleHierarchy(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getModuleHierarchyInfo(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
+}
+
+std::string Module::getCallStack(const int64_t debug_handle) const {
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+  return getDebugTable().getSourceDebugString(
+      debug_handle, getTopModuleTypeName(*this));
+#else
+  return "";
+#endif
 }
 
 // We will continue to support this API for now as this is being relied upon

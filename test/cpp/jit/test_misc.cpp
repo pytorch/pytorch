@@ -2479,7 +2479,7 @@ TEST(RecordDebugHandles, Basic) {
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
       {torch::autograd::profiler::ActivityType::CPU});
   {
-    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     float x{5.9999}, y{2.1212};
     float z = x / y;
   }
@@ -2550,7 +2550,7 @@ TEST(RecordDebugHandles, ScopedCallbacks) {
       {torch::autograd::profiler::ActivityType::CPU},
       {at::RecordScope::USER_SCOPE});
   {
-    RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
+    RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     auto a = torch::rand({128, 128});
     auto b = torch::rand({128, 128});
     auto c = a + b;

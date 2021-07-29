@@ -112,9 +112,9 @@ void Function::set_register_size(size_t size) {
 int64_t Function::get_debug_handle(size_t pc) const {
   TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->debug_handles_.size(),
+      pc < code_->instructions_with_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->debug_handles_[pc];
+  return code_->instructions_with_handles_[pc].debug_handle;
 }
 
 void Function::setSchema(c10::FunctionSchema schema) {
@@ -146,7 +146,7 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 int64_t Function::getExceptionDebugHandle() const {
   size_t pc = getInterpretersExceptionPC();
-  return (pc < code_->debug_handles_.size()) ? code_->debug_handles_[pc] : -1;
+  return code_->instructions_with_handles_.at(pc).debug_handle;
 }
 
 } // namespace mobile

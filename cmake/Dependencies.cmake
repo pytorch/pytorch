@@ -1541,6 +1541,11 @@ endif()
 # --[ ATen checks
 set(USE_LAPACK 0)
 
+# we need to build all targets to be linked with PIC
+if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER)
+  set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+endif()
+
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
@@ -1849,9 +1854,15 @@ list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
 # ---[ Kineto
-if(USE_KINETO AND INTERN_BUILD_MOBILE)
+# edge profiler depends on KinetoProfiler but it only does cpu
+# profiling. Thus we dont need USE_CUDA/USE_ROCM
+if(USE_KINETO AND INTERN_BUILD_MOBILE AND NOT USE_LITE_INTERPRETER_PROFILER)
   message(STATUS "Not using libkineto in a mobile build.")
   set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND INTERN_BUILD_MOBILE AND USE_LITE_INTERPRETER_PROFILER AND (USE_CUDA OR USE_ROCM))
+  message(FATAL_ERROR "Mobile build with profiler does not support CUDA or ROCM")
 endif()
 
 if(USE_KINETO)
@@ -1929,6 +1940,7 @@ if(USE_KINETO)
 
   if(NOT TARGET kineto)
     add_subdirectory("${KINETO_SOURCE_DIR}")
+    set_property(TARGET kineto PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")

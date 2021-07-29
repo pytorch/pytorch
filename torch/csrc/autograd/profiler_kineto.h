@@ -4,7 +4,11 @@
 
 #ifdef USE_KINETO
 // skip Kineto dependency on mobile
-#ifdef C10_MOBILE
+// unless explicitly asked for.
+// When is it explicitly asked for?
+// KinetoEdgeCPUProfiler uses KinetoProfiler for cpu
+// event profiling. This has dependency on cpu only libkineto
+#if defined(C10_MOBILE) && !defined(EDGE_PROFILER_USE_KINETO)
 #undef USE_KINETO
 #endif
 #endif
@@ -297,6 +301,12 @@ struct TORCH_API ProfilerResult {
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
+    const std::unordered_set<at::RecordScope>& scopes = {});
+
+TORCH_API void enableProfilerWithEventPostProcess(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities,
+    std::function<void(std::vector<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();

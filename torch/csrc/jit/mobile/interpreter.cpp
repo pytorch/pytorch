@@ -53,7 +53,9 @@ bool InterpreterState::run(Stack& stack) {
   size_t pc = 0;
   while (true) {
     try {
-      Instruction inst = code_->instructions_with_handles_[pc].instruction;
+      auto inst_with_handle = code_->instructions_with_handles_.at(pc);
+      Instruction inst = inst_with_handle.instruction;
+      DebugHandle debug_handle = inst_with_handle.debug_handle;
 
       //    std::cout << "RUNNING " << pc << " " << code_->instructions_[pc];
       //    if (inst.op == OP) {
@@ -80,7 +82,7 @@ bool InterpreterState::run(Stack& stack) {
             // enable only for the RecordFunction
             enableRecordFunction(true);
           }
-          RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(code_->op_names_[inst.X].name, debug_handle, stack);
           if (!prev_value) {
             enableRecordFunction(false);
           }

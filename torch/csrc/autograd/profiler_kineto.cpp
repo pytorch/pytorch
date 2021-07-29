@@ -189,9 +189,18 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
+  const std::function<void(std::vector<KinetoEvent>&)>& getEventPostProcessingCallback() const {
+    return event_post_process_cb_;
+  }
+
+  void setEventPostProcessingCallback(std::function<void(std::vector<KinetoEvent>&)>&& cb) {
+    event_post_process_cb_ = std::move(cb);
+  }
+
   uint64_t start_time_;
   std::vector<KinetoEvent> kineto_events_;
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
+  std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -428,6 +437,16 @@ void prepareProfiler(
   libkineto::api().activityProfiler().prepareTrace(k_activities);
 }
 
+void enableProfilerWithEventPostProcess(
+    const ProfilerConfig& config,
+    const std::set<ActivityType>& activities,
+    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    const std::unordered_set<at::RecordScope>& scopes) {
+  enableProfiler(config, activities, scopes);
+  auto state_ptr = getProfilerTLSState();
+  state_ptr->setEventPostProcessingCallback(std::move(cb));
+}
+
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
@@ -478,6 +497,10 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   state_ptr->cpu_trace->span.endTime = getTimeUs();
 
+  // Call events post processing callback before finalizing trace, if there is one.
+  if (state_ptr->getEventPostProcessingCallback()) {
+    state_ptr->getEventPostProcessingCallback()(state_ptr->kineto_events_);
+  }
   state_ptr->finalizeCPUTrace();
   libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
