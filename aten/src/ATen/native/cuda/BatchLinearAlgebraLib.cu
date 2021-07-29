@@ -500,6 +500,9 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
   }
 
+  // A device-host sync will be performed.
+  batchCheckErrors(infos, "svd_cuda");
+
   // gesvdjBatched fails with illegal memory access and
   // gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
   // if matrices for U and VT are not allocated
@@ -510,8 +513,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     VT_working_copy.resize_({0});
   }
 
-  // A device-host sync will be performed.
-  batchCheckErrors(infos, "svd_cuda");
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
