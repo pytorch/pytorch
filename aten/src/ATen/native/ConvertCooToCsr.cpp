@@ -10,7 +10,7 @@ namespace {
 constexpr int64_t GRAIN_SIZE = at::internal::GRAIN_SIZE;
 
 template <typename input_t, typename output_t>
-void convert_coo_to_csr_cpu(Tensor& result, const Tensor& input, const int64_t size) {
+void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
   const input_t* data_in = input.data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
@@ -21,48 +21,48 @@ void convert_coo_to_csr_cpu(Tensor& result, const Tensor& input, const int64_t s
   }
 
   for (int64_t i = 0; i <= data_in[0]; i++)
-    data_out[i] = (output_t)0;
+    data_out[i] = static_cast<output_t>(0);
 
   at::parallel_for(0, numel - 1, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     input_t curr_value = data_in[start], next_value;
     for (int64_t i = start; i < end; i++) {
       next_value = data_in[i + 1];
       for (; curr_value < next_value; curr_value++)
-        data_out[curr_value + 1] = (output_t)(i + 1);
+        data_out[curr_value + 1] = static_cast<output_t>(i + 1);
     }
   });
 
   for (int64_t i = data_in[numel - 1] + 1; i < size + 1; i++)
-    data_out[i] = (output_t)numel;
+    data_out[i] = static_cast<output_t>(numel);
 }
 
-void dispatch(Tensor& result, const Tensor& input, const int64_t size, bool const out_int32) {
+void dispatch(const Tensor& result, const Tensor& input, const int64_t size, bool const out_int32) {
   if (!out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
-      convert_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+      convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
     });
   } else {
-    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_coo_to_csr_cpu", [&] {
-      convert_coo_to_csr_cpu<scalar_t, int>(result, input, size);
+    AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
+      convert_indices_from_coo_to_csr_cpu<scalar_t, int>(result, input, size);
     });
   }
 }
 
 } // namespace
 
-Tensor& _convert_coo_to_csr_out_cpu(const Tensor& self, const int64_t size, const bool out_int32, Tensor& result) {
-  TORCH_CHECK(self.dim() == 1, "Input needs to be 1-dimensional, but got ", self.dim(), " dimensions");
-  TORCH_CHECK(result.dim() == 1, "Output needs to be 1-dimensional, but got ", result.dim(), " dimensions");
-  TORCH_CHECK(result.numel() == size + 1, "Output needs ", size + 1, " elements, but got ", result.numel(), " elements");
+Tensor& _convert_indices_from_coo_to_csr_out_cpu(const Tensor& self, const int64_t size, const bool out_int32, Tensor& result) {
+  TORCH_CHECK(self.dim() <= 1, "Input is supposed to be a vector");
+  TORCH_CHECK(result.dim() <= 1, "Output is supposed to be a vector");
+  at::native::resize_output(result, {size + 1});
   dispatch(result, self, size, out_int32);
   return result;
 }
 
-Tensor _convert_coo_to_csr_cpu(const Tensor& self, const int64_t size, const bool out_int32) {
+Tensor _convert_indices_from_coo_to_csr_cpu(const Tensor& self, const int64_t size, const bool out_int32) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({size + 1}, options);
-  at::native::_convert_coo_to_csr_out_cpu(self, size, out_int32, result);
+  at::native::_convert_indices_from_coo_to_csr_out_cpu(self, size, out_int32, result);
   return result;
 }
 
