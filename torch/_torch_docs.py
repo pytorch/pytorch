@@ -6295,63 +6295,6 @@ Example::
     tensor([1, 0, -1])
 """.format(**common_args))
 
-add_docstr(torch.aminmax, r"""
-aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
-
-Computes the minimum and maximum values of the :attr:`input` tensor.
-
-Args:
-    input: Tensor
-        the input tensor
-
-Keyword Args:
-    dim: Optional[int]
-        The dimension along which to compute the values. If `None`,
-        computes the values over the entire tensor. Default is `None`.
-    keepdim: bool
-        If `True`, the reduced dimensions will be kept in the output
-        tensor as dimensions with size 1, otherwise they will be removed.
-        Default is `False`.
-    out: Optional[Tuple[Tensor, Tensor]]
-        Optional tensors on which to write the result. Must have the same
-        shape and dtype as the expected output. Default is `None`.
-
-Returns:
-    A named tuple (min, max) containing the minimum and maximum values.
-
-Raises:
-    RuntimeError
-        If any of the dimensions to compute the values over has size 0.
-
-.. note::
-    NaN values are propagated to the output if at least one value is NaN.
-
-.. seealso::
-    :func:`torch.amin` minimum value an input tensor
-    :func:`torch.amax` maximum value an input tensor
-
-Example::
-
-    >>> torch.aminmax(torch.tensor([1, -3, 5]))
-    torch.return_types.aminmax(
-    min=tensor(-3),
-    max=tensor(5))
-
-    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
-    torch.return_types.aminmax(
-    min=tensor(nan),
-    max=tensor(nan))
-
-    >>> x = torch.arange(10).view(2, 5)
-    >>> x
-    tensor([[0, 1, 2, 3, 4],
-            [5, 6, 7, 8, 9]])
-    >>> x.aminmax(dim=0, keepdim=True)
-    torch.return_types.aminmax(
-    min=tensor([[0, 1, 2, 3, 4]]),
-    max=tensor([[5, 6, 7, 8, 9]]))
-""")
-
 add_docstr(torch.fmin, r"""
 fmin(input, other, *, out=None) -> Tensor
 
@@ -6417,6 +6360,63 @@ Example::
     >>> torch.amin(a, 1)
     tensor([-1.3312, -0.5744, -1.7268, -1.6165])
 """.format(**multi_dim_common))
+
+add_docstr(torch.aminmax, r"""
+aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
+
+Computes the minimum and maximum values of the :attr:`input` tensor.
+
+Args:
+    input (Tensor):
+        the input tensor
+
+Keyword Args:
+    dim (Optional[int]):
+        The dimension along which to compute the values. If `None`,
+        computes the values over the entire tensor. Default is `None`.
+    keepdim (bool):
+        If `True`, the reduced dimensions will be kept in the output
+        tensor as dimensions with size 1, otherwise they will be removed.
+        Default is `False`.
+    out (Optional[Tuple[Tensor, Tensor]]):
+        Optional tensors on which to write the result. Must have the same
+        shape and dtype as the expected output. Default is `None`.
+
+Returns:
+    A named tuple `(min, max)` containing the minimum and maximum values.
+
+Raises:
+    RuntimeError
+        If any of the dimensions to compute the values over has size 0.
+
+.. note::
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso::
+    :func:`torch.amin` minimum value an input tensor
+    :func:`torch.amax` maximum value an input tensor
+
+Example::
+
+    >>> torch.aminmax(torch.tensor([1, -3, 5]))
+    torch.return_types.aminmax(
+    min=tensor(-3),
+    max=tensor(5))
+
+    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
+    torch.return_types.aminmax(
+    min=tensor(nan),
+    max=tensor(nan))
+
+    >>> x = torch.arange(10).view(2, 5)
+    >>> x
+    tensor([[0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9]])
+    >>> x.aminmax(dim=0, keepdim=True)
+    torch.return_types.aminmax(
+    min=tensor([[0, 1, 2, 3, 4]]),
+    max=tensor([[5, 6, 7, 8, 9]]))
+""")
 
 add_docstr(torch.argmin,
            r"""
