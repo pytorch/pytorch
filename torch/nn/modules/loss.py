@@ -446,7 +446,7 @@ class KLDivLoss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar by default. If :attr:``reduction`` is ``'none'``, then :math:`(*)`,
-          the same shape as the input.
+          same shape as the input.
 
     """
     __constants__ = ['reduction']
@@ -584,10 +584,9 @@ class BCELoss(_WeightedLoss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
     Examples::
@@ -684,9 +683,9 @@ class BCEWithLogitsLoss(_Loss):
                 Must be a vector with length equal to the number of classes.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
      Examples::
@@ -1003,10 +1002,10 @@ class SoftMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(*)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(*)`, same shape as the input
-        - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
+          shape as input.
 
     """
     __constants__ = ['reduction']
