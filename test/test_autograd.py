@@ -7735,6 +7735,18 @@ class TestAutogradForwardMode(TestCase):
         del foo
         self.assertTrue(foo_weak.expired())
 
+    def test_out_variant(self):
+
+        with fwAD.dual_level():
+            foo = fwAD.make_dual(torch.rand(2), torch.rand(2))
+            bar = torch.rand(2)
+
+            with self.assertRaisesRegex(RuntimeError, "out= function"):
+                torch.add(bar, bar, out=foo)
+
+            with self.assertRaisesRegex(RuntimeError, "out= function"):
+                torch.add(foo, bar, out=bar)
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):

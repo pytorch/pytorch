@@ -13188,6 +13188,21 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
 
     @onlyOnCPUAndCUDA
+    def test_Bilinear_empty(self, device):
+        mod = torch.nn.Bilinear(20, 30, 40).to(device)
+        inp1 = torch.randn(0, 10, 20, requires_grad=True, device=device)
+        inp2 = torch.randn(0, 10, 30, requires_grad=True, device=device)
+
+        output = mod(inp1, inp2)
+        output.sum().backward()
+
+        self.assertEqual(inp1, torch.zeros_like(inp1))
+        self.assertEqual(inp2, torch.zeros_like(inp2))
+
+        self.assertEqual(inp1.grad, torch.zeros_like(inp1))
+        self.assertEqual(inp2.grad, torch.zeros_like(inp2))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
