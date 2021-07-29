@@ -1,3 +1,4 @@
+#include "ATen/TensorMeta.h"
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
@@ -32,6 +33,27 @@ TORCH_META_FUNC(_log_softmax) (
 
   TensorOptions options(input_.options());
   set_output(input_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+}
+
+TORCH_META_FUNC(_log_softmax_backward_data)
+(const Tensor& grad,
+ const Tensor& output,
+ int64_t dim,
+ const Tensor& input_){
+  auto grad_ = grad.contiguous();
+  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+
+  if (grad_.dim() == 0) {
+    grad_ = grad_.view(1);
+  }
+
+  TORCH_CHECK(
+      dim_ >= 0 && dim_ < grad_.dim(),
+      "dim must be non-negative and less than input dimensions");
+
+  TensorOptions options(grad_.options());
+  set_output(
+      grad_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 }
 
@@ -92,7 +114,7 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
 
 template <typename scalar_t, bool LogSoftMax>
 void host_softmax_backward(
-    Tensor& gI,
+    const Tensor& gI,
     const Tensor& grad,
     const Tensor& output,
     int64_t dim) {
@@ -236,44 +258,34 @@ Tensor softmax_backward_cpu(
   return grad_input;
 }
 
-Tensor log_softmax_backward_cpu(
-    const Tensor& grad_,
-    const Tensor& output_,
-    int64_t dim_,
-    const Tensor& input_) {
-  TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
-  checkSameSize("log_softmax_backward", grad_arg, output_arg);
-  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-  auto grad = grad_.contiguous();
-  auto output = output_.contiguous();
-  Tensor grad_input = at::native::empty_like(
-      grad,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (
+    const Tensor& grad,
+    const Tensor& output,
+    int64_t dim,
+    const Tensor& input,
+    const Tensor& grad_input) {
+  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+  auto grad_ = grad.contiguous();
+  auto output_ = output.contiguous();
 
-  if (output.numel() == 0) {
-    return grad_input;
+  if (output.numel() != 0) {
+    if (grad_.dim() == 0)
+      grad_ = grad_.view(1);
+    if (output_.dim() == 0) {
+      output_ = output_.view(1);
+    }
+    if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
+      log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output_);
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND(
+          at::ScalarType::BFloat16,
+          grad.scalar_type(),
+          "log_softmax_backward",
+          [&] {
+            host_softmax_backward<scalar_t, true>(grad_input, grad_, output_, dim_);
+          });
+    }
   }
-  if (grad.dim() == 0)
-    grad = grad.view(1);
-  if (output.dim() == 0)
-    output = output.view(1);
-  TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
-      "dim must be non-negative and less than input dimensions");
-  if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
-    log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(),
-                                   "log_softmax_backward", [&] {
-                                     host_softmax_backward<scalar_t, true>(
-                                         grad_input, grad, output, dim);
-                                   });
-  }
-  return grad_input;
 }
 
 Tensor softmax(const Tensor& input_, const int64_t dim_) {
