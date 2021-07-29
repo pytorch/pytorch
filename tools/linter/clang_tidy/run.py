@@ -343,55 +343,6 @@ def map_filenames(build_folder: str, fnames: Iterable[str]) -> List[str]:
     return [map_filename(build_folder, fname) for fname in fnames]
 
 
-def split_negative_from_positive_patterns(patterns: Iterable[str]) -> Patterns:
-    """Separates negative patterns (that start with a dash) from positive patterns"""
-    positive, negative = [], []
-    for pattern in patterns:
-        if pattern.startswith("-"):
-            negative.append(pattern[1:])
-        else:
-            positive.append(pattern)
-
-    return Patterns(positive, negative)
-
-
-def get_file_patterns(globs: Iterable[str], regexes: Iterable[str]) -> Patterns:
-    """Returns a list of compiled regex objects from globs and regex pattern strings."""
-    # fnmatch.translate converts a glob into a regular expression.
-    # https://docs.python.org/2/library/fnmatch.html#fnmatch.translate
-    glob = split_negative_from_positive_patterns(globs)
-    regexes_ = split_negative_from_positive_patterns(regexes)
-
-    positive_regexes = regexes_.positive + [fnmatch.translate(g) for g in glob.positive]
-    negative_regexes = regexes_.negative + [fnmatch.translate(g) for g in glob.negative]
-
-    positive_patterns = [re.compile(regex) for regex in positive_regexes] or [
-        DEFAULT_FILE_PATTERN
-    ]
-    negative_patterns = [re.compile(regex) for regex in negative_regexes]
-
-    return Patterns(positive_patterns, negative_patterns)
-
-
-def filter_files(files: Iterable[str], file_patterns: Patterns) -> Iterable[str]:
-    """Returns all files that match any of the patterns."""
-    if VERBOSE:
-        log("Filtering with these file patterns: {}".format(file_patterns))
-    for file in files:
-        if not any(n.match(file) for n in file_patterns.negative):
-            if any(p.match(file) for p in file_patterns.positive):
-                yield file
-                continue
-        if VERBOSE:
-            log(f"{file} omitted due to file filters")
-
-
-async def get_all_files(paths: List[str]) -> List[str]:
-    """Returns all files that are tracked by git in the given paths."""
-    output = await run_shell_command(["git", "ls-files"] + paths)
-    return str(output).strip().splitlines()
-
-
 def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
     # Delay import since this isn't required unless using the --diff-file
     # argument, which for local runs people don't care about
