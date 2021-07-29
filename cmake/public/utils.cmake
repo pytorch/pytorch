@@ -462,7 +462,9 @@ function(torch_compile_options libname)
   endif()
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
-  target_compile_options(${libname} PRIVATE "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>")
+  target_compile_options(${libname} PRIVATE
+      $<$<COMPILE_LANGUAGE:C++>:
+        $<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-O2>)
 
 endfunction()
 

@@ -1563,7 +1563,7 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1574,22 +1574,21 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
 
-  list(APPEND CUDA_NVCC_FLAGS -Wno-deprecated-gpu-targets)
-  list(APPEND CUDA_NVCC_FLAGS --expt-extended-lambda)
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
-  list(APPEND CUDA_NVCC_FLAGS ${TORCH_NVCC_FLAGS})
-  if(CMAKE_POSITION_INDEPENDENT_CODE AND NOT MSVC)
-    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
-  endif()
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${TORCH_NVCC_FLAGS}")
 
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    list(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1" "-D__CUDA_NO_HALF_OPERATORS__" "-D__CUDA_NO_HALF_CONVERSIONS__"
-      "-D__CUDA_NO_BFLOAT16_CONVERSIONS__" "-D__CUDA_NO_HALF2_OPERATORS__")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DCUDA_HAS_FP16=1")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF_OPERATORS__")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF_CONVERSIONS__")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF2_OPERATORS__")
+	set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
