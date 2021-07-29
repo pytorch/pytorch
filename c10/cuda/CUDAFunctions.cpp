@@ -142,9 +142,9 @@ void device_synchronize() {
 // operations, to raise proper error or warning
 void warn_or_error_on_sync() {
   if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
-    TORCH_CHECK(false, "called a synchronizing cuda operation");
+    TORCH_CHECK(false, "called a synchronizing CUDA operation");
   } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
-    TORCH_WARN("called a synchronizing cuda operation");
+    TORCH_WARN("called a synchronizing CUDA operation");
   }
 }
 

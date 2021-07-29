@@ -4260,10 +4260,10 @@ else:
         def _sync_raises_helper(f, level):
             with CudaSyncGuard(level):
                 if level == 1:
-                    with self.assertWarnsRegex(UserWarning, "called a synchronizing cuda operation"):
+                    with self.assertWarnsRegex(UserWarning, "called a synchronizing CUDA operation"):
                         f()
                 elif level == 2:
-                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing cuda operation"):
+                    with self.assertRaisesRegex(RuntimeError, "called a synchronizing CUDA operation"):
                         f()
 
         def _no_sync_helper(f, level):

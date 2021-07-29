@@ -443,7 +443,7 @@ PyObject * THCPModule_cudaSetSyncDebugMode(PyObject * _unused, PyObject * arg){
   HANDLE_TH_ERRORS
   TORCH_WARN_ONCE("Synchronization debug mode is a prototype feature and does not yet detect all " \
   "synchronizing operations");
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_warn_on_synchronization");
+  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to set_sync_debug_mode");
   int64_t debug_mode = THPUtils_unpackLong(arg);
   TORCH_CHECK(debug_mode >=0 && debug_mode <=2, "invalid value of debug_mode, expected one of 0,1,2");
   c10::cuda::SyncDebugMode l;
