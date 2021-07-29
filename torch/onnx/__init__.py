@@ -303,10 +303,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1.
 
-        enable_onnx_checker (bool, default True): [Deprecated and ignored. Will be removed in next release]
-            If True the onnx model checker will be run to ensure the exported model is a valid ONNX
-            model. If it is an invalid ONNX model, an exception will be thrown out and the onnx
-            model file will still be generated.
+        enable_onnx_checker (bool, default True): [Deprecated and ignored. Will be removed in next
+            Pytorch release] If True the onnx model checker will be run to ensure the exported
+            model is a valid ONNX model. If it is an invalid ONNX model, an exception will be
+            thrown out and the onnx model file will still be generated.
         use_external_data_format (bool, default False): If True, then some of the model
             parameters are stored in external data files and not in the ONNX model file itself.
             Models larger than 2GB cannot be exported in one file because of size limits imposed
