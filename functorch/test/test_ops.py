@@ -138,6 +138,11 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
+    '__getitem__',
+    '__rpow__',
+    'linalg.cholesky',
+    'linalg.inv',
+    'linalg.matrix_power',
     'linalg.matrix_norm',
     'linalg.norm',
     'nanquantile',
