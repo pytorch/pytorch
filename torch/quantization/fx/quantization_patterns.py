@@ -711,8 +711,6 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     # conv2d_dyanmic branch
                     raise Exception("Only static quant is supported for conv")
 
-
-# handle linear, maybe followed by relu
 @register_quant_pattern(torch.nn.Linear)
 @register_quant_pattern(torch.nn.functional.linear)
 @register_quant_pattern(torch.nn.qat.Linear)
@@ -1181,9 +1179,8 @@ ARGS_TO_SKIP = {
 # @register_quant_pattern(torch.nn.functional.gelu)
 # @register_quant_pattern(torch.nn.functional.softmax)
 class DefaultNodeQuantizeHandler(QuantizeHandler):
-    ''' Common quantized op, first input and first output will be quantized
-    '''
-
+    """ Common quantized op, first input and first output will be quantized
+    """
     def __init__(
             self,
             node: Node,
@@ -1245,7 +1242,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.functional.softmax: int8_dtypes,
         }
         dtypes = get_qconfig_dtypes(qconfig)
-        if dtypes not in supported_dtypes[self.op]:
+        if not is_reference and dtypes not in supported_dtypes[self.op]:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by {} "
@@ -1305,22 +1302,24 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     "call_method", "to", (op_out, torch.float16), {})
         else:
             assert is_reference
-            if dtypes in [(torch.quint8, torch.qint8, None)]:
-                load_arg(quantized=[0])(node.args)
+            # We can produce reference for a dtypes including
+            # (torch.quint8, torch.qint8, torch.qint32, torch.float16)
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            if activation_post_process is None:
+                op_out = quantized_graph.node_copy(
+                    node,
+                    load_arg(quantized=torch.float))
+                return op_out
+            else:
+                act_dtype = activation_dtype(qconfig)
+                load_arg(quantized={0: act_dtype})(node.args)
                 args = load_arg(quantized=torch.float)(node.args)
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                activation_post_process = \
-                    self._maybe_get_last_node_only_observer(modules)
-                assert activation_post_process is not None
                 return quantize_node(
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
-            else:
-                assert dtypes in [(torch.float16, torch.float16, None)]
-                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
-                return quantized_graph.create_node(
-                    "call_method", "to", (op_out, torch.float16), {})
 
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
