@@ -211,7 +211,7 @@ if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-build || "${BUIL
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *ios* && "${BUILD_ENVIRONMENT}" != *mobile* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
     export BUILD_STATIC_RUNTIME_BENCHMARK=ON
   fi
 fi
