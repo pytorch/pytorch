@@ -1,3 +1,4 @@
+""""""
 from functools import wraps, partial
 from itertools import product, chain
 import itertools
@@ -5142,11 +5143,17 @@ op_db: List[OpInfo] = [
                    domain=(-1, 1),
                    supports_sparse=True,
                    supports_forward_ad=True,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
+                   decorators=[
+                       DecorateInfo(
+                           toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-04)}),
+                           'TestUnaryUfuncs', 'test_reference_numerics', device_type='cuda',
+                           dtypes=[torch.float16]),
+                       precisionOverride({torch.bfloat16: 1e-2}),
+                   ],
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
