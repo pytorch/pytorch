@@ -244,6 +244,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
                 repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
             repeats = g.op("Expand", repeats, reps)
         # Check if repeats is dynamic
+        # As repeats is dynamic, we use a where node as a substitute for the if statement
         # If repests_dim = 1, expand repeats otherwise use original tensor
         elif cond_dynamic_repeats:
             repeat_dim = sym_help._size_helper(g, repeats, g.op("Constant", value_t=torch.LongTensor([0])))
@@ -292,7 +293,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
 
     r_split = loop_block.op("SequenceAt", r_splits, block_input_iter)
     i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
-    
+
     i_split = unsqueeze(loop_block, i_split, dim + 1)
     r_concat = [loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[:dim + 1])),
                 r_split,

@@ -4360,7 +4360,7 @@ class TestONNXRuntime(unittest.TestCase):
         repeats = torch.tensor([2])
         another_repeats = torch.tensor([4])
         self.run_test(DynamicRepeatsModel(), (x, repeats), test_with_inputs=[(another_x, another_repeats)],
-                      input_names=["input_1", "repeats_1"], 
+                      input_names=["input_1", "repeats_1"],
                       dynamic_axes={"input_1" : {1 : "w"}, "repeats_1" : {0 : "r"}})
 
         class DynamicRepeatsModel2(torch.nn.Module):
@@ -4371,7 +4371,7 @@ class TestONNXRuntime(unittest.TestCase):
         repeats = torch.tensor([2])
         another_repeats = torch.tensor([4])
         self.run_test(DynamicRepeatsModel2(), (x, repeats), test_with_inputs=[(x, another_repeats)],
-                      input_names=["input_1", "repeats_1"], 
+                      input_names=["input_1", "repeats_1"],
                       dynamic_axes={"repeats_1" : {0 : "r"}})
 
     @skipIfUnsupportedMinOpsetVersion(13)
@@ -4384,7 +4384,7 @@ class TestONNXRuntime(unittest.TestCase):
         repeats = torch.tensor([2, 3, 4])
         another_repeats = torch.tensor([4, 3, 2])
         self.run_test(DynamicRepeatsModel(), (x, repeats), test_with_inputs=[(x, another_repeats)],
-                      input_names=["input_1", "repeats_1"], 
+                      input_names=["input_1", "repeats_1"],
                       dynamic_axes={"repeats_1" : {0 : "r"}})
 
         class DynamicRepeatsModel2(torch.nn.Module):
@@ -4395,7 +4395,7 @@ class TestONNXRuntime(unittest.TestCase):
         repeats = torch.tensor([2, 3])
         another_repeats = torch.tensor([4, 3])
         self.run_test(DynamicRepeatsModel2(), (x, repeats), test_with_inputs=[(x, another_repeats)],
-                      input_names=["input_1", "repeats_1"], 
+                      input_names=["input_1", "repeats_1"],
                       dynamic_axes={"repeats_1" : {0 : "r"}})
 
     def test_view(self):
