@@ -466,7 +466,7 @@ void scan_innermost_dim(const Tensor& self, Tensor& result, scalar_t init, Binar
 }
 
 template<typename scalar_t, typename BinaryFunction>
-void scan_dim(const Tensor& self, Tensor& result,
+void scan_dim(const Tensor& self, const Tensor& result,
      int64_t dim, scalar_t init, BinaryFunction binary_op) {
   int ndim = self.dim();
   Tensor self_ = self.contiguous();
@@ -529,7 +529,7 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-void cumsum_cuda_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "cumsum_cuda",
