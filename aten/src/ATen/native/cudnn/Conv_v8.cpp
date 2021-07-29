@@ -383,11 +383,6 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
 auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
-  size_t workspace_size = get_available_workspace();
-  auto predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan.getWorkspaceSize() > workspace_size;
-  };
-
   auto sources = get_generator_sources(/*desc,*/ x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
