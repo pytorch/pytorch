@@ -281,7 +281,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
 #endif // CUDNN_VERSION >= 7400
   }
 
-  std::tie(output_t, save_mean, save_var, reserve) = cudnn_batch_norm_out(
+  return cudnn_batch_norm_out(
       input_t,
       weight_t,
       bias_t_opt,
@@ -294,7 +294,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
       save_mean,
       save_var,
       reserve);
-  return std::make_tuple(output_t, save_mean, save_var, reserve);
 }
 
 
