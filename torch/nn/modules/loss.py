@@ -683,7 +683,7 @@ class BCEWithLogitsLoss(_Loss):
                 Must be a vector with length equal to the number of classes.
 
     Shape:
-        - Input: :math:`(*)`. where :math:`*` means any number of dimensions.
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
