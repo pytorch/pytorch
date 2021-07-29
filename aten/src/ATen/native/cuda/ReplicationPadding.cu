@@ -673,8 +673,8 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
       at::Tensor input_ = input;
       at::Tensor output_ = output;
       if (numInputDims == 4) {
-        auto input_ = input.unsqueeze(0);
-        auto output_ = output.unsqueeze(0);
+        input_ = input.unsqueeze(0);
+        output_ = output.unsqueeze(0);
       }
 
       auto devInput = input_.packed_accessor64<scalar_t, 5>();
