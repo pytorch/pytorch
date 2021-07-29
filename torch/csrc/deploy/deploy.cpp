@@ -208,7 +208,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
   // note: if you want better debugging symbols for things inside
   // new_intepreter_impl, comment out this line so that the so lasts long enough
   // for the debugger to see it.
-  // unlink(library_name_.c_str());
+  unlink(library_name_.c_str());
 
   if (custom_loader_) {
     auto deploy_set_self_ptr =
