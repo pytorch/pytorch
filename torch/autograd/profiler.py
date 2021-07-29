@@ -756,7 +756,7 @@ class emit_nvtx(object):
                 False,
                 False,
                 False,
-                False)
+                False),
             set()
         )
         return self
