@@ -13208,6 +13208,33 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(inp2.grad, torch.zeros_like(inp2))
 
     @onlyOnCPUAndCUDA
+    def test_TransformerDecoderLayer_empty(self, device):
+        for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
+                                                     (False, (10, 0, 512), (20, 0, 512))]:
+            memory = torch.rand(*memory_shape, device=device)
+            tgt = torch.rand(*tgt_shape, device=device)
+            decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
+            out = decoder_layer(tgt, memory)
+            out.sum().backward()
+
+            self.assertEqual(tgt, torch.zeros_like(tgt))
+            self.assertEqual(tgt.grad, torch.zeros_like(tgt))
+
+    @onlyOnCPUAndCUDA
+    def test_TransformerDecoder_empty(self, device):
+        for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
+                                                     (False, (10, 0, 512), (20, 0, 512))]:
+            memory = torch.rand(*memory_shape, device=device)
+            tgt = torch.rand(*tgt_shape, device=device)
+            decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
+            transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6).to(device)
+            out = transformer_decoder(tgt, memory)
+            out.sum().backward()
+
+            self.assertEqual(tgt, torch.zeros_like(tgt))
+            self.assertEqual(tgt.grad, torch.zeros_like(tgt))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
