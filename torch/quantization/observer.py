@@ -712,7 +712,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
                 elif name == expected_max_name:
                     self.max_val.resize_(val.shape)
                 else:
-                    warnings.warn("Observer load_from_state_dict got unexpected name ", name)
+                    warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
                 # For torchscript module we need to update the attributes here since we do not
                 # call the `_load_from_state_dict` function defined module.py
                 if torch.jit.is_scripting():
@@ -721,7 +721,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
                     elif name == expected_max_name:
                         self.max_val.copy_(val)
                     else:
-                        warnings.warn("Observer load_from_state_dict got unexpected name ", name)
+                        warnings.warn("Observer load_from_state_dict got unexpected name {}".format(name))
             elif strict:
                 missing_keys.append(key)
 
