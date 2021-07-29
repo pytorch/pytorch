@@ -3670,16 +3670,19 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
 
 
 # Used for both log_softmax and softmax
-def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, with_lastdim=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = [
         ((S, ), (0, )),
         ((S, S), (0, )),
-        ((S, S), (1, )),
         ((S, S), (-1, )),
-        ((S, M, S), (2, )),
     ]
+
+    # softmax supports bfloat16 dtype when passed with lastdim (when: number of dimensions - 1 == dim)
+    if with_lastdim:
+        cases += (((S, S), (1, )),
+                  ((S, M, S), (2, )))
 
     # PyTorch on XLA throws an error when passed with dim argument for 0d tensor.
     # See https://github.com/pytorch/xla/issues/3061 for more details.
@@ -6380,8 +6383,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
-    # `softmax` supports different dtypes based on whether `dtype` argument,
-    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    # `softmax` supports different dtypes based on whether `dtype` argument is passed or not
+    # and when `dim` passed is the last dimension. Hence multiple OpInfo entries to cover all cases.
     OpInfo('softmax',
            aliases=('nn.functional.softmax',),
            aten_name='softmax',
@@ -6391,10 +6394,19 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('softmax',
            aliases=('nn.functional.softmax',),
-           variant_test_name="with_dtype",
+           variant_test_name='with_lastdim',
+           aten_name='softmax',
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_softmax_variant, with_lastdim=True),
+           assert_autodiffed=True,
+           supports_out=False),
+    OpInfo('softmax',
+           aliases=('nn.functional.softmax',),
+           variant_test_name='with_dtype_and_lastdim',
            aten_name='softmax',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
+           sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True, with_lastdim=True),
            assert_autodiffed=True,
            supports_out=False),
     OpInfo('nn.functional.hardswish',
@@ -7910,7 +7922,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_softmax_variant,
+        sample_inputs_func=partial(sample_inputs_softmax_variant, with_lastdim=True),
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -7918,7 +7930,7 @@ op_db: List[OpInfo] = [
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True), 
+        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True, with_lastdim=True),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
