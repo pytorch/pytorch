@@ -977,19 +977,23 @@ int64_t check_gpu_tensors(const std::vector<at::Tensor>& tensors, bool same_devi
     if (t.scalar_type() != first.scalar_type()) {
       TORCH_CHECK(false, "Tensors must have identical type");
     }
-    if (t.sizes() != first.sizes()) {
-      TORCH_CHECK(false, "Tensors must have identical size");
-    }
-    if (t.strides() != first.strides()) {
-      TORCH_CHECK(false, "Tensors must have identical strides");
-    }
     if (!t.is_non_overlapping_and_dense()) {
       TORCH_CHECK(false, "Tensors must be non-overlapping and dense");
     }
     if (same_device) {
+      // same_device=true means the user called a coalesced collective
+      // on a set of tensors with potentially different sizes and strides.
+      // Therefore, we don't check for matching sizes and strides,
+      // but we do double-check tensors are on the same device.
       TORCH_CHECK(t.get_device() == tensors[0].get_device(),
                   "Expected list of tensors on the same device");
     } else {
+      if (t.sizes() != first.sizes()) {
+        TORCH_CHECK(false, "Tensors must have identical size");
+      }
+      if (t.strides() != first.strides()) {
+        TORCH_CHECK(false, "Tensors must have identical strides");
+      }
       const auto inserted = usedDevices.insert(t.get_device()).second;
       if (!inserted) {
         TORCH_CHECK(false, "Tensors must be on distinct GPU devices");
