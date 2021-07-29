@@ -497,7 +497,7 @@ class Tracer(TracerBase):
                         if 'proxy_factory_fn' in inspect.signature(self.create_proxy).parameters:
                             kwargs['proxy_factory_fn'] = (None if not self.param_shapes_constant else
                                                           lambda node : ParameterProxy(self, node, n, attr_val))
-                        val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)
+                        val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]
 
