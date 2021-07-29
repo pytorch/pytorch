@@ -4559,7 +4559,7 @@ def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
             make_input(
                 shape,
                 low=0,
-                high=10 if num_classes == -1 else 5,
+                high=10 if num_classes == -1 else num_classes // 2,
             ),
             kwargs=dict(num_classes=num_classes),
         )
