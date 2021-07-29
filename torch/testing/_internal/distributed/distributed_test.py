@@ -976,11 +976,11 @@ class DistributedTest:
             expected_avg_tensor = torch.ones_like(param.data) * sum(range(world_size)) / world_size
             period = 4
             for warmup_steps in [12, 13, 14, 15]:
-                averager = averagers.PeriodicModelAverager(model.parameters(), warmup_steps=warmup_steps, period=period)
+                averager = averagers.PeriodicModelAverager(warmup_steps=warmup_steps, period=period)
                 for step in range(0, 20):
                     # Reset the parameters at every step.
                     param.data = copy.deepcopy(tensor)
-                    averager.average_parameters()
+                    averager.average_parameters(model.parameters())
                     if step >= warmup_steps and (step - warmup_steps) % period == 0:
                         self.assertEqual(param.data, expected_avg_tensor)
                     else:
@@ -4497,7 +4497,7 @@ class DistributedTest:
                 gradient_as_bucket_view=grad_is_view
             )
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
-            averager = averagers.PeriodicModelAverager(net.parameters(), period=period, warmup_steps=warmup_steps)
+            averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
 
             post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
@@ -4507,7 +4507,7 @@ class DistributedTest:
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 params=post_localSGD_net.parameters(),
                 optimizer_class=torch.optim.SGD,
-                averager=averagers.PeriodicModelAverager(post_localSGD_net.parameters(), period=period, warmup_steps=warmup_steps),
+                averager=averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps),
                 lr=learning_rate,
             )
 
@@ -4515,13 +4515,13 @@ class DistributedTest:
             target = torch.randn(dist.get_world_size() * 2, 4).cuda()
             loss_fn = nn.MSELoss()
 
-            for idx in range(20):
+            for _ in range(20):
                 opt.zero_grad()
                 output = net(input)
                 loss = loss_fn(output, target)
                 loss.backward()
                 opt.step()
-                averager.average_parameters()
+                averager.average_parameters(net.parameters())
 
                 post_localSGD_opt.zero_grad()
                 post_localSGD_output = post_localSGD_net(input)
