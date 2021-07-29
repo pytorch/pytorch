@@ -377,13 +377,6 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          return_complex: Optional[bool] = True) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
-    .. warning::
-        From version 1.10.0, :attr:`return_complex` must always be True, using
-        False was removed.
-
-        Note that :func:`torch.view_as_real` can be used to recover a real
-        tensor with an extra last dimension for real and imaginary components.
-
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
     time. The interface of this function is modeled after the librosa_ stft function.
@@ -442,10 +435,6 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     :attr:`input`, :math:`N` is the number of frequencies where STFT is applied
     and :math:`T` is the total number of frames used.
 
-    .. warning::
-      This function changed signature at version 0.4.1. Calling with the
-      previous signature may cause error or return incorrect result.
-
     Args:
         input (Tensor): the input tensor
         n_fft (int): size of Fourier transform
@@ -471,6 +460,9 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
 
             .. versionchanged: 1.10
                Only accepts True
+               Note that :func:`torch.view_as_real` can be used to recover a real
+               tensor with an extra last dimension for real and imaginary components.
+
 
     Returns:
         Tensor: A tensor containing the STFT result with shape described above
