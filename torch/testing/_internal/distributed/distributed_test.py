@@ -64,8 +64,8 @@ from torch.testing._internal.common_utils import (
 )
 
 if not IS_WINDOWS:
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -4496,8 +4496,7 @@ class DistributedTest:
             "Only NCCL and GLOO backend support DistributedDataParallel",
         )
         @unittest.skipIf(
-            IS_WINDOWS,
-            "PostLocalSGDOptimizer not yet supported with Windows."
+            IS_WINDOWS, "PostLocalSGDOptimizer not yet supported with Windows."
         )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
@@ -4507,20 +4506,24 @@ class DistributedTest:
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
-                gradient_as_bucket_view=grad_is_view
+                gradient_as_bucket_view=grad_is_view,
             )
             opt = torch.optim.SGD(net.parameters(), lr=learning_rate)
-            averager = averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps)
+            averager = averagers.PeriodicModelAverager(
+                period=period, warmup_steps=warmup_steps
+            )
 
             post_localSGD_net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
-                gradient_as_bucket_view=grad_is_view
+                gradient_as_bucket_view=grad_is_view,
             )
             post_localSGD_opt = post_localSGD_optimizer.PostLocalSGDOptimizer(
                 params=post_localSGD_net.parameters(),
                 optimizer_class=torch.optim.SGD,
-                averager=averagers.PeriodicModelAverager(period=period, warmup_steps=warmup_steps),
+                averager=averagers.PeriodicModelAverager(
+                    period=period, warmup_steps=warmup_steps
+                ),
                 lr=learning_rate,
             )
 
@@ -6789,7 +6792,9 @@ class DistributedTest:
                         except RuntimeError as e:
                             msg = str(e)
                             unused_index = 0
-                            unused_index_substr = f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
+                            unused_index_substr = (
+                                f"Parameter indices which did not receive grad for rank {self.rank}: {unused_index}"
+                            )
                             if ddp == net:
                                 expected_strs = [
                                     ddp_prev_reduction_unfinished_str,
