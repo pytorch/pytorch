@@ -320,18 +320,11 @@ size_t get_available_workspace() {
   return max_block_size;
 }
 
-auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
-  auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
-  void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
-  int64_t uids[] = {'x', 'y', 'w'};
-  // We don't care about getting the best ordering of algos if we're roing to run all of them
-  auto sources = get_generator_sources(/*desc,*/ x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
+void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::OperationGraph&& opGraph, cudnn_frontend::EngineConfigGenerator& generator, const Tensor& x, cudnn_frontend::executionPlans_t& valid_plans, Tensor& workspace) {
   auto initial_predicate_function = [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
     return false;
   };
-  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
   auto plans = generator.cudnnGetPlan(handle, std::move(opGraph), initial_predicate_function);
-  cudnn_frontend::executionPlans_t valid_plans;
   size_t max_block_size = get_available_workspace();
   size_t max_workspace_size = 0u;
   std::for_each(plans.begin(), plans.end(), [&] (cudnn_frontend::ExecutionPlan& plan) {
@@ -344,7 +337,6 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
     }
   });
   TORCH_CHECK_WITH(CUDAOutOfMemoryError, max_workspace_size < 1_TiB, "Not enough memory for workspace!");
-  Tensor workspace;
   bool remove_invalid = false;
   while (max_workspace_size) {
     try {
@@ -365,6 +357,18 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
     }
     valid_plans = std::move(new_valid_plans);
   }
+}
+
+auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
+  auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
+  void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w'};
+  // We don't care about getting the best ordering of algos if we're roing to run all of them
+  auto sources = get_generator_sources(/*desc,*/ x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT); 
+  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  cudnn_frontend::executionPlans_t valid_plans;
+  Tensor workspace;
+  generate_and_filter_plans(handle, std::move(opGraph), generator, x, valid_plans, workspace);
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
@@ -379,6 +383,36 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   }
   return sorted_plans;
 }
+
+auto get_plans_from_find_fused(const cudnnHandle_t handle,
+                               const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b,
+                               const float alpha, const CacheKeyFused& key,
+ 		               const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation,
+ 			       const bool deterministic, const bool allow_tf32) {
+  auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
+  void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), z.data_ptr(), b.data_ptr()};
+  int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
+
+  auto sources = get_generator_sources(x, deterministic, allow_tf32, CUDNN_HEUR_MODE_INSTANT);
+  cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
+  cudnn_frontend::executionPlans_t valid_plans;
+  Tensor workspace;
+  generate_and_filter_plans(handle, std::move(opGraph), generator, x, valid_plans, workspace);
+  auto variantPack = cudnn_frontend::VariantPackBuilder()
+      .setDataPointers(5, data_ptrs)
+      .setUids(5, uids)
+      .setWorkspacePointer(workspace.data_ptr())
+      .build();
+
+  auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
+
+  cudnn_frontend::executionPlans_t sorted_plans;
+  for (auto& option : options) {
+    sorted_plans.emplace_back(std::move(option.plan));
+  }
+  return sorted_plans;
+}
+
 
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
 auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
@@ -399,7 +433,6 @@ auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, const Tensor&
   return configs;
 }
 
-
 void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto & plan : plans) {
     try {
@@ -411,7 +444,21 @@ void try_plans(cudnn_frontend::executionPlans_t& plans, const CacheKey& key, con
         cudaGetLastError(); // clear CUDA error
     }
   }
-  TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
+}
+
+void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
+  for (auto & plan : plans) {
+    try {
+      run_conv_plan_fused(handle, x, y, w, z, b, plan);
+      benchmark_cache_fused.emplace(key, plan);
+      return;
+    } catch (cudnn_frontend::cudnnException &e) {} catch (CuDNNError &e) {}
+      catch (c10::CUDAOutOfMemoryError &e) {
+        cudaGetLastError(); // clear CUDA error
+    }
+  }
+  TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
 
 void try_configs(cudnn_frontend::EngineConfigList& configs, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
@@ -429,7 +476,7 @@ void try_configs(cudnn_frontend::EngineConfigList& configs, const CacheKey& key,
         cudaGetLastError(); // clear CUDA error
     }
   }
-  TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
 }
 
 void try_configs_fused(cudnn_frontend::EngineConfigList& configs, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
@@ -447,7 +494,7 @@ void try_configs_fused(cudnn_frontend::EngineConfigList& configs, const CacheKey
         cudaGetLastError(); // clear CUDA error
     }
   }
-  TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
+  TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
 }
 
 void run_single_conv(const cudnnBackendDescriptorType_t operation,
@@ -487,9 +534,9 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
   }
 }
 
-void run_single_conv_fused(const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b,
+void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b,
   float alpha, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-  int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
+  int64_t groups, const bool benchmark, const bool deterministic, const bool allow_tf32) {
   cudnnHandle_t handle = getCudnnHandle();
 
   CacheKeyFused key;
@@ -504,13 +551,19 @@ void run_single_conv_fused(const Tensor& x, const Tensor& y, const Tensor& w, co
     }
   }
 
-  //if (!benchmark) {
+  if (!benchmark) {
     cudnn_frontend::EngineConfigList configs = get_configs_from_heuristics_fused(handle,
                                                                                  x, y, w, z, b, alpha, key,
 										 padding, stride, dilation,
 										 deterministic, allow_tf32);
     try_configs_fused(configs, key, handle, x, y, w, z, b);
-  //}
+  } else {
+    cudnn_frontend::executionPlans_t plans = get_plans_from_find_fused(handle,
+                                                                       x, y, w, z, b, alpha, key,
+                                                                       padding, stride, dilation,
+                                                                       deterministic, allow_tf32);
+    try_plans_fused(plans, key, handle, x, y, w, z, b);
+  }
 }
 
 void raw_cudnn_convolution_forward_out(
@@ -587,7 +640,7 @@ void raw_cudnn_convolution_add_relu_out(
   if (use_v8()) {
     //auto bias_ = bias.repeat({output.size(0), 1, 1, 1});
     auto bias_ = bias.view({1, bias.numel(), 1, 1});
-    run_single_conv_fused (input, output, weight, z, bias_,
+    run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);
   } else {

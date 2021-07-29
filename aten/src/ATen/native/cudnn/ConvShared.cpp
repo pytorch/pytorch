@@ -494,6 +494,7 @@ Tensor cudnn_convolution_relu(
   }
 
   auto& ctx = at::globalContext();
+  bool benchmark = ctx.benchmarkCuDNN();
   bool allow_tf32 = ctx.allowTF32CuDNN();
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -516,7 +517,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -532,7 +533,7 @@ Tensor cudnn_convolution_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark, // benchmark
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -566,6 +567,7 @@ Tensor cudnn_convolution_add_relu(
 
   auto& ctx = at::globalContext();
   bool allow_tf32 = ctx.allowTF32CuDNN();
+  bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()
           ? bias_t.value()
@@ -588,7 +590,7 @@ Tensor cudnn_convolution_add_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
@@ -604,7 +606,7 @@ Tensor cudnn_convolution_add_relu(
       padding,
       dilation,
       groups,
-      false, // benchmark
+      benchmark,
       false, // deterministic
       allow_tf32  // allow_tf32
   );
