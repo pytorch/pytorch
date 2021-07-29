@@ -80,12 +80,30 @@ struct VariadicBdimsBatchRuleHelper<F, Func, typelist<A, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
-template <typename F, F Func, typename... ExtraArgs>
-std::tuple<Tensor,optional<int64_t>> existing_bdim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
-  auto self_ = reshape_dim_into(*self_bdim, 0, self);
-  auto out = Func(self_, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple(reshape_dim_outof(0, self.sizes()[*self_bdim], out), 0);
-}
+
+template <typename A, A a, typename C>
+struct ExistingBdimBatchRuleHelper;
+
+template <typename F, F Func, typename A, typename... T>
+struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& self,
+      optional<int64_t> self_bdim,
+      T... extra_args) {
+    auto self_ = reshape_dim_into(*self_bdim, 0, self);
+    auto out = Func(self_, std::forward<T>(extra_args)...);
+    return std::make_tuple(reshape_dim_outof(0, self.sizes()[*self_bdim], out), 0);
+  }
+};
+
+// USAGE: EXISTING_BDIM_BATCH_RULE(at::cholesky_inverse)
+// INCORRECT USAGE: EXISTING_BDIM_BATCH_RULE(&at::cholesky_inverse)
+// It is important that this macro is not passed a function pointer!!
+#define EXISTING_BDIM_BATCH_RULE(fn) SINGLE_ARG(\
+    ExistingBdimBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
 
 #define INVOKE(object,ptrToMember)  ((object).*(ptrToMember))

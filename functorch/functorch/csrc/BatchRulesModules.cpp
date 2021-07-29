@@ -212,19 +212,19 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(dropout);
 
   VMAP_SUPPORT("constant_pad_nd", BASIC_UNARY_BATCH_RULE(at::constant_pad_nd));
-  VMAP_SUPPORT("reflection_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad1d), &at::reflection_pad1d, IntArrayRef>));
-  VMAP_SUPPORT("reflection_pad2d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::reflection_pad2d), &at::reflection_pad2d, IntArrayRef>));
-  VMAP_SUPPORT("replication_pad1d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad1d), &at::replication_pad1d, IntArrayRef>));
-  VMAP_SUPPORT("replication_pad2d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad2d), &at::replication_pad2d, IntArrayRef>));
-  VMAP_SUPPORT("replication_pad3d", SINGLE_ARG(existing_bdim_batch_rule<decltype(&at::replication_pad3d), &at::replication_pad3d, IntArrayRef>));
+  VMAP_SUPPORT("reflection_pad1d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad1d));
+  VMAP_SUPPORT("reflection_pad2d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad2d));
+  VMAP_SUPPORT("replication_pad1d", EXISTING_BDIM_BATCH_RULE(at::replication_pad1d));
+  VMAP_SUPPORT("replication_pad2d", EXISTING_BDIM_BATCH_RULE(at::replication_pad2d));
+  VMAP_SUPPORT("replication_pad3d", EXISTING_BDIM_BATCH_RULE(at::replication_pad3d));
 
-  VMAP_SUPPORT("upsample_bicubic2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_bicubic2d, vec)), &at::upsample_bicubic2d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_bilinear2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_bilinear2d, vec)), &at::upsample_bilinear2d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_linear1d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_linear1d, vec)), &at::upsample_linear1d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_nearest1d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest1d, vec)), &at::upsample_nearest1d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_nearest2d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest2d, vec)), &at::upsample_nearest2d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_nearest3d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_nearest3d, vec)), &at::upsample_nearest3d, optional<IntArrayRef>, optional<ArrayRef<double>>>));
-  VMAP_SUPPORT("upsample_trilinear3d.vec", SINGLE_ARG(existing_bdim_batch_rule<decltype(&ATEN_FN2(upsample_trilinear3d, vec)), &at::upsample_trilinear3d, optional<IntArrayRef>, bool, optional<ArrayRef<double>>>));
+  VMAP_SUPPORT("upsample_bicubic2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_bicubic2d, vec)));
+  VMAP_SUPPORT("upsample_bilinear2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_bilinear2d, vec)));
+  VMAP_SUPPORT("upsample_linear1d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_linear1d, vec)));
+  VMAP_SUPPORT("upsample_nearest1d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest1d, vec)));
+  VMAP_SUPPORT("upsample_nearest2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest2d, vec)));
+  VMAP_SUPPORT("upsample_nearest3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest3d, vec)));
+  VMAP_SUPPORT("upsample_trilinear3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_trilinear3d, vec)));
 
 }
 }}
