@@ -295,7 +295,7 @@ TEST(TorchpyTest, FxModule) {
   }
 }
 
-#ifndef NO_CUSTOM_LIBRARY
+#ifdef TEST_CUSTOM_LIBRARY
 thread_local int in_another_module = 5;
 TEST(TorchpyTest, SharedLibraryLoad) {
   torch::deploy::InterpreterManager manager(2);
