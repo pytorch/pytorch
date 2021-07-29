@@ -1,6 +1,4 @@
 #include <torch/csrc/jit/mobile/profiler_edge.h>
-#include "autograd/profiler_kineto.h"
-#include "autograd/profiler_legacy.h"
 
 namespace profiler = torch::autograd::profiler;
 namespace torch {
