@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Function
 import torch.distributed as dist
+import warnings
 
 
 def broadcast(tensor, src, group=dist.group.WORLD):
@@ -20,6 +21,11 @@ def broadcast(tensor, src, group=dist.group.WORLD):
         Tensor: Received tensor from the broadcast op.
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
     return _Broadcast.apply(src, group, tensor)
 
 
@@ -35,6 +41,11 @@ def gather(tensor, dst=0, group=dist.group.WORLD):
     Returns:
         tuple[Tensor]: List of appropriately-sized tensors with the gathered data.
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
     return _Gather.apply(dst, group, tensor)
 
 
@@ -55,6 +66,11 @@ def scatter(tensors, src=0, group=dist.group.WORLD):
         Tensor: Output tensor from the scatter operation.
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
     return _Scatter.apply(src, group, *tensors)
 
 
@@ -76,6 +92,14 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
         Tensor: Output of the collective.
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
+    if op != dist.ReduceOp.SUM:
+        raise RuntimeError("`reduce` supports SUM operation only.")
+
     return _Reduce.apply(dst, op, group, tensor)
 
 
@@ -91,6 +115,11 @@ def all_gather(tensor, group=dist.group.WORLD):
         tuple[Tensor]): Output of the collective.
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
     return _AllGather.apply(group, tensor)
 
 
@@ -107,6 +136,11 @@ def all_to_all(tensors, group=dist.group.WORLD):
         tuple[Tensor]): Output of the collective.
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
     return _AlltoAll.apply(group, *tensors)
 
 
@@ -129,6 +163,14 @@ def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
         Tensor: Output of the collective
 
     """
+    warnings.warn(
+        "torch.distributed.nn.functional is deprecated, please use "
+        "torch.distributed.ops instead."
+    )
+
+    if op != dist.ReduceOp.SUM:
+        raise RuntimeError("`all_reduce` supports SUM operation only.")
+
     return _AllReduce.apply(op, group, tensor)
 
 
