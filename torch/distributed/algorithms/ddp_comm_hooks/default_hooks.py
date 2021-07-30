@@ -13,7 +13,11 @@ def _allreduce_fut(
     # Apply the division first to avoid overflow, especially for FP16.
     tensor.div_(group_to_use.size())
 
-    return dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
+    return (
+        dist.all_reduce(tensor, group=group_to_use, async_op=True)
+        .get_future()
+        .then(lambda fut: fut.value()[0])
+    )
 
 
 def allreduce_hook(
@@ -71,22 +75,27 @@ class OptimizerHookState(object):
     Holds state for running optimizer in-line after DDP communication hook.
     Currently contains only optimizer class which must have a method `step_param`.
     """
-    __slots__ = ['functional_optimizer']
 
-    def __init__(self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs):
+    __slots__ = ["functional_optimizer"]
+
+    def __init__(
+        self, functional_optim_cls, *functional_optim_args, **functional_optim_kwargs
+    ):
         self.functional_optimizer = functional_optim_cls(
             [],
             *functional_optim_args,
             **functional_optim_kwargs,
-            allow_empty_param_list=True
+            allow_empty_param_list=True,
         )
-        if not hasattr(self.functional_optimizer, 'step_param'):
+        if not hasattr(self.functional_optimizer, "step_param"):
             raise ValueError(
                 f"Class {functional_optim_cls} must implement method step_param."
             )
 
+
 def hook_then_optimizer(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future], optimizer_state: OptimizerHookState
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
+    optimizer_state: OptimizerHookState,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
     """Runs optimizer in a functional fashion after DDP communication hook."""
 
@@ -105,9 +114,11 @@ def hook_then_optimizer(
                     grad_tensor,
                 )
             return bucket.get_tensor()
+
         return fut.then(optimizer_step)
 
     return hook_then_optimizer_wrapper
+
 
 def fp16_compress_wrapper(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
@@ -127,7 +138,7 @@ def fp16_compress_wrapper(
     def fp16_compress_wrapper_hook(
         hook_state, bucket: dist.GradBucket
     ) -> torch.futures.Future:
-        # Cast bucket tensor to the FP16.
+        # Cast bucket tensor to FP16.
         bucket.set_tensor(bucket.get_tensor().to(torch.float16))
 
         fut = hook(hook_state, bucket)
@@ -136,7 +147,7 @@ def fp16_compress_wrapper(
             decompressed_tensor = bucket.get_tensor()
             # Decompress in place to reduce the peak memory.
             # See: https://github.com/pytorch/pytorch/issues/45968
-            decompressed_tensor.copy_(fut.value()[0])
+            decompressed_tensor.copy_(fut.value())
             return decompressed_tensor
 
         # Decompress after hook has run.
