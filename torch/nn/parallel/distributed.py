@@ -1261,7 +1261,7 @@ class DistributedDataParallel(Module, _Joinable):
 
             >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result([bucket.get_tensor()])
+            >>>     fut.set_result([bucket.buffer()])
             >>>     return fut
 
             >>> ddp.register_comm_hook(state=None, hook=noop)
@@ -1271,7 +1271,7 @@ class DistributedDataParallel(Module, _Joinable):
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
+            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
