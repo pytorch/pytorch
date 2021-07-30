@@ -5,6 +5,7 @@ import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.distributed import distributed_c10d
 
 
 # Functional optimizers require passing a list of gradients to their `step()`
@@ -35,8 +36,8 @@ def hook_with_zero_step(
     if communication is relatively slow compared to computation.
 
     Arguments:
-        hook (Any * dist.GradBucket -> torch.futures.Future): the hook to
-            modify.
+        hook (Callable[[Any, dist.GradBucket], torch.futures.Future]): the hook
+            to modify.
         ddp (DistributedDataParallel): the :class:`DistributedDataParallel`
             instance to use.
         zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
@@ -47,6 +48,14 @@ def hook_with_zero_step(
 
     Raises:
         ValueError: if ``zero`` was constructed with ``overlap_with_ddp=False``.
+
+    .. warning::
+        Given the way that overlapping :class:`DistributedDataParallel` with
+        :class:`ZeroRedundancyOptimizer` is currently implemented, the first
+        two training iterations do not perform parameter updates in the
+        optimizer step. This is because it needs information about the gradient
+        bucketing strategy used by :class:`DistributedDataParallel`, which is
+        not finalized until the second forward pass.
     """
     if not zero._overlap_with_ddp:
         raise ValueError(
@@ -55,7 +64,7 @@ def hook_with_zero_step(
         )
 
     def hook_with_zero_fn(
-        state,
+        state: Any,
         bucket: dist.GradBucket,
     ) -> torch.futures.Future:
         r"""
@@ -68,7 +77,7 @@ def hook_with_zero_step(
         information used to implement the modified hook.
 
         Arguments:
-            state: any state for the hook.
+            state (Any): any state for the hook.
             bucket (dist.GradBucket): the :class:`DistributedDataParallel`
                 gradient bucket.
         """
@@ -198,6 +207,17 @@ def hook_with_zero_step_interleaved(
 
     Raises:
         ValueError: if ``zero`` was constructed with ``overlap_with_ddp=False``.
+        RuntimeError: if using any backend other than NCCL since currently
+            Gloo may hang due to the interleaving of all-reduces and
+            broadcasts.
+
+    .. warning::
+        Given the way that overlapping :class:`DistributedDataParallel` with
+        :class:`ZeroRedundancyOptimizer` is currently implemented, the first
+        two training iterations do not perform parameter updates in the
+        optimizer step. This is because it needs information about the gradient
+        bucketing strategy used by :class:`DistributedDataParallel`, which is
+        not finalized until the second forward pass.
     """
     if not zero._overlap_with_ddp:
         raise ValueError(
@@ -218,10 +238,19 @@ def hook_with_zero_step_interleaved(
             bucket (dist.GradBucket): the :class:`DistributedDataParallel`
                 gradient bucket.
         """
+        # NOTE: Gloo may hang with this interleaved approach, so we require
+        # NCCL backend for now
+        if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
+            raise RuntimeError(
+                "Overlapping DDP with ZeRO using this interleaved approach "
+                "currently requires NCCL backend to avoid hangs"
+            )
+
         fut = hook(state, bucket)
 
         # Proceed as normal until the DDP buckets have been rebuilt
         if not ddp._has_rebuilt_buckets:
+            assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
             return fut
 
         def zero_step(fut: torch.futures.Future) -> torch.Tensor:
