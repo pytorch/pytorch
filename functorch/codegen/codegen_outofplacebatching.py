@@ -143,6 +143,8 @@ def parse_return(return_t):
     if 'std::tuple' not in return_t:
         return (return_t,)
     m = re.match(r'std::tuple<(.*)>', return_t)
+    if m is None:
+        m = re.match(r'::std::tuple<(.*)>', return_t)
     return tuple([x.strip() for x in m.group(1).split(',')])
 
 def parse_args(args_t):
