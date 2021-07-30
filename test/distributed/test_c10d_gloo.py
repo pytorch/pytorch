@@ -48,7 +48,10 @@ from torch.testing._internal.common_utils import (
 )
 
 if TEST_WITH_TSAN:
-    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    print(
+        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 
@@ -835,7 +838,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @sandcastle_skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
+    @sandcastle_skip(
+        "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
+    )
     @skip_if_lt_x_gpu(2)
     def test_scatter_stress_cuda(self):
         inputs = [
