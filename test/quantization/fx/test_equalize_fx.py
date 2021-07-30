@@ -15,6 +15,7 @@ from torch.quantization.fx._equalize import (
 )
 
 from torch.testing._internal.common_quantization import (
+    ModelMultipleOpsNoAvgPool,
     NodeSpec as ns,
     QuantizationTestCase,
     SingleLayerLinearModel,
@@ -191,8 +192,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the min/max weight rows are correct
         ref_min_weights_scaled, ref_max_weights_scaled = self.channel_minmax(ref_w_scaled)
-        self.assertEqual(weight_quant_obs.min_vals, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
-        self.assertEqual(weight_quant_obs.max_vals, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.min_val, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.max_val, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
 
         weight_qparams = weight_quant_obs.calculate_qparams()
 
@@ -335,7 +336,7 @@ class TestEqualizeFx(QuantizationTestCase):
             self.assertEqual(output, convert_ref_output)
 
     @skipIfNoFBGEMM
-    def test_nonequalized_nodes(self):
+    def test_input_weight_equalization_nonequalized_nodes(self):
         """ Checks if equalization is applied correctly on models containing
         nodes that are being quantized but not equalized. A dequant node should
         be inserted between the node being quantized and the node being
@@ -367,6 +368,35 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize'),
         ]
         self.checkGraphModuleNodes(quantized, expected_node_list=linear2_node_list)
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_reshape(self):
+        class LinearReshapeLinear(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 10)
+                self.linear2 = nn.Linear(5, 10)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                x = x.view(10, 5)
+                x = self.linear2(x)
+                return x
+
+        m = LinearReshapeLinear().eval()
+        x = torch.rand((5, 5))
+
+        prepared = prepare_fx(
+            copy.deepcopy(m),
+            default_qconfig_dict,
+            equalization_qconfig_dict=default_equalization_qconfig_dict
+        )
+        prepared(x)
+
+        try:
+            _convert_equalization_ref(prepared)
+        except ValueError:
+            pass
 
     def calculate_equalization_scale_ref(self, x, w):
         """ Calculates the equalization scale based on the input and weight

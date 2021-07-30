@@ -79,7 +79,7 @@ class _InputEqualizationObserver(nn.Module):
         return self.input_obs(x_orig)
 
     def get_input_minmax(self):
-        return (self.input_obs.min_vals, self.input_obs.max_vals)
+        return (self.input_obs.min_val, self.input_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         # Reshape the equalization scale along axis=1 so that it can be
@@ -153,7 +153,7 @@ class _WeightEqualizationObserver(nn.Module):
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
-        return (self.weight_col_obs.min_vals, self.weight_col_obs.max_vals)
+        return (self.weight_col_obs.min_val, self.weight_col_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale
@@ -440,16 +440,17 @@ def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module])
         return next_inp_eq_obs.equalization_scale
     return None
 
-def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
+def scale_input_observer(
+    node: Node,
+    input_quant_obs_node: Node,
+    modules: Dict[str, nn.Module]
+) -> None:
     """ Scales the following input quantization observer's min/max values by
     updating the values with the scaled min/max values calculated by the input
     equalization observer
     """
     input_eq_obs = modules[str(node.target)]
     assert(isinstance(input_eq_obs, _InputEqualizationObserver))
-
-    input_quant_obs_node = node.args[0]
-    assert(isinstance(input_quant_obs_node, Node))
 
     input_quant_obs = modules[str(input_quant_obs_node.target)]
     if not isinstance(input_quant_obs, ObserverBase):
@@ -500,7 +501,9 @@ def scale_weight_node(
         next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, scaled_weight)
     except RuntimeError:
         raise ValueError(
-            "Input-weight equalization is unable to support general reshapes within models."
+            "Input-weight equalization is unable to support general reshapes within models. " +
+            f"Tried to reshape equalization scale with shape {next_equalization_scale.shape} " +
+            f"to be multiplied row-wise to the weight tensor with shape {scaled_weight.shape}."
         )
     scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
 
@@ -742,7 +745,7 @@ def convert_eq_obs(
                 continue
 
             # Update the following input quantization observer's min/max values
-            scale_input_observer(node, modules)
+            scale_input_observer(node, inp_quant_obs_node, modules)
 
             # Remove the InputEqualization node and add a mul operator before
             # the quantization observer node that appears before the equalization node
