@@ -1155,15 +1155,16 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
 namespace {
 void testLiteModuleCompareResultTensors(
     Module& m,
-    const std::vector<torch::jit::IValue>& inputs) {
-  auto outputref = m.forward(inputs).toTensor();
+    const std::vector<torch::jit::IValue>& inputs,
+    const std::string& method_name = "forward") {
+  auto outputref = m.get_method(method_name)(inputs).toTensor();
 
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   IValue res;
   for (int i = 0; i < 3; ++i) {
-    res = bc.get_method("forward")(inputs);
+    res = bc.get_method(method_name)(inputs);
   }
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
@@ -1368,6 +1369,42 @@ static auto reg =
             });
 
 } // namespace
+
+TEST(LiteInterpreterTest, OperatorCacheDifferentiatesDefaultArgs) {
+  // Create 3 methods:
+  //
+  // 1. forward() returns a tensor with dtype=torch.int64 (4)
+  // 2. forward2() returns a tensor with dtype=torch.float32 (6)
+  // 3. forward3() returns a tensor with dtype=torch.float32 but
+  //    the dtype is inferred by the input tensor's dtype
+  //
+  // If caching works correctly, then the result from the full-jit
+  // module and the lite module will be the same. Otherwise, it
+  // will be different if we don't correctly ignore the cache
+  // entry for an operator that has a different number of
+  // arguments.
+  Module m("m");
+  m.define(R"(
+    def forward(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=4)
+      return ret1.fill_(25)
+  )");
+  m.define(R"(
+    def forward2(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10], dtype=6)
+      return ret1.fill_(32.0)
+  )");
+  m.define(R"(
+    def forward3(self):
+      ret1 = torch.new_empty(torch.zeros(10), [10])
+      return ret1.fill_(12.0)
+  )");
+
+  std::vector<torch::jit::IValue> inputs;
+  testLiteModuleCompareResultTensors(m, inputs, "forward");
+  testLiteModuleCompareResultTensors(m, inputs, "forward2");
+  testLiteModuleCompareResultTensors(m, inputs, "forward3");
+}
 
 } // namespace jit
 } // namespace torch
