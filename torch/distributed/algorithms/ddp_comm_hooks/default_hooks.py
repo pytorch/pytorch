@@ -106,8 +106,8 @@ def hook_then_optimizer(
         fut = hook(hook_state, bucket)
 
         def optimizer_step(fut):
-            gradient_tensors = bucket.get_per_parameter_tensors()
-            model_params = bucket.get_model_params_for_bucket()
+            gradient_tensors = bucket.gradients()
+            model_params = bucket.parameters()
             for grad_tensor, model_param in zip(gradient_tensors, model_params):
                 optimizer_state.functional_optimizer.step_param(
                     model_param,

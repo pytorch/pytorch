@@ -273,7 +273,7 @@ This tensor can be further decomposed into a list of per-parameter tensors withi
 to apply layer-wise operations.
 )")
       .def(
-          "get_index",
+          "index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -294,7 +294,7 @@ Returns:
     which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
-          "get_per_parameter_tensors",
+          "gradients",
           &::c10d::GradBucket::getPerParameterTensors,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -302,7 +302,7 @@ Returns:
     A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
 )")
       .def(
-          "get_model_params_for_bucket",
+          "parameters",
           &::c10d::GradBucket::getModelParamsForBucket,
           py::call_guard<py::gil_scoped_release>(),
                     R"(
@@ -311,7 +311,7 @@ Returns:
     parameter.
 )")
       .def(
-          "is_the_last_bucket_to_allreduce",
+          "is_last",
           &::c10d::GradBucket::isTheLastBucketToAllreduce,
           py::call_guard<py::gil_scoped_release>(),
           R"(

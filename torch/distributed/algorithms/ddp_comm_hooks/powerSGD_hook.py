@@ -74,7 +74,7 @@ def _report_compression_stats(bucket, state):
     Report compression stats at the frequency of `compression_stats_logging_frequency` specified in PowerSGD state.
     """
     if (
-        bucket.is_the_last_bucket_to_allreduce()
+        bucket.is_last()
         and state.iter >= state.next_stats_report
     ):
         stats = state.compression_stats()
@@ -229,7 +229,7 @@ class PowerSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.is_the_last_bucket_to_allreduce():
+        if bucket.is_last():
             self.iter += 1
 
         if self.iter == self.start_powerSGD_iter:
@@ -334,7 +334,7 @@ def powerSGD_hook(
     dtype = input_tensor.dtype
 
     # Incorporate the error from the previous state into the gradients.
-    bucket_index = bucket.get_index()
+    bucket_index = bucket.index()
     input_tensor_cp = None
     total_length = input_tensor.shape[0]
     if state.use_error_feedback:
@@ -356,7 +356,7 @@ def powerSGD_hook(
         input_tensor_cp = torch.clone(input_tensor).detach()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
-    tensors = bucket.get_per_parameter_tensors()
+    tensors = bucket.gradients()
 
     # Step I: Divide all the tensors into two groups,
     # one will be compressed before allreduce and the other will be directly allreduced without compression.
@@ -620,7 +620,7 @@ def batched_powerSGD_hook(
     _report_compression_stats(bucket, state)
 
     # Incorporate the error from the previous state into the gradients.
-    bucket_index = bucket.get_index()
+    bucket_index = bucket.index()
     input_tensor_cp = None
     if state.use_error_feedback:
         if bucket_index in state.error_dict:

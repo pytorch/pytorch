@@ -40,7 +40,7 @@ class PostLocalSGDState(object):
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
-        if bucket.is_the_last_bucket_to_allreduce():
+        if bucket.is_last():
             self.iter += 1
 
         if self.iter == self.start_localSGD_iter:
