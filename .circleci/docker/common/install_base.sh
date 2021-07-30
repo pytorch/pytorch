@@ -3,18 +3,6 @@
 set -ex
 
 install_ubuntu() {
-  # NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
-  # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
-  # find the correct image. As a result, here we have to check for
-  #   "$UBUNTU_VERSION" == "18.04"*
-  # instead of
-  #   "$UBUNTU_VERSION" == "18.04"
-  if [[ "$UBUNTU_VERSION" == "18.04"* ]]; then
-    cmake3="cmake=3.10*"
-  else
-    cmake3="cmake=3.5*"
-  fi
-
   # Install common dependencies
   apt-get update
   # TODO: Some of these may not be necessary
@@ -23,7 +11,7 @@ install_ubuntu() {
   apt-get install -y --no-install-recommends \
     $ccache_deps \
     $numpy_deps \
-    ${cmake3} \
+	"cmake=3.10*" \
     apt-transport-https \
     autoconf \
     automake \

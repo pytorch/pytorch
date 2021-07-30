@@ -181,7 +181,7 @@ case "$image" in
     ANDROID=yes
     ANDROID_NDK_VERSION=r19c
     GRADLE_VERSION=6.8.3
-    CMAKE_VERSION=3.7.0
+    CMAKE_VERSION=3.10
     NINJA_VERSION=1.9.0
     ;;
   pytorch-linux-xenial-py3.6-clang7)
