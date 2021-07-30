@@ -2293,11 +2293,15 @@ def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
     return tensors
 
 def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
-    cases = (((3, 3), (1, 1), (2), (1, 1), True),
-             ((2, 2), (0, 0), (), (-1, -1), False))
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return [SampleInput(kernel_size, args=(stride, padding, dilation, return_indices))
-            for kernel_size, stride, padding, dilation, return_indices in cases]
+    cases = (((1, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
+             ((1, 1, 4, 4), (2, 2), (1, 1), (0, ), False, True, -2),
+             ((1, 2, 6, 6), (4, 4), (2, 2), (2, ), True, True, 3))
+
+    return [SampleInput(make_arg(input_shape), args=(kernel_size, stride, padding, ceil_mode,
+                                                     count_include_pad, divisor_override))
+            for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override in cases]
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
@@ -6403,11 +6407,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
-    OpInfo('nn.functional.avgpool2d',
-           aten_name='avgpool2d',
+    OpInfo('nn.functional.avg_pool2d',
+           aten_name='avg_pool2d',
            supports_autograd=True,
            supports_out=False,
-           dtypes=integral_types(),
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_avgpool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
