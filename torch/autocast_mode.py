@@ -12,7 +12,7 @@ class autocast(object):
     See the :ref:`Autocast Op Reference<autocast-op-reference>` for details.
 
     When entering an autocast-enabled region, Tensors may be any type.
-    You should not call ``.half()`` on your model(s) or inputs when using autocasting.
+    You should not call ``half()`` or ``bfloat16()`` on your model(s) or inputs when using autocasting.
 
     :class:`autocast` should wrap only the forward pass(es) of your network, including the loss
     computation(s).  Backward passes under autocast are not recommended.
@@ -153,8 +153,7 @@ class autocast(object):
                 enabled = False
         if self.device == 'cuda':
             if self.fast_dtype == torch.bfloat16 and torch.cuda.get_device_properties(torch.cuda.current_device()).major < 8:
-                warnings.warn('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
-                self.fast_dtype = torch.float16
+                raise RuntimeError('Current CUDA Device does not support bfloat16. Switching fast_dtype to float16.')
         self._enabled = enabled
 
     def __enter__(self):
