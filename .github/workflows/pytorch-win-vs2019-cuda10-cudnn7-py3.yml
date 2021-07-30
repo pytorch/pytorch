@@ -24,9 +24,9 @@ env:
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
   TORCH_CUDA_ARCH_LIST: "7.0"
   USE_CUDA: 1
-
 
 concurrency:
   group: pytorch-win-vs2019-cuda10-cudnn7-py3-${{ github.event.pull_request.number || github.sha }}
@@ -41,6 +41,8 @@ jobs:
         working-directory: pytorch-${{ github.run_id }}
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cuda10-cudnn7-py3-build
+      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -120,6 +122,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
+      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
