@@ -12,6 +12,13 @@
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <cuda.h>
 
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/Macros.h> // for the definition of HAS_CUDNN_V8
+#endif
+#endif
+
 namespace at { namespace native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
@@ -21,8 +28,10 @@ std::string cudnnTypeToString(cudnnDataType_t dtype);
 inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
+#ifdef USE_CUDA
 #if HAS_CUDNN_V8()
     case CUDNN_DATA_BFLOAT16:
+#endif
 #endif
     case CUDNN_DATA_HALF: return 2;
     case CUDNN_DATA_FLOAT: return 4;
