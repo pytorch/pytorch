@@ -192,7 +192,6 @@ Interpreter::Interpreter(InterpreterManager* manager)
   if (custom_loader_) {
     flags |= RTLD_DEEPBIND;
   }
-  void* libc = dlopen("libdl.so.2", RTLD_NOLOAD | RTLD_LAZY | RTLD_LOCAL);
   TORCH_INTERNAL_ASSERT(libc);
 #ifdef FBCODE_CAFFE2
   static dlopen_t dlopen_ = find_real_dlopen();
@@ -211,6 +210,10 @@ Interpreter::Interpreter(InterpreterManager* manager)
   unlink(library_name_.c_str());
 
   if (custom_loader_) {
+    // when using the custom loader we need to link python symbols against
+    // the right version of the symbols for the interpreter which an be looked up
+    // from the handle_ to this shared library. here we register the handle with
+    // the code that does custom loading of python extensions.
     auto deploy_set_self_ptr =
         (void (*)(void*))dlsym(handle_, "deploy_set_self");
     AT_ASSERT(deploy_set_self_ptr);
