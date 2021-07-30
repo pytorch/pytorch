@@ -2299,8 +2299,8 @@ def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
     cases = (((1, 3, 9, 9), 3, 1, 1, True, False, 2),
              ((1, 3, 9, 9), (4, 4), (2, 3), 1, True, False, 2),
              ((1, 3, 9, 9), (6, 6), (3, 3), (2, 3), True, True, 2),
-             ((1, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
-             ((1, 1, 4, 4), (2, 2), (1, 1), (0, ), False, True, -2),
+             ((2, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
+             ((1, 1, 4, 4), (2, 2), (), (0, ), False, True, -2),
              ((1, 2, 6, 6), (4, 4), (2, 2), (2, ), True, True, None))
 
     def generator():
