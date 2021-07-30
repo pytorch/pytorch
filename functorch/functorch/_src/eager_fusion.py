@@ -87,7 +87,7 @@ def tvm_compile(fx_module, example_inputs, name = None):
             tune_option = auto_scheduler.TuningOptions(
                 num_measure_trials=100,  # change this to 20000 to achieve the best performance
                 measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                early_stopping=1000,
+                # early_stopping=1000,
                 # verbose=2,
             )
             tuner.tune(tune_option)
@@ -120,6 +120,7 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                 with torch.enable_grad():
                     fx_g = make_fx(vjpfull)(fn, args, (torch.ones_like(out),))
                 fw_module, bw_module = partition_backwards(fx_g)
+                print(fw_module.code, bw_module.code)
 
                 garbage_hack = torch.randn(())
                 fw_args = (garbage_hack,) + args
