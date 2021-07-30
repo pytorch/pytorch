@@ -4529,12 +4529,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m2.load_state_dict(m1.state_dict())
             m2 = torch.quantization.QuantWrapper(m2)
             # FX graph
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 m1, (data,), QuantType.STATIC,
                 expected_node_occurrence={
                     ns.call_module(q_cls): 1,
                 })
-            q_reslut1 = result_dict["result"]
+            q_result1 = result_dict["result"]
             # Eager
             m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
             m2.eval()
