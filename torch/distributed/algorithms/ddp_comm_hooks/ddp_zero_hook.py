@@ -48,6 +48,8 @@ def hook_with_zero_step(
 
     Raises:
         ValueError: if ``zero`` was constructed with ``overlap_with_ddp=False``.
+        RuntimeError: if using any backend other than NCCL since currently
+            Gloo may hang.
 
     .. warning::
         Given the way that overlapping :class:`DistributedDataParallel` with
@@ -61,6 +63,14 @@ def hook_with_zero_step(
         raise ValueError(
             "ZeroRedundancyOptimizer must be constructed with "
             "`overlap_with_ddp=True` to use this hook properly"
+        )
+
+    # NOTE: Gloo may hang with this overlapping approach, so we require
+    # NCCL backend for now
+    if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
+        raise RuntimeError(
+            "Overlapping DDP with ZeRO using this approach currently requires "
+            "NCCL backend to avoid hangs"
         )
 
     def hook_with_zero_fn(
@@ -208,8 +218,7 @@ def hook_with_zero_step_interleaved(
     Raises:
         ValueError: if ``zero`` was constructed with ``overlap_with_ddp=False``.
         RuntimeError: if using any backend other than NCCL since currently
-            Gloo may hang due to the interleaving of all-reduces and
-            broadcasts.
+            Gloo may hang.
 
     .. warning::
         Given the way that overlapping :class:`DistributedDataParallel` with
