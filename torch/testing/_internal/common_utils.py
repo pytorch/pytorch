@@ -1940,77 +1940,58 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         it is not possible to create a noncontiguous Tensor with a single element.
 
         If exclude_zero is passed with True (default is False), all the matching values (with zero) in
-        created tensor are replaced with an epsilon value if floating type, [`eps + `eps`.j] if
-        complex type and 1 if integer/boolean type.
+        created tensor are replaced with a tiny (smallest positive representable number) value if floating type,
+        [`tiny` + `tiny`.j] if complex type and 1 if integer/boolean type.
     """
-    def _modify_low_high(ranges, input_low, input_high, default_values, is_integral_dtype=False):
+    def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
         """
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
         """
-        # This dict contains important values used for comparisons in _for_val helper function
-        # Format: key (low/high): ["value of low/high", "default value", "extremal for low/high"]
-        # We consider float('inf') as an extremal for low and float('-inf') as an extremal for high,
-        # while float('nan') is considered extremal for both
-        _vals_dict = {'low': [input_low, default_values[0], float('inf')],
-                      'high': [input_high, default_values[1], float('-inf')]}
+        def clamp(a, l, h):
+            return min(max(a, l), h)
 
-        def _for_val(inp):
-            val, default_val, extremal_val = _vals_dict[inp]
+        low = low if low is not None else default_low
+        high = high if high is not None else default_high
 
-            if val != val or val == extremal_val:
-                raise ValueError(f"Found invalid value {val} for {inp}")
-            elif val is None:
-                return default_val
-            elif inp == 'low':
-                if (val == float('-inf') or val < ranges[0]):
-                    return ranges[0]
-                elif val > ranges[1]:
-                    raise ValueError(f"Expected low value < maximum limit for the dtype, but found {val} > {ranges[1]}")
-                else:
-                    return val
-            elif inp == 'high':
-                if (val == float('inf') or val > ranges[1]):
-                    return ranges[1]
-                elif val < ranges[0]:
-                    raise ValueError(f"Expected high value > minimum limit for the dtype, but found {val} < {ranges[0]}")
-                else:
-                    return val
-            else:
-                raise ValueError(f"Invalid input, only low/high expected but found {inp}")
+        # Checks for error cases
+        if low != low or high != high:
+            raise ValueError("make_tensor: one of low or high was NaN!")
+        if low > high:
+            raise ValueError("make_tensor: low must be weakly less than high!")
 
-        low = _for_val('low')
-        high = _for_val('high')
-        return (math.floor(low), math.ceil(high)) if is_integral_dtype else (low, high)
+        low = clamp(low, lowest, highest)
+        high = clamp(high, lowest, highest)
 
-    if low is not None and high is not None and low > high:
-        raise ValueError(f"Expected low <= high, but got {low} > {high}")
+        if dtype in integral_types():
+            return math.ceil(low), math.floor(high)
+
+        return low, high
 
     if dtype is torch.bool:
         result = torch.randint(0, 2, size, device=device, dtype=dtype)
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(ranges, low, high, default_values=(0, 9), is_integral_dtype=True)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], 0, 9, dtype)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in integral_types():
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(ranges, low, high, default_values=(-9, 9), is_integral_dtype=True)
+        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 9, dtype)
         result = torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         rand_val = torch.rand(size, device=device, dtype=dtype)
         result = high * rand_val + low * (1 - rand_val)
-    elif dtype in complex_types():
+    else:
+        assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        low, high = _modify_low_high(ranges_floats, low, high, default_values=(-9, 9))
+        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
         real_rand_val = torch.rand(size, device=device, dtype=float_dtype)
         imag_rand_val = torch.rand(size, device=device, dtype=float_dtype)
         real = high * real_rand_val + low * (1 - real_rand_val)
         imag = high * imag_rand_val + low * (1 - imag_rand_val)
         result = torch.complex(real, imag)
-    else:
-        raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
