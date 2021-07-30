@@ -55,16 +55,18 @@ source functorch-env/bin/activate
 Next, install one of the following following PyTorch nightly binaries.
 ```
 # For CUDA 10.2
-pip install --pre torch>=1.9.0.dev -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html
 # For CUDA 11.1
-pip install --pre torch>=1.9.0.dev -f https://download.pytorch.org/whl/nightly/cu111/torch_nightly.html
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu111/torch_nightly.html
 # For CPU-only build
-pip install --pre torch>=1.9.0.dev -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
 ```
+If you already have a nightly of PyTorch installed and wanted to upgrade it
+(recommended!), append `--upgrade` to one of those commands.
 
 Install functorch:
 ```
-pip install --user "git+https://github.com/zou3519/functorch.git"
+pip install --user "git+https://github.com/facebookresearch/functorch.git"
 ```
 
 Run a quick sanity check in python:
