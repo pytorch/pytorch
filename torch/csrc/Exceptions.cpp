@@ -24,6 +24,10 @@ bool THPException_init(PyObject *module)
   return true;
 }
 
+PyObject* TORCH_API getTHPException_GPUOutOfMemoryError() {
+  return THPException_GPUOutOfMemoryError;
+}
+
 namespace torch {
 
 static bool compute_cpp_stack_traces_enabled() {
