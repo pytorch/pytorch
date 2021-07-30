@@ -14,9 +14,9 @@ namespace nnapi {
 namespace bind {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-nnapi_wrapper* nnapi;
+TORCH_API extern nnapi_wrapper* nnapi;
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-nnapi_wrapper* check_nnapi;
+TORCH_API extern nnapi_wrapper* check_nnapi;
 
 #define MAKE_SMART_PTR(type) \
   struct type ## Freer { \
