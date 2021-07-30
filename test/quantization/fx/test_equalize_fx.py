@@ -38,7 +38,6 @@ from torch.testing._internal.common_quantization import (
     ConvReluAddModel,
     FunctionalConvReluModel,
     FunctionalConvReluConvModel,
-    ModelMultipleOpsNoAvgPool,
 )
 
 # Standard Libraries
