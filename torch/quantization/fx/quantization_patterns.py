@@ -448,13 +448,14 @@ class CatQuantizeHandler(QuantizeHandler):
         if not self.all_node_args_are_tensors:
             return NotImplemented
         if is_reference:
-            activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
-            if activation_post_process is None:
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
             else:
-                act_dtype = activation_dtype(qconfig)
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
                 # make sure the first argument is quantized to act_dtype
                 load_arg(quantized={0: act_dtype})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
@@ -1311,13 +1312,14 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             assert is_reference
             # We can produce reference for a dtypes including
             # (torch.quint8, torch.qint8, torch.qint32, torch.float16)
-            activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
-            if activation_post_process is None:
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
             else:
-                act_dtype = activation_dtype(qconfig)
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
                 # make sure the input is quantized to act_dtype
                 load_arg(quantized={0: act_dtype})(node.args)
                 args = load_arg(quantized=torch.float)(node.args)
@@ -1478,16 +1480,17 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if is_reference:
-            activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
-            # when there is no activation_post_process following the CopyNode, it means
-            # that the CopyNode is configured with a qconfig that doesnot require
+            # when activation dtype is torch.float, the node does not require
             # observation
-            # e.g. dynamic quantization qconfig or weight_only quantization qconfig
-            if activation_post_process is None:
+            # e.g. dynamic quantization or weight_only quantization
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
             else:
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
                 # TODO: change this to act_dtype
                 # make sure the input is quantized to torch.quint8
                 load_arg(quantized={0: torch.quint8})(node.args)
