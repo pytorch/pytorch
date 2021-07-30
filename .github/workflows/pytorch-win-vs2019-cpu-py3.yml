@@ -23,7 +23,8 @@ env:
   VC_VERSION: ""
   VS_VERSION: "16.8.6"
   VC_YEAR: "2019"
-
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
 
 concurrency:
   group: pytorch-win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
@@ -36,9 +37,10 @@ jobs:
     defaults:
       run:
         working-directory: pytorch-${{ github.run_id }}
-    needs: []
     env:
       JOB_BASE_NAME: pytorch-win-vs2019-cpu-py3-build
+      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@v2
@@ -86,7 +88,6 @@ jobs:
 
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: []
     runs-on: ubuntu-18.04
     env:
       TEST_RUNNER_TYPE: windows.4xlarge
@@ -111,6 +112,8 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
+      http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -151,16 +154,19 @@ jobs:
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
-            if [[ -n $GITHUB_HEAD_REF && "$USE_CUDA" == 1 ]]; then
+            if [[ -n $GITHUB_HEAD_REF && "$BUILD_ENVIRONMENT" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: powershell
         run: |
           # -ir => recursive include all files in pattern
-          7z a "test-reports-$Env:TEST_CONFIG.zip" -ir'!test\*.xml'
+          7z a "test-reports-$Env:COMMIT_SHA1-$Env:WORKFLOW_ID.zip" -ir'!test\*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -191,6 +197,18 @@ jobs:
       fail-fast: false
     # TODO: Make this into a composite step
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:

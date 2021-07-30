@@ -189,8 +189,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the min/max weight rows are correct
         ref_min_weights_scaled, ref_max_weights_scaled = self.channel_minmax(ref_w_scaled)
-        self.assertEqual(weight_quant_obs.min_vals, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
-        self.assertEqual(weight_quant_obs.max_vals, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.min_val, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.max_val, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
 
         weight_qparams = weight_quant_obs.calculate_qparams()
 
