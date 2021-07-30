@@ -273,9 +273,10 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         two training iterations do not perform parameter updates in the
         optimizer step. This is because it needs information about the gradient
         bucketing strategy used by :class:`DistributedDataParallel`, which is
-        not finalized until the second forward pass. To adjust for this, one
-        option is to prepend two dummy inputs. Note, however, that it is
-        important to still include ``ZeroRedundancyOptimizer.step()`` in the
+        not finalized until the second forward pass if ``static_graph=False``
+        or until the third forward pass if ``static_graph=True``. To adjust
+        for this, one option is to prepend dummy inputs. Note, however, that it
+        is important to still include ``ZeroRedundancyOptimizer.step()`` in the
         training loop.
 
     .. warning:: ZeroRedundancyOptimizer is experimental and subject to change.
@@ -582,16 +583,16 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 self._partition_parameters_cache = [[] for _ in range(self.world_size)]
                 sizes = [0] * self.world_size
                 for param_group in self.param_groups:
-                    params_per_rank: List[List] = [[] for _ in range(self.world_size)]
+                    param_group_params_per_rank: List[List] = [[] for _ in range(self.world_size)]
                     # Sort the parameters by size (largest first)
                     params_sorted = sorted(param_group["params"], key=lambda t: t.numel(), reverse=True)
                     for param in params_sorted:
                         # Greedily add the parameter to rank with smallest size so far
                         rank = sizes.index(min(sizes))
-                        params_per_rank[rank].append(param)
+                        param_group_params_per_rank[rank].append(param)
                         sizes[rank] += param.numel()
                     # Apply the constructed partition of the parameter group
-                    self._partition_param_group(param_group, params_per_rank)
+                    self._partition_param_group(param_group, param_group_params_per_rank)
 
             return self._partition_parameters_cache
 

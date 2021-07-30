@@ -225,6 +225,14 @@ def hook_with_zero_step_interleaved(
             "`overlap_with_ddp=True` to use this hook properly"
         )
 
+    # NOTE: Gloo may hang with this overlapping approach, so we require
+    # NCCL backend for now
+    if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
+        raise RuntimeError(
+            "Overlapping DDP with ZeRO using this approach currently requires "
+            "NCCL backend to avoid hangs"
+        )
+
     def hook_with_zero_interleaved_fn(
         state,
         bucket: dist.GradBucket,
@@ -238,14 +246,6 @@ def hook_with_zero_step_interleaved(
             bucket (dist.GradBucket): the :class:`DistributedDataParallel`
                 gradient bucket.
         """
-        # NOTE: Gloo may hang with this interleaved approach, so we require
-        # NCCL backend for now
-        if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
-            raise RuntimeError(
-                "Overlapping DDP with ZeRO using this interleaved approach "
-                "currently requires NCCL backend to avoid hangs"
-            )
-
         fut = hook(state, bucket)
 
         # Proceed as normal until the DDP buckets have been rebuilt
