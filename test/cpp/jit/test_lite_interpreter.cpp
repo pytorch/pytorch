@@ -455,6 +455,7 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   AT_ASSERT(str == expected);
 }
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, ModuleInfoBasic) {
   Module m("M");
   m.define(R"JIT(
@@ -596,6 +597,14 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+/**
+ * The test below is disarmed for FB internal xplat builds since
+ * BUCK requires us to pass in the script_module_v4.ptl file in
+ * as a resource dependency of the build rule for this file, and
+ * we would need to access it via the C++ Resources API instead
+ * of directly reading from disk (which is what the open source
+ * build/run does).
+ */
 TEST(LiteInterpreterTest, GetByteCodeVersion) {
   std::string filePath(__FILE__);
   auto test_model_file_v4 =
@@ -605,6 +614,7 @@ TEST(LiteInterpreterTest, GetByteCodeVersion) {
   auto version_v4 = _get_model_bytecode_version(test_model_file_v4);
   AT_ASSERT(version_v4 == 4);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 
@@ -696,9 +706,9 @@ void backportAllVersionCheck(
       _backport_for_mobile(test_model_file_stream, oss, minimum_to_version - 1);
   AT_ASSERT(!backPortSuccess);
 }
-
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
@@ -730,6 +740,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       expect_result_list,
       caffe2::serialize::kProducedBytecodeVersion);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   auto runtime_ops = _get_runtime_ops_and_info();
@@ -738,6 +749,7 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(
@@ -909,6 +921,7 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
   AT_ASSERT(module_debug_info_set.count("top(B).A0(A).aten::add"));
   AT_ASSERT(module_debug_info_set.count("top(B).A1(A).aten::add"));
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterTest, Eval) {
   std::vector<torch::jit::IValue> inputs;
@@ -1186,6 +1199,7 @@ void testDefaultArgsPinv(int num_args) {
 }
 } // namespace
 
+#if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, DefaultArgsPinv) {
   // Test with different number of specified arguments.
   // Arguments not specified take default value.
@@ -1335,6 +1349,7 @@ Traceback of TorchScript (most recent call last):
   )";
   ASSERT_THROWS_WITH_MESSAGE(lite_m.forward(inputs), error_pattern);
 }
+#endif // !defined(FB_XPLAT_BUILD)
 
 namespace {
 static auto reg =
