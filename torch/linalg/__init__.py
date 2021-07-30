@@ -54,7 +54,9 @@ Args:
                 consisting of symmetric or Hermitian positive-definite matrices.
 
 Keyword args:
-    upper (bool, optional): whether to output as upper triangle matrix. Default: `False`.
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:
@@ -121,7 +123,9 @@ Args:
                     `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
-    upper (bool, optional): whether to output as upper triangle matrix. Default: `False`.
+    upper (bool, optional): whether to return an upper triangular matrix.
+        The tensor returned with upper=True is the conjugate transpose of the tensor
+        returned with upper=False.
     check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
     out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
 
