@@ -4,7 +4,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 from torch.utils.benchmark._impl import common
 from torch.utils.benchmark._impl import constants
+from torch.utils.benchmark._impl.tasks import callgrind
 from torch.utils.benchmark._impl.tasks import wall_time
+from torch.utils.benchmark._impl.workers import callgrind_worker
 from torch.utils.benchmark._impl.workers import in_process_worker
 from torch.utils.benchmark._impl.workers import noise_police_worker
 from torch.utils.benchmark._impl.workers import subprocess_worker
@@ -114,6 +116,8 @@ class Timer:
             default is set to one. This is in contrast to the default PyTorch
             threadpool size which tries to utilize all cores.
     """
+
+    _callgrind_task: Optional[callgrind.CallgrindTask] = None
 
     def __init__(
         self,
@@ -239,6 +243,15 @@ class Timer:
             min_run_time=min_run_time,
         )
         return common.Measurement(number_per_run, raw_times)
+
+    def collect_callgrind(self, number: int = 100) -> None:
+        if self._callgrind_task is None:
+            self._callgrind_task = callgrind.CallgrindTask(
+                work_spec=self._work_spec,
+                worker=callgrind_worker.CallgrindWorker(),
+            )
+
+        self._callgrind_task.collect(n_iter=number)
 
 
 class SubprocessTimer(Timer):

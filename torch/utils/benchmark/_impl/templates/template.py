@@ -48,3 +48,18 @@ class PythonTemplate:
             torch.cuda.synchronize()
 
         return timer() - start_time
+
+    @staticmethod
+    def collect_callgrind(n_iter: int, n_warmup_iter: int) -> None:
+        # SETUP_TEMPLATE_LOCATION
+
+        for _ in range(n_warmup_iter):
+            # STMT_TEMPLATE_LOCATION
+            pass
+
+        torch._C._valgrind_toggle()
+        for _ in range(n_iter):
+            # STMT_TEMPLATE_LOCATION
+            pass
+
+        torch._C._valgrind_toggle_and_dump_stats()

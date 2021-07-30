@@ -378,9 +378,15 @@ def build_deps():
         'tools/shared/_utils_internal.py',
         'torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h',
         'torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h',
+
+        'torch/utils/benchmark/_impl/templates/callgrind.h',
+        'torch/utils/benchmark/_impl/templates/valgrind.h',
     ]
     orig_files = [
         'torch/_utils_internal.py',
+        'third_party/valgrind-headers/callgrind.h',
+        'third_party/valgrind-headers/valgrind.h',
+
         'third_party/valgrind-headers/callgrind.h',
         'third_party/valgrind-headers/valgrind.h',
     ]

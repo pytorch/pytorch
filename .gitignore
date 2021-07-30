@@ -111,6 +111,8 @@ torch/share/
 torch/test/
 torch/utils/benchmark/utils/valgrind_wrapper/callgrind.h
 torch/utils/benchmark/utils/valgrind_wrapper/valgrind.h
+torch/utils/benchmark/_impl/templates/callgrind.h
+torch/utils/benchmark/_impl/templates/valgrind.h
 torch/version.py
 # Root level file used in CI to specify certain env configs.
 # E.g., see .circleci/config.yaml

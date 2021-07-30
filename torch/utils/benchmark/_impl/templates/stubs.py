@@ -32,3 +32,7 @@ class CompiledTemplate(Protocol):
     ) -> float:
         # C++ overload
         ...
+
+    @staticmethod
+    def collect_callgrind(n_iter: int, n_warmup_iter: int) -> None:
+        ...
