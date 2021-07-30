@@ -94,7 +94,7 @@ class OptimizerHookState(object):
 
 
 def hook_then_optimizer(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
     optimizer_state: OptimizerHookState,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """Runs optimizer in a functional fashion after DDP communication hook."""
@@ -137,7 +137,7 @@ def fp16_compress_wrapper(
 
     def fp16_compress_wrapper_hook(
         hook_state, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         # Cast bucket tensor to FP16.
         bucket.set_tensor(bucket.get_tensor().to(torch.float16))
 
