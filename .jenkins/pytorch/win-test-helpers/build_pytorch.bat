@@ -97,6 +97,7 @@ if "%USE_CUDA%"=="1" (
   curl -kL https://github.com/peterjc123/randomtemp-rust/releases/download/v0.3/randomtemp.exe --output %TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_EXECUTABLE=%TMP_DIR_WIN%\bin\nvcc.exe
   set CUDA_NVCC_EXECUTABLE=%TMP_DIR_WIN%\bin\randomtemp.exe
+  set CMAKE_CUDA_COMPILER=%TMP_DIR_WIN%\bin\randomtemp.exe
   set RANDOMTEMP_BASEDIR=%TMP_DIR_WIN%\bin
 )
 
