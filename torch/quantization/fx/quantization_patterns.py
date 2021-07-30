@@ -21,6 +21,7 @@ from ..utils import (
     weight_is_statically_quantized,
     get_qconfig_dtypes,
     activation_dtype,
+    get_qparam_dict,
 )
 
 from ..quantize import (
@@ -570,9 +571,11 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.conv_node.args[0])
                 args = load_arg(quantized=torch.float)(self.conv_node.args)
-                # Get the float conv and attach weight_post_process
-                # lowering pass can call weight_post_process.calculate_qparams
-                # to get scale and zero_point for weight
+                # Get the float conv and attach quantization scheme and quantization
+                # parameters of weight to the module
+                # and qparam is a dictionary of
+                # {"qscheme": ..., "scale": ..., "zero_point": ...} for per tensor quantization or
+                # {"qscheme": ..., "scale": ..., "zero_point": ..., "axis": ...} for per channel quantization
                 if isinstance(
                         self.conv,
                         QAT_CONV_MODULE_CLASSES):
@@ -587,7 +590,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     setattr(modules[parent_name], name, float_conv)
                     if isinstance(float_conv, torch.nn.intrinsic._FusedModule):
                         float_conv = float_conv[0]
-                    float_conv.weight_post_process = self.conv.weight_fake_quant
+                    weight_post_process = self.conv.weight_fake_quant
                 else:
                     # case 2. converting a conv module/fused conv module
                     # to float conv module, we need to attach
@@ -597,9 +600,10 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     if isinstance(self.conv, torch.nn.intrinsic._FusedModule):
                         float_conv = self.conv[0]
                     assert qconfig is not None
-                    float_conv.weight_post_process = qconfig.weight()
+                    weight_post_process = qconfig.weight()
                     # run weight observer
-                    float_conv.weight_post_process(float_conv.weight)
+                    weight_post_process(float_conv.weight)
+                float_conv.weight_qparams = get_qparam_dict(weight_post_process)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
@@ -799,9 +803,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     dtype = activation_dtype(qconfig)
                 activation = load_arg(quantized=dtype)(self.linear_node.args[0])
                 args = load_arg(quantized=torch.float)(self.linear_node.args)
-                # Get the float linear and attach weight_post_process
-                # lowering pass can call weight_post_process.calculate_qparams
-                # to get scale and zero_point for weight
+                # Get the float linear and attach qscheme and qparams
+                # the the module
                 float_linear = self.linear
                 if isinstance(float_linear, (torch.nn.qat.Linear, torch.nn.intrinsic.qat.LinearReLU)):
                     float_linear = float_linear.to_float()
@@ -811,15 +814,16 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # Attach weight fake quant to the linear module
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
                         float_linear = float_linear[0]
-                    float_linear.weight_post_process = self.linear.weight_fake_quant
+                    weight_post_process = self.linear.weight_fake_quant
                 else:
                     if isinstance(float_linear, torch.nn.intrinsic.LinearReLU):
                         float_linear = self.linear[0]  # type: ignore[index]
                     # Attach the weight observer to the module
-                    float_linear.weight_post_process = qconfig.weight()  # type: ignore[union-attr]
+                    weight_post_process = qconfig.weight()  # type: ignore[union-attr]
                     # Run weight observer
-                    float_linear.weight_post_process(float_linear.weight)  # type: ignore[operator]
+                    weight_post_process(float_linear.weight)  # type: ignore[operator]
 
+                float_linear.weight_qparams = get_qparam_dict(weight_post_process)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
@@ -1310,9 +1314,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
             if activation_post_process is None:
-                op_out = quantized_graph.node_copy(
-                    node,
-                    load_arg(quantized=torch.float))
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
             else:
                 act_dtype = activation_dtype(qconfig)
@@ -1480,7 +1482,8 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 self._maybe_get_last_node_only_observer(modules)
             # when there is no activation_post_process following the CopyNode, it means
             # that the CopyNode is configured with a qconfig that doesnot require
-            # observation, e.g. dynamic_qconfig
+            # observation
+            # e.g. dynamic quantization qconfig or weight_only quantization qconfig
             if activation_post_process is None:
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out

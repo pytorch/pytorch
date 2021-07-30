@@ -20,6 +20,22 @@ def is_per_channel(qscheme):
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
 
+def get_qparam_dict(observer_or_fake_quant):
+    scale, zero_point = observer_or_fake_quant.calculate_qparams()
+    qscheme = observer_or_fake_quant.qscheme
+    qparams = {"scale": scale, "zero_point": zero_point}
+    if is_per_tensor(qscheme):
+        qscheme = torch.per_tensor_affine
+    elif is_per_channel(qscheme):
+        if qscheme in (torch.per_channel_affine, torch.per_channel_symmetric):
+            qscheme = torch.per_channel_affine
+        qparams["axis"] = observer_or_fake_quant.ch_axis
+    else:
+        raise RuntimeError(f"Unrecognized qscheme: {qscheme}")
+
+    return qparams
+
+
 def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
     """ Get the observed/quantized custom module class that we need
     to swap `custom_module` to
