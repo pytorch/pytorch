@@ -83,7 +83,7 @@ TORCH_META_FUNC(nll_loss_backward)
       total_weight.numel(),
       " elements)");
 
-  auto weight = weight_opt.getTensorRef();
+  const auto& weight = weight_opt.getTensorRef();
 
   TORCH_CHECK(
       !weight.defined() || weight.numel() == self.size(-1),
