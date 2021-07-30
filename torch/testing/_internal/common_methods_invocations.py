@@ -7896,7 +7896,7 @@ op_db: List[OpInfo] = [
         ref=np.linalg.tensorinv,
         dtypes=floating_and_complex_types(),
         sample_inputs_func=sample_inputs_tensorinv,
-        supports_forward_ad=True,
+        supports_forward_ad=False,
         skips=(
             SkipInfo(
                 "TestJit",
