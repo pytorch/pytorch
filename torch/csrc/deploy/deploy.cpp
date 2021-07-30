@@ -289,10 +289,9 @@ void LoadBalancer::free(int where) {
 void PythonMethodWrapper::setArgumentNames(
     std::vector<std::string>& argumentNamesOut) const {
   auto session = model_.acquire_session();
+  auto method = session.self.attr(method_name_.c_str());
   auto iArgumentNames =
-      session
-          .global("GetArgumentNamesModule", "getArgumentNames")(
-              {session.from_movable(model_)})
+      session.global("GetArgumentNamesModule", "getArgumentNames")({method})
           .toIValue();
   TORCH_INTERNAL_ASSERT(iArgumentNames.isList());
   auto argumentNames = iArgumentNames.toListRef();
