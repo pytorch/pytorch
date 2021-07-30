@@ -5204,6 +5204,86 @@ for shape in [(1,), ()]:
                                     "Output 0 of ComplexViewBackward is a view and is being modified inplace"):
             out += 1
 
+    def test_autograd_not_implemented_boxed_function(self):
+        import torch.utils.cpp_extension
+        count = 0  #  Generate unique library names
+        # We need a way to unload libraries for clean-up purposes too
+
+        # Maybe this test should be somewhere else?
+        def run_test(in_schema, out_schema, fn_src):
+            nonlocal count
+            count += 1
+            ns = f"my_ops{count}"
+
+            cpp_source = f"""
+            using namespace torch;
+            using namespace aten;
+            using namespace torch::autograd;
+
+            {fn_src}
+
+            TORCH_LIBRARY({ns}, m) {{
+            m.def("my_test_op({in_schema}) -> {out_schema} ");
+            }}
+
+            TORCH_LIBRARY_IMPL({ns}, CPU, m) {{
+            m.impl("my_test_op", my_test_op);
+            }}
+
+            TORCH_LIBRARY_IMPL({ns}, Autograd, m) {{
+            m.impl("my_test_op", torch::CppFunction::makeFromBoxedFunction<&autogradNotImplementedFunction>());
+            }}
+            """
+            torch.utils.cpp_extension.load_inline(
+                name=ns,
+                cpp_sources=cpp_source,
+                is_python_module=False,
+                verbose=True,
+            )
+
+            a = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1.)
+            c = torch.tensor(1.)
+
+            op = getattr(torch.ops, ns).my_test_op
+
+            # If any inputs require grad,
+            d = op(a, b)
+            out = d[0] if isinstance(d, tuple) else d
+            with self.assertRaisesRegex(RuntimeError, f"derivative for {ns}::my_test_op is not implemented"):
+                torch.autograd.grad(out, a)
+
+            # Should not have grad_fn if none require grad
+            d = op(b, c)
+            out = d[0] if isinstance(d, tuple) else d
+            with self.assertRaisesRegex(RuntimeError, "element 0 of tensors does not require grad and does not have a grad_fn"):
+                torch.autograd.grad(out, b)
+
+            # Forward ad raises error as well
+            with fwAD.dual_level():
+                p = torch.rand(2, 3)
+                t = torch.rand(2, 3)
+                dual_input = fwAD.make_dual(p, t)
+                with self.assertRaisesRegex(RuntimeError, f"Trying to use forward AD with {ns}::my_test_op that does not support it."):
+                    op(dual_input, dual_input)
+
+        funcs = (
+            ("Tensor self, Tensor other", "Tensor", """
+torch::Tensor my_test_op(const torch::Tensor& self, const torch::Tensor& other) {
+    return self + other;
+}
+             """),
+            ("Tensor self, Tensor other", "(Tensor, Tensor, int)", """
+std::tuple<torch::Tensor, torch::Tensor, int64_t> my_test_op(const torch::Tensor& self, const torch::Tensor& other) {
+    torch::Tensor a = self - other;
+    torch::Tensor b = self + other;
+    return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
+}
+            """))
+
+        for in_schema, out_schema, fn_src in funcs:
+            run_test(in_schema, out_schema, fn_src)
+
     def test_autograd_python_custom_function_inplace(self):
         # This is not necessarily the absolute correct behavior, but this is the current
         # one. This test is here to make sure that any change to this behavior is detected

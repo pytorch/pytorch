@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
@@ -229,6 +230,8 @@ inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
     [](const Variable& var) { return var; });
   return result;
 }
+
+void TORCH_API autogradNotImplementedFunction(const c10::OperatorHandle& op, at::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
 
 template<class T>
 template<typename X, typename... Args>

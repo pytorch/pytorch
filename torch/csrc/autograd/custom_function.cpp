@@ -2,6 +2,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
+#include <torch/csrc/autograd/FunctionsManual.h>
 
 namespace torch { namespace autograd {
 
@@ -23,6 +25,65 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   } else {
     return at::zeros(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
+  }
+}
+
+void autogradNotImplementedFunction(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  const auto& op_name = schema.operator_name().name;
+  const auto& arguments = op.schema().arguments();
+  const auto num_arguments = arguments.size();
+  const auto num_returns = schema.returns().size();
+  const auto stack_start = stack->size() - num_arguments;
+
+  std::vector<at::Tensor> tensors_requiring_grad;
+  for (const auto i : c10::irange(num_arguments)) {
+    auto& ivalue = (*stack)[stack_start + i];
+    // Replicate 'unpack' behavior in VariableType
+    if (ivalue.isTensor()) {
+      const auto& tensor = VariableType::unpack(ivalue.toTensor(), op_name.c_str(), i);
+      if (GradMode::is_enabled() && tensor.requires_grad()) {
+        tensors_requiring_grad.push_back(tensor);
+      }
+      TORCH_CHECK_NOT_IMPLEMENTED(!generated::details::isFwGradDefined(tensor), "Trying to use forward AD with ", op_name, " that does not support it.");
+    } else if (ivalue.isTensor()) {
+      VariableType::unpack(ivalue.toTensorVector(), op_name.c_str(), i);
+    }
+    // What about optional tensors?
+  }
+  std::shared_ptr<NotImplemented> grad_fn;
+  if (tensors_requiring_grad.size() > 0) {
+    grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented(op_name), deleteNode);
+    grad_fn->set_next_edges(collect_next_edges(tensors_requiring_grad));
+  }
+  {
+    at::AutoDispatchBelowADInplaceOrView guard;
+    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+  }
+  const auto returns = torch::jit::last(stack, num_returns);
+  // Copy non-tensor outputs to use after jit::drop
+  std::vector<c10::IValue> returns_copy;
+  std::vector<at::Tensor> output_tensors;
+  for (const auto return_idx : c10::irange(returns.size())) {
+    if (!returns[return_idx].isTensor()) {
+      // Undefined tensor as placeholder for non-tensor outputs
+      output_tensors.push_back(Tensor());
+      returns_copy.push_back(returns[return_idx]);
+    } else {
+      output_tensors.push_back(returns[return_idx].toTensor());
+      returns_copy.push_back({});
+    }
+  }
+  torch::jit::drop(stack, num_returns);
+  if (grad_fn) {
+    set_history(output_tensors, grad_fn);
+  }
+  for (const auto return_idx : c10::irange(num_returns)) {
+    if (output_tensors[return_idx].defined()) {
+      torch::jit::push(stack, output_tensors[return_idx]);
+    } else {
+      torch::jit::push(stack, returns_copy[return_idx]);
+    }
   }
 }
 
