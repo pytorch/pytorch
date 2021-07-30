@@ -31,13 +31,10 @@ jobs:
         uses: actions/checkout@v2
       - name: Install requirements
         run: pip3 install -r .circleci/ecr_gc_docker/requirements.txt
-      - name: Generate tags to keep
+      - name: Run garbage collection
         run: |
           GENERATED_IMAGE_TAG=$(\
             git log --oneline --pretty='%H' .circleci/docker \
               | xargs -I '{}' git rev-parse '{}:.circleci/docker' \
               | paste -sd "," -)
-          echo "export GENERATED_IMAGE_TAG='${GENERATED_IMAGE_TAG}'" >> "${BASH_ENV}"
-      - name: Run garbage collection
-        run: |
           .circleci/ecr_gc_docker/gc.py --filter-prefix "${FILTER_PREFIX}" --ignore-tags "${GENERATED_IMAGE_TAG}"
