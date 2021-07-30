@@ -1,7 +1,6 @@
-#include "reportMemoryUsage.h"
-
 #include <gtest/gtest.h>
 
+#include <ATen/test/reportMemoryUsage.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 TEST(DeviceCachingAllocator, check_reporter) {
