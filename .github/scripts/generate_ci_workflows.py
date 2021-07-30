@@ -100,6 +100,8 @@ class CIWorkflow:
     num_test_shards: int = 1
     on_pull_request: bool = False
     only_build_on_pull_request: bool = False
+    only_run_smoke_tests_on_pull_request: bool = False
+    num_test_shards_on_pull_request: int = -1
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -135,6 +137,15 @@ class CIWorkflow:
         if not self.on_pull_request:
             self.only_build_on_pull_request = False
 
+        # If num_test_shards_on_pull_request is not user-defined, default to num_test_shards unless we are
+        # only running smoke tests on the pull request.
+        if self.num_test_shards_on_pull_request == -1:
+            # Don't waste resources on runner spinup and cooldown for another shard if we are only running a few tests
+            if self.only_run_smoke_tests_on_pull_request:
+                self.num_test_shards_on_pull_request = 1
+            else:
+                self.num_test_shards_on_pull_request = self.num_test_shards
+
         self.assert_valid()
 
     def assert_valid(self) -> None:
@@ -169,6 +180,7 @@ WINDOWS_WORKFLOWS = [
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
+        only_run_smoke_tests_on_pull_request=True,
         num_test_shards=2,
     ),
     CIWorkflow(
