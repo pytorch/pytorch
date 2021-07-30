@@ -4,10 +4,10 @@ import torch
 from functools import partial
 import time
 
-a = torch.randn(10000, 1, 4, requires_grad=True)
-b = torch.randn(1, 10000, 4)
+a = torch.randn(2000, 1, 4, requires_grad=True)
+b = torch.randn(1, 2000, 4)
 def f(a):
-    return (a * b).sin().sum(dim=0)
+    return (a * b).sum(dim=0)
 
 fw_compiler = partial(tvm_compile, name='fw_keops')
 bw_compiler = partial(tvm_compile, name='bw_keops')
@@ -21,9 +21,9 @@ out.sum().backward()
 def bench(func):
     begin = time.time()
     for _ in range(iters):
-        out = func(a)
+        out = func(a).sin()
         out.sum().backward()
-        mod.zero_grad()
+        a.grad = None
     print(time.time()-begin)
 
 def bench_jax():
