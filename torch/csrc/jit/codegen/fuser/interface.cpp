@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
 #include <c10/util/Flags.h>
+#include <c10/util/irange.h>
 #include <stdexcept>
 
 C10_DEFINE_bool(torch_jit_enable_cpu_fusion, false, "enable cpu fusion");
@@ -63,10 +64,12 @@ std::vector<at::Tensor> debugLaunchGraph(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.inputs().size())) {
+    (void)i; // Suppress unused variable warning
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.outputs().size())) {
+    (void)i; // Suppress unused variable warning
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
@@ -85,10 +88,12 @@ std::string debugGetFusedKernelCode(
   Node* fusion_group = wrapper_graph->insertNode(
       wrapper_graph->createWithSubgraph(prim::FusionGroup));
   fusion_group->g_(attr::Subgraph, graph.copy());
-  for (size_t i = 0; i < graph.inputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.inputs().size())) {
+    (void)i; // Suppress unused variable warning
     fusion_group->addInput(wrapper_graph->addInput());
   }
-  for (size_t i = 0; i < graph.outputs().size(); ++i) {
+  for (const auto i : c10::irange(graph.outputs().size())) {
+    (void)i; // Suppress unused variable warning
     wrapper_graph->registerOutput(fusion_group->addOutput());
   }
 
