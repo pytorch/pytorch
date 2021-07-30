@@ -12887,6 +12887,20 @@ class TestNNDeviceType(NNTestCase):
         input = torch.empty(50, 20, 64, 64)
         self._test_dropout(nn.Dropout3d, device, input)
 
+    @onlyCPU
+    def test_elu_bfloat16(self, device):
+        input = torch.randn(1, 2, 30, 30, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
+        elu = torch.nn.ELU().to(device)
+        input2 = input.detach().clone().float().requires_grad_(True)
+        out = elu(input)
+        out.sum().backward()
+        out2 = elu(input2)
+        out2.sum().backward()
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(input.grad.dtype, torch.bfloat16)
+        self.assertEqual(out, out2.bfloat16())
+        self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0, rtol=0)
+
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
