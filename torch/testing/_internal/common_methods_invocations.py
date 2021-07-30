@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union
+from typing import List, Sequence, Tuple, Union, Dict
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -6400,6 +6400,7 @@ op_db: List[OpInfo] = [
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
