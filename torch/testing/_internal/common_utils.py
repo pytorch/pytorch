@@ -1955,7 +1955,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
                       'high': [input_high, default_values[1], float('-inf')]}
 
         def _for_val(inp):
-            val, default_val, extremal_val = _vals_dict[inp][0], _vals_dict[inp][1], _vals_dict[inp][2]
+            val, default_val, extremal_val = _vals_dict[inp]
 
             if val != val or val == extremal_val:
                 raise ValueError(f"Found invalid value {val} for {inp}")
@@ -2020,10 +2020,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         if dtype in integral_types() or dtype is torch.bool:
             replace_with = torch.tensor(1, device=device, dtype=dtype)
         elif dtype in floating_types_and(torch.half, torch.bfloat16):
-            replace_with = torch.tensor(torch.finfo(dtype).eps, device=device, dtype=dtype)
+            replace_with = torch.tensor(torch.finfo(dtype).tiny, device=device, dtype=dtype)
         elif dtype in complex_types():
             float_dtype = torch.float if dtype is torch.cfloat else torch.double
-            float_eps = torch.tensor(torch.finfo(float_dtype).eps, device=device, dtype=float_dtype)
+            float_eps = torch.tensor(torch.finfo(float_dtype).tiny, device=device, dtype=float_dtype)
             replace_with = torch.complex(float_eps, float_eps)
         else:
             raise ValueError(f"Invalid dtype passed, supported dtypes are: {get_all_dtypes()}")
