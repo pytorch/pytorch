@@ -281,7 +281,33 @@ class TestEqualizeFx(QuantizationTestCase):
         quantized.
         """
 
-        class AddBranchingModel(nn.Module):
+        # Tests that we do not add an equalization observer due to both initial
+        # nodes in the branch containing layers that need to be equalized.
+        # Note that this should print out 2 warning messages for not being able
+        # to equalize layers linear1 and linear1 because it is part of a branch
+        class TestBranchingWithoutEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+                self.linear2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = self.linear2(x)
+                return torch.add(y, z)
+
+        no_eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 0,
+            ns.call_module(MinMaxObserver): 3,
+        }
+
+        m = TestBranchingWithoutEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_eq_branching_node_occurrence)
+
+        # Tests that we will add an equalization observer because there is only
+        # one initial node in the branch that needs to be equalized
+        class TestBranchingWithEqualizationModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear1 = nn.Linear(5, 5)
@@ -291,25 +317,14 @@ class TestEqualizeFx(QuantizationTestCase):
                 z = torch.add(x, 5)
                 return torch.add(y, z)
 
-        multiple_ops_node_occurrence = {
-            ns.call_module(_InputEqualizationObserver): 2,
-            ns.call_module(MinMaxObserver): 7,
-        }
-
-        add_branching_node_occurrence = {
+        eq_branching_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 1,
             ns.call_module(MinMaxObserver): 2,
         }
 
-        tests = [
-            (ModelMultipleOpsNoAvgPool, default_qconfig_dict, multiple_ops_node_occurrence),
-            (AddBranchingModel, specific_qconfig_dict, add_branching_node_occurrence),
-        ]
-
-        for (M, qconfig_dict, node_occurrence) in tests:
-            m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
-            self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+        m = TestBranchingWithEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=eq_branching_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
