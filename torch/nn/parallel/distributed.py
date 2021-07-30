@@ -1211,7 +1211,7 @@ class DistributedDataParallel(Module, _Joinable):
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
             hook (callable): Callable with the following signature:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1221,8 +1221,7 @@ class DistributedDataParallel(Module, _Joinable):
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
-                             Note that the future's return type must be a list with a
-                             tensor as its single element.
+                             Note that the future's return type must be a single tensor.
 
                              We also provide an API called ``get_future`` to retrieve a
                              Future associated with the completion of ``c10d.ProcessGroup.Work``.
@@ -1238,29 +1237,19 @@ class DistributedDataParallel(Module, _Joinable):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a list that contains a
-            single tensor that has the same shape with the tensors inside grad bucket.
-
-        .. warning ::
-            DDP communication hook does not support single-process multiple-device mode.
-            Gradbucket tensors should consist of only a single tensor.
+            The Future object that hook returns should contain a single tensor
+            that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             ``get_future`` API supports NCCL, and partially GLOO and MPI backends (no support
-            for peer-to-peer operations like send/recv) and will return a ``torch._C.Future``
-            which is an internal type and should be used with caution. It can still be used by
-            ``register_comm_hook`` API, but it is subject to some subtle differences compared
-            to ``torch.futures.Future``.
-
-        .. warning ::
-            DDP communication hook is experimental and subject to change.
+            for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
         Example::
-            Below is an example of a noop hook that returns the same tensors.
+            Below is an example of a noop hook that returns the same tensor.
 
-            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result([bucket.get_tensor()])
+            >>>     fut.set_result(bucket.get_tensor())
             >>>     return fut
 
             >>> ddp.register_comm_hook(state=None, hook=noop)
@@ -1269,13 +1258,13 @@ class DistributedDataParallel(Module, _Joinable):
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
             >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
             >>>         decoded_tensor = decode(fut.value()[0]) # decode gradients
-            >>>         return [decoded_tensor]
+            >>>         return decoded_tensor
             >>>     return fut.then(decode)
 
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
@@ -1298,13 +1287,6 @@ class DistributedDataParallel(Module, _Joinable):
         .. warning ::
             DDP communication hook can only be registered once and should be registered
             before calling backward.
-
-        .. warning ::
-            DDP communication hook does not support single-process multiple-device mode.
-            Gradbucket tensors should consist of only a single tensor.
-
-        .. warning ::
-            DDP communication hook is experimental and subject to change.
 
         Example::
             Below is an example of a FP16 compression where gradients are
@@ -1390,13 +1372,13 @@ class DistributedDataParallel(Module, _Joinable):
                 "Communication hook: bucket annotation should be dist.GradBucket.",
             )
 
-        if sig.return_annotation != inspect._empty and (
-            sig.return_annotation != torch.futures.Future
-            and sig.return_annotation != torch._C.Future
+        if (
+            sig.return_annotation != inspect._empty
+            and sig.return_annotation != torch.futures.Future[torch.Tensor]
         ):
             self._log_and_throw(
                 ValueError,
-                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+                "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
     @property

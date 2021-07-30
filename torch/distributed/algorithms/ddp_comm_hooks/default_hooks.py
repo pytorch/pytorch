@@ -6,7 +6,7 @@ import torch.distributed as dist
 
 def _allreduce_fut(
     process_group: dist.ProcessGroup, tensor: torch.Tensor
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     "Averages the input gradient tensor by allreduce and returns a future."
     group_to_use = process_group if process_group is not None else dist.group.WORLD
 
@@ -22,7 +22,7 @@ def _allreduce_fut(
 
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     """
     This DDP communication hook just calls ``allreduce`` using ``GradBucket``
     tensors. Once gradient tensors are aggregated across all workers, its ``then``
@@ -40,10 +40,10 @@ def allreduce_hook(
 
 def fp16_compress_hook(
     process_group: dist.ProcessGroup, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     """
     This DDP communication hook implements a simple gradient compression
-    approach that casts ``GradBucket`` tensors to half-precision floating-point format (``torch.float16``)
+    approach that casts ``GradBucket`` tensor to half-precision floating-point format (``torch.float16``)
     and then divides it by the process group size.
     It allreduces those ``float16`` gradient tensors. Once compressed gradient
     tensors are allreduced, the chained callback ``decompress`` casts it back to the input data type (such as ``float32``).
@@ -96,12 +96,12 @@ class OptimizerHookState(object):
 def hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     optimizer_state: OptimizerHookState,
-) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """Runs optimizer in a functional fashion after DDP communication hook."""
 
     def hook_then_optimizer_wrapper(
         hook_state, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         # Run original hook
         fut = hook(hook_state, bucket)
 
@@ -121,11 +121,11 @@ def hook_then_optimizer(
 
 
 def fp16_compress_wrapper(
-    hook: Callable[[Any, dist.GradBucket], torch.futures.Future]
-) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+    hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     """
-    This wrapper casts the input gradient tensors of a given DDP communication hook to half-precision
-    floating point format (``torch.float16``), and casts the resulting tensors of the given hook back to
+    This wrapper casts the input gradient tensor of a given DDP communication hook to half-precision
+    floating point format (``torch.float16``), and casts the resulting tensor of the given hook back to
     the input data type, such as ``float32``.
 
     Therefore, ``fp16_compress_hook`` is equivalent to ``fp16_compress_wrapper(allreduce_hook)``.

@@ -426,7 +426,7 @@ class AbstractDistributedDataParallelTest(object):
 
     def _simple_hook(
         self, state: object, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         fut = torch.futures.Future()
         fut.set_result(torch.ones_like(bucket.get_tensor()))
 

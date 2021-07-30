@@ -1889,7 +1889,9 @@ class DistributedDataParallelTest(
             ValueError, "bucket annotation should be dist.GradBucket."
         ):
 
-            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+            def comm_hook(
+                state: object, bucket: int
+            ) -> torch.futures.Future[torch.Tensor]:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -1908,7 +1910,7 @@ class DistributedDataParallelTest(
             ModuleForDdpCommHook(), process_group=process_group
         )
 
-        expected_err = "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+        expected_err = "Communication hook: return annotation should be torch.futures.Future"
         with self.assertRaisesRegex(
             ValueError,
             expected_err,
@@ -1923,7 +1925,7 @@ class DistributedDataParallelTest(
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "callback must return a torch.futures.Future or torch._C.Future object, but got",
+            "callback must return a torch.futures.Future object, but got",
         ):
 
             def comm_hook(state: object, bucket: dist.GradBucket):
@@ -1983,7 +1985,7 @@ class DistributedDataParallelTest(
 
         def allreduce_hook_gloo(
             state: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future:
+        ) -> torch.futures.Future[torch.Tensor]:
             def div_by_world_size(fut):
                 # Divide the result by 2 * world_size.
                 return fut.wait()[0] / self.world_size
