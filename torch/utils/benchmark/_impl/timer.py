@@ -6,6 +6,8 @@ from torch.utils.benchmark._impl import common
 from torch.utils.benchmark._impl import constants
 from torch.utils.benchmark._impl.tasks import wall_time
 from torch.utils.benchmark._impl.workers import in_process_worker
+from torch.utils.benchmark._impl.workers import noise_police_worker
+from torch.utils.benchmark._impl.workers import subprocess_worker
 
 
 class Timer:
@@ -237,3 +239,30 @@ class Timer:
             min_run_time=min_run_time,
         )
         return common.Measurement(number_per_run, raw_times)
+
+
+class SubprocessTimer(Timer):
+
+    # TODO: warn if globals are provided
+    _timeit_worker: Optional[subprocess_worker.SubprocessWorker] = None
+
+    def _make_timeit_worker(self) -> subprocess_worker.SubprocessWorker:
+        return subprocess_worker.SubprocessWorker()
+
+    def _make_timeit_task(self) -> wall_time.TimeitTask:
+        # Process startup and teardown cost is non-trivial, so we reuse the
+        # Worker for the lifetime of the timer.
+        if self._timeit_worker is None:
+            self._timeit_worker = self._make_timeit_worker()
+
+        return wall_time.TimeitTask(
+            work_spec=self._work_spec,
+            timer=self._timer,
+            worker=self._timeit_worker,
+        )
+
+
+class NoisePoliceTimer(SubprocessTimer):
+
+    def _make_timeit_worker(self) -> subprocess_worker.SubprocessWorker:
+        return noise_police_worker.NoisePoliceWorker()
