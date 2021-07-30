@@ -607,6 +607,76 @@ class TestShardedTensorChunked(ShardedTensorTestBase, MultiProcessTestCase):
         self.verify_sharded_tensor(m.sharded_tensor1, module_load.sharded_tensor1)
         self.verify_sharded_tensor(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2)
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_state_dict_no_sharded_tensors(self):
+        # Verify hooks don't affect modules with no ShardedTensors.
+        m = torch.nn.Linear(10, 10)
+
+        # Test save
+        state_dict_before = m.state_dict()
+        m._register_state_dict_hook(state_dict_hook)
+        buffer = io.BytesIO()
+        torch.save(m.state_dict(), buffer)
+        self.assertEqual(state_dict_before, m.state_dict())
+
+        # Test load.
+        module_load = torch.nn.Linear(10, 10)
+        module_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
+
+        buffer.seek(0)
+        state_dict_deser = torch.load(buffer)
+        module_load.load_state_dict(state_dict_deser, strict=False)
+
+        # Verify after load.
+        self.assertEqual(m.weight, module_load.weight)
+        self.assertEqual(m.bias, module_load.bias)
+
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_load_state_dict_errors(self):
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}",
+        )
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        m = MyShardedModel1(spec)
+
+        # Test save
+        m._register_state_dict_hook(state_dict_hook)
+        buffer = io.BytesIO()
+        torch.save(m.state_dict(), buffer)
+
+        pg = dist.new_group(ranks=[0, 2, 3])
+
+        buffer.seek(0)
+        if self.rank != 0:
+            with self.assertRaisesRegex(RuntimeError, 'Local rank at save time was'):
+                with load_with_process_group(pg):
+                    state_dict_deser = torch.load(buffer)
+        else:
+            with self.assertRaisesRegex(RuntimeError, 'Local world size at save time was'):
+                with load_with_process_group(pg):
+                    state_dict_deser = torch.load(buffer)
+
+        dist.destroy_process_group()
+        buffer.seek(0)
+        with self.assertRaisesRegex(RuntimeError, 'Need to initialize default process group'):
+            state_dict_deser = torch.load(buffer)
+
 
 class TestShardedTensorEnumerable(ShardedTensorTestBase, MultiProcessTestCase):
 

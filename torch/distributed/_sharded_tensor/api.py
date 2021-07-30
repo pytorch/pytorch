@@ -497,6 +497,7 @@ class ShardedTensor(object):
         return self._local_shards, self._metadata, pg_state, self._sharding_spec
 
     def __setstate__(self, state):
+        self._sharded_tensor_id = None
         if not distributed_c10d.is_initialized():
             raise RuntimeError(
                 'Need to initialize default process group using '
