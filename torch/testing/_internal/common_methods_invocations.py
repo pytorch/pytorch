@@ -4548,20 +4548,21 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
-    def make_tensor_(shape):
-        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    sample_inputs = [
-        SampleInput(make_tensor_(shape), args=(make_tensor_(shape),)) for shape in ((), (S,), (M, S), (L, M, S))
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
     ]
-    sample_inputs.extend(
-        [
-            SampleInput(make_tensor_((S,)), args=(make_tensor_((S,)),), kwargs=dict(reduction=reduction))
-            for reduction in ("mean", "sum", "none")
-        ]
-    )
 
-    return sample_inputs
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
@@ -7909,6 +7910,13 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
     ),
 ]
 
