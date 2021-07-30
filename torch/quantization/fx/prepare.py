@@ -1,3 +1,4 @@
+from torch.quantization.observer import ObserverBase
 import torch
 import operator
 import warnings
@@ -950,21 +951,31 @@ def insert_observers_for_model(
                 if node.op != 'output':
 
                     # This is currently only used for equalization.
-                    # Checks if the current node is in a branch by seeing if its
-                    # previous node has more than 1 user.
+                    # Checks if the current node is in a branch in which the two
+                    # first layers are both being quantized.
                     #
                     # ex.       conv2
                     #         /
                     #      x -> conv1
                     #
-                    # conv1 and conv2 are both in branches because its previous
-                    # node (x) has 2 users (conv1 and conv2). These layers will
-                    # currently not get equalized.
-                    is_branch = (
+                    # If this is the case, we will not apply equalization to the
+                    # initial two layers.
+                    is_quantized_branch = False
+                    if (
                         len(node.args) > 0 and
                         isinstance(node.args[0], Node) and
                         len(node.args[0].users) > 1
-                    )
+                    ):
+                        for user in node.args[0].users:
+                            # Checks if there exists another user being quantized
+                            is_user_quantized = (
+                                qconfig_map.get(user.name, None) is not None or
+                                (user.op == 'call_module' and isinstance(modules[str(user.target)], ObserverBase))
+                            )
+                            if user != node and is_user_quantized:
+                                is_quantized_branch = True
+                                print(is_quantized_branch, user)
+                                break
 
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
@@ -975,7 +986,7 @@ def insert_observers_for_model(
                     # Insert equalization input observers if needed
                     maybe_insert_input_equalization_observers_for_node(
                         node, equalization_qconfig, model, modules, graph,
-                        node_name_to_target_dtype, is_branch)
+                        node_name_to_target_dtype, is_quantized_branch)
 
                     is_last_node_of_pattern = root_node is node
                     is_general_tensor_value_op = \

@@ -192,8 +192,8 @@ class TestEqualizeFx(QuantizationTestCase):
 
         # Check the min/max weight rows are correct
         ref_min_weights_scaled, ref_max_weights_scaled = self.channel_minmax(ref_w_scaled)
-        self.assertEqual(weight_quant_obs.min_vals, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
-        self.assertEqual(weight_quant_obs.max_vals, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.min_val, torch.tensor(ref_min_weights_scaled, dtype=torch.float32))
+        self.assertEqual(weight_quant_obs.max_val, torch.tensor(ref_max_weights_scaled, dtype=torch.float32))
 
         weight_qparams = weight_quant_obs.calculate_qparams()
 
@@ -253,27 +253,58 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(MinMaxObserver): 6,
         }
 
+        tests = [(SingleLayerLinearModel, single_nn_layer_node_occurrence),
+                 (TwoLayerLinearModel, two_nn_layer_node_occurrence),
+                 (TwoLayerFunctionalLinearModel, two_F_layer_node_occurrence),
+                 (FunctionalLinearAddModel, fp_F_layer_node_occurrence),
+                 (LinearReluModel, single_nn_layer_node_occurrence),
+                 (LinearReluLinearModel, two_nn_layer_node_occurrence),
+                 (FunctionalLinearReluModel, single_F_layer_node_occurrence),
+                 (FunctionalLinearReluLinearModel, two_F_layer_node_occurrence),
+                 (ConvModel, single_nn_layer_node_occurrence),
+                 (TwoLayerConvModel, two_nn_layer_node_occurrence),
+                 (TwoLayerFunctionalConvModel, two_F_layer_node_occurrence),
+                 (ConvReluModel, single_nn_layer_node_occurrence),
+                 (ConvReluConvModel, two_nn_layer_node_occurrence),
+                 (FunctionalConvReluModel, single_F_layer_node_occurrence),
+                 (FunctionalConvReluConvModel, two_F_layer_node_occurrence)]
+
+        for (M, node_occurrence) in tests:
+            m = M().eval()
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_branching(self):
+        """ Tests that graphs containing branches are prepared correctly.
+        Specifically, equalization observers should not be inserted in front of
+        branches in which both initial layers in the branches plan to be
+        quantized.
+        """
+
+        class AddBranchingModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = torch.add(x, 5)
+                return torch.add(y, z)
+
         multiple_ops_node_occurrence = {
             ns.call_module(_InputEqualizationObserver): 2,
             ns.call_module(MinMaxObserver): 7,
         }
 
-        tests = [(SingleLayerLinearModel, default_qconfig_dict, single_nn_layer_node_occurrence),
-                 (TwoLayerLinearModel, default_qconfig_dict, two_nn_layer_node_occurrence),
-                 (TwoLayerFunctionalLinearModel, default_qconfig_dict, two_F_layer_node_occurrence),
-                 (FunctionalLinearAddModel, specific_qconfig_dict, fp_F_layer_node_occurrence),
-                 (LinearReluModel, default_qconfig_dict, single_nn_layer_node_occurrence),
-                 (LinearReluLinearModel, default_qconfig_dict, two_nn_layer_node_occurrence),
-                 (FunctionalLinearReluModel, default_qconfig_dict, single_F_layer_node_occurrence),
-                 (FunctionalLinearReluLinearModel, default_qconfig_dict, two_F_layer_node_occurrence),
-                 (ConvModel, default_qconfig_dict, single_nn_layer_node_occurrence),
-                 (TwoLayerConvModel, default_qconfig_dict, two_nn_layer_node_occurrence),
-                 (TwoLayerFunctionalConvModel, default_qconfig_dict, two_F_layer_node_occurrence),
-                 (ConvReluModel, default_qconfig_dict, single_nn_layer_node_occurrence),
-                 (ConvReluConvModel, default_qconfig_dict, two_nn_layer_node_occurrence),
-                 (FunctionalConvReluModel, default_qconfig_dict, single_F_layer_node_occurrence),
-                 (FunctionalConvReluConvModel, default_qconfig_dict, two_F_layer_node_occurrence),
-                 (ModelMultipleOpsNoAvgPool, default_qconfig_dict, multiple_ops_node_occurrence)]
+        add_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        tests = [
+            (ModelMultipleOpsNoAvgPool, default_qconfig_dict, multiple_ops_node_occurrence),
+            (AddBranchingModel, specific_qconfig_dict, add_branching_node_occurrence),
+        ]
 
         for (M, qconfig_dict, node_occurrence) in tests:
             m = M().eval()
