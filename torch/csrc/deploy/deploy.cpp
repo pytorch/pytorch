@@ -211,9 +211,9 @@ Interpreter::Interpreter(InterpreterManager* manager)
 
   if (custom_loader_) {
     // when using the custom loader we need to link python symbols against
-    // the right version of the symbols for the interpreter which an be looked up
-    // from the handle_ to this shared library. here we register the handle with
-    // the code that does custom loading of python extensions.
+    // the right version of the symbols for the interpreter which an be looked
+    // up from the handle_ to this shared library. here we register the handle
+    // with the code that does custom loading of python extensions.
     auto deploy_set_self_ptr =
         (void (*)(void*))dlsym(handle_, "deploy_set_self");
     AT_ASSERT(deploy_set_self_ptr);
