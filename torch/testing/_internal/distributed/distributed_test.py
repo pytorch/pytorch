@@ -4496,6 +4496,7 @@ class DistributedTest:
         )
         @sandcastle_skip_if(
             IS_WINDOWS, "PostLocalSGDOptimizer not yet supported with Windows."
+        )
         def test_post_localSGD_optimizer_parity(self, grad_is_view=False):
             learning_rate = 0.03
             period = 4
@@ -7347,6 +7348,7 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
         @skip_if_lt_x_gpu(2)
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
