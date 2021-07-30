@@ -29,8 +29,10 @@ inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
 #ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
     case CUDNN_DATA_BFLOAT16:
+#endif
 #endif
 #endif
     case CUDNN_DATA_HALF: return 2;

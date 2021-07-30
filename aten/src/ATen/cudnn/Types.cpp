@@ -2,6 +2,13 @@
 
 #include <ATen/ATen.h>
 
+#ifdef USE_CUDA
+#include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#if AT_CUDNN_ENABLED()
+#include <ATen/native/cudnn/Macros.h> // for the definition of HAS_CUDNN_V8
+#endif
+#endif
+
 namespace at { namespace native {
 
 cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
@@ -11,6 +18,9 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
     return CUDNN_DATA_DOUBLE;
   } else if (dtype == at::kHalf) {
     return CUDNN_DATA_HALF;
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED
+#if HAS_CUDNN_V8()
   } else if (dtype == at::kBFloat16) {
     return CUDNN_DATA_BFLOAT16;
   } else if (dtype == at::kInt) {
@@ -20,6 +30,9 @@ cudnnDataType_t getCudnnDataTypeFromScalarType(const at::ScalarType dtype) {
   } else if (dtype == at::kChar) {
     return CUDNN_DATA_INT8;
   }
+#endif
+#endif
+#endif
   std::string msg("getCudnnDataTypeFromScalarType() not supported for ");
   msg += toString(dtype);
   throw std::runtime_error(msg);
