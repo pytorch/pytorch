@@ -109,6 +109,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("FPGA", c10::DeviceType::FPGA)
       .value("MSNPU", c10::DeviceType::MSNPU)
       .value("XLA", c10::DeviceType::XLA)
+      .value("Lazy", c10::DeviceType::Lazy)
       .value("MLC", c10::DeviceType::MLC)
       .value("HPU", c10::DeviceType::HPU)
       .value("Meta", c10::DeviceType::Meta)
@@ -262,12 +263,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   });
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
-  });
-  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
-    torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
-  });
-  m.def("_reset_default_hooks", []() {
-    torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
