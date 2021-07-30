@@ -1,4 +1,3 @@
-from torch.quantization.observer import ObserverBase
 import torch
 import operator
 import warnings
@@ -8,6 +7,7 @@ from torch.fx import (
 
 from torch.quantization import (
     propagate_qconfig_,
+    ObserverBase,
 )
 from torch.fx.graph import (
     Graph,
@@ -974,8 +974,6 @@ def insert_observers_for_model(
                             )
                             if user != node and is_user_quantized:
                                 is_quantized_branch = True
-                                print(is_quantized_branch, user)
-                                break
 
                     # this modifies node inplace
                     maybe_insert_input_observers_for_node(
