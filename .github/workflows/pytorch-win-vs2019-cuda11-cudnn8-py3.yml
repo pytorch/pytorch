@@ -101,6 +101,7 @@ jobs:
     env:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
@@ -123,6 +124,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
+      RUN_SMOKE_TESTS_ONLY_ON_PR: False
     needs: [build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -171,7 +173,7 @@ jobs:
             if [[ $NUM_TEST_SHARDS -ne 2 ]]; then
               export SHARD_NUMBER=0
             fi
-            if [[ -n $GITHUB_HEAD_REF && "$BUILD_ENVIRONMENT" == "pytorch-win-vs2019-cuda10-cudnn7-py3" ]]; then
+            if [[ -n $GITHUB_HEAD_REF && "$RUN_SMOKE_TESTS_ONLY_ON_PR" == "true" ]]; then
               export RUN_SMOKE_TESTS_ONLY=1
             fi
             .jenkins/pytorch/win-test.sh
