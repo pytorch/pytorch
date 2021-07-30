@@ -10,8 +10,8 @@ namespace mobile {
 using Stack = std::vector<c10::IValue>;
 using DebugHandle = int64_t;
 struct InstructionWithDebugHandle {
-  InstructionWithDebugHandle(Instruction inst, DebugHandle handle) :
-    instruction(inst), debug_handle(handle) {}
+  InstructionWithDebugHandle(Instruction inst, DebugHandle handle)
+      : instruction(inst), debug_handle(handle) {}
   Instruction instruction;
   DebugHandle debug_handle;
 };
