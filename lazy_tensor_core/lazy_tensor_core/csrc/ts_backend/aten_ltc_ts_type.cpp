@@ -829,6 +829,12 @@ at::Tensor LazyNativeFunctions::stack(at::TensorList tensors, int64_t dim) {
       LazyTensor::stack(bridge::GetLtcTensors(tensors), dim));
 }
 
+at::Tensor LazyNativeFunctions::sqrt(const at::Tensor& self) {
+  LTC_FN_COUNTER("lazy::");
+  return bridge::AtenFromLtcTensor(
+      LazyTensor::sqrt(bridge::GetLtcTensor(self)));
+}
+
 at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self) {
   LTC_FN_COUNTER("lazy::");
   return bridge::AtenFromLtcTensor(
