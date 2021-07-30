@@ -18,10 +18,11 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
     return CUDNN_DATA_HALF;
   } else if (scalar_type == at::kDouble) {
     return CUDNN_DATA_DOUBLE;
+  }
 #ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
 #if HAS_CUDNN_V8()
-  } else if (scalar_type == at::kBFloat16) {
+    else if (scalar_type == at::kBFloat16) {
     return CUDNN_DATA_BFLOAT16;
   }
 #endif
