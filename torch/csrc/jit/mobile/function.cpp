@@ -27,7 +27,8 @@ void Function::append_instruction(OpCode op, int X, int N, int64_t dbg_handle) {
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
-  code_->instructions_with_handles_.emplace_back(Instruction(op, X, N), dbg_handle);
+  code_->instructions_with_handles_.emplace_back(
+      Instruction(op, X, N), dbg_handle);
 }
 
 bool Function::
