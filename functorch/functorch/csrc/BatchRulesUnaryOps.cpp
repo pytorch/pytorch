@@ -26,12 +26,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl(#op, inplacePlumbing1<UnaryInplaceBRType, &unary_inplace_func_batch_rule<decltype(&at::op), &at::op>>);
 
 #define UNARY_POINTWISE(op) \
-  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(at::op));
+  VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
 
 #define UNARY_POINTWISE_ALL(op) \
   UNARY_POINTWISE_(op ## _); \
   VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(at::op));
 
+  UNARY_POINTWISE(_to_copy);
   UNARY_POINTWISE(alias);
   UNARY_POINTWISE_ALL(abs);
   UNARY_POINTWISE_ALL(acos);
