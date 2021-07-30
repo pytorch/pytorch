@@ -904,16 +904,13 @@ class TestLinalg(TestCase):
             self.assertEqual(actual_w, expected_w)
             # sign of eigenvectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual_v), abs(expected_v))
-            # additionally we can flip the sign and then compare the values
-            # let's choose the convention that the first element of the eigenvector should be positive,
-            # otherwise flip the sign of the eigenvector
+            # additionally we can multiply the eigenvector with a phase factor e^{i\phi} and then compare the values
+            # let's choose the convention that the first element of the eigenvectors from torch and numpy be the same
+            # for real inputs, this phase factor is plus or minus one
             if matrix.numel() > 0:
-                sign = np.sign(expected_v[..., 0, :]).reshape(batch + (1, shape))
-                expected_v = sign * expected_v
-                torch_real_slice = actual_v[..., 0, :].real if dtype.is_complex else actual_v[..., 0, :]
-                sign = torch.sign(torch_real_slice).reshape(batch + (1, shape))
-                actual_v = sign * actual_v
-                self.assertEqual(actual_v, expected_v)
+                phase = torch.from_numpy(expected_v[..., 0, :]).to(device=device).div(actual_v[..., 0, :])
+                actual_v_rotated = actual_v * phase.unsqueeze(-2).expand_as(actual_v)
+                self.assertEqual(actual_v_rotated, expected_v)
 
             # check the out= variant
             out_w = torch.empty_like(actual_w)
