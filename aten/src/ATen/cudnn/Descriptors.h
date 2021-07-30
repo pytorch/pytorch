@@ -21,7 +21,9 @@ std::string cudnnTypeToString(cudnnDataType_t dtype);
 inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
+#if HAS_CUDNN_V8()
     case CUDNN_DATA_BFLOAT16:
+#endif
     case CUDNN_DATA_HALF: return 2;
     case CUDNN_DATA_FLOAT: return 4;
     default: return 8;

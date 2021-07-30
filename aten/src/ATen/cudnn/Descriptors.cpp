@@ -18,9 +18,11 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
     return CUDNN_DATA_HALF;
   } else if (scalar_type == at::kDouble) {
     return CUDNN_DATA_DOUBLE;
+#if HAS_CUDNN_V8()
   } else if (scalar_type == at::kBFloat16) {
     return CUDNN_DATA_BFLOAT16;
   }
+#endif
   throw std::runtime_error("TensorDescriptor only supports double, float and half tensors");
 }
 
@@ -75,8 +77,10 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
       return "CUDNN_DATA_DOUBLE";
     case CUDNN_DATA_HALF:
       return "CUDNN_DATA_HALF";
+#if HAS_CUDNN_V8()
     case CUDNN_DATA_BFLOAT16:
       return "CUDNN_DATA_BFLOAT16";
+#endif
     case CUDNN_DATA_INT8:
       return "CUDNN_DATA_INT8";
     case CUDNN_DATA_INT32:
