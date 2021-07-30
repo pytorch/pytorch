@@ -159,7 +159,7 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     } else {
       auto dict = std::move(input).toGenericDict();
       auto obj = c10::ivalue::Object::create(type, n);
-      for (size_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         obj->setSlot(i, dict.at(cls->getAttributeName(i)));
       }
       return obj;
