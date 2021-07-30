@@ -327,7 +327,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
         if is_reference and self.binary_op in binary_reference_op_supported_dtypes and \
                 dtypes in binary_reference_op_supported_dtypes[self.binary_op]:
             if dtypes in binary_op_int8_dtypes:
-                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.binary_op_node.args)
+                # make sure both inputs are quantized to torch.quint8
+                load_arg(quantized={0: torch.quint8, 1: torch.quint8})(self.binary_op_node.args)
                 args = load_arg(quantized=torch.float)(self.binary_op_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.binary_op_node.kwargs)
                 op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
@@ -453,8 +454,8 @@ class CatQuantizeHandler(QuantizeHandler):
                 return op_out
             else:
                 act_dtype = activation_dtype(qconfig)
-                # only the first argument needs to be quantized
-                args = load_arg(quantized=[act_dtype])(node.args)
+                # make sure the first argument is quantized to act_dtype
+                load_arg(quantized={0: act_dtype})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
@@ -633,7 +634,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         else:  # call_function
             assert self.conv_node.op == "call_function"
             if is_reference:
-                args = load_arg(quantized=[torch.quint8, torch.qint8])(self.conv_node.args)
+                # make sure the input and weight are quantized to torch.quint8, torch.qint8, respectively
+                load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
                 args = load_arg(quantized=torch.float)(self.conv_node.args)
                 kwargs = load_arg(quantized=torch.float)(self.conv_node.kwargs)
                 op_out = quantized_graph.create_node(
@@ -666,6 +668,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             else:
                 assert len(self.conv_node.args) >= 7, \
                     "only conv2d calls with all arguments specified is supported right now in is_reference=False option"
+                # make sure the input and weight are quantized to torch.quint8, torch.qint8, respectively
                 args = load_arg(quantized={0: torch.quint8, 1: torch.qint8})(self.conv_node.args)
                 # pack weight
                 weight = load_arg(quantized=torch.qint8)(self.conv_node.args[1])
@@ -1313,6 +1316,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 return op_out
             else:
                 act_dtype = activation_dtype(qconfig)
+                # make sure the input is quantized to act_dtype
                 load_arg(quantized={0: act_dtype})(node.args)
                 args = load_arg(quantized=torch.float)(node.args)
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
@@ -1481,7 +1485,9 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
                 return op_out
             else:
-                args = load_arg(quantized=[torch.quint8])(node.args)
+                # TODO: change this to act_dtype
+                # make sure the input is quantized to torch.quint8
+                load_arg(quantized={0: torch.quint8})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
