@@ -268,6 +268,52 @@ class TestOperators(TestCase):
             self.assertEqual(result_vjps, expected_vjps)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    def test_vmapvjpvjp(self, device, dtype, op):
+        self.skipTest("Skipped; these tests take too long")
+        op_skip = set({
+        })
+        op_skip = op_skip.union(vjp_fail)
+        if op.name in op_skip:
+            self.skipTest("Skipped; Expected failures")
+            return
+
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Autograd not supported.")
+            return
+        if not op.supports_gradgrad:
+            self.skipTest("Skipped! Operation does not support gradgrad")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        # TODO: test in-place
+        if is_inplace(op, op.get_op()):
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        for sample in samples:
+            fn, args = normalize_op_for_vjp_vjp(op, sample)
+            result = fn(*args)
+            cotangents = tree_map(lambda x: torch.randn_like(x), result)
+            cotangents, _ = tree_flatten(cotangents)
+            num_args = len(args)
+
+            args_and_cotangents = tuple(args) + tuple(cotangents)
+
+            def vjp_of_vjp(*args_and_cotangents):
+                args = args_and_cotangents[:num_args]
+                cotangents = args_and_cotangents[num_args:]
+                result, vjp_fn = vjp(fn, *args)
+                result_vjps = vjp_fn(cotangents)
+                result, _ = tree_flatten(result)
+                result_vjps, _ = tree_flatten(result_vjps)
+                return (*result, *result_vjps)
+
+            for loop_out, batched_out in \
+                    get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}):
+                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     def test_vmapvjp(self, device, dtype, op):
         op_skip = {
             'nn.functional.pad.circular',
