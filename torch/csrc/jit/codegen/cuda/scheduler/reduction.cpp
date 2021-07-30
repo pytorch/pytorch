@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
@@ -17,20 +18,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
-constexpr int64_t y_grid_limit = 65535;
-// Largest Power of 2 less-than n
-constexpr int64_t lastPow2(int64_t n) {
-  TORCH_INTERNAL_ASSERT(n >= 0);
-  n |= (n >> 1);
-  n |= (n >> 2);
-  n |= (n >> 4);
-  n |= (n >> 8); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 16); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 32); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  return std::max((int64_t)1, n - (n >> 1));
-}
-
 ReductionParams innerReductionHeuristic(
     const int64_t num_elems_in_reduction,
     const int64_t num_outputs_for_reduction,
@@ -52,7 +39,9 @@ ReductionParams innerReductionHeuristic(
       // Available unrolling based on size of data type
       (int64_t)16 / max_input_dtype_size,
       // Reduce unrolling if we have many inputs, start reduction at 2 inputs
-      std::max((lastPow2((int64_t)n_input_tensors) >> 1), (int64_t)1));
+      std::max(
+          (scheduler_utils::lastPow2((int64_t)n_input_tensors) >> 1),
+          (int64_t)1));
 
   // Conservative value, could be set to larger based on arch if necessary.
   constexpr int64_t l1_cache = 32 * 1024;
@@ -257,9 +246,9 @@ ReductionParams innerReductionHeuristic(
 
   if (rparams.cross_grid) {
     gdimx = grdim;
-    rparams.split_grid_dim = gdimy > y_grid_limit;
+    rparams.split_grid_dim = gdimy > scheduler_utils::y_grid_limit;
   } else {
-    rparams.split_grid_dim = gdimx > x_grid_limit;
+    rparams.split_grid_dim = gdimx > scheduler_utils::x_grid_limit;
   }
 
   rparams.lparams = LaunchParams(
@@ -310,7 +299,9 @@ ReductionParams OuterReductionHeuristic(
       // Available unrolling based on size of data type
       (int64_t)16 / (int64_t)max_input_dtype_size,
       // Reduce unrolling if we have many inputs, start reduction at 2 inputs
-      std::max((lastPow2((int64_t)n_input_tensors) >> 1), (int64_t)1));
+      std::max(
+          (scheduler_utils::lastPow2((int64_t)n_input_tensors) >> 1),
+          (int64_t)1));
 
   // If we have one warp per block, how many blocks would that be?
   target_blocks = ceilDiv(n_elems, (int64_t)warp_size);
@@ -537,18 +528,18 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     const at::ArrayRef<c10::IValue>& fusion_inputs) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
-  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
+  SchedulerRuntimeInfo runtime_info(fusion, fusion_inputs, true);
 
-  return getReductionHeuristics(fusion, evaluator);
+  return getReductionHeuristics(fusion, runtime_info);
 }
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator) {
+    SchedulerRuntimeInfo& runtime_info) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
   FusionGuard fg(fusion);
-  auto tvs = scheduler_utils::allTvs(fusion);
+  auto tvs = ir_utils::allTvs(fusion);
   TensorView* red_tv = nullptr;
   for (auto tv : tvs) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
@@ -596,7 +587,8 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   int64_t red_elements = 1;
 
   for (auto id : red_tv->getRootDomain()) {
-    auto inferred_val = evaluator.evaluate(id->extent());
+    auto inferred_val =
+        runtime_info.expressionEvaluator().evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(), "Error inferring reduction size.");
     if (id->isReduction()) {
@@ -633,7 +625,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("scheduleReduction");
   FusionGuard fg(fusion);
 
-  auto tvs = scheduler_utils::allTvs(fusion);
+  auto tvs = ir_utils::allTvs(fusion);
   TensorView* red_tv = nullptr;
   for (auto tv : tvs) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
@@ -726,7 +718,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
         // unrolling
         red_tv->split(reduce_axis, 1);
 
-        auto red_tv_rf = scheduler_utils::rfactorHelper(red_tv, {-4, -3, -2});
+        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-4, -3, -2});
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
@@ -736,7 +728,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
               iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
           red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::TIDy);
           if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, x_grid_limit);
+            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
             red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -759,7 +751,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
         red_tv->split(
             reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
 
-        auto red_tv_rf = scheduler_utils::rfactorHelper(red_tv, {-2});
+        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-2});
         red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
 
         if (has_iter_axis) {
@@ -778,7 +770,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
           // [BIDx, 1, 8, TIDy, rf-outer, r-TIDx]
 
           if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, x_grid_limit);
+            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
             red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -810,8 +802,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
         // Clang tidy
         constexpr int kNegFive = -5;
         constexpr int kNegSix = -6;
-        auto red_tv_rf =
-            scheduler_utils::rfactorHelper(red_tv, {kNegSix, -3, -2});
+        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {kNegSix, -3, -2});
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
@@ -820,7 +811,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
 
         if (has_iter_axis) {
           if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, y_grid_limit);
+            red_tv_rf->split(iter_axis, scheduler_utils::y_grid_limit);
             red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDy);
           } else {
             red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDy);
@@ -846,14 +837,14 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
         // unrolling
         red_tv->split(reduce_axis, 1);
 
-        auto red_tv_rf = scheduler_utils::rfactorHelper(red_tv, {-4, -3, -2});
+        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-4, -3, -2});
 
         red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
         red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
 
         if (has_iter_axis) {
           if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, x_grid_limit);
+            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
             red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -888,7 +879,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
 
         red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
 
-        auto red_tv_rf = scheduler_utils::rfactorHelper(
+        auto red_tv_rf = ir_utils::rfactorHelper(
             red_tv,
             {-5, -2, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
@@ -920,7 +911,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
           red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
           red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
 
-          auto red_tv_rf = scheduler_utils::rfactorHelper(
+          auto red_tv_rf = ir_utils::rfactorHelper(
               red_tv,
               {-4, -2, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
@@ -950,7 +941,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
           // unrolling
           red_tv->split(0, 1);
 
-          auto red_tv_rf = scheduler_utils::rfactorHelper(
+          auto red_tv_rf = ir_utils::rfactorHelper(
               red_tv, {-2}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
 
           red_tv_rf->axis(-1)->parallelize(ParallelType::TIDy);
@@ -980,7 +971,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
         red_tv->split(1, 1);
         red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
 
-        auto red_tv_rf = scheduler_utils::rfactorHelper(red_tv, {-3, -2});
+        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-3, -2});
 
         red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
         red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
@@ -1019,8 +1010,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
       "Need these two tensor views to finish the scheduling.");
 
   TransformPropagator::from(reference_tv);
-  scheduler_utils::parallelizeAllLike(
-      reference_tv, scheduler_utils::allTvs(fusion));
+  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
 
   if (rparams.loop_unroll > 1) {
     // Schedule unrolling on inputs
@@ -1042,8 +1032,7 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
     // Input to cahced_input we want outside unswitched position
     // Cached input to rfactor we want inlined
     for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache =
-          scheduler_utils::consumerTvsOf(cached_input);
+      auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
       for (auto consumer : consumers_of_input_cache) {
         if (consumer != reference_tv) {
           // consumer->computeAt(reference_tv, -1, ComputeAtMode::MostInlined);

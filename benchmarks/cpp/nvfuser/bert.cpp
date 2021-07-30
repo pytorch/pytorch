@@ -138,7 +138,7 @@ static void MagicScheduler_DivMaxSoftDropFwd(
 
   setupDivMaxSoftmaxDropoutForward(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =
@@ -196,7 +196,7 @@ static void MagicScheduler_DivMaxSoftDropBwd(
 
   setupDivMaxSoftmaxDropoutBackward(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =
@@ -337,7 +337,7 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
 
   setupBiasDropoutAddLayernormFwd(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =
@@ -465,7 +465,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
 
   setupBiasDropoutAddLayernormBwd1(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =
@@ -593,7 +593,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
 
   setupBiasDropoutAddLayernormBwd2(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =
@@ -696,7 +696,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
 
   setupBiasDropoutAddLayernormBwd3(&fusion, dtype);
 
-  auto tvs = scheduler_utils::allTvs(&fusion);
+  auto tvs = ir_utils::allTvs(&fusion);
 
   at::manual_seed(0);
   auto options =

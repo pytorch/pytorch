@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -277,6 +278,110 @@ Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute) {
   FusionGuard fg(expr->fusion());
   return ValReplacement::SubstituteInExpr::subsitute(
       expr, reference, substitute);
+}
+
+TensorView* rfactorHelper(
+    TensorView* reduction_tv,
+    const std::vector<int>& axes) {
+  TORCH_INTERNAL_ASSERT(reduction_tv->definition() != nullptr);
+  const bool is_welford = reduction_tv->definition()->isA<WelfordOp>();
+  if (!is_welford) {
+    return reduction_tv->rFactor(axes);
+  }
+  auto welford = reduction_tv->definition()->as<WelfordOp>();
+  auto w_avg = welford->outAvg()->as<TensorView>();
+  auto w_var = welford->outVar()->as<TensorView>();
+  auto w_n = welford->outN()->as<TensorView>();
+
+  WelfordResult rtvs = reduction_tv->rFactor(axes, w_avg, w_var, w_n);
+
+  // TODO: this can be more generic, using avg because
+  //      WelfordOp::out() returns the avg
+  return rtvs.avg;
+}
+
+namespace {
+
+std::vector<TensorView*> uniqueEntries(
+    const std::vector<TensorView*>& tv_deuqe) {
+  std::vector<TensorView*> unique_entries;
+  std::unordered_set<TensorView*> inserted;
+  for (auto tv_entry : tv_deuqe) {
+    if (inserted.emplace(tv_entry).second) {
+      unique_entries.emplace_back(tv_entry);
+    }
+  }
+  return unique_entries;
+}
+
+} // namespace
+
+std::vector<TensorView*> producerTvsOf(TensorView* tv) {
+  if (tv->definition() == nullptr) {
+    return {};
+  }
+  auto producer_vals =
+      ir_utils::filterByType<TensorView>(tv->definition()->inputs());
+  return uniqueEntries({producer_vals.begin(), producer_vals.end()});
+}
+
+std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
+  std::vector<TensorView*> consumer_tvs;
+  for (auto use_expr : tv->uses()) {
+    auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
+    consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
+  }
+  return uniqueEntries(consumer_tvs);
+}
+
+std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
+  std::vector<TensorView*> all_producer_tvs;
+  for (auto tv : tvs) {
+    auto producer_tvs = producerTvsOf(tv);
+    all_producer_tvs.insert(
+        all_producer_tvs.end(), producer_tvs.begin(), producer_tvs.end());
+  }
+
+  return uniqueEntries(all_producer_tvs);
+}
+
+std::vector<TensorView*> consumerTvsOf(const std::vector<TensorView*>& tvs) {
+  std::vector<TensorView*> all_consumer_tvs;
+  for (auto tv : tvs) {
+    auto consumer_tvs = consumerTvsOf(tv);
+    all_consumer_tvs.insert(
+        all_consumer_tvs.end(), consumer_tvs.begin(), consumer_tvs.end());
+  }
+
+  return uniqueEntries(all_consumer_tvs);
+}
+
+std::vector<TensorView*> inputTvsOf(TensorView* tv) {
+  return inputTvsOf(std::vector<TensorView*>{tv});
+}
+
+std::vector<TensorView*> outputTvsOf(TensorView* tv) {
+  return outputTvsOf(std::vector<TensorView*>{tv});
+}
+
+std::vector<TensorView*> inputTvsOf(std::vector<TensorView*> tvs) {
+  auto inp_vals = IterVisitor::getInputsTo({tvs.begin(), tvs.end()});
+  auto filtered = ir_utils::filterByType<TensorView>(inp_vals);
+  std::vector<TensorView*> inp_tvs(filtered.begin(), filtered.end());
+  return uniqueEntries(inp_tvs);
+}
+
+std::vector<TensorView*> outputTvsOf(std::vector<TensorView*> tvs) {
+  auto out_vals = DependencyCheck::getAllOutputsOf({tvs.begin(), tvs.end()});
+  auto filtered = ir_utils::filterByType<TensorView>(out_vals);
+  std::vector<TensorView*> out_tvs(filtered.begin(), filtered.end());
+  return uniqueEntries(out_tvs);
+}
+
+std::vector<TensorView*> allTvs(Fusion* fusion) {
+  auto used_vals = fusion->usedMathVals();
+  auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
+  return uniqueEntries({used_tvs.begin(), used_tvs.end()});
 }
 
 } // namespace ir_utils

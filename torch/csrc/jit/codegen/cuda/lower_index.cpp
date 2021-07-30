@@ -153,7 +153,8 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
             out_domain->domain().begin(),
             out_domain->domain().end(),
             [](kir::IterDomain* id) {
-              return !id->isThread() && id->isReduction();
+              return !id->isThread() && id->isReduction() &&
+                  !id->extent()->isOneInt();
             }),
         "Found a reduction stage that has both a non-parallelized ",
         "reduction and a grid reduction.  This is not supported, ",

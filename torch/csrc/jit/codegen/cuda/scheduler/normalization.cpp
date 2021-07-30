@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
@@ -18,20 +19,6 @@ namespace cuda {
 // TODO: Fork outputs
 
 namespace {
-constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
-// constexpr int64_t y_grid_limit = 65535; // unused at this time
-// Largest Power of 2 less-than n
-constexpr int64_t lastPow2(int64_t n) {
-  TORCH_INTERNAL_ASSERT(n >= 0);
-  n |= (n >> 1);
-  n |= (n >> 2);
-  n |= (n >> 4);
-  n |= (n >> 8); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 16); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 32); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  return std::max((int64_t)1, n - (n >> 1));
-}
-
 // Copied from reduction scheduler, should generalize. Simply needed to take out
 // grid reductions.
 ReductionParams innerNormalizationHeuristic(
@@ -56,7 +43,9 @@ ReductionParams innerNormalizationHeuristic(
       // Available unrolling based on size of data type
       (int64_t)16 / (int64_t)max_input_dtype_size,
       // Reduce unrolling if we have many inputs, start reduction at 2 inputs
-      std::max((lastPow2((int64_t)n_tensor_inputs) >> 1), (int64_t)1));
+      std::max(
+          (scheduler_utils::lastPow2((int64_t)n_tensor_inputs) >> 1),
+          (int64_t)1));
 
   // Conservative value, could be set to larger based on arch if necessary.
   constexpr int64_t l1_cache = 32 * 1024;
@@ -125,7 +114,7 @@ ReductionParams innerNormalizationHeuristic(
   // Compute maximum number of reductions we could do in the same kernel based
   // on persistent buffer size
   const int64_t max_multi_reduction_factor = std::max(
-      (persistence_required ? (scheduler_utils::registerFileSize() * 3) /
+      (persistence_required ? (scheduler_utils::register_file_size * 3) /
                (max_persistent_buffer_size * 4)
                             : std::numeric_limits<int64_t>::max()),
       (int64_t)1);
@@ -212,7 +201,7 @@ ReductionParams innerNormalizationHeuristic(
       num_elems_in_reduction,
       bdimx * (unroll_reduction ? unroll_factor : (int64_t)1));
   // round up to multiple of 8 or pow2 whichever smaller
-  auto round_up_pow2 = lastPow2(batches_per_block);
+  auto round_up_pow2 = scheduler_utils::lastPow2(batches_per_block);
   if (round_up_pow2 < batches_per_block) {
     round_up_pow2 *= 2;
   }
@@ -239,7 +228,7 @@ ReductionParams innerNormalizationHeuristic(
   // gdimx assigned to grdim. Otherwise it's helpful to pull godim into gdimx in
   // case it's larger than gdimy can hold, as not doing so can thrash the cache.
 
-  rparams.split_grid_dim = godim > x_grid_limit;
+  rparams.split_grid_dim = godim > scheduler_utils::x_grid_limit;
 
   rparams.lparams = LaunchParams(
       LaunchParams::UNINITIALIZED_VAL,
@@ -296,7 +285,9 @@ ReductionParams OuterNormalizationHeuristic(
       // Available unrolling based on size of data type
       (int64_t)16 / (int64_t)max_input_dtype_size,
       // Reduce unrolling if we have many inputs, start reduction at 2 inputs
-      std::max((lastPow2((int64_t)n_tensor_inputs) >> 1), (int64_t)1));
+      std::max(
+          (scheduler_utils::lastPow2((int64_t)n_tensor_inputs) >> 1),
+          (int64_t)1));
 
   // If we have one warp per block, how many blocks would that be?
   target_blocks = ceilDiv(n_elems, (int64_t)warp_size);
@@ -322,7 +313,7 @@ ReductionParams OuterNormalizationHeuristic(
   // on persistent buffer size
 
   const int64_t max_multi_reduction_factor = std::max(
-      (persistence_required ? (scheduler_utils::registerFileSize() * 3) /
+      (persistence_required ? (scheduler_utils::register_file_size * 3) /
                (max_persistent_buffer_size * 4)
                             : std::numeric_limits<int64_t>::max()),
       (int64_t)1);
@@ -438,7 +429,7 @@ ReductionParams OuterNormalizationHeuristic(
     // round up to multiple of 8 or pow2 whichever smaller
   }
 
-  auto round_up_pow2 = lastPow2(batches_per_block);
+  auto round_up_pow2 = scheduler_utils::lastPow2(batches_per_block);
   if (round_up_pow2 < batches_per_block) {
     round_up_pow2 *= 2;
   }
@@ -519,13 +510,13 @@ ReductionParams NormalizationHeuristic(
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator) {
+    SchedulerRuntimeInfo& runtime_info) {
   FUSER_PERF_SCOPE("getNormalizationHeuristics");
 
   FusionGuard fg(fusion);
 
   std::vector<TensorView*> reduction_tvs;
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
       reduction_tvs.push_back(tv);
     }
@@ -567,10 +558,10 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
   bool requires_persistence = !persistent_buffers.buffers.empty();
 
   auto properties =
-      scheduler_utils::getProperties(fusion, evaluator, first_red_tv);
+      scheduler_utils::getProperties(fusion, runtime_info, first_red_tv);
 
   auto max_persistent_size =
-      scheduler_utils::persistentBufferSize(fusion, evaluator);
+      scheduler_utils::persistentBufferSize(fusion, runtime_info);
 
   return NormalizationHeuristic(
       properties.reduction_numel,
@@ -587,9 +578,9 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     const at::ArrayRef<c10::IValue>& fusion_inputs) {
   FUSER_PERF_SCOPE("getNormalizationHeuristics");
 
-  auto evaluator = executor_utils::bindFusionInputs(fusion_inputs, fusion);
+  SchedulerRuntimeInfo runtime_info(fusion, fusion_inputs, true);
 
-  return getNormalizationHeuristics(fusion, evaluator);
+  return getNormalizationHeuristics(fusion, runtime_info);
 }
 namespace {
 
@@ -601,7 +592,7 @@ void schedulePersistentNormalization(
   FusionGuard fg(fusion);
 
   std::vector<TensorView*> reduction_tvs;
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
       if (auto welford_op = dynamic_cast<WelfordOp*>(tv->definition())) {
         if (tv == welford_op->out()) {
@@ -639,7 +630,7 @@ void schedulePersistentNormalization(
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->isFusionInput() || tv->isFusionOutput()) {
       tv->setMemoryType(MemoryType::Global);
     } else {
@@ -658,12 +649,12 @@ void schedulePersistentNormalization(
     auto persistent_buffers =
         scheduler_utils::persistentBuffers(fusion).buffers;
     auto producers_for_persistence =
-        scheduler_utils::producerTvsOf(persistent_buffers);
+        ir_utils::producerTvsOf(persistent_buffers);
 
     // Don't cache inputs that are not producers of the reductions, they could
     // have a different pattern than the reduction and we don't want to use them
     // to computeWithOutputs
-    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
+    auto inputs_to_reduction_vec = ir_utils::inputTvsOf(reduction_tvs);
     std::unordered_set<TensorView*> inputs_to_reductions_set(
         inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
 
@@ -709,7 +700,7 @@ void schedulePersistentNormalization(
         reduction_tv->split(reduce_axis, 1);
         reduction_tv->reorder({{-1, -4}, {-4, -3}, {-3, -2}, {-2, -1}});
         rfactor_axes = {-3, -2, -1};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-4)->parallelize(ParallelType::TIDx);
         rfactor_tv->axis(-3)->parallelize(ParallelType::Unswitch);
@@ -719,7 +710,7 @@ void schedulePersistentNormalization(
               iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
           rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::TIDy);
           if (rparams.split_grid_dim) {
-            rfactor_tv->split(iter_axis, x_grid_limit);
+            rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
             rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -741,7 +732,7 @@ void schedulePersistentNormalization(
         reduction_tv->split(reduce_axis, rparams.batches_per_block, false);
 
         rfactor_axes = {-2};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -761,7 +752,7 @@ void schedulePersistentNormalization(
           // [BIDx, 1, 8, TIDy, rf-outer, r-TIDx]
 
           if (rparams.split_grid_dim) {
-            rfactor_tv->split(iter_axis, x_grid_limit);
+            rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
             rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -791,14 +782,14 @@ void schedulePersistentNormalization(
       reduction_tv->reorder({{-1, -4}, {-4, -3}, {-3, -2}, {-2, -1}});
 
       rfactor_axes = {-3, -2, -1};
-      rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+      rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
       rfactor_tv->axis(-4)->parallelize(ParallelType::TIDx);
       rfactor_tv->axis(-2)->parallelize(ParallelType::Unswitch);
 
       if (has_iter_axis) {
         if (rparams.split_grid_dim) {
-          rfactor_tv->split(iter_axis, x_grid_limit);
+          rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
           rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
         } else {
           rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -825,7 +816,7 @@ void schedulePersistentNormalization(
         // unrolling
         reduction_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
         rfactor_axes = {-4, -2, -1};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-2)->parallelize(ParallelType::Unswitch);
         rfactor_tv->axis(-3)->parallelize(ParallelType::TIDy);
@@ -852,7 +843,7 @@ void schedulePersistentNormalization(
         reduction_tv->reorder({{-2, 0}});
         // [rF-Leftover, x-BIDx, x-Unswitch, x-Unroll, x-TIDx, r-TIDy]
         rfactor_axes = {0};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-1)->parallelize(ParallelType::TIDy);
         rfactor_tv->axis(4)->parallelize(ParallelType::TIDx);
@@ -889,12 +880,11 @@ void schedulePersistentNormalization(
     } else {
       // other reduction tvs
       rfactor_tvs.push_back(
-          scheduler_utils::rfactorHelper(reduction_tv_, rfactor_axes));
+          ir_utils::rfactorHelper(reduction_tv_, rfactor_axes));
     }
   }
 
-  scheduler_utils::parallelizeAllLike(
-      reference_tv, scheduler_utils::allTvs(fusion));
+  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
 
   if (rparams.loop_unroll > 1) {
     // Schedule unrolling on inputs
@@ -922,8 +912,7 @@ void schedulePersistentNormalization(
 
     for (auto cached_input : cached_inputs) {
       if (!post_norm_inputs.count(cached_input)) {
-        auto consumers_of_input_cache =
-            scheduler_utils::consumerTvsOf(cached_input);
+        auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
         for (auto consumer : consumers_of_input_cache) {
           scheduler_utils::computeWithOutputs(
               consumer, -1, ComputeAtMode::MostInlined);
@@ -931,7 +920,7 @@ void schedulePersistentNormalization(
               consumer, unswitch_axis, ComputeAtMode::BestEffort);
         }
       } else {
-        auto tv_outputs = scheduler_utils::outputTvsOf(cached_input);
+        auto tv_outputs = ir_utils::outputTvsOf(cached_input);
         if (tv_outputs.empty()) {
           // At the moment can have dummy inputs that aren't actually connected
           // to the graph, just skip them.
@@ -958,8 +947,7 @@ void schedulePersistentNormalization(
 
     // Compute at should not remove parallelization scheme, but let's just make
     // sure everything is set properly
-    scheduler_utils::parallelizeAllLike(
-        reference_tv, scheduler_utils::allTvs(fusion));
+    scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
   } else {
     // Want to inline, especially backwards based on reduction_tv, otherwise
     // rfactor tv may not be inlined correctly
@@ -985,8 +973,7 @@ void schedulePersistentNormalization(
           *cur_red_it, -1, ComputeAtMode::MostInlined);
     }
 
-    scheduler_utils::parallelizeAllLike(
-        reference_tv, scheduler_utils::allTvs(fusion));
+    scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
   }
 }
 
@@ -999,7 +986,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
   FusionGuard fg(fusion);
 
   std::vector<TensorView*> reduction_tvs;
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->hasReduction() && !fusion->hasInput(tv)) {
       if (auto welford_op = dynamic_cast<WelfordOp*>(tv->definition())) {
         if (tv == welford_op->out()) {
@@ -1037,7 +1024,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->isFusionInput() || tv->isFusionOutput()) {
       tv->setMemoryType(MemoryType::Global);
     } else {
@@ -1056,12 +1043,12 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
     auto persistent_buffers =
         scheduler_utils::persistentBuffers(fusion).buffers;
     auto producers_for_persistence =
-        scheduler_utils::producerTvsOf(persistent_buffers);
+        ir_utils::producerTvsOf(persistent_buffers);
 
     // Don't cache inputs that are not producers of the reductions, they could
     // have a different pattern than the reduction and we don't want to use them
     // to computeWithOutputs
-    auto inputs_to_reduction_vec = scheduler_utils::inputTvsOf(reduction_tvs);
+    auto inputs_to_reduction_vec = ir_utils::inputTvsOf(reduction_tvs);
     std::unordered_set<TensorView*> inputs_to_reductions_set(
         inputs_to_reduction_vec.begin(), inputs_to_reduction_vec.end());
 
@@ -1108,7 +1095,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
         reduction_tv->reorder({{-1, -4}, {-4, -3}, {-3, -2}, {-2, -1}});
 
         rfactor_axes = {-3, -2, -1};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-4)->parallelize(ParallelType::TIDx);
         rfactor_tv->axis(-2)->parallelize(ParallelType::Unswitch);
@@ -1118,7 +1105,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
               iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
           rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::TIDy);
           if (rparams.split_grid_dim) {
-            rfactor_tv->split(iter_axis, x_grid_limit);
+            rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
             rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -1141,7 +1128,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
             reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
 
         rfactor_axes = {-2};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-1)->parallelize(ParallelType::TIDx);
 
@@ -1161,7 +1148,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
           // [BIDx, 1, 8, TIDy, rf-outer, r-TIDx]
 
           if (rparams.split_grid_dim) {
-            rfactor_tv->split(iter_axis, x_grid_limit);
+            rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
             rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
           } else {
             rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -1191,14 +1178,14 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
       reduction_tv->reorder({{-1, -4}, {-4, -3}, {-3, -2}, {-2, -1}});
 
       rfactor_axes = {-3, -2, -1};
-      rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+      rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
       rfactor_tv->axis(-4)->parallelize(ParallelType::TIDx);
       rfactor_tv->axis(-2)->parallelize(ParallelType::Unswitch);
 
       if (has_iter_axis) {
         if (rparams.split_grid_dim) {
-          rfactor_tv->split(iter_axis, x_grid_limit);
+          rfactor_tv->split(iter_axis, scheduler_utils::x_grid_limit);
           rfactor_tv->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
         } else {
           rfactor_tv->axis(iter_axis)->parallelize(ParallelType::BIDx);
@@ -1226,7 +1213,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
         // unrolling
         reduction_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
         rfactor_axes = {-4, -2, -1};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-2)->parallelize(ParallelType::Unswitch);
         rfactor_tv->axis(-3)->parallelize(ParallelType::TIDy);
@@ -1253,7 +1240,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
         reduction_tv->reorder({{-2, 0}});
         // [rF-Leftover, x-BIDx, x-Unswitch, x-Unroll, x-TIDx, r-TIDy]
         rfactor_axes = {0};
-        rfactor_tv = scheduler_utils::rfactorHelper(reduction_tv, rfactor_axes);
+        rfactor_tv = ir_utils::rfactorHelper(reduction_tv, rfactor_axes);
 
         rfactor_tv->axis(-1)->parallelize(ParallelType::TIDy);
         rfactor_tv->axis(4)->parallelize(ParallelType::TIDx);
@@ -1290,12 +1277,11 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
     } else {
       // other reduction tvs
       rfactor_tvs.push_back(
-          scheduler_utils::rfactorHelper(reduction_tv_, rfactor_axes));
+          ir_utils::rfactorHelper(reduction_tv_, rfactor_axes));
     }
   }
 
-  scheduler_utils::parallelizeAllLike(
-      reference_tv, scheduler_utils::allTvs(fusion));
+  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
 
   if (rparams.loop_unroll > 1) {
     // Schedule unrolling on inputs
@@ -1323,8 +1309,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
 
     for (auto cached_input : cached_inputs) {
       if (!post_norm_inputs.count(cached_input)) {
-        auto consumers_of_input_cache =
-            scheduler_utils::consumerTvsOf(cached_input);
+        auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
         for (auto consumer : consumers_of_input_cache) {
           scheduler_utils::computeWithOutputs(
               consumer, -1, ComputeAtMode::MostInlined);
@@ -1332,7 +1317,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
               consumer, unswitch_axis, ComputeAtMode::BestEffort);
         }
       } else {
-        auto tv_outputs = scheduler_utils::outputTvsOf(cached_input);
+        auto tv_outputs = ir_utils::outputTvsOf(cached_input);
         if (tv_outputs.empty()) {
           // At the moment can have dummy inputs that aren't actually connected
           // to the graph, just skip them.
@@ -1357,8 +1342,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
           red_tv, -1, ComputeAtMode::BestEffort);
     }
 
-    scheduler_utils::parallelizeAllLike(
-        reference_tv, scheduler_utils::allTvs(fusion));
+    scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
 
   } else {
     // Want to inline, especially backwards based on reduction_tv, otherwise
@@ -1370,8 +1354,7 @@ void scheduleMultiReduction(Fusion* fusion, const ReductionParams& rparams) {
           red_tv, -1, ComputeAtMode::MostInlined);
     }
 
-    scheduler_utils::parallelizeAllLike(
-        reference_tv, scheduler_utils::allTvs(fusion));
+    scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
   }
 }
 } // namespace

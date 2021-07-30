@@ -131,7 +131,8 @@ class KernelIrScanner : private kir::IrVisitor {
       const auto id =
           gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
       summary_.has_grid_reduction_in_loop =
-          summary_.has_grid_reduction_in_loop || !id->isThread();
+          summary_.has_grid_reduction_in_loop ||
+          !(id->isThread() || id->extent()->isOneInt());
     }
   }
 };

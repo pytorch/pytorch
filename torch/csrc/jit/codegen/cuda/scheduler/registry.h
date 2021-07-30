@@ -9,6 +9,7 @@ namespace fuser {
 namespace cuda {
 
 class SegmentedGroup;
+class ExpressionEvaluator;
 
 //!  SchedulerRuntimeInfo is the abstraction introduced in
 //! this PR for passing runtime input dependent information

@@ -7,7 +7,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
-class ExpressionEvaluator;
+
+class SchedulerRuntimeInfo;
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
@@ -15,7 +16,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
-    ExpressionEvaluator& evaluator);
+    SchedulerRuntimeInfo& runtime_info);
 
 TORCH_CUDA_CU_API void scheduleNormalization(
     Fusion* fusion,

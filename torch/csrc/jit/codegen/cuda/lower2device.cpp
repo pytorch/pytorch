@@ -21,9 +21,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 
-// TODO: Move scheduler utils that are useful to ir_utils
-#include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
-
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
@@ -104,7 +101,7 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
 
   auto fusion_vals = fusion->usedMathVals();
   for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
-    auto consumer_tvs = scheduler_utils::consumerTvsOf({producer_tv});
+    auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
     for (auto consumer_tv : consumer_tvs) {
       auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
       auto c2p_root_map = pairwise_map.mapConsumerToProducer(

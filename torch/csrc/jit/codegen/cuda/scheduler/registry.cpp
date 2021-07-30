@@ -41,7 +41,8 @@ class SchedulerTopologyChecker {
       }
     }
 
-    // All tensor views that are eventually consumed to produce a reduction
+    // All tensor views that are eventually consumed to produce a reduction,
+    // includes reduction tensor views.
     std::unordered_set<TensorView*> pre_reduction_tvs;
 
     {
@@ -228,13 +229,13 @@ class SchedulerTopologyChecker {
   }
 
   // Checks if any broadcasts are resolved after a reduction, this shouldn't be
-  // accepted in the single reduction scheduler
+  // accepted in the single reduction or multi-reduction scheduler
   static bool hasPostReductionBCast(Fusion* fusion) {
     auto all_vals = fusion->usedMathVals();
     for (auto tv : ir_utils::filterByType<TensorView>(all_vals)) {
       // Welford can have 2 outputs, so do this on all found reduction tensor
       // views
-      if (tv->hasReduction() && !fusion->hasInput(tv)) {
+      if (tv->hasReduction() && !tv->isFusionInput()) {
         auto tv_chains = tvChains(DependencyCheck::getAllUseChains(tv));
         // Propagate forward from reduction through all uses of the reduction
         for (auto tv_dep_chain : tv_chains) {
@@ -265,6 +266,69 @@ class SchedulerTopologyChecker {
       }
     }
     return false;
+  }
+
+  // Checks if there's any unsupported operations post reduction. If outer
+  // reduction we can fuse some pointwise ops if they don't require
+  // broadcasting (checked in hasPostReductionBCast). For inner reductions we
+  // cannot fuse any binary like operation (includes operations like shift that
+  // we're not fusing right now) involving "new" inputs (not going through a
+  // reduction).
+  static bool supportedPostReductionFusion(
+      Fusion* fusion,
+      std::vector<TensorView*> reduction_tvs) {
+    TORCH_INTERNAL_ASSERT(reduction_tvs.size());
+    bool fastest_dim_reduction = true;
+    auto red_root_dom = reduction_tvs[0]->getRootDomain();
+    for (size_t i = red_root_dom.size(); i > 0; i--) {
+      if (red_root_dom[i - 1]->isBroadcast() ||
+          red_root_dom[i - 1]->isTrivialReduction()) {
+        continue;
+      } else if (red_root_dom[i - 1]->isReduction()) {
+        fastest_dim_reduction = true;
+        break;
+      } else {
+        fastest_dim_reduction = false;
+        break;
+      }
+    }
+
+    // If reductions are on fastest dim, don't fuse any operations (after
+    // reductions) that requires an input that is not an input to the
+    // reductions.
+    if (fastest_dim_reduction) {
+      auto post_reduction_vals = DependencyCheck::getAllValsBetween(
+          {reduction_tvs.begin(), reduction_tvs.end()},
+          {fusion->outputs().begin(), fusion->outputs().end()});
+
+      if (post_reduction_vals.empty()) {
+        return true;
+      }
+
+      auto reduction_inputs = IterVisitor::getInputsTo(
+          {reduction_tvs.begin(), reduction_tvs.end()});
+
+      for (auto tv : ir_utils::filterByType<TensorView>(
+               post_reduction_vals.begin(), post_reduction_vals.end())) {
+        if (tv->definition() == nullptr) {
+          continue;
+        }
+
+        auto tv_inputs = IterVisitor::getInputsTo({tv});
+
+        if (std::any_of(
+                tv_inputs.begin(),
+                tv_inputs.end(),
+                [&reduction_inputs](Val* inp) {
+                  return inp->isA<TensorView>() &&
+                      reduction_inputs.find(inp) == reduction_inputs.end();
+                })) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 };
 } // namespace
@@ -594,21 +658,12 @@ class SingleReductionScheduler : public SchedulerEntry {
       return false;
     }
 
-    auto red_tv = is_welford ? welford_ops[0]->out()->as<TensorView>()
-                             : red_ops[0]->out()->as<TensorView>();
+    auto reduction_tv = is_welford ? welford_ops[0]->out()->as<TensorView>()
+                                   : red_ops[0]->out()->as<TensorView>();
 
-    // Not allowing broadcasting reduction result to support
-    //  grid reduction. This is an overkill might want to consider
-    //  trying to get the heuristics and check only if grid reduction is
-    //  required.
-    //  TODO: We can actually allow broadcasts that doesn't get resolved
-    //        in the same fusion, temporarily use a simplified detection
-    //        where broadcast is allowed if it's at output and has no use
-    auto dependent_vals = DependencyCheck::getAllDependentVals({red_tv});
-    for (auto val : dependent_vals) {
-      if (val->definition()->isA<BroadcastOp>() && !val->uses().empty()) {
-        return false;
-      }
+    if (!SchedulerTopologyChecker::supportedPostReductionFusion(
+            fusion, {reduction_tv})) {
+      return false;
     }
 
     return true;
@@ -621,8 +676,7 @@ class SingleReductionScheduler : public SchedulerEntry {
 
  private:
   void computeHeuristics(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
-    auto& expr_evaluator = runtime_info.expressionEvaluator();
-    auto param = getReductionHeuristics(fusion, expr_evaluator);
+    auto param = getReductionHeuristics(fusion, runtime_info);
     TORCH_INTERNAL_ASSERT(param.has_value());
     rparams_ = param.value();
   }
@@ -671,14 +725,14 @@ class NormalizationScheduler : public SchedulerEntry {
 
   static bool canSchedule(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
     // auto & expr_evaluator = runtime_info.expressionEvaluator();
-    std::vector<TensorView*> reduction_tv;
-    for (auto tv : scheduler_utils::allTvs(fusion)) {
+    std::vector<TensorView*> reduction_tvs;
+    for (auto tv : ir_utils::allTvs(fusion)) {
       if (tv->hasReduction() && !fusion->hasInput(tv)) {
-        reduction_tv.push_back(tv);
+        reduction_tvs.push_back(tv);
       }
     }
 
-    if (reduction_tv.size() == 0) {
+    if (reduction_tvs.size() == 0) {
       // Use single reduction or pointwise logic
       return false;
     }
@@ -702,7 +756,7 @@ class NormalizationScheduler : public SchedulerEntry {
       return count;
     };
 
-    for (auto red : reduction_tv) {
+    for (auto red : reduction_tvs) {
       if (!valid_axis_count) {
         valid_axis_count = true;
         axis_count = reduction_root_size(red);
@@ -719,17 +773,29 @@ class NormalizationScheduler : public SchedulerEntry {
     root_map.build(true);
 
     // red_ops.size()>1 checked before
-    for (size_t it = 1; it < reduction_tv.size(); it++) {
-      if (!checkEquivalence(reduction_tv[it - 1], reduction_tv[it], root_map)) {
+    for (size_t it = 1; it < reduction_tvs.size(); it++) {
+      if (!checkEquivalence(
+              reduction_tvs[it - 1], reduction_tvs[it], root_map)) {
         return false;
       }
     }
+    auto persistent_size =
+        scheduler_utils::persistentBufferSize(fusion, runtime_info);
 
-    if (scheduler_utils::persistentBufferSize(
-            fusion, runtime_info.expressionEvaluator()) *
-            4 >
-        scheduler_utils::registerFileSize() * 3) {
+    if (persistent_size * 4 > scheduler_utils::register_file_size * 3) {
       return false;
+    }
+
+    if (persistent_size <= 1) {
+      // multi reduction scheduler
+      if (SchedulerTopologyChecker::hasPostReductionBCast(fusion)) {
+        return false;
+      }
+
+      if (!SchedulerTopologyChecker::supportedPostReductionFusion(
+              fusion, reduction_tvs)) {
+        return false;
+      }
     }
 
     return true;
@@ -737,8 +803,7 @@ class NormalizationScheduler : public SchedulerEntry {
 
  private:
   void computeHeuristics(Fusion* fusion, SchedulerRuntimeInfo& runtime_info) {
-    auto& expr_evaluator = runtime_info.expressionEvaluator();
-    auto rparams = getNormalizationHeuristics(fusion, expr_evaluator);
+    auto rparams = getNormalizationHeuristics(fusion, runtime_info);
     TORCH_INTERNAL_ASSERT(rparams.has_value());
     rparams_ = rparams.value();
   }

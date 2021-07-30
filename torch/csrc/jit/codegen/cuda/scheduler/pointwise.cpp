@@ -22,18 +22,6 @@ namespace {
 // constexpr int64_t x_grid_limit = ((int64_t)1 << (int64_t)31) - (int64_t)1;
 // Unused at the moment, commenting for clang tidy
 constexpr int64_t kThreadX = 128;
-
-// Largest Power of 2 less-than n
-constexpr int64_t lastPow2(int64_t n) {
-  TORCH_INTERNAL_ASSERT(n >= 0);
-  n |= (n >> 1);
-  n |= (n >> 2);
-  n |= (n >> 4);
-  n |= (n >> 8); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 16); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  n |= (n >> 32); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-  return std::max((int64_t)1, n - (n >> 1));
-}
 } // namespace
 
 c10::optional<PointwiseParams> getPointwiseHeuristics(
@@ -140,7 +128,8 @@ c10::optional<PointwiseParams> getPointwiseHeuristics(
       // Available unrolling based on size of data type
       (int64_t)kSixteen / max_input_dtype_size,
       // Reduce unrolling if we have many inputs, start reduction at 4 inputs
-      std::max((lastPow2((int64_t)n_tensors) >> 2), (int64_t)1));
+      std::max(
+          (scheduler_utils::lastPow2((int64_t)n_tensors) >> 2), (int64_t)1));
 
   // Don't unroll at the cost of getting a full wave on the GPU
   if (n_elems < device_multiprocessor_count * kThreadX &&
@@ -224,7 +213,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
-  for (auto tv : scheduler_utils::allTvs(fusion)) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
     if (tv->isFusionInput() || tv->isFusionOutput()) {
       tv->setMemoryType(MemoryType::Global);
     } else {
@@ -347,7 +336,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
       reference_tv != nullptr,
       "Could not find a fully broadcasted output to reference schedule on.");
 
-  auto all_tvs = scheduler_utils::allTvs(fusion);
+  auto all_tvs = ir_utils::allTvs(fusion);
 
   scheduler_utils::mergeNonReduction(reference_tv);
 
@@ -414,7 +403,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   {
     std::unordered_set<TensorView*> added;
     for (auto cached_input : cached_inputs) {
-      auto consumer_tvs = scheduler_utils::consumerTvsOf(cached_input);
+      auto consumer_tvs = ir_utils::consumerTvsOf(cached_input);
       TORCH_INTERNAL_ASSERT(
           consumer_tvs.size(),
           "Input was not succesfully filtered out for scheduling but wasn't used.");
