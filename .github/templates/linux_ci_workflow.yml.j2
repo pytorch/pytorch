@@ -58,7 +58,7 @@ jobs:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
 {%- endif %}
-  calculate-docker-image:
+  setup:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     {%- if ciflow_config.enabled %}
@@ -66,9 +66,20 @@ jobs:
     {%- endif %}
     env:
       DOCKER_BUILDKIT: 1
+      TEST_RUNNER_TYPE: !{{ test_runner_type }}
+      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
+      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
+      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
+      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
+      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
+      NUM_TEST_SHARDS: !{{ num_test_shards }}
+      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     steps:
       - name: Log in to ECR
         run: |
@@ -133,12 +144,23 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Install dependencies
+        run: pip install typing-extensions
+      - name: Generate test matrix
+        id: set-matrix
+        run: .github/scripts/generate_pytorch_test_matrix.py
+        
 {% block build +%}
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
+    needs: [setup, !{{ ciflow_config.root_job_name }}]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-build
     steps:
       - name: Log in to ECR
@@ -239,44 +261,14 @@ jobs:
 {%- endblock %}
 {%- if not exclude_test %}
 {% block test +%}
-  generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
-    {%- if ciflow_config.enabled %}
-    needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
-    env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
   test:
-    needs: [calculate-docker-image, build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
+    needs: [setup, build, !{{ ciflow_config.root_job_name }}]
     strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
@@ -418,10 +410,10 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+    needs: [setup, test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      matrix: ${{ fromJson(needs.setup.outputs.render-matrix) }}
       fail-fast: false
     steps:
       - name: Log in to ECR
@@ -480,9 +472,9 @@ jobs:
 
   pytorch_python_doc_build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, build, !{{ ciflow_config.root_job_name }}]
+    needs: [setup, build, !{{ ciflow_config.root_job_name }}]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
     steps:
       - name: Log in to ECR
         run: |

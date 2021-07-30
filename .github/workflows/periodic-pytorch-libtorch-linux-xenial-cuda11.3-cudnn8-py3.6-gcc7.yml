@@ -34,15 +34,26 @@ jobs:
     steps:
       - name: noop
         run: echo running ciflow_should_run
-  calculate-docker-image:
+  setup:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
+      TEST_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
+      ENABLE_JIT_LEGACY_TEST: ''
+      ENABLE_MULTIGPU_TEST: ''
+      ENABLE_NOGPU_NO_AVX_TEST: ''
+      ENABLE_NOGPU_NO_AVX2_TEST: ''
+      ENABLE_SLOW_TEST: ''
+      NUM_TEST_SHARDS: 1
+      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     steps:
       - name: Log in to ECR
         run: |
@@ -107,12 +118,23 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Install dependencies
+        run: pip install typing-extensions
+      - name: Generate test matrix
+        id: set-matrix
+        run: .github/scripts/generate_pytorch_test_matrix.py
+        
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ciflow_should_run]
+    needs: [setup, ciflow_should_run]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: periodic-pytorch-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
     steps:
       - name: Log in to ECR

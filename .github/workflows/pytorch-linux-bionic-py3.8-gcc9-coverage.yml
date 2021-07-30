@@ -36,15 +36,26 @@ jobs:
     steps:
       - name: noop
         run: echo running ciflow_should_run
-  calculate-docker-image:
+  setup:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
+      TEST_RUNNER_TYPE: linux.2xlarge
+      ENABLE_JIT_LEGACY_TEST: ''
+      ENABLE_MULTIGPU_TEST: ''
+      ENABLE_NOGPU_NO_AVX_TEST: ''
+      ENABLE_NOGPU_NO_AVX2_TEST: ''
+      ENABLE_SLOW_TEST: ''
+      NUM_TEST_SHARDS: 2
+      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      NOGPU_RUNNER_TYPE: linux.2xlarge
     timeout-minutes: 90
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
     steps:
       - name: Log in to ECR
         run: |
@@ -109,12 +120,23 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Install dependencies
+        run: pip install typing-extensions
+      - name: Generate test matrix
+        id: set-matrix
+        run: .github/scripts/generate_pytorch_test_matrix.py
+        
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ciflow_should_run]
+    needs: [setup, ciflow_should_run]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-bionic-py3.8-gcc9-coverage-build
     steps:
       - name: Log in to ECR
@@ -211,42 +233,14 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
-  generate-test-matrix:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-18.04
-    needs: [ciflow_should_run]
-    env:
-      TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_JIT_LEGACY_TEST: ''
-      ENABLE_MULTIGPU_TEST: ''
-      ENABLE_NOGPU_NO_AVX_TEST: ''
-      ENABLE_NOGPU_NO_AVX2_TEST: ''
-      ENABLE_SLOW_TEST: ''
-      NUM_TEST_SHARDS: 2
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions
-      - name: Clone pytorch/pytorch
-        uses: actions/checkout@v2
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
   test:
-    needs: [calculate-docker-image, build, generate-test-matrix, ciflow_should_run]
+    needs: [setup, build, ciflow_should_run]
     strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-bionic-py3.8-gcc9-coverage-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
@@ -386,10 +380,10 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [generate-test-matrix, test, ciflow_should_run]
+    needs: [setup, test, ciflow_should_run]
     runs-on: linux.2xlarge
     strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
+      matrix: ${{ fromJson(needs.setup.outputs.render-matrix) }}
       fail-fast: false
     steps:
       - name: Log in to ECR
