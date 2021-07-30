@@ -202,10 +202,6 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo
-    fi
-
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
@@ -285,12 +281,13 @@ test_libtorch() {
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TEST_BASE_DIR"/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TEST_BASE_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     "$TEST_BASE_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
-    assert_git_not_dirty
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
       # Restore the build folder to avoid any impact on other tests
       mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
     fi
+
+    assert_git_not_dirty
   fi
 }
 
