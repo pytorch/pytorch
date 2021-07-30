@@ -10,8 +10,6 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCAtomics.cuh>
 
-#include <thrust/execution_policy.h>
-
 #pragma once
 
 namespace at {

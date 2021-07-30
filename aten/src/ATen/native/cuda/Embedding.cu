@@ -10,10 +10,7 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 
-#include <thrust/execution_policy.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/unique.h>
-#include <thrust/device_ptr.h>
+#include <ATen/cuda/cub.cuh>
 
 #include <ATen/native/cuda/EmbeddingBackwardKernel.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -276,8 +273,14 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   auto orig_indices = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor count;
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_dense_backward_cuda", [&] () {
+    auto range = at::arange(num_indices, indices.options());
+    int64_t nbits = cuda::cub::get_num_bits(num_weights);
+    cuda::cub::sort_pairs(
+      indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
+      range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
+      num_indices, false, 0, nbits);
+    /*
     using device_ptr = thrust::device_ptr<index_t>;
-
     // Sort the inputs into sorted with the corresponding indices; we
     // don't need a stable or multidimensional sort, so just use Thrust
     // directly
@@ -297,6 +300,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
         thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data,
                             LTOp<index_t>());
     }
+    */
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
