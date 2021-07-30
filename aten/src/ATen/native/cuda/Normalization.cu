@@ -415,6 +415,7 @@ TORCH_IMPL_FUNC(batch_norm_cuda_out)
 
   const int64_t n_input = self.size(1);
 
+  Tensor& output_non_const = const_cast<Tensor&>(output);
   Tensor& save_mean_non_const = const_cast<Tensor&>(save_mean);
   Tensor& save_invstd_non_const = const_cast<Tensor&>(save_invstd);
 
@@ -422,6 +423,7 @@ TORCH_IMPL_FUNC(batch_norm_cuda_out)
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
   save_mean_non_const = at::empty({n_input}, options);
   save_invstd_non_const = at::empty({n_input}, options);
+  output_non_const = at::empty_like(self, at::MemoryFormat::Contiguous);
 
   if (train) {
     batch_norm_mean_var(self, save_mean_non_const, save_invstd_non_const);
@@ -441,7 +443,7 @@ TORCH_IMPL_FUNC(batch_norm_cuda_out)
   }
 
   batch_norm_elementwise(
-      output,
+      output_non_const,
       self,
       weight_opt.getTensorRef(),
       bias_opt.getTensorRef(),

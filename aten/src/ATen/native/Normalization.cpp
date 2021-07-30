@@ -50,8 +50,7 @@ TORCH_META_FUNC(native_batch_norm)
  double momentum,
  double eps) {
   int64_t n_input = self.size(1);
-  TensorOptions options(self.options());
-  set_output(0, self.sizes(), options.memory_format(at::MemoryFormat::Contiguous));
+  set_output(0, self.sizes(), self.options().memory_format(self.suggest_memory_format()));
 
   if (train) {
     set_output(1, {n_input}, self.options());
