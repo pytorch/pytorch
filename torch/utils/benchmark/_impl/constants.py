@@ -79,3 +79,6 @@ class WorkMetadata:
     sub_label: typing.Optional[str] = None
     description: typing.Optional[str] = None
     env: typing.Optional[str] = None
+
+
+COMPILED_MODULE_NAME = "CompiledTimerModule"
