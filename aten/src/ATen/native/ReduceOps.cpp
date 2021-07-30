@@ -130,23 +130,15 @@ TORCH_META_FUNC(aminmax)
   } else {
     TORCH_CHECK(
         self.numel() > 0,
-        "minmax(): cannot compute minmax over an empty dimension as the "
+        "aminmax(): cannot compute aminmax over an empty dimension as the "
         "operation has no identity.");
     if (keepdim) {
       shape = DimVector(self.ndimension(), 1);
     }
   }
   const auto options = self.options();
-  const auto out0 = this->maybe_get_output(0);
-  const auto out1 = this->maybe_get_output(1);
-  this->set_output(
-      0,
-      shape,
-      options.dtype(out0.defined() ? out0.scalar_type() : self.scalar_type()));
-  this->set_output(
-      1,
-      shape,
-      options.dtype(out1.defined() ? out1.scalar_type() : self.scalar_type()));
+  this->set_output(0, shape, options);
+  this->set_output(1, shape, options);
 }
 
 } // namespace meta

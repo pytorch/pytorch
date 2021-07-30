@@ -117,15 +117,15 @@ static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
   });
 }
 
-static void minmax_kernel_impl(
+static void aminmax_kernel_impl(
     const Tensor& self,
     int64_t dim,
     bool keepdim,
     Tensor& min_result,
     Tensor& max_result) {
-  at::TensorIterator iter = make_reduction("minmax_cuda", min_result,
+  at::TensorIterator iter = make_reduction("aminmax_cuda", min_result,
     max_result, self, dim, keepdim, self.scalar_type());
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "minmax_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "aminmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
@@ -178,7 +178,7 @@ REGISTER_DISPATCH(argmax_stub, &argmax_kernel_cuda);
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_cuda);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(minmax_stub, &minmax_kernel_impl);
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
 REGISTER_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl);
