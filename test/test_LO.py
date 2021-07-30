@@ -37,31 +37,29 @@ class RectangularTensor(torch.Tensor):
         # The wrapping tensor (RectangularTensor) is just a meta tensor, so it
         # doesn't hold any memory (meta tensor is generally the preferred type
         # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
-        # ...the real tensor is held as an element on the tensor.
-        r.elem = elem
+        r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         r.full_rank = kwargs['full_rank'] if 'full_rank' in kwargs else True
         r.well_cond = kwargs['well_cond'] if 'well_cond' in kwargs else True
         r.rcond = kwargs['rcond'] if 'rcond' in kwargs else None
         return r
 
-    def __repr__(self):
-        return f"RectangularTensor({self.elem})"
-
     def tensor(self):
-        return self.elem
+        return self
 
     @classmethod
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-        if func not in self.handled_functions:
-            return NotImplemented
-        return self.handled_functions[func](*args, **kwargs)
+        with no_dispatch():
+            if func not in self.handled_functions:
+                return func(*args, **kwargs)
+            else:
+                self.handled_functions[func](*args, **kwargs)
+                return x
 
 @implements(torch.ops.aten.linalg_solve, HANDLED_FUNCTIONS_RECTANGULAR)
 def solve(A, B):
-    A_tensor = A.elem
+    A_tensor = A
     # As per https://github.com/pytorch/pytorch/issues/54151
     rcond = A.rcond if A.rcond is not None else \
         torch.finfo(A_tensor.dtype).eps * max(A_tensor.size(-2), A_tensor.size(-1))
@@ -83,18 +81,12 @@ class Square(RectangularTensor):
         r = super().__new__(cls, elem, invertible=invertible, well_cond=well_cond)
         return r
 
-    def __repr__(self):
-        return f"Square({self.elem})"
-
-    def tensor(self):
-        return self.elem
-
 @implements(torch.ops.aten.linalg_solve, HANDLED_FUNCTIONS_SQUARE)
 def solve(A, B):
     if A.full_rank:  # PLU
-        return torch.linalg.solve(A.elem, B)
+        return torch.linalg.solve(A, B)
     else:
-        return super().solve(A.elem, B)
+        return super().solve(A, B)
 
 if __name__ == "__main__":
     A = torch.randn(3, 3, requires_grad=True).clone()
@@ -104,7 +96,7 @@ if __name__ == "__main__":
 
     A_sqr = Square(A, invertible=False)
     X = torch.linalg.solve(A_sqr, b)
-    print(type(X), X.__dict__)
+
     # # torch.autograd.gradcheck(torch.solve, [A, b])
     # # B is not in the image of A, so there is no solution
     # # solve returns the vectors X that minimize ||AX - B|| (least squares solution)
