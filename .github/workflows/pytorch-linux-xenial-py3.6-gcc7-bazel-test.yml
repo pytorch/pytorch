@@ -126,9 +126,9 @@ jobs:
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [setup, ]
     env:
-      DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+      DOCKER_IMAGE: ${{ needs.setup.outputs.docker_image }}
       JOB_BASE_NAME: pytorch-linux-xenial-py3.6-gcc7-bazel-test-build-and-test
       NUM_TEST_SHARDS: 1
     steps:
