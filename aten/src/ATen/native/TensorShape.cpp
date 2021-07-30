@@ -2137,16 +2137,9 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
-    switch (tensors[i].dim()) {
-    case 0:
-      shape[i] = 1;
-      break;
-    case 1:
-      shape[i] = tensors[i].size(0);
-      break;
-    default:
-      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
-    }
+    TORCH_CHECK(tensors[i].dim() <= 1,
+                "Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
+    shape[i] = tensors[i].numel();  // treat 0D tensors as if they were a 1D tensor
   }
   for(const auto i: c10::irange(size - 1)){
       TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
