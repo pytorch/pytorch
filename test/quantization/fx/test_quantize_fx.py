@@ -2757,6 +2757,28 @@ class TestQuantizeFx(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m_reference, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
 
+    def test_linear_qint8_activation(self):
+        """Test support for qint8 activation in reference pattern
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 2, 2, 2)
+                self.linear = torch.nn.Linear(8, 5)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = torch.flatten(x, 1)
+                x = self.linear(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": torch.quantization.QConfig(
+            activation=torch.quantization.HistogramObserver.with_args(
+                qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+            ), weight=torch.quantization.default_per_channel_weight_observer)})
+        m = convert_fx(m, is_reference=True)
+        m(torch.rand(2, 1, 5, 5))
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -3430,9 +3452,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         """ quantization of the output of cat will depend on the
         input of cat. we only quantize the output of cat when its inputs are quantized.
         """
-        class QuantizedInput(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self):
-                super(QuantizedInput, self).__init__()
+                super().__init__()
                 self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
                 self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
 
@@ -3441,22 +3463,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 y = self.conv2(y)
                 return torch.cat([x, y], 1)
 
-        class NonQuantizedInput(torch.nn.Module):
-            def __init__(self):
-                super(NonQuantizedInput, self).__init__()
-
-            def forward(self, x, y):
-                return torch.cat([x, y], 1)
-
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ns.call_function(torch.cat)
-        for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedInput(), data, quant_type, quantized_node)
-            self.checkGraphModeFxOp(NonQuantizedInput(), data, quant_type, quantized_node)
+        options = itertools.product(self.static_quant_types, [True, False])
+        for quant_type, is_reference in options:
+            if is_reference:
+                converted_node_list = [
+                    ns.call_method("dequantize"),
+                    ns.call_function(torch.cat),
+                    ns.call_function(torch.quantize_per_tensor)
+                ]
+            else:
+                converted_node_list = None
+
+            self.checkGraphModeFxOp(
+                M(),
+                data,
+                quant_type,
+                quantized_node,
+                expected_node_list=converted_node_list,
+                is_reference=is_reference)
 
         # check cat is using the same observer for input and output
-        m = QuantizedInput().eval()
+        m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
         # two inputs and one output of torch.cat are using same observer, so we have
         # 2 observers that's replicated
@@ -3484,15 +3514,22 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            # 1: ns.call_module(nnq.BatchNorm1d),
-            2: ns.call_module(nnq.BatchNorm2d),
-            3: ns.call_module(nnq.BatchNorm3d),
+            False: {
+                # 1: ns.call_module(nnq.BatchNorm1d),
+                2: ns.call_module(nnq.BatchNorm2d),
+                3: ns.call_module(nnq.BatchNorm3d),
+            },
+            True: {
+                # 1: ns.call_module(nn.BatchNorm1d),
+                2: ns.call_module(nn.BatchNorm2d),
+                3: ns.call_module(nn.BatchNorm3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             model = self.checkGraphModeFxOp(
-                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[dim])
+                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
@@ -3523,17 +3560,23 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return F.relu(self.bn(x), True)
 
-        options = itertools.product(self.static_quant_types, [2, 3])
+        options = itertools.product(self.static_quant_types, [2, 3], [True, False])
         quantized_nodes = {
-            2: ns.call_module(nniq.BNReLU2d),
-            3: ns.call_module(nniq.BNReLU3d),
+            True: {
+                2: ns.call_module(nni.BNReLU2d),
+                3: ns.call_module(nni.BNReLU3d),
+            },
+            False: {
+                2: ns.call_module(nniq.BNReLU2d),
+                3: ns.call_module(nniq.BNReLU3d),
+            }
         }
-        for quant_type, dim in options:
+        for quant_type, dim, is_reference in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False),
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 self.checkGraphModeFxOp(
                     instance, self.img_data_dict[dim], quant_type,
-                    quantized_nodes[dim])
+                    quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     def _test_activation_impl(
             self, float_module, float_op, quantized_module, quantized_op):
