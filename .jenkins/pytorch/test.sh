@@ -301,7 +301,7 @@ test_vulkan() {
       # Rename the build folder when running test to ensure it
       # is not depended on the folder
       mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_BIN_DIR"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
     else
       echo "Testing vulkan with the build folder"
       TEST_BASE_DIR="$BUILD_BIN_DIR"
