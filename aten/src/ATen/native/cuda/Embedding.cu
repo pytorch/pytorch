@@ -279,28 +279,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       indices.data_ptr<index_t>(), sorted_indices.data_ptr<index_t>(),
       range.data_ptr<index_t>(), orig_indices.data_ptr<index_t>(),
       num_indices, false, 0, nbits);
-    /*
-    using device_ptr = thrust::device_ptr<index_t>;
-    // Sort the inputs into sorted with the corresponding indices; we
-    // don't need a stable or multidimensional sort, so just use Thrust
-    // directly
-    {
-        sorted_indices.copy_(indices);
-
-        auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-        auto policy = thrust::cuda::par(allocator).on(stream);
-
-        // Fill sortedOrigIndices with sequential indices
-        auto count_iter = thrust::counting_iterator<index_t>(0);
-        auto orig_data = device_ptr(orig_indices.data_ptr<index_t>());
-        thrust::copy(policy, count_iter, count_iter + num_indices, orig_data);
-
-        // Sort; a stable sort is not required
-        auto sorted_data = device_ptr(sorted_indices.data_ptr<index_t>());
-        thrust::sort_by_key(policy, sorted_data, sorted_data + num_indices, orig_data,
-                            LTOp<index_t>());
-    }
-    */
 
     if (scale_grad_by_freq) {
       count = at::empty_like(indices, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
