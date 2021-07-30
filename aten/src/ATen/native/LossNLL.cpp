@@ -5,6 +5,7 @@
 #include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/SmallBuffer.h>
 
 namespace at {
 namespace meta {
@@ -455,19 +456,78 @@ Tensor nll_loss_backward_cpu(
   return grad_input;
 }
 
+Tensor cross_entropy_loss_prob_target(
+    const Tensor& self,
+    const Tensor& target,
+    const Tensor& weight,
+    int64_t reduction) {
+  const auto n_classes = self.size(1);
+  TORCH_CHECK(
+      !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
+      "cross_entropy: weight tensor should be defined either for all ",
+      n_classes,
+      " classes or no classes"
+      " but got weight tensor of shape: ",
+      weight.sizes());
+
+  auto input = at::log_softmax(self, 1, self.scalar_type());
+  if (weight.defined()) {
+    // Expand weight to the correct number of dims for broadcasting with input / target
+    auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+    std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+    weight_broadcast_shape[1] = weight.size(0);
+    Tensor weight_ = weight.view(weight_broadcast_shape);
+
+    switch (reduction) {
+      case Reduction::Mean:
+        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
+      case Reduction::Sum:
+        return -(input * target * weight_).sum();
+      case Reduction::None:
+        return -(input * target * weight_).sum(1);
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+  } else {
+    switch (reduction) {
+      case Reduction::Mean:
+        return -(input * target).sum() / (input.numel() / input.size(1));
+      case Reduction::Sum:
+        return -(input * target).sum();
+      case Reduction::None:
+        return -(input * target).sum(1);
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+  }
+}
+
 Tensor cross_entropy_loss(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction,
     int64_t ignore_index) {
-  return at::nll_loss_nd(
-      at::log_softmax(
-          self, 1, optTypeMetaToScalarType(self.options().dtype_opt())),
-      target,
-      weight,
-      reduction,
-      ignore_index);
+  Tensor ret;
+  if (self.sizes() == target.sizes()) {
+    // Assume soft targets when input and target shapes are the same
+    TORCH_CHECK(at::isFloatingType(target.scalar_type()),
+        "Expected floating point type for target with class probabilities, got ", target.scalar_type());
+    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
+
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+    const Tensor& weight_ = *weight_maybe_owned;
+    ret = cross_entropy_loss_prob_target(self, target, weight_, reduction);
+  } else {
+    ret = at::nll_loss_nd(
+        at::log_softmax(self, 1, self.scalar_type()),
+        target,
+        weight,
+        reduction,
+        ignore_index);
+  }
+  return ret;
 }
 
 Tensor & nll_loss_out(const Tensor & self, const Tensor & target, const c10::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index, Tensor & output) {

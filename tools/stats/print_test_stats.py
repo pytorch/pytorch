@@ -743,8 +743,8 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
             for test_case in test_suite.test_cases.values()
         ]
     )
-    res = send_to_scribe(logs)
-    print(res)
+    # no need to print send result as exceptions will be captured and print later.
+    send_to_scribe(logs)
 
 
 def assemble_s3_object(
