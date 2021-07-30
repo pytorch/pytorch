@@ -1,8 +1,8 @@
+#include <caffe2/torch/csrc/deploy/deploy.h>
 #include <pybind11/pybind11.h>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
-#include "caffe2/torch/csrc/deploy/deploy.h"
 
 bool run() {
   torch::deploy::InterpreterManager m(2);

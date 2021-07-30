@@ -1,5 +1,6 @@
 from libfb.py import testutil
-import sys, os
+import sys
+import os
 
 # in order to make sure torch_deploy has all the torch symbols loaded globally,
 # make sure it gets opened with RTLD_GLOBAL
