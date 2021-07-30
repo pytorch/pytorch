@@ -570,7 +570,7 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
 
-set(CMAKE_CUDA_FLAGS "--forward-unknown-to-host-compiler ${CMAKE_CUDA_FLAGS}")
+string(PREPEND CMAKE_CUDA_FLAGS "--forward-unknown-to-host-compiler ")
 foreach(FLAG ${CUDA_NVCC_FLAGS})
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${FLAG}")
+  string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
 endforeach()

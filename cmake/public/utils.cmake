@@ -427,9 +427,20 @@ function(torch_compile_options libname)
         -Wall
         -Wextra
         -Wno-unused-parameter
+        -Wno-unused-variable
+        -Wno-unused-function
+        -Wno-unused-result
+        -Wno-unused-local-typedefs
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
+        -Wno-type-limits
+        -Wno-array-bounds
+        -Wno-unknown-pragmas
+        -Wno-sign-compare
+        -Wno-strict-overflow
+        -Wno-strict-aliasing
+        -Wno-error=deprecated-declarations
         # Clang has an unfixed bug leading to spurious missing braces
         # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
         -Wno-missing-braces

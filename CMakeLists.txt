@@ -503,14 +503,14 @@ if(MSVC)
   endforeach(flag_var)
 
   # Try harder
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /w -w")
+  string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler /w -w")
 endif(MSVC)
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xfatbin -compress-all")
+string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
 if(NOT MSVC)
-  set(CMAKE_CUDA_FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG} -g -lineinfo --source-in-ptx")
-  set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO "${CMAKE_CUDA_FLAGS_RELWITHDEBINFO} -g -lineinfo --source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -g -lineinfo --source-in-ptx")
+  string(APPEND CMAKE_CUDA_FLAGS_RELWITHDEBINFO " -g -lineinfo --source-in-ptx")
 endif(NOT MSVC)
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not

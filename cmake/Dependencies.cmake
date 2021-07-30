@@ -1529,7 +1529,6 @@ function(add_onnx_tensorrt_subdir)
 endfunction()
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_TENSORRT)
-    set(CMAKE_CUDA_COMPILER ${CUDA_NVCC_EXECUTABLE})
     add_onnx_tensorrt_subdir()
     include_directories("${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx-tensorrt")
     caffe2_interface_library(nvonnxparser_static onnx_trt_library)
@@ -1563,7 +1562,7 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
+    string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
   if(NOT MSVC)
@@ -1574,21 +1573,21 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   endif()
 
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Wno-deprecated-gpu-targets --expt-extended-lambda")
+  string(APPEND CMAKE_CUDA_FLAGS " -Wno-deprecated-gpu-targets --expt-extended-lambda")
 
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_STANDARD 14)
   endif()
 
-  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${TORCH_NVCC_FLAGS}")
+  string(APPEND CMAKE_CUDA_FLAGS " ${TORCH_NVCC_FLAGS}")
 
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -DCUDA_HAS_FP16=1")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF_OPERATORS__")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF_CONVERSIONS__")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_HALF2_OPERATORS__")
-    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
+    string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
+                                   " -D__CUDA_NO_HALF_OPERATORS__"
+                                   " -D__CUDA_NO_HALF_CONVERSIONS__"
+                                   " -D__CUDA_NO_HALF2_OPERATORS__"
+                                   " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
