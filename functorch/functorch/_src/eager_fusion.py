@@ -5,8 +5,9 @@ from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjpfu
 from torch.fx.node import map_arg
 import torch.fx as fx
 from torchvision.models import resnet18
+from functools import partial
+import os
 
-torch.manual_seed(0)
 def partition_backwards(fx_module: fx.GraphModule):
     bw_nodes = set()
     saved_nodes = set()
@@ -62,17 +63,52 @@ def partition_backwards(fx_module: fx.GraphModule):
     fw_module = fx.GraphModule(fx_module, fw_graph)
     return fw_module, bw_module
 
-import tvm
-from tvm import relay
-from tvm.contrib import graph_executor
 
+def tvm_compile(fx_module, example_inputs, name = None):
+    import tvm
+    from tvm import relay, auto_scheduler
+    from tvm.contrib import graph_executor
+    jit_mod = torch.jit.script(fx_module)
+    # jit_mod = torch.jit.trace(fx_module, example_inputs)
 
-def compiled_function(fn):
-    """Wraps a jax function to be supported by PyTorch.
-    The resulting PyTorch autograd.Function is only differentiable once.
-    We could write a "twice_differentiable_jax_function" to enable second order
-    derivatives with autograd.
-    """
+    shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
+    mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
+    target = tvm.target.Target("llvm -mcpu=core-avx2")
+    tasks, task_weights = auto_scheduler.extract_tasks(mod['main'], params, target)
+    for task in tasks:
+        print(task.compute_dag)
+    if name is None:
+        log_file = f'{time.time()}.json'
+    else:
+        log_file = f'{name}.json'
+    if len(tasks) != 0:
+        tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
+        if not os.path.exists(log_file):
+            tune_option = auto_scheduler.TuningOptions(
+                num_measure_trials=100,  # change this to 20000 to achieve the best performance
+                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
+                early_stopping=1000,
+                # verbose=2,
+            )
+            tuner.tune(tune_option)
+
+    dev = tvm.cpu(0)
+    with auto_scheduler.ApplyHistoryBest(log_file):
+        with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
+            lib = relay.build(mod, target=target, params=params)
+    dtype = "float32"
+    m = graph_executor.GraphModule(lib["default"](dev))
+    def exec_tvm(*args):
+        begin = time.time()
+        for idx, arg in enumerate(args, 0):
+            if arg.dim() != 0:
+                m.set_input(f"inp_{idx}", arg)
+        m.run()
+        outs = [torch.from_numpy(m.get_output(i).numpy()) for i in range(m.get_num_outputs())]
+        return outs
+    return exec_tvm
+
+def compiled_function(fn, fw_compiler, bw_compiler):
     compiled_fw = None
     compiled_bw = None
     class CompiledFunction(torch.autograd.Function):
@@ -84,70 +120,31 @@ def compiled_function(fn):
                 with torch.enable_grad():
                     fx_g = make_fx(vjpfull)(fn, args, (torch.ones_like(out),))
                 fw_module, bw_module = partition_backwards(fx_g)
+
                 garbage_hack = torch.randn(())
                 fw_args = (garbage_hack,) + args
 
-                # compiled_fw = torch.jit.trace(fw_module, fw_args)
-                # shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(fw_args)]
-                # mod, params = relay.frontend.from_pytorch(compiled_fw, shape_list)
+                compiled_fw = fw_compiler(fw_module, fw_args)
+                fw_outs = compiled_fw(*fw_args)
 
-
-                # target = tvm.target.Target("llvm", host="llvm")
-                # dev = tvm.cpu(0)
-                # with tvm.transform.PassContext(opt_level=3):
-                #     lib = relay.build(mod, target=target, params=params)
-                # dtype = "float32"
-                # m = graph_executor.GraphModule(lib["default"](dev))
-                # m.run()
-
-                compiled_fw = nnc_compile(fw_module, (garbage_hack,) + args)
-
-                fw_outs = compiled_fw(garbage_hack, *args)
                 if not isinstance(fw_outs, list):
                     fw_outs = [fw_outs]
-                bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
 
-                # compiled_bw = torch.jit.trace(bw_module, bw_args)
-                compiled_bw = nnc_compile(bw_module, bw_args)
+                bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
+                compiled_bw = bw_compiler(bw_module, bw_args)
             garbage_hack = torch.randn(())
             fw_outs = compiled_fw(garbage_hack, *args)
             ctx.activations = fw_outs[1:]
-            # import pdb; pdb.set_trace()
             return fw_outs[0]
 
         @staticmethod
         def backward(ctx, *args):
             out = compiled_bw(*ctx.activations, args[0].contiguous())
+            if not isinstance(out, list):
+                out = [out]
             return tuple(out)
 
     return CompiledFunction
 
-
-class Perceptron(torch.nn.Module):
-    def __init__(self):
-        super(Perceptron, self).__init__()
-        self.fc = nn.Linear(1,1)
-    def forward(self, x):
-        output = self.fc(x)
-        def f(x):
-            return (x*2).sin()
-        f = compiled_function(f).apply
-        return f(output)
-
-
-def f(a, b):
-    return (a * b).sum()
-nnc_f = compiled_function(f).apply
-a = torch.randn(1, 1, requires_grad=True)
-b = torch.randn(1, 1, requires_grad=True)
-iters = 100
-nnc_f(a, b)
-def bench(func):
-    begin = time.time()
-    for _ in range(iters):
-        out = func(a, b)
-        # out.sum().backward()
-    print(time.time()-begin)
-
-bench(f)
-bench(nnc_f)
+def tvm_function(fn, name):
+    return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
