@@ -162,11 +162,29 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
+        # flex inputs
         self.check(
             torch.nn.Flatten(),
             torch.randn(4, 2, 1, 3, 7),
             convert_args=[torch.zeros(0, 2, 1, 3, 7)]
         )
+
+        # channels last
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 1, 4, 7))
+        )
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 3, 1, 1))
+        )
+
+        # Exceptions
+        with self.assertRaisesRegex(Exception, "not supported on NHWC"):
+            self.check(
+                torch.nn.Flatten(),
+                nhwc(torch.randn(1, 3, 4, 4))
+            )
         with self.assertRaisesRegex(Exception, "Flattening flexible dims is not supported yet"):
             self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
         with self.assertRaisesRegex(Exception, "Only 1 dim"):

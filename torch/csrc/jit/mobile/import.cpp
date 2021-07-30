@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
@@ -169,7 +170,7 @@ c10::intrusive_ptr<c10::ivalue::Object> objLoaderMobile(
     size_t ndict = dict.size();
     auto obj = c10::ivalue::Object::create(type, ndict);
     auto it = dict.begin();
-    for (size_t i = 0; i < ndict; ++i) {
+    for (const auto i : c10::irange(ndict)) {
       std::stringstream name;
       name << it->key();
       cls->addOrCheckAttribute(name.str(), it->key().type());
@@ -233,11 +234,18 @@ class BytecodeDeserializer final {
    * Loads operators by looking them up in the Dispatcher and returns
    * the set of operator names (with overload) that are not supported
    * by the current runtime.
+   *
+   * Accepts an operator_cache, which allows you to cache operator
+   * functions for the entire model. This is keyed on
+   * c10::OperatorName. The value may not be what you're looking for
+   * even if the key is the same. You need to call has_same_arg_num()
+   * on the value to ensure that the number of arguments are the same.
    */
   std::unordered_set<std::string> load_and_find_unsupported_operator_names(
       const std::vector<IValue>& ops_list,
       mobile::Function* function,
-      int64_t model_version) const;
+      int64_t model_version,
+      mobile::Function::OperatorCacheType& operator_cache) const;
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_{};
@@ -256,7 +264,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
     load_and_find_unsupported_operator_names(
         const std::vector<IValue>& ops_list,
         mobile::Function* function,
-        int64_t model_version) const {
+        int64_t model_version,
+        mobile::Function::OperatorCacheType& operator_cache) const {
   std::unordered_set<std::string> unsupported_op_names;
   // ops_list is the list of operator names that were read in from
   // bytecode.plk for the method that is currently being processed.
@@ -275,7 +284,8 @@ std::unordered_set<std::string> BytecodeDeserializer::
         op_item[0].toString()->string(),
         op_item[1].toString()->string(),
         num_args,
-        model_version);
+        model_version,
+        operator_cache);
     if (!op_found) {
       unsupported_op_names.emplace(operator_str(
           op_item[0].toString()->string(), op_item[1].toString()->string()));
@@ -322,8 +332,11 @@ void BytecodeDeserializer::parseMethods(
         "The numbers of bytecode values and debug info values do not match.");
   }
 
+  // A Global Cache for Operator functions across all methods in the model.
+  mobile::Function::OperatorCacheType operator_cache;
+
   // Process all methods in this mobile module.
-  for (size_t i = method_i_start; i < vals.size(); ++i) {
+  for (const auto i : c10::irange(method_i_start, vals.size())) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
@@ -380,8 +393,8 @@ void BytecodeDeserializer::parseMethods(
           "The numbers of instructions and debug handles strings do not match.");
     }
 
-    for (size_t i = 0; i < ins_list.size(); ++i) {
-      auto ins_item = ins_list[i].toTuple()->elements();
+    for (const auto j : c10::irange(ins_list.size())) {
+      auto ins_item = ins_list[j].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -390,7 +403,7 @@ void BytecodeDeserializer::parseMethods(
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       if (has_debug_handles) {
-        int64_t debug_handle = debug_handles_list[i].toInt();
+        int64_t debug_handle = debug_handles_list[j].toInt();
         function->append_instruction(op_code, X, N, debug_handle);
       } else {
         function->append_instruction(op_code, X, N);
@@ -399,7 +412,7 @@ void BytecodeDeserializer::parseMethods(
 
     std::unordered_set<std::string> unsupported_op_names =
         load_and_find_unsupported_operator_names(
-            ops_list, function.get(), model_version);
+            ops_list, function.get(), model_version, operator_cache);
     if ((module_load_options_ & MobileModuleLoadOptions::OPERATOR_CHECK) &&
         !unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
