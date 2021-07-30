@@ -2153,10 +2153,11 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
+    view_shape[i] = -1;  // select this dimension to infer
     grids.push_back(tensors[i].view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
   }
   return grids;
 }
