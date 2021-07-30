@@ -1,12 +1,38 @@
+import statistics
 import textwrap
 import timeit
 import typing
 
+import torch
 from torch.utils.benchmark._impl import constants
 from torch.utils.benchmark._impl.tasks import base as task_base
 from torch.utils.benchmark._impl.templates import jit as jit_template
 from torch.utils.benchmark._impl.workers import base as worker_base
 from torch.utils.benchmark._impl.workers import in_process_worker
+
+
+TimerCallback = typing.Callable[[int, float], typing.NoReturn]
+
+
+class CommonStatistics:
+
+    sorted_x: typing.Tuple[float]
+    median: float
+    mean: float
+    p25: float
+    p75: float
+
+    def __init__(self, x: typing.List[float]):
+        self.sorted_x = tuple(sorted(x))
+        _sorted_x = torch.tensor(self.sorted_x, dtype=torch.float64)
+        self.median = _sorted_x.quantile(.5).item()
+        self.mean = _sorted_x.mean().item()
+        self.p25 = _sorted_x.quantile(.25).item()
+        self.p75 = _sorted_x.quantile(.75).item()
+
+    @property
+    def iqr(self):
+        return self.p75 - self.p25
 
 
 class TimeitTask(task_base.TaskBase):
@@ -91,7 +117,92 @@ class TimeitTask(task_base.TaskBase):
 
             return jit_template.get().measure_wall_time(
                 n_iter=n_iter,
-                n_warmup_iter=1,
+                n_warmup_iter=max(int(n_iter // 100), 2),
                 cuda_sync=should_cuda_sync,
                 **kwargs,
             ), should_cuda_sync
+
+    def _estimate_block_size(self, min_run_time: float) -> int:
+        # Estimate the block size needed for measurement to be negligible
+        # compared to the inner loop.
+        overhead = statistics.median([self.timeit(0) for _ in range(5)])
+        number = 1
+        while True:
+            time_taken = self.timeit(number)
+            relative_overhead = overhead / time_taken
+            if relative_overhead <= 1e-4 and time_taken >= min_run_time / 1000:
+                break
+            if time_taken > min_run_time:
+                break
+            # Avoid overflow in C++ pybind11 interface
+            if number * 10 > 2147483647:
+                break
+            number *= 10
+        return number
+
+    def _threaded_measurement_loop(
+        self,
+        number: int,
+        time_hook: typing.Callable[[], float],
+        stop_hook: typing.Callable[[typing.List[float]], bool],
+        min_run_time: float,
+        max_run_time: typing.Optional[float] = None,
+        callback: typing.Optional[TimerCallback] = None,
+    ) -> typing.List[float]:
+        total_time = 0.0
+        can_stop = False
+        times: typing.List[float] = []
+        while (total_time < min_run_time) or (not can_stop):
+            time_spent = time_hook()
+            times.append(time_spent)
+            total_time += time_spent
+            if callback:
+                callback(number, time_spent)
+            can_stop = stop_hook(times)
+            if max_run_time and total_time > max_run_time:
+                break
+        return times
+
+    def adaptive_autorange(
+            self,
+            threshold: float = 0.1,
+            *,
+            min_run_time: float = 0.01,
+            max_run_time: float = 10.0,
+            callback: typing.Optional[TimerCallback] = None,
+    ) -> typing.Tuple[int, typing.List[float]]:
+        number = self._estimate_block_size(min_run_time=0.05)
+
+        def time_hook() -> float:
+            return self.timeit(number)
+
+        def stop_hook(times: typing.List[float]) -> bool:
+            if len(times) > 3:
+                s = CommonStatistics(times)
+                return s.iqr / s.median < threshold
+            return False
+
+        times = self._threaded_measurement_loop(
+            number, time_hook, stop_hook, min_run_time, max_run_time, callback=callback)
+
+        return number, times
+
+    def blocked_autorange(
+        self,
+        callback: typing.Optional[TimerCallback] = None,
+        min_run_time: float = 0.2,
+    ) -> typing.Tuple[int, typing.List[float]]:
+        number = self._estimate_block_size(min_run_time)
+
+        def time_hook() -> float:
+            return self.timeit(number)
+
+        def stop_hook(times: typing.List[float]) -> bool:
+            return True
+
+        times = self._threaded_measurement_loop(
+            number, time_hook, stop_hook,
+            min_run_time=min_run_time,
+            callback=callback)
+
+        return number, times
