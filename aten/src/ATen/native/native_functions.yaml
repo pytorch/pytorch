@@ -2714,12 +2714,12 @@
     CPU, CUDA: _aminmax
 
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
-  device_check: NoCheck
+  device_check: NoCheck   # TensorIterator
   structured_delegate: aminmax.out
   variants: function, method
 
 - func: aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)
-  device_check: NoCheck
+  device_check: NoCheck   # TensorIterator
   structured: True
   dispatch:
     CPU, CUDA: aminmax_out

@@ -6368,19 +6368,22 @@ Computes the minimum and maximum values of the :attr:`input` tensor.
 
 Args:
     input (Tensor):
-        the input tensor
+        The input tensor
 
 Keyword Args:
     dim (Optional[int]):
         The dimension along which to compute the values. If `None`,
-        computes the values over the entire tensor. Default is `None`.
+        computes the values over the entire :attr:`input` tensor.
+        Default is `None`.
     keepdim (bool):
         If `True`, the reduced dimensions will be kept in the output
-        tensor as dimensions with size 1, otherwise they will be removed.
+        tensor as dimensions with size 1 for broadcasting, otherwise
+        they will be removed, as if calling (:func:`torch.squeeze`).
         Default is `False`.
     out (Optional[Tuple[Tensor, Tensor]]):
         Optional tensors on which to write the result. Must have the same
-        shape and dtype as the expected output. Default is `None`.
+        shape and dtype as the expected output.
+        Default is `None`.
 
 Returns:
     A named tuple `(min, max)` containing the minimum and maximum values.
@@ -6393,8 +6396,8 @@ Raises:
     NaN values are propagated to the output if at least one value is NaN.
 
 .. seealso::
-    :func:`torch.amin` minimum value an input tensor
-    :func:`torch.amax` maximum value an input tensor
+    :func:`torch.amin` computes just the minimum value
+    :func:`torch.amax` computes just the maximum value
 
 Example::
 
@@ -6403,16 +6406,17 @@ Example::
     min=tensor(-3),
     max=tensor(5))
 
+    >>> # aminmax propagates NaNs
     >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
     torch.return_types.aminmax(
     min=tensor(nan),
     max=tensor(nan))
 
-    >>> x = torch.arange(10).view(2, 5)
-    >>> x
+    >>> t = torch.arange(10).view(2, 5)
+    >>> t
     tensor([[0, 1, 2, 3, 4],
             [5, 6, 7, 8, 9]])
-    >>> x.aminmax(dim=0, keepdim=True)
+    >>> t.aminmax(dim=0, keepdim=True)
     torch.return_types.aminmax(
     min=tensor([[0, 1, 2, 3, 4]]),
     max=tensor([[5, 6, 7, 8, 9]]))
