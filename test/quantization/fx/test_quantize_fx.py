@@ -664,12 +664,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 else quantized_convs[dim])
             m = M(dim, has_relu)
             m_eager = copy.deepcopy(m)
-            result = self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 m,
                 self.img_data_dict[dim],
                 quant_type,
                 expected_node=expected_node,
             )
+            result = result_dict["result"]
 
             # check numerics
             qengine = torch.backends.quantized.engine
@@ -3032,7 +3033,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             3: ns.call_module(nnq.Conv3d),
         }
         for dim, quant_type in options:
-            model = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 ConvWrapper(dim), self.img_data_dict[dim], quant_type,
                 quantized_nodes[dim])
 
@@ -3528,7 +3529,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
         }
         for quant_type, dim, is_reference in options:
-            model = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     @skipIfNoFBGEMM
@@ -3958,7 +3959,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
         for quant_type in self.static_quant_types:
-            m = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
 
     def test_fixed_qparams_ops_fp16(self):
@@ -3985,7 +3986,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         node_occurrence = {
             ns.call_method("to"): 7
         }
-        m = self.checkGraphModeFxOp(
+        self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
             expected_node_occurrence=node_occurrence)
 
@@ -4519,11 +4520,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m2.load_state_dict(m1.state_dict())
             m2 = torch.quantization.QuantWrapper(m2)
             # FX graph
-            q_result1 = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 m1, (data,), QuantType.STATIC,
                 expected_node_occurrence={
                     ns.call_module(q_cls): 1,
                 })
+            q_reslut1 = result_dict["result"]
             # Eager
             m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
             m2.eval()
