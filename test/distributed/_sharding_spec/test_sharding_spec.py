@@ -6,6 +6,7 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
 )
+from torch.distributed._sharding_spec._internals import check_tensor
 
 class TestShardingSpec(TestCase):
 
@@ -73,7 +74,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:1",
             )
         ])
-        spec.check_tensor(torch.rand(10, 5).size())
+        check_tensor(spec.shards, torch.rand(10, 5).size())
 
         # test row and column sharding
         spec = EnumerableShardingSpec([
@@ -98,7 +99,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6).size())
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test uneven shard sizes.
         spec = EnumerableShardingSpec([
@@ -123,7 +124,7 @@ class TestShardingSpec(TestCase):
                 placement="cuda:3",
             ),
         ])
-        spec.check_tensor(torch.rand(6, 6).size())
+        check_tensor(spec.shards, torch.rand(6, 6).size())
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, 'not a valid device'):
@@ -183,7 +184,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'Rank of tensor is.*but shards rank'):
-            spec.check_tensor(torch.rand(10, 10, 10).size())
+            check_tensor(spec.shards, torch.rand(10, 10, 10).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -199,7 +200,7 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'exceeds tensor dim'):
-            spec.check_tensor(torch.rand(10, 3).size())
+            check_tensor(spec.shards, torch.rand(10, 3).size())
 
         spec = EnumerableShardingSpec([
             ShardMetadata(
@@ -215,4 +216,4 @@ class TestShardingSpec(TestCase):
         ])
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
-            spec.check_tensor(torch.rand(10, 10).size())
+            check_tensor(spec.shards, torch.rand(10, 10).size())
