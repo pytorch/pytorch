@@ -15,7 +15,6 @@ from torch.quantization.fx._equalize import (
 )
 
 from torch.testing._internal.common_quantization import (
-    ModelMultipleOpsNoAvgPool,
     NodeSpec as ns,
     QuantizationTestCase,
     SingleLayerLinearModel,
