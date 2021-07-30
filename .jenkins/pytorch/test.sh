@@ -10,6 +10,14 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # Get fully qualified path using realpath
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
+TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
+TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
+
+BUILD_DIR="build"
+BUILD_RENAMED_DIR="build_renamed"
+BUILD_BIN_DIR="$BUILD_DIR"/bin
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -132,7 +140,9 @@ fi
 if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
@@ -172,7 +182,18 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Running test with the install folder"
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
+      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
+    else
+      echo "Running test with the build folder"
+      TEST_BASE_DIR="$BUILD_BIN_DIR"
+    fi
+
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -180,13 +201,20 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
-    ls build/bin
-    aten/tools/run_tests.sh build/bin
+    ls "$TEST_BASE_DIR"
+    aten/tools/run_tests.sh "$TEST_BASE_DIR"
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      # Restore the build folder to avoid any impact on other tests
+      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+    fi
+
     assert_git_not_dirty
   fi
 }
@@ -395,9 +423,9 @@ test_benchmarks() {
     pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns_profiling_te.json --fuser=te --executor=profiling
     # TODO: Enable these for GHA once we have credentials for forked pull requests
     if [[ -z "${GITHUB_ACTIONS}" ]]; then
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
-      python -m benchmarks.upload_scribe --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_default.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_legacy_old.json
+      python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns_profiling_te.json
     fi
     assert_git_not_dirty
   fi
