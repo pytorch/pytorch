@@ -4548,8 +4548,7 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
-    def make_input(shape, *, low, high):
-        return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     shapes = ((), (S,), (L, M, S))
     num_classess = (-1, 10)
