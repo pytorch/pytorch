@@ -311,7 +311,7 @@ void batch_norm_cpu_collect_stats_channels_last_impl(
 }
 
 template <typename scalar_t>
-void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+void batch_norm_cpu_backward_contiguous_impl(const Tensor& grad_input, const Tensor& grad_weight, const Tensor& grad_bias,
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
     bool train, double eps) {
@@ -431,7 +431,7 @@ void batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_we
 }
 
 template <typename scalar_t>
-void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+void batch_norm_cpu_backward_channels_last_impl(const Tensor& grad_input, const Tensor& grad_weight, const Tensor& grad_bias,
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
     bool train, double eps) {
@@ -656,7 +656,7 @@ void batch_norm_cpu_collect_stats_kernel(
   }
 }
 
-void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Tensor& grad_bias,
+void batch_norm_cpu_backward_kernel(const Tensor& grad_input, const Tensor& grad_weight, const Tensor& grad_bias,
     const Tensor& grad_output, const Tensor& input, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
     bool train, double eps) {

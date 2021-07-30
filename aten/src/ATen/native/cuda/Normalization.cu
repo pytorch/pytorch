@@ -463,13 +463,25 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10
       epsilon);
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_out, const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt, bool train, double epsilon, std::array<bool,3> grad_input_mask) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
-  c10::MaybeOwned<Tensor> save_mean = at::borrow_from_optional_tensor(save_mean_opt);
-  c10::MaybeOwned<Tensor> save_invstd = at::borrow_from_optional_tensor(save_invstd_opt);
-  c10::MaybeOwned<Tensor> running_mean = at::borrow_from_optional_tensor(running_mean_opt);
-  c10::MaybeOwned<Tensor> running_var = at::borrow_from_optional_tensor(running_var_opt);
+TORCH_IMPL_FUNC(batch_norm_backward_cuda)
+(const Tensor& grad_out,
+ const Tensor& input,
+ OptionalTensorRef weight_opt,
+ OptionalTensorRef running_mean_opt,
+ OptionalTensorRef running_var_opt,
+ OptionalTensorRef save_mean_opt,
+ OptionalTensorRef save_invstd_opt,
+ bool train,
+ double epsilon,
+ std::array<bool, 3> grad_input_mask,
+ const Tensor& grad_input,
+ const Tensor& grad_weight,
+ const Tensor& grad_bias) {
+  const auto& weight = weight_opt.getTensorRef();
+  const auto& save_mean = save_mean_opt.getTensorRef();
+  const auto& save_invstd = save_invstd_opt.getTensorRef();
+  const auto& running_mean = running_mean_opt.getTensorRef();
+  const auto& running_var = running_var_opt.getTensorRef();
 
   const bool needs_reduction = train || grad_input_mask[1] || grad_input_mask[2];
 
@@ -484,12 +496,12 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda(const Tensor& grad_o
       const bool mixed_type = is_mixed_type(input, *weight, *running_mean, *running_var);
       if (mixed_type) {
           return batch_norm_backward_cuda_template<scalar_t, accscalar_t, int32_t>(
-              grad_out, input, *weight, *running_mean, *running_var,
-              *save_mean, *save_invstd, train, epsilon, grad_input_mask);
+              grad_out, input, weight, running_mean, running_var,
+              save_mean, save_invstd, train, epsilon, grad_input_mask);
       } else {
           return batch_norm_backward_cuda_template<scalar_t, scalar_t, int32_t>(
-              grad_out, input, *weight, *running_mean, *running_var,
-              *save_mean, *save_invstd, train, epsilon, grad_input_mask);
+              grad_out, input, weight, running_mean, running_var,
+              save_mean, save_invstd, train, epsilon, grad_input_mask);
       }
     });
   }

@@ -57,6 +57,28 @@ TORCH_META_FUNC(native_batch_norm)
     set_output(2, {n_input}, self.options());
   }
 }
+
+TORCH_META_FUNC(native_batch_norm_backward)
+(const Tensor& grad_out,
+ const Tensor& self,
+ OptionalTensorRef weight_opt,
+ OptionalTensorRef running_mean_opt,
+ OptionalTensorRef running_var_opt,
+ OptionalTensorRef save_mean_opt,
+ OptionalTensorRef save_invstd_opt,
+ bool train,
+ double eps,
+ std::array<bool, 3> grad_input_mask) {
+  if (grad_input_mask[0]) {
+    set_output(0, self.sizes(), self.options().memory_format(self.suggest_memory_format()));
+  }
+  if (grad_input_mask[1]) {
+    set_output(1, weight_opt.getTensorRef().sizes(), weight_opt.getTensorRef().options().memory_format(at::MemoryFormat::Contiguous));
+  }
+  if (grad_input_mask[2]) {
+    set_output(2, weight_opt.getTensorRef().sizes(), weight_opt.getTensorRef().options().memory_format(at::MemoryFormat::Contiguous));
+  }
+}
 }  // namespace meta
 
 namespace native {
@@ -245,25 +267,13 @@ void batch_norm_cpu_update_stats_template(
 }
 
 template<typename scalar_t>
-std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
+void batch_norm_backward_cpu_template(
     const Tensor& grad_out_, const Tensor& input, const Tensor& weight,
     const Tensor& running_mean, const Tensor& running_var, const Tensor& save_mean, const Tensor& save_invstd,
-    bool train, double eps, std::array<bool,3> grad_input_mask) {
+    bool train, double eps, std::array<bool,3> grad_input_mask, const Tensor& grad_input, const Tensor& grad_weight,
+    const Tensor& grad_bias) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
-
-  Tensor grad_input;
-  Tensor grad_weight;
-  Tensor grad_bias;
-  if (grad_input_mask[0]) {
-    grad_input = at::empty_like(input, input.suggest_memory_format());
-  }
-  if (grad_input_mask[1]) {
-    grad_weight = at::empty_like(weight, at::MemoryFormat::Contiguous);
-  }
-  if (grad_input_mask[2]) {
-    grad_bias = at::empty_like(weight, at::MemoryFormat::Contiguous);
-  }
 
   // since we are directly manipulating pointers in contiguous path,
   // need to make sure input and grad_out have the same memory format.
@@ -274,7 +284,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
   if (all_contiguous) {
     batch_norm_cpu_backward_stub(kCPU, grad_input, grad_weight, grad_bias,
         grad_out_, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
-    return std::make_tuple(grad_input, grad_weight, grad_bias);
+    return;
   }
 
   auto weight_a = conditional_accessor_1d<scalar_t>(weight);
@@ -420,7 +430,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu_template(
         }
       }
     });
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
 // _batch_norm_impl_index(_backward) are used in the JIT be able to keep the run-time selection
@@ -663,19 +672,29 @@ TORCH_IMPL_FUNC(batch_norm_cpu_out) (
   });
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,
-                                                           bool train, double eps, std::array<bool,3> grad_input_mask) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
-  const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
+TORCH_IMPL_FUNC(batch_norm_backward_cpu) (
+    const Tensor& grad_out,
+    const Tensor& self,
+    OptionalTensorRef weight_opt,
+    OptionalTensorRef running_mean_opt,
+    OptionalTensorRef running_var_opt,
+    OptionalTensorRef save_mean_opt,
+    OptionalTensorRef save_invstd_opt,
+    bool train,
+    double eps,
+    std::array<bool, 3> grad_input_mask,
+    const Tensor& grad_input,
+    const Tensor& grad_weight,
+    const Tensor& grad_bias) {
+  const Tensor& weight = weight_opt.getTensorRef();
+  const Tensor& running_mean = running_mean_opt.getTensorRef();
+  const Tensor& running_var = running_var_opt.getTensorRef();
+  const Tensor& save_mean = save_mean_opt.getTensorRef();
+  const Tensor& save_invstd = save_invstd_opt.getTensorRef();
 
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_backward_cpu", [&] {
-      return batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask);
-    });
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_backward_cpu", [&] {
+    batch_norm_backward_cpu_template<scalar_t>(grad_out, self, weight, running_mean, running_var, save_mean, save_invstd, train, eps, grad_input_mask, grad_input, grad_weight, grad_bias);
+  });
 }
 
 TORCH_IMPL_FUNC(renorm_out)(const Tensor& self, const Scalar& p, int64_t dim,

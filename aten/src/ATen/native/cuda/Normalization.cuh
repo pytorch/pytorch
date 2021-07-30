@@ -627,27 +627,27 @@ static GenericPackedTensorAccessor<scalar_t, dim, PtrTraits, index_t> packed_acc
 }
 
 template<typename input_scalar_t, typename stat_scalar_t, typename index_t>
-std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tensor& grad_out_, const Tensor& input_, const Tensor& weight_,
-                                                                     const Tensor& running_mean_, const Tensor& running_var_, const Tensor& save_mean_, const Tensor& save_invstd_,
-                                                                     bool train, double epsilon, std::array<bool,3> grad_input_mask) {
+void batch_norm_backward_cuda_template(
+  const Tensor& grad_out_,
+  const Tensor& input_,
+  const Tensor& weight_,
+  const Tensor& running_mean_,
+  const Tensor& running_var_,
+  const Tensor& save_mean_,
+  const Tensor& save_invstd_,
+  bool train, double epsilon,
+  std::array<bool,3> grad_input_mask,
+  const Tensor& grad_input_,
+  const Tensor& grad_weight_,
+  const Tensor& grad_bias_) {
 
   using accscalar_t = at::acc_type<stat_scalar_t, true>;
-  Tensor grad_input_;
   Tensor grad_input_reshaped;
-  Tensor grad_weight_;
-  Tensor grad_bias_;
   auto input_reshaped = input_.reshape({input_.size(0), input_.size(1), -1});
   auto grad_output_reshaped = grad_out_.reshape(input_reshaped.sizes());
 
   if (grad_input_mask[0]) {
-    grad_input_ = at::empty_like(input_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     grad_input_reshaped = grad_input_.view(input_reshaped.sizes());
-  }
-  if (grad_input_mask[1]) {
-    grad_weight_ = at::empty_like(weight_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (grad_input_mask[2]) {
-    grad_bias_ = at::empty_like(weight_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
 
   auto input = get_packed_accessor<
@@ -680,8 +680,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cuda_template(const Tenso
     (input, grad_output, grad_input, grad_weight, grad_bias, weight, running_mean, running_var,
      save_mean, save_invstd, train, epsilon);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-  return std::make_tuple(grad_input_, grad_weight_, grad_bias_);
 }
 
 template<typename scalar_t, typename index_t, typename VarTransform>
