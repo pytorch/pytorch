@@ -836,6 +836,7 @@ elseif(USE_CUDA)
     set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
     add_library(torch_cuda_w_sort_by_key OBJECT ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
     target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
   elseif(BUILD_SPLIT_CUDA)
     add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})

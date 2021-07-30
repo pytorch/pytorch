@@ -298,6 +298,9 @@ case "$image" in
     VISION=yes
     BREAKPAD=yes
     echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *xenial* ]]; then
+      CMAKE_VERSION=3.10.3
+    fi
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
     fi
