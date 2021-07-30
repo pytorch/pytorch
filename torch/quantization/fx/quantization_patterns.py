@@ -1491,9 +1491,8 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
-                # TODO: change this to act_dtype
-                # make sure the input is quantized to torch.quint8
-                load_arg(quantized={0: torch.quint8})(node.args)
+                # make sure the input is quantized to act_dtype
+                load_arg(quantized={0: act_dtype})(node.args)
                 args = list(load_arg(quantized=torch.float)(node.args))
                 kwargs = load_arg(quantized=torch.float)(node.kwargs)
                 op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))

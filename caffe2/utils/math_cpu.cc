@@ -476,7 +476,8 @@ C10_EXPORT void BroadcastImpl(
     const T alpha,
     const T* X,
     T* Y,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   CAFFE_ENFORCE_LE(X_ndim, Y_ndim);
   std::vector<int> X_dims_vector(Y_ndim);
   const int d = Y_ndim - X_ndim;
@@ -510,8 +511,10 @@ C10_EXPORT void BroadcastImpl(
       const T alpha,                                                        \
       const T* X,                                                           \
       T* Y,                                                                 \
-      CPUContext* context) {                                                \
-    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y, context); \
+      CPUContext* context,                                                  \
+      bool allow_broadcast_fastpath) {                                      \
+    BroadcastImpl<T>(X_ndim, X_dims, Y_ndim, Y_dims, alpha, X, Y,           \
+                     context, allow_broadcast_fastpath);                    \
   }
 CAFFE2_SPECIALIZED_BROADCAST(std::int32_t)
 CAFFE2_SPECIALIZED_BROADCAST(std::int64_t)
