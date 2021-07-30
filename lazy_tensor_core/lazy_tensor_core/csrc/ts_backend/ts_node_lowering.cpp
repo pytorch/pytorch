@@ -126,7 +126,8 @@ class TSNodeLowering : public NodeLowering {
       case at::aten::leaky_relu:
       case at::aten::pow:
       case at::aten::relu:
-      case at::aten::relu_: {
+      case at::aten::relu_:
+      case at::aten::sqrt: {
         const ir::Output& argument = node->operand(0);
         return argument.shape();
       }
