@@ -186,8 +186,8 @@ class TestObserver(QuantizationTestCase):
             ]
             per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
 
-            self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
-            self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+            self.assertEqual(myobs.min_val, ref_min_vals[ch_axis])
+            self.assertEqual(myobs.max_val, ref_max_vals[ch_axis])
             if qscheme == torch.per_channel_symmetric:
                 ref_scales = per_channel_symmetric_ref_scales[ch_axis]
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
@@ -223,8 +223,8 @@ class TestObserver(QuantizationTestCase):
             loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
-            self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
+            self.assertEqual(myobs.min_val, loaded_obs.min_val)
+            self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
@@ -314,9 +314,7 @@ class TestObserver(QuantizationTestCase):
         Tests that we can save and load state_dict for observers that are scripted
         in a quantized model.
         """
-        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
-                    PerChannelMinMaxObserver,
-                    MovingAveragePerChannelMinMaxObserver, HistogramObserver]
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver, HistogramObserver]
 
         for obs in obs_list:
             model = SingleLayerLinearModel().eval()
