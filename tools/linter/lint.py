@@ -25,7 +25,7 @@ from tools.linter.utils import (
 # This list is used for quickly discovering linters The names provided here are
 # not used when initializing the linter. Instead, they are declared in the
 # corresponding class
-SUPPORTED_LINTERS = ["shellcheck", "flake8", "mypy", "clang-tidy"]
+SUPPORTED_LINTERS = ["shellcheck", "flake8", "mypy", "clang-tidy", "clang-format"]
 
 
 class LinterBinaryNotFound(Exception):
@@ -94,7 +94,7 @@ def build_parser(linters) -> argparse.Namespace:
         "-p", "--paths", nargs="+", help="Lint only the given paths (recursively)",
     )
     parser.add_argument(
-        "-v", "--verbose", nargs="+", help="Print verbose output", default=False,
+        "-v", "--verbose", action="store_true", help="Print verbose output", default=False,
     )
 
     subparsers = parser.add_subparsers()

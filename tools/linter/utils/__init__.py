@@ -5,7 +5,7 @@ import shlex
 import os
 import sys
 from argparse import Action
-from typing import List
+from typing import List, Union, Optional, Dict, Any
 
 
 class CommandResult:
@@ -129,9 +129,20 @@ class Glob2RegexAction(Action):
         )
 
 
-async def run_cmd(cmd: List[str], on_completed=None, on_completed_args=None):
+async def run_cmd(
+    cmd: Union[str, List[str]],
+    env: Optional[Dict[str, Any]] = None,
+    on_completed=None,
+    on_completed_args=None):
+
+    if isinstance(cmd, list):
+        cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
+    else:
+        cmd_str = cmd
+
     proc = await asyncio.create_subprocess_shell(
-        " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
+        cmd_str,
+        env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
