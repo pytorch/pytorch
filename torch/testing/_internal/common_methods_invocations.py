@@ -6324,6 +6324,7 @@ op_db: List[OpInfo] = [
            skips=(SkipInfo('TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('cross',
            dtypes=all_types_and_complex(),
+           dtypesIfCPU=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half),
            sample_inputs_func=sample_inputs_cross,
            supports_forward_ad=True,
