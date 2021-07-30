@@ -56,13 +56,13 @@
 #include <c10/util/Optional.h>
 
 #include <fmt/format.h>
-#include <linker.h>
+#include <torch/csrc/deploy/loader.h>
 
 namespace torch {
 namespace deploy {
 
 #define DEPLOY_ERROR(msg_fmt, ...) \
-  throw DeployLinkerError(fmt::format(msg_fmt, ##__VA_ARGS__))
+  throw DeployLoaderError(fmt::format(msg_fmt, ##__VA_ARGS__))
 
 #define DEPLOY_CHECK(cond, fmt, ...)  \
   if (!(cond)) {                      \
@@ -213,6 +213,7 @@ struct GnuHash {
 // loader. it is passed a pointer to where the EH_FRAME section was loaded,
 // which appears to include frame information relative to that address.
 extern "C" void __register_frame(void*);
+extern "C" void __deregister_frame(void*);
 
 // Memory maps a file into the address space read-only, and manages the lifetime
 // of the mapping. Used in the loader to read in initial image, and to inspect
@@ -937,10 +938,14 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
         void* seg_addr = mmap64(
             reinterpret_cast<void*>(seg_page_start),
             file_length,
-            prot,
+            prot | PROT_WRITE, // initially everything is writable to do
+                               // relocations
             MAP_FIXED | MAP_PRIVATE,
             contents_.fd(),
             file_page_start);
+        fixup_prot_.emplace_back([=]() {
+          mprotect(reinterpret_cast<void*>(seg_page_start), file_length, prot);
+        });
         if (seg_addr == MAP_FAILED) {
           DEPLOY_ERROR(
               "couldn't map \"{}\" segment {}: {}",
@@ -967,13 +972,17 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
       // map for all extra pages.
       if (seg_page_end > seg_file_end) {
         size_t zeromap_size = seg_page_end - seg_file_end;
+        int prot = PFLAGS_TO_PROT(phdr->p_flags);
         void* zeromap = mmap(
             reinterpret_cast<void*>(seg_file_end),
             zeromap_size,
-            PFLAGS_TO_PROT(phdr->p_flags),
+            prot | PROT_WRITE,
             MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE,
             -1,
             0);
+        fixup_prot_.emplace_back([=]() {
+          mprotect(reinterpret_cast<void*>(seg_file_end), zeromap_size, prot);
+        });
         if (zeromap == MAP_FAILED) {
           DEPLOY_ERROR(
               "couldn't zero fill \"{}\" gap: {}",
@@ -1169,13 +1178,22 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     __deploy_register_code();
   }
 
+  // remove the extra write flags from read-only sections
+  void protect() {
+    for (const auto& fixup : fixup_prot_) {
+      fixup();
+    }
+  }
+
   void load() override {
     check_library_format();
     reserve_address_space();
     load_segments();
     read_dynamic_section();
     relocate();
+    protect();
     __register_frame(eh_frame_);
+    eh_frame_registered_ = true;
     register_debug_info();
     initialize();
   }
@@ -1184,6 +1202,9 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     // std::cout << "LINKER IS UNLOADING: " << name_ << "\n";
     if (initialized_) {
       finalize();
+    }
+    if (eh_frame_registered_) {
+      __deregister_frame(eh_frame_);
     }
     if (mapped_library_) {
       munmap(mapped_library_, mapped_size_);
@@ -1247,6 +1268,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   int argc_ = 0;
   const char** argv_ = nullptr;
   bool initialized_ = false;
+  bool eh_frame_registered_ = false;
 
   pthread_key_t tls_key_ = 0;
   void* tls_initalization_image_ = nullptr;
@@ -1254,6 +1276,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   size_t tls_mem_size_ = 0;
 
   std::vector<std::shared_ptr<SymbolProvider>> symbol_search_path_;
+  std::vector<std::function<void(void)>> fixup_prot_;
 };
 
 std::shared_ptr<CustomLibrary> CustomLibrary::create(
