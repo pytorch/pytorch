@@ -82,7 +82,7 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack, void* use_me);
 
 class PyInterpreterHolder {
  public:
@@ -1475,7 +1475,7 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack, void* use_me) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1530,25 +1530,31 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
 
   for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
     auto& ivalue = arguments[idx];
-    // Search for Tensors (as they may have the torch functions we need)
-    if (ivalue.isTensor()) {
-      const auto& tensor = ivalue.toTensor();
-      if (isPythonTensor(tensor)) {
-        overloaded_args.emplace_back(py::cast(tensor));
-      }
-    } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (int64_t jdx = 0; jdx < list.size(); jdx++) {
-        const auto& nv = list[jdx];
-        if (nv.isTensor()) {
-          const auto& tensor = nv.toTensor();
-          if (isPythonTensor(tensor)) {
-            overloaded_args.emplace_back(py::cast(tensor));
+    if (use_me == nullptr) {
+      // Search for Tensors (as they may have the torch functions we need)
+      if (ivalue.isTensor()) {
+        const auto& tensor = ivalue.toTensor();
+        if (isPythonTensor(tensor)) {
+          overloaded_args.emplace_back(py::cast(tensor));
+        }
+      } else if (ivalue.isList()) {
+        const auto& list = ivalue.toListRef();
+        for (int64_t jdx = 0; jdx < list.size(); jdx++) {
+          const auto& nv = list[jdx];
+          if (nv.isTensor()) {
+            const auto& tensor = nv.toTensor();
+            if (isPythonTensor(tensor)) {
+              overloaded_args.emplace_back(py::cast(tensor));
+            }
           }
         }
       }
     }
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(ivalue)).release().ptr());
+  }
+  if (use_me) {
+    TORCH_INTERNAL_ASSERT(isPythonTensor(*(Tensor*)use_me));
+    overloaded_args.emplace_back(py::cast(*(Tensor*)use_me));
   }
 
   auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(

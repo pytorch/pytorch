@@ -267,6 +267,7 @@ Tensor internal_new_from_data(
   {
     at::AutoDispatchBelowADInplaceOrView guard;  // TODO: remove
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::PythonMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,

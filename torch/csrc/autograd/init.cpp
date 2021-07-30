@@ -20,7 +20,7 @@
 #include <set>
 
 struct DisableTorchDispatch {
-  DisableTorchDispatch() : guard_(c10::DispatchKey::Python) {
+  DisableTorchDispatch() : guard_(c10::DispatchKeySet({c10::DispatchKey::Python, c10::DispatchKey::PythonMode})) {
   }
   c10::impl::ExcludeDispatchKeyGuard guard_;
 };

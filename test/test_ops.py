@@ -3,12 +3,16 @@ from functools import partial, wraps
 import warnings
 
 import torch
+import random
 
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
+from torch.testing._internal.composite_implicit_autograd_compliance import (
+    _check_CompositeImplicitAutograd_compliance,
+)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
@@ -18,6 +22,7 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.utils._pytree import tree_map
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -664,6 +669,17 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
 
         self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_CompositeImplicitAutograd_compliance(self, device, dtype, op):
+        if device != 'cpu':
+            return
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            _check_CompositeImplicitAutograd_compliance(op, args, kwargs)
 
 
 # Tests operators for consistency between JIT and eager, also checks

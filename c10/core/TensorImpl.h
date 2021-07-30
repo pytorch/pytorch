@@ -255,7 +255,8 @@ struct C10_API PyInterpreter {
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack);
+      torch::jit::Stack* stack,
+      void* use_me);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -299,8 +300,9 @@ struct C10_API PyInterpreter {
   // Invoke the Python boxed fallback dispatch to go back into Python
   __ubsan_ignore_function__ void dispatch(
       const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const {
-    return (*dispatch_fn_)(this, op, stack);
+      torch::jit::Stack* stack,
+      void* use_me) const {
+    return (*dispatch_fn_)(this, op, stack, use_me);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

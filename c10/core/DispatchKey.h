@@ -133,6 +133,8 @@ enum class DispatchKey : uint8_t {
   BackendSelect,
 
   Python,
+  PythonMode,
+
   FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.

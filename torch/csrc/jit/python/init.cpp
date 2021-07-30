@@ -96,6 +96,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <ATen/PythonMode.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -142,6 +143,10 @@ bool loadPythonClasses() {
 TORCH_API void runJITCPPTests();
 #endif
 
+bool is_alias_of(const Tensor& a, const Tensor& b) {
+  return a.is_alias_of(b);
+}
+
 void initJITBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto jit = m.def_submodule("_jit");
@@ -152,6 +157,9 @@ void initJITBindings(PyObject* module) {
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
+      .def("_python_mode_set_torch_dispatch", at::impl::PythonMode::set_torch_dispatch)
+      .def("_python_mode_reset_torch_dispatch", at::impl::PythonMode::reset_torch_dispatch)
+      .def("_is_alias_of", is_alias_of)
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)
