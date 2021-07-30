@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union
+from typing import Callable, List, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -3830,6 +3830,48 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad):
     return tuple(sample_inputs)
 
 
+def sample_inputs_meshgrid(
+        calling_convention: str) -> Callable[[OpInfo, torch.device, torch.dtype, bool], List[SampleInput]]:
+    if calling_convention == 'variadic':
+        def make_inputs(
+                tensors: List[torch.Tensor]) -> Tuple[Union[torch.Tensor,
+                                                            List[torch.Tensor]],
+                                                      Tuple[torch.Tensor, ...]]:
+            return tensors[0], tuple(tensors[1:])
+    elif calling_convention == 'list':
+        def make_inputs(
+                tensors: List[torch.Tensor]) -> Tuple[Union[torch.Tensor,
+                                                            List[torch.Tensor]],
+                                                      Tuple[torch.Tensor, ...]]:
+            return tensors, ()
+    else:
+        raise ValueError(
+            'Unsupported calling convention, must be one of {"variadic", "list"}. '
+            f'Got "{calling_convention}".')
+
+    def sample_inputs(op_info: OpInfo, device: torch.device, dtype: torch.dtype,
+                      requires_grad: bool) -> List[SampleInput]:
+        Z = ()  # note: torch.rand(()) yields a random 0D tensor
+        S = (3,)
+        test_cases: List[List[Tuple[int, ...]]] = [
+            [Z],
+            [S],
+            [Z, S],
+            [S, Z, S],
+            [S, Z, S, Z],
+        ]
+
+        sample_inputs = []
+        for shapes in test_cases:
+            input, args = make_inputs(
+                [make_tensor(shape, device, dtype, requires_grad=requires_grad)
+                 for shape in shapes])
+            sample_inputs.append(SampleInput(input=input, args=args))
+        return sample_inputs
+
+    return sample_inputs
+
+
 def sample_inputs_polar(op_info, device, dtype, requires_grad, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, device, dtype, low=low, high=high, requires_grad=requires_grad)
@@ -6352,6 +6394,26 @@ op_db: List[OpInfo] = [
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
+    OpInfo('meshgrid',
+           variant_test_name='variadic_tensors',
+           # Our implementation corresponds to "ij" indexing for
+           # numpy.meshgrid, but its default value is "xy".
+           ref=lambda *tensors: np.meshgrid(*tensors, indexing='ij'),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
+           sample_inputs_func=sample_inputs_meshgrid('variadic'),
+           # JIT does not support variadic tensors.
+           skips=[SkipInfo('TestJit', 'test_variant_consistency_jit')],
+           supports_out=False,
+           supports_forward_ad=True),
+    OpInfo('meshgrid',
+           variant_test_name='list_of_tensors',
+           # Unlike the variant above, we do not use np.meshgrid as a
+           # ref since it does not officially support list of numpy
+           # arrays.
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.bool, torch.float16),
+           sample_inputs_func=sample_inputs_meshgrid('list'),
+           supports_out=False,
+           supports_forward_ad=True),
     OpInfo('min',
            op=torch.min,
            variant_test_name='binary',
