@@ -12,6 +12,7 @@ from torch.utils.benchmark._impl.workers import in_process_worker
 class TimeitTask(task_base.TaskBase):
 
     _worker: worker_base.WorkerBase
+    _should_cuda_sync: typing.Optional[bool]
 
     def __init__(
         self,
@@ -22,6 +23,9 @@ class TimeitTask(task_base.TaskBase):
         self._work_spec = work_spec
         self._worker = worker or in_process_worker.InProcessWorker({})
         self.worker.run(jit_template.generate(work_spec=self._work_spec))
+
+        # See `measure` for more details.
+        self._should_cuda_sync = None
 
         # `timeit.Timer` allows users to override the timer used, so we have
         # to support that functionality.
@@ -38,18 +42,56 @@ class TimeitTask(task_base.TaskBase):
         return self._worker
 
     def timeit(self, number: int) -> float:
-        return self.measure(n_iter=number, custom_timer=self._custom_timer)
+        result, self._should_cuda_sync = self.measure(
+            n_iter=number,
+            num_threads=self._work_spec.num_threads,
+            custom_timer=self._custom_timer,
+            should_cuda_sync=self._should_cuda_sync
+        )
+        return result
 
     @task_base.run_in_worker(scoped=True)
-    def measure(n_iter: int, custom_timer: bool) -> float:
+    def measure(
+        n_iter: int,
+        num_threads: int,
+        custom_timer: bool,
+        should_cuda_sync: typing.Optional[bool],
+    ) -> typing.Tuple[float, bool]:
+        from torch.utils.benchmark._impl import runtime_utils
         from torch.utils.benchmark._impl.templates import jit as jit_template
 
-        # This is placed in the global namespace during Task init.
-        kwargs = {"timer": globals()["_timeit_task_timer"]} if custom_timer else {}
+        with runtime_utils.set_torch_threads(num_threads):
+            # The first time `measure` is called, we must determine if it is
+            # necessary to syncronize CUDA. In some cases this can be done
+            # statically: if PyTorch is not built with CUDA or a GPU is not
+            # present, we know a priori that we don't need to sync.
+            #
+            # Alternatively, if we cannot make such a static determination we
+            # run a few times using the Kineto profier, and check if any CUDA
+            # events are observed.
+            #
+            # We pass `should_cuda_sync` back to the caller so that TimeitTask
+            # can remember if it needs to sync, and subsequent calls can skip
+            # the overhead of checking.
+            if should_cuda_sync is None:
+                should_cuda_sync = runtime_utils.ShouldCudaSynchronize.cuda_present()
 
-        return jit_template.get().measure_wall_time(
-            n_iter=n_iter,
-            n_warmup_iter=1,
-            cuda_sync=False,
-            **kwargs,
-        )
+            if should_cuda_sync is None:
+                with runtime_utils.ShouldCudaSynchronize() as watch_cuda:
+                    jit_template.get().call(n_iter=3)
+                should_cuda_sync = watch_cuda.cuda_detected
+
+            if not isinstance(should_cuda_sync, bool):
+                raise ValueError(
+                    "`should_cuda_sync` should have been narrowed to a bool, "
+                    f"instead got `{should_cuda_sync}`. ({type(should_cuda_sync)})")
+
+            # This is placed in the global namespace during Task init.
+            kwargs = {"timer": globals()["_timeit_task_timer"]} if custom_timer else {}
+
+            return jit_template.get().measure_wall_time(
+                n_iter=n_iter,
+                n_warmup_iter=1,
+                cuda_sync=should_cuda_sync,
+                **kwargs,
+            ), should_cuda_sync
