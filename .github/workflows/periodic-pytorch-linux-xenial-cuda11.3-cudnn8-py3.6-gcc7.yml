@@ -118,17 +118,17 @@ jobs:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           cd .circleci/docker && ./build_docker.sh
+      # Setup test matrix
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.x
-          architecture: x64
+          python-version: 3.9
       - name: Install dependencies
         run: pip install typing-extensions
       - name: Generate test matrix
         id: set-matrix
         run: .github/scripts/generate_pytorch_test_matrix.py
-        
+
 
   build:
     runs-on: linux.2xlarge
