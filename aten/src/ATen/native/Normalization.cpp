@@ -4,6 +4,7 @@
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/Config.h>
+#include <ATen/TensorMeta.h>
 
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorIterator.h>
@@ -29,6 +30,34 @@ TORCH_META_FUNC(renorm)(const Tensor& self, const Scalar& p, int64_t dim, const 
   set_output(self.sizes(), self.options());
 }
 
+TORCH_META_FUNC(batch_norm_update_stats)
+(const Tensor& self,
+ OptionalTensorRef running_mean_opt,
+ OptionalTensorRef running_var_opt,
+ double momentum) {
+  int64_t n_input = self.size(1);
+  set_output(0, {n_input}, self.options());
+  set_output(1, {n_input}, self.options());
+}
+
+TORCH_META_FUNC(native_batch_norm)
+(const Tensor& self,
+ const OptionalTensorRef weight_opt,
+ const OptionalTensorRef bias_opt,
+ const OptionalTensorRef running_mean_opt,
+ const OptionalTensorRef running_var_opt,
+ bool train,
+ double momentum,
+ double eps) {
+  int64_t n_input = self.size(1);
+  TensorOptions options(self.options());
+  set_output(0, self.sizes(), options.memory_format(at::MemoryFormat::Contiguous));
+
+  if (train) {
+    set_output(1, {n_input}, self.options());
+    set_output(2, {n_input}, self.options());
+  }
+}
 }  // namespace meta
 
 namespace native {
@@ -79,15 +108,13 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     const Tensor& save_mean /* optional */, const Tensor& save_invstd /* optional */,
     const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
-    bool train, double eps) {
+    bool train, double eps, const Tensor& output) {
 
   bool all_contiguous = is_contiguous(input)
       && (!weight.defined() || weight.is_contiguous())
       && (!bias.defined() || bias.is_contiguous())
       && running_mean.is_contiguous()
       && running_var.is_contiguous();
-
-  Tensor output = at::empty_like(input, input.suggest_memory_format());
 
   // inference contiguous path
   if (all_contiguous) {
@@ -136,9 +163,9 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 }
 
 template<typename scalar_t, template<typename T> class VarTransform>
-std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
+void batch_norm_cpu_update_stats_template(
     const Tensor& input, const Tensor& running_mean, const Tensor& running_var,
-    double momentum, double eps) {
+    double momentum, double eps, const Tensor& save_mean, const Tensor& save_var_transform) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
 
@@ -153,8 +180,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     reduce_dims[i - 1] = i;
   }
 
-  Tensor save_mean = at::mean(input, /*dims=*/reduce_dims);
-  Tensor save_var_transform = at::empty({n_input}, input.options());
+  at::mean_out(const_cast<Tensor&>(save_mean), input, /*dims=*/reduce_dims);
   auto save_mean_a = save_mean.accessor<scalar_t, 1>();
   auto save_var_transform_a = save_var_transform.accessor<scalar_t, 1>();
 
@@ -184,8 +210,6 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         }
       }
     });
-
-    return std::make_tuple(save_mean, save_var_transform);
   }
 
   // non-contiguous path
@@ -219,7 +243,6 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
       }
     }
   });
-  return std::make_tuple(save_mean, save_var_transform);
 }
 
 template<typename scalar_t>
@@ -577,37 +600,68 @@ Tensor instance_norm(
   return out.view(input.sizes());
 }
 
-std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
-        const Tensor& self, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, double momentum) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
-  const Tensor& running_mean = *running_mean_maybe_owned;
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+TORCH_IMPL_FUNC(batch_norm_update_stats_cpu) (
+  const Tensor& self,
+  OptionalTensorRef running_mean_opt,
+  OptionalTensorRef running_var_opt,
+  double momentum,
+  const Tensor& save_mean,
+  const Tensor& save_var) {
+  const Tensor& running_mean = running_mean_opt.getTensorRef();
+  const Tensor& running_var = running_var_opt.getTensorRef();
 
-  return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
-      return batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0);
-    });
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
+    batch_norm_cpu_update_stats_template<scalar_t, Var>(self, running_mean, running_var, momentum, 0, save_mean, save_var);
+  });
 }
 
-std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
-                                                  bool train, double momentum, double eps) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+TORCH_IMPL_FUNC(batch_norm_cpu_out) (
+  const Tensor& self,
+  OptionalTensorRef weight_opt,
+  OptionalTensorRef bias_opt,
+  OptionalTensorRef running_mean_opt,
+  OptionalTensorRef running_var_opt,
+  bool train,
+  double momentum,
+  double eps,
+  const Tensor& output,
+  const Tensor& save_mean,
+  const Tensor& save_invstd
+) {
+  const Tensor& weight = weight_opt.getTensorRef();
+  const Tensor& bias = bias_opt.getTensorRef();
+  const Tensor& running_mean = running_mean_opt.getTensorRef();
+  const Tensor& running_var = running_var_opt.getTensorRef();
 
-  checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
+  checkBackend(
+      "batch_norm_cpu",
+      {self, weight, bias, running_mean, running_var},
+      Backend::CPU);
 
   return AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "batch_norm", [&] {
-      if (!train) {
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, {}, {}, running_mean, running_var, train, eps);
-      } else {
-        auto save_stats = batch_norm_cpu_update_stats_template<scalar_t, InvStd>(self, running_mean, running_var, momentum, eps);
-        return batch_norm_cpu_transform_input_template<scalar_t>(self, weight, bias, std::get<0>(save_stats), std::get<1>(save_stats), running_mean, running_var, train, eps);
-      }
-    });
+    if (train) {
+      batch_norm_cpu_update_stats_template<scalar_t, InvStd>(
+          self,
+          running_mean,
+          running_var,
+          momentum,
+          eps,
+          save_mean,
+          save_invstd);
+    }
+
+    batch_norm_cpu_transform_input_template<scalar_t>(
+        self,
+        weight,
+        bias,
+        save_mean,
+        save_invstd,
+        running_mean,
+        running_var,
+        train,
+        eps,
+        output);
+  });
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_invstd_opt,

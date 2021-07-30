@@ -60,7 +60,7 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
 
 /// A fast path for CPU inference and training forward when all tensors are contiguous.
 template<typename scalar_t>
-void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
+void batch_norm_cpu_contiguous_impl(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
@@ -136,7 +136,7 @@ void batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
 }
 
 template <typename scalar_t>
-void batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
+void batch_norm_cpu_channels_last_impl(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& runnning_var, bool train, double eps) {
 
@@ -608,7 +608,7 @@ void batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad
   }
 }
 
-void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
+void batch_norm_cpu_kernel(const Tensor& output, const Tensor& input,
     const Tensor& weight, const Tensor& bias, const Tensor& save_mean,  const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
   switch (input.suggest_memory_format()) {

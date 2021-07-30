@@ -3114,13 +3114,14 @@
   device_guard: False
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
+  structured_delegate: native_batch_norm.out
   dispatch:
-    CPU: batch_norm_cpu
-    CUDA: batch_norm_cuda
     MkldnnCPU: mkldnn_batch_norm
 
 - func: native_batch_norm.out(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_invstd) -> (Tensor(a!), Tensor(b!), Tensor(c!))
+  structured: True
   dispatch:
+    CPU: batch_norm_cpu_out
     CUDA: batch_norm_cuda_out
 
 - func: batch_norm_stats(Tensor input, float eps) -> (Tensor, Tensor)
@@ -3159,6 +3160,10 @@
     CUDA: batch_norm_backward_elemt_cuda
 
 - func: batch_norm_update_stats(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum) -> (Tensor, Tensor)
+  structured_delegate: batch_norm_update_stats.out
+
+- func: batch_norm_update_stats.out(Tensor input, Tensor? running_mean, Tensor? running_var, float momentum, *, Tensor(a!) save_mean, Tensor(b!) save_var) -> (Tensor(a!), Tensor(b!))
+  structured: True
   dispatch:
     CPU: batch_norm_update_stats_cpu
     CUDA: batch_norm_update_stats_cuda
