@@ -21,7 +21,8 @@ void ComputeDivGradient(
     const TOut* C,
     TGrad* dA,
     TGrad* dB,
-    CPUContext* context) {
+    CPUContext* context,
+    bool allow_broadcast_fastpath) {
   const int A_size =
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(A_dims, A_dims + ndim, 1, std::multiplies<int>());
@@ -97,7 +98,8 @@ bool DivFunctor<CPUContext>::Backward(
         C,
         nullptr,
         dB,
-        context);
+        context,
+        allow_broadcast_fastpath_);
     math::Div(
         A_dims.size(),
         A_dims.data(),
@@ -118,7 +120,8 @@ bool DivFunctor<CPUContext>::Backward(
         C,
         dA,
         dB,
-        context);
+        context,
+        allow_broadcast_fastpath_);
   }
   return true;
 }
@@ -127,7 +130,7 @@ template <>
 class BinaryElementwiseWithArgsGradientOp<
     NumericTypes,
     CPUContext,
-    BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>>,
+    BinaryFunctorWithBroadcastOptionsCtor<DivFunctor<CPUContext>>,
     SameTypeAsInput,
     SameTypeAsInput>
     final : public Operator<CPUContext> {
@@ -267,12 +270,12 @@ class BinaryElementwiseWithArgsGradientOp<
   const std::string axis_str_;
   const std::string order_;
 
-  BinaryFunctorWithDefaultCtor<DivFunctor<CPUContext>> functor_;
+  BinaryFunctorWithBroadcastOptionsCtor<DivFunctor<CPUContext>> functor_;
 };
 
 REGISTER_CPU_OPERATOR(
     DivGradient,
-    BinaryElementwiseGradientOp<
+    BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         DivFunctor<CPUContext>>);
