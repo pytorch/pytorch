@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -133,7 +134,8 @@ void initScriptListBindings(PyObject* module) {
 
             auto seq = std::make_shared<ScriptList>(self->type());
 
-            for (size_t i = 0; i < slicelength; ++i) {
+            for (const auto i : c10::irange(slicelength)) {
+              (void)i; // Suppress unused variable warning
               seq->append(self->getItem(start));
               start += step;
             }
@@ -172,7 +174,7 @@ void initScriptListBindings(PyObject* module) {
                   "Left and right hand size of slice assignment have different sizes");
             }
 
-            for (size_t i = 0; i < slicelength; ++i) {
+            for (const auto i : c10::irange(slicelength)) {
               try {
                 self->setItem(
                     start, toIValue(value[i], self->type()->getElementType()));
