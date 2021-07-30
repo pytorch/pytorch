@@ -1,7 +1,9 @@
 #include <ATen/Parallel.h>
+#include <cstring>
 #include <gtest/gtest.h>
 
 #include <c10/util/irange.h>
+#include <libgen.h>
 #include <torch/csrc/deploy/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -56,6 +58,21 @@ TEST(TorchpyTest, LoadLibrary) {
 TEST(TorchpyTest, InitTwice) {
   { torch::deploy::InterpreterManager m(2); }
   { torch::deploy::InterpreterManager m(1); }
+}
+
+TEST(TorchpyTest, DifferentInterps) {
+  torch::deploy::InterpreterManager m(2);
+  m.register_module_source("check_none", "check = id(None)\n");
+  int64_t id0, id1;
+  {
+    auto I = m.all_instances()[0].acquire_session();
+    id0 = I.global("check_none", "check").toIValue().toInt();
+  }
+  {
+    auto I = m.all_instances()[1].acquire_session();
+    id1 = I.global("check_none", "check").toIValue().toInt();
+  }
+  ASSERT_NE(id0, id1);
 }
 
 TEST(TorchpyTest, SimpleModel) {
@@ -278,16 +295,25 @@ TEST(TorchpyTest, FxModule) {
   }
 }
 
-#ifndef FBCODE_CAFFE2
+#ifdef TEST_CUSTOM_LIBRARY
 thread_local int in_another_module = 5;
-
 TEST(TorchpyTest, SharedLibraryLoad) {
   torch::deploy::InterpreterManager manager(2);
   auto no_args = at::ArrayRef<torch::deploy::Obj>();
   for (auto& interp : manager.all_instances()) {
     auto I = interp.acquire_session();
-    I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
-    I.global("test_deploy_python", "setup")({getenv("PATH")});
+
+    const char* test_lib_path = getenv("LIBTEST_DEPLOY_LIB");
+    if (!test_lib_path) {
+      I.global("sys", "path").attr("append")({"torch/csrc/deploy"});
+      I.global("test_deploy_python", "setup")({getenv("PATH")});
+    } else {
+      char buf[PATH_MAX];
+      strncpy(buf, test_lib_path, PATH_MAX);
+      dirname(buf);
+      I.global("sys", "path").attr("append")({buf});
+    }
+
     AT_ASSERT(I.global("libtest_deploy_lib", "check_initial_state")(no_args)
                   .toIValue()
                   .toBool());
