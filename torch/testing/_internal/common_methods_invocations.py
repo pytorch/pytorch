@@ -4548,8 +4548,7 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
-    def make_tensor_(shape):
-        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     batch_size = 2
     num_channels = 3
@@ -4559,8 +4558,8 @@ def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
 
     sample_inputs = []
     for dim in (2, 3):
-        input = make_tensor_((batch_size, num_channels, *[S] * dim))
-        grid = make_tensor_((batch_size, *[S] * dim, dim))
+        input = _make_tensor((batch_size, num_channels, *[S] * dim))
+        grid = _make_tensor((batch_size, *[S] * dim, dim))
 
         modes_ = (*modes, "bicubic") if dim == 2 else modes
 
@@ -7915,7 +7914,14 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         supports_gradgrad=False,
-        gradcheck_nondet_tol=0.0,
+        gradcheck_nondet_tol=1e-15,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
     )
 ]
 
