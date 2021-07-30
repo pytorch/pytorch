@@ -2292,6 +2292,13 @@ def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
 
+def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
+    cases = (((3, 3), (1, 1), (2), (1, 1), True),
+             ((2, 2), (0, 0), (), (-1, -1), False))
+
+    return [SampleInput(kernel_size, args=(stride, padding, dilation, return_indices))
+            for kernel_size, stride, padding, dilation, return_indices in cases]
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -6396,6 +6403,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    OpInfo('nn.functional.avgpool2d',
+           aten_name='avgpool2d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypes=integral_types(),
+           sample_inputs_func=sample_inputs_avgpool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
