@@ -17,6 +17,7 @@ import typing
 
 from torch.utils.benchmark._impl import constants
 import torch.utils.benchmark._impl.templates.template as py_template
+from torch.utils.benchmark._impl.templates.stubs import CompiledTemplate
 
 
 SOURCE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -151,3 +152,23 @@ def generate(work_spec: constants.WorkSpec) -> str:
         global_setup=work_spec.global_setup,
         language=work_spec.language,
     )
+
+
+def get() -> CompiledTemplate:
+    """Convenience method to access CompiledTimerModule in a typed manner."""
+
+    # In Python, `global` means global to a module, not global to the program.
+    # So if we simply call `globals()`, we will get the globals for jit.py, not
+    # the top level globals where the result of `generate` was run. So instead
+    # we grab the calling frame (which expects CompiledTimerModule to be
+    # defined) and search those globals.
+    calling_frame = inspect.stack()[1].frame
+
+    compiled_module = calling_frame.f_globals.get(constants.COMPILED_MODULE_NAME, None)
+    if compiled_module is None:
+        raise ValueError(
+            f"{constants.COMPILED_MODULE_NAME} was not defined. "
+            "Did you run the result of `generate`?"
+        )
+
+    return compiled_module

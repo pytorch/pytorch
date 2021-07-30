@@ -12,7 +12,6 @@ from torch.utils.benchmark._impl.workers import in_process_worker
 class TimeitTask(task_base.TaskBase):
 
     _worker: worker_base.WorkerBase
-    _timer_arg: str
 
     def __init__(
         self,
@@ -21,35 +20,36 @@ class TimeitTask(task_base.TaskBase):
         worker: typing.Optional[worker_base.WorkerBase] = None,
     ) -> None:
         self._work_spec = work_spec
-        self._timer = timer
         self._worker = worker or in_process_worker.InProcessWorker({})
-
         self.worker.run(jit_template.generate(work_spec=self._work_spec))
 
+        # `timeit.Timer` allows users to override the timer used, so we have
+        # to support that functionality.
+        self._custom_timer: bool = False
         if self._work_spec.language == constants.Language.CPP:
-            assert self._timer is None
-            self._maybe_timer_arg = ""
+            assert timer is None
 
-        elif self._timer in (None, timeit.default_timer):
-            self._maybe_timer_arg = "timer=timeit.default_timer,"
-
-        else:
-            self.worker.store("_timeit_task_timer", self._timer, in_memory=True)
-            self._maybe_timer_arg = "timer=_timeit_task_timer,"
+        elif timer not in (None, timeit.default_timer):
+            self.worker.store("_timeit_task_timer", timer, in_memory=True)
+            self._custom_timer = True
 
     @property
     def worker(self) -> worker_base.WorkerBase:
         return self._worker
 
     def timeit(self, number: int) -> float:
-        self.worker.run(textwrap.dedent(f"""
-            _timeit_task_result = {constants.COMPILED_MODULE_NAME}.measure_wall_time(
-                n_iter={number},
-                n_warmup_iter=1,
-                cuda_sync=False,
-                {self._maybe_timer_arg}
-            )
-        """))
-        result = self.worker.load("_timeit_task_result")
-        assert isinstance(result, float)
-        return result
+        return self.measure(n_iter=number, custom_timer=self._custom_timer)
+
+    @task_base.run_in_worker(scoped=True)
+    def measure(n_iter: int, custom_timer: bool) -> float:
+        from torch.utils.benchmark._impl.templates import jit as jit_template
+
+        # This is placed in the global namespace during Task init.
+        kwargs = {"timer": globals()["_timeit_task_timer"]} if custom_timer else {}
+
+        return jit_template.get().measure_wall_time(
+            n_iter=n_iter,
+            n_warmup_iter=1,
+            cuda_sync=False,
+            **kwargs,
+        )

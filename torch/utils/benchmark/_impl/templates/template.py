@@ -28,7 +28,7 @@ class PythonTemplate:
         n_iter: int,
         n_warmup_iter: int,
         cuda_sync: bool,
-        timer: typing.Callable[[], float],
+        timer: typing.Callable[[], float] = timeit.default_timer,
     ) -> float:
         # SETUP_TEMPLATE_LOCATION
 
