@@ -54,8 +54,7 @@ class RectangularTensor(torch.Tensor):
             if func not in self.handled_functions:
                 return func(*args, **kwargs)
             else:
-                self.handled_functions[func](*args, **kwargs)
-                return x
+                return self.handled_functions[func](*args, **kwargs)
 
 @implements(torch.ops.aten.linalg_solve, HANDLED_FUNCTIONS_RECTANGULAR)
 def solve(A, B):
@@ -95,16 +94,17 @@ if __name__ == "__main__":
     A[2] = 2.4 * A[0] + 3 * A[1]
 
     A_sqr = Square(A, invertible=False)
+    # This should return a tensor instead of a Square object
     X = torch.linalg.solve(A_sqr, b)
 
     # # torch.autograd.gradcheck(torch.solve, [A, b])
-    # # B is not in the image of A, so there is no solution
-    # # solve returns the vectors X that minimize ||AX - B|| (least squares solution)
-    # assert not torch.allclose(A @ X.elem, b, atol=1e-6)
+    # B is not in the image of A, so there is no solution
+    # solve returns the vectors X that minimize ||AX - B|| (least squares solution)
+    assert not torch.allclose(A @ X_tensor, b, atol=1e-6)
 
     # # "Project" B onto the image of A
-    # b = A @ A.T @ b
-    # A_sqr = Square(A, invertible=False)
-    # X = torch.linalg.solve(A_sqr, b)
-    # # B is now on the image of A, so there is a solution and solve finds it
-    # assert torch.allclose(A @ X.elem, b, atol=1e-6)
+    b = A @ A.T @ b
+    A_sqr = Square(A, invertible=False)
+    X = torch.linalg.solve(A_sqr, b)
+    # B is now on the image of A, so there is a solution and solve finds it
+    assert torch.allclose(A @ X_tensor, b, atol=1e-6)
