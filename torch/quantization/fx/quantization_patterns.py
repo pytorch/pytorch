@@ -445,7 +445,29 @@ class CatQuantizeHandler(QuantizeHandler):
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
-        return quantized_graph.node_copy(node, load_arg(quantized=torch.quint8))
+        if is_reference:
+            activation_post_process = \
+                self._maybe_get_last_node_only_observer(modules)
+            if activation_post_process is None:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                act_dtype = activation_dtype(qconfig)
+                # only the first argument needs to be quantized
+                args = load_arg(quantized=[act_dtype])(node.args)
+                args = list(load_arg(quantized=torch.float)(node.args))
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out,
+                    activation_post_process,
+                    node,
+                    modules,
+                    quantized_graph,
+                    node_name_to_scope,
+                    is_input=False)
+        else:
+            return quantized_graph.node_copy(node, load_arg(quantized=torch.quint8))
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
@@ -516,7 +538,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
         # TODO: is_reference option for conv module
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes:
+        if not is_reference and dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by Conv "
@@ -742,7 +764,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         dtypes = get_qconfig_dtypes(qconfig)
         # leave the op unquantized if the dtype combination is not supported
-        if dtypes not in supported_dtypes:
+        if not is_reference and dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
                 "supported by Linear "
