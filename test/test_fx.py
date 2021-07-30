@@ -28,12 +28,15 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
+from collections import namedtuple
 
 from torch.fx.proxy import TraceError
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
+from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 if sys.version_info >= (3, 7):
@@ -64,6 +67,11 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+# used in test_pytree. It's all the way out here because pickling a GraphModule
+# that uses Point errors out if Point is local to the function
+Point = namedtuple('Point', ['x', 'y'])
+
 
 # Test wrap() passing both a function name as well as a function
 # directly
@@ -2610,6 +2618,8 @@ class TestFX(JitTestCase):
         def f_dict_add(x):
             return x['a'] + sum(x['z'])
 
+        def f_namedtuple_add(x):
+            return x.x + x.y
 
         pytree._register_pytree_node(
             Foo,
@@ -2639,6 +2649,7 @@ class TestFX(JitTestCase):
             (f_custom, Foo(PH, 3)),
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
             # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
+            (f_namedtuple_add, Point(PH, PH)),
         ]
 
         def verify_pytree(f, inp):
