@@ -267,7 +267,7 @@ test_libtorch() {
     build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
     build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
-      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+      if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
         build/bin/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
       fi
     fi
