@@ -990,6 +990,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     list(ddp_model_overlap.parameters())
                 )
 
+                # Ensure that this test runs independently
+                dist.barrier()
+
                 # Run the DDP model overlapping with ZeRO
                 # NOTE: Overlapping currently requires 2 or 3 warmup iterations
                 # to ensure DDP buckets have been rebuilt (depending on the
@@ -1006,7 +1009,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     loss = output.sum()
                     loss.backward()
                     zero_optim.step()
-                dist.barrier()
 
                 # Run the DDP model with local optimizer
                 for input in inputs:
@@ -1026,11 +1028,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # Check that the parameters were updated
                 self.assertNotEqual(init_params_overlap, list(ddp_model_overlap.parameters()))
+
+                # Ensure that this test runs independently
                 dist.barrier()
 
     @common_distributed.skip_if_win32()
     @common_distributed.requires_nccl()
     @common_distributed.skip_if_no_gpu
+    @common_distributed.skip_if_rocm
     def test_ddp_with_zero_step_parity_gpu(self):
         r"""
         Check that overlapping DDP with ZeRO using ``hook_with_zero_step()``
@@ -1056,6 +1061,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @common_distributed.skip_if_win32()
     @common_distributed.requires_nccl()
     @common_distributed.skip_if_no_gpu
+    @common_distributed.skip_if_rocm
     def test_ddp_with_zero_step_interleaved_parity_gpu(self):
         r"""
         Check that overlapping DDP with ZeRO using

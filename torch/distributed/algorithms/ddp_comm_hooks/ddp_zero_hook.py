@@ -5,8 +5,6 @@ import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
 from torch.nn.parallel.distributed import DistributedDataParallel
-from torch.distributed import distributed_c10d
-
 
 # Functional optimizers require passing a list of gradients to their `step()`
 # method, and ZeRO requires a functional optimizer to overlap with DDP
@@ -66,8 +64,8 @@ def hook_with_zero_step(
         )
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
-    # NCCL backend for now
-    if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
+    # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
+    if dist.get_backend() != dist.Backend.NCCL:
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
@@ -136,6 +134,9 @@ def hook_with_zero_step(
 
         # Perform partial optimizer step on all buckets after the final
         # bucket has been computed
+        # NOTE: This should not be chained as a callback to the last bucket's
+        # all-reduce future since that would add synchronization that delays
+        # all optimizer computation to wait for that last all-reduce
         for bucket_index in range(num_buckets):
             rank_to_update = zero._ddp_bucket_index_to_rank(bucket_index)
             num_local_optim_params = len(zero.optim.param_groups[0]["params"])
@@ -235,8 +236,8 @@ def hook_with_zero_step_interleaved(
         )
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
-    # NCCL backend for now
-    if distributed_c10d.get_backend() != distributed_c10d.Backend.NCCL:
+    # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
+    if dist.get_backend() != dist.Backend.NCCL:
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
