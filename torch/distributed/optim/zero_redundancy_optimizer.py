@@ -325,11 +325,11 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self._default_device = self._all_params[0].device
 
         self.process_group = process_group if process_group is not None else dist.group.WORLD
-        self.world_size = dist.get_world_size(self.process_group)
-        self.rank = dist.get_rank(self.process_group)
-        self.global_rank = _get_global_rank(self.process_group, self.rank)
+        self.world_size: int = dist.get_world_size(self.process_group)
+        self.rank: int = dist.get_rank(self.process_group)
+        self.global_rank: int = _get_global_rank(self.process_group, self.rank)
 
-        self._overlap_with_ddp = overlap_with_ddp
+        self._overlap_with_ddp: bool = overlap_with_ddp
         self._optim_defaults = defaults
         self._optim_constructor = self._get_optimizer_constructor(optimizer_class)
 
@@ -338,7 +338,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         if not overlap_with_ddp:
             self._init_local_optimizer()
         else:
-            self._overlap_info = _OverlapInfo()
+            self._overlap_info: _OverlapInfo = _OverlapInfo()
             if parameters_as_bucket_view:
                 logging.warning(
                     "`parameters_as_bucket_view=True` will be ignored since "
