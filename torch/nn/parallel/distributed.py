@@ -607,7 +607,7 @@ class DistributedDataParallel(Module, _Joinable):
         # that are defined first, such that their gradients don't spill into
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
-        bucket_indices, _ = dist._compute_bucket_assignment_by_size(
+        bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
             parameters[0],
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
             expect_sparse_gradient[0],
@@ -619,6 +619,7 @@ class DistributedDataParallel(Module, _Joinable):
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
+            list(reversed(per_bucket_size_limits)),
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
