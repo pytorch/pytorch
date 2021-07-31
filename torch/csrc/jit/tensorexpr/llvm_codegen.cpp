@@ -167,8 +167,8 @@ class LLVMCodeGenImpl : public IRVisitor {
   llvm::Type* Int8PtrTy_;
   llvm::Type* VoidTy_;
 
-  std::unordered_map<Var*, int> varToArg_;
-  std::unordered_map<Var*, llvm::Value*> varToVal_;
+  std::unordered_map<const Var*, int> varToArg_;
+  std::unordered_map<const Var*, llvm::Value*> varToVal_;
   std::unordered_map<Block*, std::vector<Var*>> scopeToVar_;
   Block* scope_;
 
