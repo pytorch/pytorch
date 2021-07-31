@@ -5,6 +5,7 @@
 
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <iostream>
 #include <exception>
@@ -103,7 +104,9 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
     // See cached_casts declaration above for detailed strategy.
     bool can_try_cache = (to_type == get_lower_precision_fp_from_device_type(device_type) &&
                          arg.scalar_type() == at::kFloat && arg.requires_grad() &&
-                         arg.is_leaf() && !arg.is_view());
+                         arg.is_leaf() && !arg.is_view() && !at::GradMode::is_enabled() &&
+                         !torch::jit::tracer::isTracing());
+
     if (can_try_cache) {
       auto it = cached_casts.find(arg.unsafeGetTensorImpl());
       if (it != cached_casts.end()) {
