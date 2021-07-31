@@ -26,6 +26,5 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(tensor_add)->Apply(GenerateSizes);
 BENCHMARK_MAIN();

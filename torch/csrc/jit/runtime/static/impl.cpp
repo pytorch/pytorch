@@ -9,6 +9,7 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -64,6 +65,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
+  UseVariadicCat(graph);
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -487,6 +489,7 @@ void PrepareGraphForStaticModule(
 std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
@@ -494,10 +497,14 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  auto module = m.copy();
-  module.eval();
-
-  auto module_ptr = std::make_shared<Module>(freeze_module(module));
+  std::shared_ptr<Module> module_ptr;
+  if (!is_frozen) {
+    auto module = m.copy();
+    module.eval();
+    module_ptr = std::make_shared<Module>(freeze_module(module));
+  } else {
+    module_ptr = std::make_shared<Module>(m.copy());
+  }
 
   Method method = module_ptr->get_method("forward");
   auto graph = module_ptr->get_method("forward").graph();
@@ -525,8 +532,9 @@ StaticModule::StaticModule(
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
@@ -1387,9 +1395,13 @@ void ProcessedNode::run() {
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
-    stack.reserve(size);
+    stack.reserve(size + 1);
     for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
+    }
+    // Need to store the number of inputs in stack for variadic ops.
+    if (hasVarArgs(node_)) {
+      stack.emplace_back(static_cast<int>(size));
     }
 
     DCHECK(op_);

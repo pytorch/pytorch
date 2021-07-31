@@ -68,6 +68,7 @@ enum class DispatchKey : uint8_t {
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
+  Lazy, // For lazy tensor backends
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -229,6 +230,7 @@ enum class DispatchKey : uint8_t {
   AutogradCPU,
   AutogradCUDA,
   AutogradXLA,
+  AutogradLazy,
   AutogradXPU,
   AutogradMLC,
   AutogradHPU,
@@ -245,6 +247,8 @@ enum class DispatchKey : uint8_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
+  // it probably should get its own Autocast key
   AutocastCUDA,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
