@@ -304,6 +304,9 @@ namespace c10 {
   _(aten, bin)                       \
   _(aten, pop)                       \
   _(aten, insert)                    \
+  _(aten, _cat)                      \
+  _(aten, cat)                       \
+  _(aten, concat)                    \
   _(aten, vstack)                    \
   _(aten, row_stack)                 \
   _(prim, unchecked_unwrap_optional) \

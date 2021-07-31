@@ -301,6 +301,15 @@ Tensor cat(TensorList tensors, Dimname dim) {
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
 }
 
+// torch.concat, alias for torch.cat
+Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor concat(TensorList tensors, Dimname dim) {
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
   if (s1.size() != s2.size()) {
     return false;

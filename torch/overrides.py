@@ -359,6 +359,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
+        torch.concat: lambda tensors, dim=0, out=None: -1,  # alias for torch.cat
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
