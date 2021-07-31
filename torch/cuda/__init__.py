@@ -29,6 +29,7 @@ _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
+_manual_seed_all_lazy_cb = None  # don't invoke this until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 
@@ -111,7 +112,7 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
-def _lazy_call(callable):
+def _lazy_call(callable, **kwargs):
     if is_initialized():
         callable()
     else:
@@ -119,8 +120,14 @@ def _lazy_call(callable):
         # file system to get traceback info. Patch linecache or do something
         # else here if this ends up being important.
 
-        # Don't store the actual traceback to avoid memory cycle
-        _queued_calls.append((callable, traceback.format_stack()))
+        if kwargs.get("seed_all", False):
+            # Since seeding is memoryless, keep only the latest
+            # callback for setting seeds on all devices.
+            global _manual_seed_all_lazy_cb
+            _manual_seed_all_lazy_cb = (callable, traceback.format_stack())
+        else:
+            # Don't store the actual traceback to avoid memory cycle
+            _queued_calls.append((callable, traceback.format_stack()))
 
 _lazy_call(_check_capability)
 _lazy_call(_check_cubins)
@@ -174,6 +181,10 @@ def _lazy_init():
         # we need to just return without initializing in that case.
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
+
+        if _manual_seed_callback:
+            _queued_calls.append(_manual_seed_callback)
+
         try:
             for queued_call, orig_traceback in _queued_calls:
                 try:
