@@ -2064,7 +2064,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, self.process_group)
+        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2081,7 +2081,12 @@ class ReducerTest(TestCase):
         with self.assertRaises(RuntimeError):
             parameters = [list(model.parameters())]
             buckets = [list(range(len(parameters[0])))]
-            dist.Reducer(parameters, buckets, self.process_group)
+            dist.Reducer(
+                parameters,
+                buckets,
+                [dist._DEFAULT_FIRST_BUCKET_BYTES],
+                self.process_group
+            )
 
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
@@ -2091,7 +2096,12 @@ class ReducerTest(TestCase):
             range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
-        dist.Reducer(parameters, buckets, self.process_group)
+        dist.Reducer(
+            parameters,
+            buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in buckets],
+            self.process_group
+        )
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
@@ -2102,6 +2112,7 @@ class ReducerTest(TestCase):
         return dist.Reducer(
             parameters,
             buckets,
+            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in range(len(buckets))],
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )
