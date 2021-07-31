@@ -13230,7 +13230,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   const int n = 32;
-  const int c = 128;
+  const int c = 127;
   const int h = 51;
   const int w = 23;
   at::Tensor t0 = at::randn({n, c, h, w}, options);

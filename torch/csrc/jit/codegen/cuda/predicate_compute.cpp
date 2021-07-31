@@ -94,15 +94,12 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     }
   }
 
-  const auto extent = (pred_type == PredicateType::Misaligned)
-      ? preds.size() - 1
-      : preds.size();
-  if (preds.empty() || extent == 0) {
+  if (preds.empty()) {
     return ir_builder.trueVal();
   }
 
   kir::Val* cond = preds[0];
-  for (size_t i = 1; i < extent; i++) {
+  for (size_t i = 1; i < preds.size(); i++) {
     cond = ir_builder.andExpr(cond, preds[i]);
   }
 

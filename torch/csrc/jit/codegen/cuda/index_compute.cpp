@@ -2221,6 +2221,11 @@ Index::getReferenceRootPredicates(
     // reference tensors root domain, but when indexing into TV1 there aren't
     // enough indices to resolve it.
     //
+    // The condition also happens with Misaligned predicates, where
+    // inner-most vectorized loops are not included in the loops
+    // parameter. Predicates involving vectorized loops are separately
+    // generated in lower_misaligned_vectorization.
+    //
     // Second condition is simply to avoid predication on broadcasting axes as
     // it's not required.
     if (it == ref_indexing.indexMap().end() || it->second->isZeroInt()) {
