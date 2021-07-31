@@ -95,14 +95,14 @@ bool CUDAHooks::isPinnedPtr(void* data) const {
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
 #ifndef __HIP_PLATFORM_HCC__
   if (err == cudaErrorInvalidValue) {
-    cudaGetLastError();
+    (void)cudaGetLastError();
     return false;
   }
   AT_CUDA_CHECK(err);
 #else
   // HIP throws hipErrorUnknown here
   if (err != cudaSuccess) {
-    cudaGetLastError();
+    (void)cudaGetLastError();
     return false;
   }
 #endif

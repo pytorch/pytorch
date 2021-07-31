@@ -134,7 +134,7 @@ int THCState_getPeerToPeerAccess(THCState* state, int dev, int devToAccess)
       cudaError_t err = cudaDeviceEnablePeerAccess(devToAccess, 0);
       if (err == cudaErrorPeerAccessAlreadyEnabled) {
         // ignore and clear the error if access was already enabled
-        cudaGetLastError();
+        (void)cudaGetLastError();
       } else {
         THCudaCheck(err);
       }

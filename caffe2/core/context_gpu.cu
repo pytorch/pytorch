@@ -239,7 +239,7 @@ static void Caffe2InitializeCuda() {
             (err != cudaSuccess)) {
           CAFFE_THROW(cudaGetErrorString(err));
         }
-        cudaGetLastError(); // reset cuda error code
+        (void)cudaGetLastError(); // reset cuda error code
       }
     }
   }
@@ -355,7 +355,7 @@ struct CAFFE2_CUDA_API PinnedCPUAllocator final : public at::Allocator {
       if (err == cudaErrorInvalidValue) {
         free(data);
         // Calling cudaGetLastError will reset the cuda error.
-        cudaError_t _err = cudaGetLastError();
+        (void)cudaGetLastError();
       } else {
         // For all other errors, still do a cuda check.
         CUDA_ENFORCE(err);

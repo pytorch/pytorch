@@ -503,7 +503,7 @@ public:
         f(algoPerf);
         return;
       } catch (c10::CUDAOutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
       }
     }
 
@@ -514,9 +514,9 @@ public:
         cache.insert(args.params, algoPerf);
         return;
       } catch (c10::CUDAOutOfMemoryError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
       } catch (c10::CuDNNError &e) {
-        cudaGetLastError(); // clear CUDA error
+        (void)cudaGetLastError(); // clear CUDA error
       }
     }
     TORCH_CHECK(false, "Unable to find a valid cuDNN algorithm to run convolution");

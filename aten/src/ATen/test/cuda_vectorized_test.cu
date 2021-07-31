@@ -144,7 +144,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
     for (int j = 0; j < 16; j++) {
       b1 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer1) + i);
       b2 = reinterpret_cast<double *>(reinterpret_cast<char *>(buffer2) + j);
-      cudaGetLastError();
+      (void)cudaGetLastError();
       cudaDeviceSynchronize();
       vectorized_copy<double, 4><<<1, 64>>>(b2, b1);
       C10_CUDA_KERNEL_LAUNCH_CHECK();

@@ -1060,7 +1060,7 @@ class DeviceCachingAllocator {
           //   the exception, free some stuff in their script, and attempt their
           //   allocation again. In this case, we can also forgive and clear
           //   CUDA's internal error state.
-          cudaGetLastError();
+          (void)cudaGetLastError();
         } else {
           // If the error's unrelated to memory allocation, we should throw
           // immediately.
@@ -1270,7 +1270,7 @@ class DeviceCachingAllocator {
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
         // ignore and clear the error if not ready
-        cudaGetLastError();
+        (void)cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         C10_CUDA_CHECK(err);

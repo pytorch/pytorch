@@ -175,7 +175,7 @@ struct HostAllocator
       cudaError_t err = cudaEventQuery(event);
       if (err == cudaErrorNotReady) {
         // ignore and clear the error if not ready
-        cudaGetLastError();
+        (void)cudaGetLastError();
         break;
       } else if (err != cudaSuccess) {
         return err;

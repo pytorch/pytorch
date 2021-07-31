@@ -426,7 +426,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
               }
               return a;
             });
-        cudaGetLastError();
+        (void)cudaGetLastError();
       });
 }
 
