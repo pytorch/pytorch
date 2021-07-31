@@ -1298,7 +1298,7 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
 at::DataPtr MemoryPlanner::allocate_buffer(
     size_t size,
     at::DeviceType deviceType) {
-  at::Allocator* allocator = GetAllocator(deviceType);
+  at::Allocator* allocator;
   if (deviceType == at::kCPU) {
     allocator = c10::GetCPUCachingAllocator();
   } else {

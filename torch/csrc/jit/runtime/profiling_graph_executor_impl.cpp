@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 #include <c10/util/irange.h>
-#include <jit/passes/memory_planning.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -28,6 +27,7 @@
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -496,17 +496,6 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
   }
   GRAPH_DEBUG(
       "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
-}
-
-void runMemoryAllocationPipeline(
-    std::shared_ptr<Graph>& graph,
-    std::unique_ptr<ProfilingRecord>& pr) {
-  GRAPH_DEBUG("Before runMemoryAllocationPipeline:\n", *graph);
-
-  InsertAllocationNodes(graph, pr);
-  GRAPH_DEBUG("After inserting allocation nodes:\n", *graph);
-
-  GRAPH_DEBUG("After runMemoryAllocationPipeline:\n", *graph);
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
