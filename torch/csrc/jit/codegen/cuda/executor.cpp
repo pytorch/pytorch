@@ -598,9 +598,6 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
 
     launch_params = computeLaunchParams(launch_constraints, expr_eval);
-    if (isDebugDumpEnabled(DebugDumpOption::LaunchParam)) {
-      launch_params.print();
-    }
 
     executor_utils::validateVectorizedTensors(
         &fusion_, inputs, outputs, lowered_, expr_eval);
@@ -674,6 +671,10 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     if (lowered_.kernel()->summary().is_stochastic) {
       kernel_arguments.appendPhiloxRNGSeed(rand_offset);
     }
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::LaunchParam)) {
+    launch_params.print();
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::PrintRuntimeArgs)) {
