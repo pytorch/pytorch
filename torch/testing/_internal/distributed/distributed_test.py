@@ -3865,7 +3865,7 @@ class DistributedTest:
 
                     # Register hook that runs allreduce + functional SGD step.
                     allreduce_hook = default.allreduce_hook
-                    opt_hook_state = default.OptimizerHookState(
+                    opt_hook_state = default._OptimizerHookState(
                         _FunctionalSGD,
                         sgd_lr,
                         momentum=sgd_momentum,
