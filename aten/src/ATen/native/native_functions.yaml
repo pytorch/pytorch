@@ -3848,10 +3848,15 @@
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  structured_delegate: _softmax.out
   dispatch:
-    CPU: softmax_cpu
-    CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
+
+- func: _softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: softmax_cpu_out
+    CUDA: softmax_cuda_out
 
 - func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
