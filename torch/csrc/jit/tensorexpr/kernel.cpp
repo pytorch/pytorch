@@ -294,7 +294,7 @@ static bool isContiguous(const torch::jit::Value* v) {
 // - Equal padding and strides, dilation == 1.
 // - Depthwise (groups == in_channels == out_channels)
 // - 3x3 kernel
-bool conv2dIsSupportedJit(torch::jit::Node* node) {
+bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
   auto const& bias = getTensorInfoJit(node->input(2));
@@ -327,7 +327,7 @@ bool conv2dIsSupportedJit(torch::jit::Node* node) {
 }
 
 // The fuser currently only supports matmul of 2D x 2D matrices
-bool matmulIsSupported(torch::jit::Node* node) {
+bool matmulIsSupported(const torch::jit::Node* node) {
   auto const& input0 = getTensorInfoJit(node->input(0));
   auto const& input1 = getTensorInfoJit(node->input(1));
 

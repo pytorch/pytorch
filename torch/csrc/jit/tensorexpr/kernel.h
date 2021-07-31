@@ -12,9 +12,9 @@ namespace jit {
 namespace tensorexpr {
 
 // Returns true if the TE fuser supports this conv2d.
-bool conv2dIsSupportedJit(Node* node);
+bool conv2dIsSupportedJit(const Node* node);
 // Returns true if the TE fuser supports this matmul.
-bool matmulIsSupported(Node* node);
+bool matmulIsSupported(const Node* node);
 template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
