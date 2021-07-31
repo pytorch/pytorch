@@ -336,10 +336,13 @@ void GpuLower::lower() {
       processMisalignedVectorization(fusion_, unrolled_loops);
 
   // Reuse memory locations
-  const auto reuse_mem_exprs = reuseMemoryAllocations(unrolled_mv_loops);
+  // TODO: Reenable once fixed.
+  // const auto reuse_mem_exprs = reuseMemoryAllocations(unrolled_mv_loops);
 
   // Insert SyncThreads at end of for-loop to avoid WAR race condition
-  const auto war_sync_exprs = insertWarThreadSynchronization(reuse_mem_exprs);
+  // const auto war_sync_exprs =
+  // insertWarThreadSynchronization(reuse_mem_exprs);
+  const auto war_sync_exprs = insertWarThreadSynchronization(unrolled_mv_loops);
 
   const auto indexed_loops = IndexLowering::getIndexedExprs(war_sync_exprs);
 

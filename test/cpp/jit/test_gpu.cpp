@@ -8280,6 +8280,8 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       "");
 }
 
+// Disabling for now because memory reuse pass needs to be fixed.
+#if 0
 TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -8409,6 +8411,7 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
       __LINE__,
       __FILE__);
 }
+#endif
 
 // DISABLED. TODO: https://github.com/csarofeen/pytorch/issues/743
 TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
