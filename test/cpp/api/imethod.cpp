@@ -34,9 +34,9 @@ TEST(IMethodTest, CallMethod) {
   EXPECT_TRUE(outputPy.isTensor());
   EXPECT_TRUE(outputScript.isTensor());
   auto outputPyTensor = outputPy.toTensor();
-  auto outputScript_tensor = outputScript.toTensor();
+  auto outputScriptTensor = outputScript.toTensor();
 
-  EXPECT_TRUE(outputPyTensor.equal(outputScript_tensor));
+  EXPECT_TRUE(outputPyTensor.equal(outputScriptTensor));
   EXPECT_EQ(outputPyTensor.numel(), 200);
 }
 
