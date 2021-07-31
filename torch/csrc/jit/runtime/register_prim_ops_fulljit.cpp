@@ -7,13 +7,21 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <algorithm>
+#include <bitset>
+#include <cctype>
 #include <cmath>
 #include <exception>
+#include <fstream>
+#include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <ostream>
 #include <stdexcept>
 #include <string>
+#include <typeinfo>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 

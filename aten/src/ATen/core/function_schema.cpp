@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-TORCH_API void FunctionSchema::dump() const {
+void FunctionSchema::dump() const {
   std::cout << *this << "\n";
 }
 
