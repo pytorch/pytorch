@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/partition.h>
 
 #include <ATen/core/jit_type.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -11,6 +12,22 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+
+bool hasNonElementWiseOperation(const Node* node) {
+  if (node->kind() == prim::CudaFusionGroup) {
+    for (auto n : node->g(attr::Subgraph)->nodes()) {
+      if (hasNonElementWiseOperation(n)) {
+        return true;
+      }
+    }
+  } else {
+    // prim::Constant is not parsible, but it is also not nonElementWise
+    if (node->kind() != prim::Constant && !isElementWiseNode(node)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Check all outputs are:
 //   1. TensorType
@@ -51,7 +68,9 @@ static bool isFusibleDevice(const Node* node) {
   if (!device.has_value()) {
     return true;
   }
-  return device->is_cuda();
+  return device->is_cuda() &&
+      (at::cuda::getDeviceProperties(device->index())->major >= 7 ||
+       !hasNonElementWiseOperation(node));
 }
 
 bool compatibleType(const torch::jit::Value* val) {
@@ -133,22 +152,6 @@ bool maybeBroadcast(
           return true;
         }
       }
-    }
-  }
-  return false;
-}
-
-bool hasNonElementWiseOperation(const Node* node) {
-  if (node->kind() == prim::CudaFusionGroup) {
-    for (auto n : node->g(attr::Subgraph)->nodes()) {
-      if (hasNonElementWiseOperation(n)) {
-        return true;
-      }
-    }
-  } else {
-    // prim::Constant is not parsible, but it is also not nonElementWise
-    if (node->kind() != prim::Constant && !isElementWiseNode(node)) {
-      return true;
     }
   }
   return false;
