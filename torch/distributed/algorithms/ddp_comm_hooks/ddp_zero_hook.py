@@ -17,7 +17,7 @@ def hook_with_zero_step(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
-) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
     optimizer step with the :class:`DistributedDataParallel` backward pass,
@@ -74,7 +74,7 @@ def hook_with_zero_step(
     def hook_with_zero_fn(
         state: Any,
         bucket: dist.GradBucket,
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         r"""
         Returns a :class:`Future` that gives a gradient bucket tensor and
         performs the equivalent of a :class:`ZeroRedundancyOptimizer`
@@ -188,7 +188,7 @@ def hook_with_zero_step_interleaved(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
-) -> Callable[[Any, dist.GradBucket], torch.futures.Future]:
+) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
     optimizer step with the :class:`DistributedDataParallel` backward pass,
@@ -246,7 +246,7 @@ def hook_with_zero_step_interleaved(
     def hook_with_zero_interleaved_fn(
         state,
         bucket: dist.GradBucket,
-    ) -> torch.futures.Future:
+    ) -> torch.futures.Future[torch.Tensor]:
         r"""
         Returns a :class:`Future` that gives a gradient bucket tensor and
         performs a partial :class:`ZeroRedundancyOptimizer` :meth:`step` using
