@@ -32,6 +32,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
+#include "caffe2/utils/math/broadcast.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -487,14 +488,29 @@ C10_EXPORT void BroadcastImpl(
     X_dims_vector[i] = X_dims[i - d];
   }
   X_dims = X_dims_vector.data();
+  CAFFE_ENFORCE_EQ(X_dims_vector.size(), Y_ndim);
+  const int X_size =
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      std::accumulate(X_dims, X_dims + Y_ndim, 1, std::multiplies<int>());
   const int Y_size =
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::accumulate(Y_dims, Y_dims + Y_ndim, 1, std::multiplies<int>());
-  std::vector<int> index(Y_ndim, 0);
-  for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
-    const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
-    Y[Y_index] = X[X_index];
-    utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+  if (allow_broadcast_fastpath && can_use_broadcast_fastpath(Y_ndim, X_dims)) {
+    int X_index = 0;
+    for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+      Y[Y_index] = X[X_index];
+      X_index++;
+      if (X_index >= X_size) {
+        X_index = 0;
+      }
+    }
+  } else {
+    std::vector<int> index(Y_ndim, 0);
+    for (int Y_index = 0; Y_index < Y_size; ++Y_index) {
+      const int X_index = utils::GetIndexFromDims(Y_ndim, X_dims, index.data());
+      Y[Y_index] = X[X_index];
+      utils::IncreaseIndexInDims(Y_ndim, Y_dims, index.data());
+    }
   }
   Scale<T, T, CPUContext>(Y_size, alpha, Y, Y, context);
 }

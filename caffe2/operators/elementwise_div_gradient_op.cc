@@ -1,5 +1,6 @@
 #include "caffe2/operators/elementwise_div_op.h"
 #include "caffe2/utils/eigen_utils.h"
+#include "caffe2/utils/math/broadcast.h"
 
 #include <algorithm>
 #include <functional>
@@ -9,6 +10,35 @@
 namespace caffe2 {
 
 namespace {
+
+template <typename TGrad, typename TIn, typename TOut>
+void ComputeDivGradientFastpath(
+    const int A_size,
+    const int B_size,
+    const int C_size,
+    const TGrad* dC,
+    const TIn* B,
+    const TOut* C,
+    TGrad* dA,
+    TGrad* dB) {
+  int A_index = 0;
+  int B_index = 0;
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    dB[B_index] += -dC[C_index] * C[C_index] / B[B_index];
+    if (dA != nullptr) {
+      dA[A_index] += dC[C_index] / B[B_index];
+      A_index++;
+      if (A_index >= A_size) {
+        A_index = 0;
+      }
+    }
+    B_index++;
+    if (B_index >= B_size) {
+      B_index = 0;
+    }
+  }
+
+}
 
 template <typename TGrad, typename TIn, typename TOut>
 void ComputeDivGradient(
@@ -36,6 +66,13 @@ void ComputeDivGradient(
     math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
   }
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
+  if (
+      allow_broadcast_fastpath
+      && math::can_use_broadcast_fastpath(ndim, B_dims)
+      && (dA == nullptr || math::can_use_broadcast_fastpath(ndim, A_dims))) {
+    ComputeDivGradientFastpath(A_size, B_size, C_size, dC, B, C, dA, dB);
+    return;
+  }
   std::vector<int> index(ndim, 0);
   for (int C_index = 0; C_index < C_size; ++C_index) {
     const int B_index =
