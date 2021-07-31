@@ -8213,8 +8213,8 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
 }
 
 TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
 
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
@@ -8226,11 +8226,11 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto bias = makeSymbolicTensor(1);
   auto running_mean = makeSymbolicTensor(1);
   auto running_var = makeSymbolicTensor(1);
-  fusion.addInput(input);
-  fusion.addInput(weight);
-  fusion.addInput(bias);
-  fusion.addInput(running_mean);
-  fusion.addInput(running_var);
+  fusion->addInput(input);
+  fusion->addInput(weight);
+  fusion->addInput(bias);
+  fusion->addInput(running_mean);
+  fusion->addInput(running_var);
 
   Double* momentum = new Double(kMomentum);
   Double* eps = new Double(kEps);
@@ -8238,9 +8238,9 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto result = batch_norm(
       input, weight, bias, running_mean, running_var, kTraining, momentum, eps);
 
-  fusion.addOutput(result.output);
-  fusion.addOutput(result.mean);
-  fusion.addOutput(result.invstd);
+  fusion->addOutput(result.output);
+  fusion->addOutput(result.mean);
+  fusion->addOutput(result.invstd);
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   auto at_input = at::randn(input_shape, options);
@@ -8252,18 +8252,9 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   std::vector<IValue> aten_inputs = {
       at_input, at_weight, at_bias, at_run_mean, at_run_var};
 
-  // Check reduction axis is same for all reductions
-  // Generate Launch Parameters
-  auto reduction_params = getNormalizationHeuristics(&fusion, aten_inputs);
+  FusionExecutorCache executor_cache(std::move(fusion));
 
-  TORCH_CHECK(reduction_params, "Reduction schedule was not generated!");
-
-  scheduleNormalization(&fusion, reduction_params.value());
-  auto lparams = reduction_params.value().lparams;
-
-  torch::jit::fuser::cuda::FusionExecutor fe;
-  fe.compileFusion(&fusion);
-  auto cg_outputs = fe.runFusion(aten_inputs, lparams);
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
 
   auto aten_outputs = at::native_batch_norm(
       at_input,
@@ -8276,7 +8267,7 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       kEps);
 
   testValidate(
-      &fusion,
+      executor_cache.fusion(),
       cg_outputs,
       aten_inputs,
       {at_run_mean,
@@ -8286,8 +8277,7 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
        std::get<2>(aten_outputs)},
       __LINE__,
       __FILE__,
-      "",
-      lparams);
+      "");
 }
 
 TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
