@@ -114,6 +114,7 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   # Setting PATH to resolve to the right nvcc alone isn't enough.
   # See /usr/share/cmake-3.5/Modules/FindCUDA.cmake, block at line 589.
   export CUDA_PATH="/usr/local/cuda"
+  export CUDA_HOME="/usr/local/cuda"
 
   # Ensure the ccache symlink can still find the real nvcc binary.
   export PATH="/usr/local/cuda/bin:$PATH"
