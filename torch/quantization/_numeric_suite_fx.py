@@ -191,7 +191,9 @@ def extract_weights(
     op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    if base_name_to_sets_of_related_ops is None:
+        base_name_to_sets_of_related_ops = \
+            get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 

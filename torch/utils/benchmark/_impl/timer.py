@@ -1,4 +1,3 @@
-import timeit
 from typing import Any, Callable, Dict, Optional, Union
 
 from torch.utils.benchmark._impl import constants
@@ -29,7 +28,7 @@ class Timer:
             language=language,
         )
 
-        self._metadata: constants.TaskSpec = constants.WorkMetadata(
+        self._metadata: constants.WorkMetadata = constants.WorkMetadata(
             label=label,
             sub_label=sub_label,
             description=description,
