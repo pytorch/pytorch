@@ -1,5 +1,4 @@
-import timeit
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Union
 
 import torch
 from torch.utils.benchmark._impl import common
@@ -141,7 +140,7 @@ class Timer:
             language=language,
         )
 
-        self._metadata: constants.TaskSpec = constants.WorkMetadata(
+        self._metadata: constants.WorkMetadata = constants.WorkMetadata(
             label=label,
             sub_label=sub_label,
             description=description,

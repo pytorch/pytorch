@@ -29,6 +29,7 @@ class CallgrindTask(task_base.TaskBase):
         )
 
     @task_base.run_in_worker(scoped=True)
+    @staticmethod
     def _collect(
         n_iter: int,
         n_warmup_iter: int,
