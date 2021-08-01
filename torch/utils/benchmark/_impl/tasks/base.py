@@ -4,7 +4,6 @@ import functools
 import inspect
 import marshal
 import textwrap
-import timeit
 import typing
 
 from torch.utils.benchmark._impl.workers import base
@@ -18,7 +17,7 @@ class TaskBase(abc.ABC):
 
 
 # TODO: This needs to be factored into components that can be unit tested.
-def run_in_worker(scoped: bool = True):
+def run_in_worker(scoped: bool = True) -> typing.Callable[..., typing.Any]:
     """Decorator to run Task method in worker rather than the caller.
 
     The Worker + Task model dictates that the caller generates a string of
@@ -85,7 +84,17 @@ def run_in_worker(scoped: bool = True):
     serializable by the `marshal` library. (i.e. basic Python types)
     """
 
-    def outer(f):
+    def outer(f: typing.Callable[..., typing.Any]) -> typing.Callable[..., typing.Any]:
+        # This will unwrap the `@staticmethod` descriptor and recover the true f
+        #   https://stackoverflow.com/questions/53694087/unwraping-and-wrapping-again-staticmethod-in-meta-class
+        #
+        # Note: The `@staticmethod` decorator must appear BELOW the
+        #       `@run_in_worker` decorator.
+        try:
+            f = f.__get__(object, None)  # type: ignore
+        except AttributeError:
+            pass
+
         signature = inspect.signature(f)
         for arg, arg_parameter in signature.parameters.items():
             if arg_parameter.kind == inspect.Parameter.VAR_POSITIONAL:
@@ -130,7 +139,11 @@ def run_in_worker(scoped: bool = True):
             body_lines.append(suffix)
 
         @functools.wraps(f)
-        def inner(self: TaskBase, *args, **kwargs) -> None:
+        def inner(
+            self: TaskBase,
+            *args: typing.Any,
+            **kwargs: typing.Any
+        ) -> typing.Any:
             bound_signature = signature.bind(*args, **kwargs)
             bound_signature.apply_defaults()
 
