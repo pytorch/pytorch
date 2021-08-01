@@ -1,4 +1,5 @@
 import contextlib
+import types
 import typing
 
 import torch
@@ -32,16 +33,21 @@ class ShouldCudaSynchronize:
         # We will need to test on a case-by-case basis.
         return None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.cuda_detected: bool = False
         self._profiler = torch.profiler.profile(
             activities=[torch.profiler.ProfilerActivity.CUDA])
 
-    def __enter__(self):
+    def __enter__(self) -> "ShouldCudaSynchronize":
         self._profiler.__enter__()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type: typing.Optional[typing.Type[BaseException]],
+        exc_value: typing.Optional[BaseException],
+        traceback: typing.Optional[types.TracebackType],
+    ) -> None:
         self._profiler.__exit__(exc_type, exc_value, traceback)
         self.cuda_detected = bool([
             e for e in self._profiler.events()

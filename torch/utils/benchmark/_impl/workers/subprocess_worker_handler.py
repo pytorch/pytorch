@@ -29,7 +29,7 @@ def _subprocess_snippet_handler(
     pathlib.Path(begin_fpath).touch()
 
     try:
-        exec(
+        exec(  # noqa: P204
             compile(snippet, "<subprocess-worker>", "exec"),
             globals(),
         )

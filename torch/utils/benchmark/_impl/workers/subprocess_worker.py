@@ -34,17 +34,19 @@ class SubprocessWorker(base.WorkerBase):
         super().__init__()
 
         self._stdin: str = os.path.join(self.working_dir, "stdin.log")
-        self._stdout: str = os.path.join(self.working_dir, "stdout.txt")
-        self._stderr: str = os.path.join(self.working_dir, "stderr.txt")
+        pathlib.Path(self._stdin).touch()
+
+        self._stdout_f: io.FileIO = io.FileIO(
+            os.path.join(self.working_dir, "stdout.txt"), mode="w",
+        )
+        self._stderr_f: io.FileIO = io.FileIO(
+            os.path.join(self.working_dir, "stderr.txt"), mode="w",
+        )
 
         self._cmd_begin = os.path.join(self.working_dir, "cmd_begin")
         self._cmd_success = os.path.join(self.working_dir, "cmd_success")
         self._cmd_failed = os.path.join(self.working_dir, "cmd_failed")
         self._cmd_finished = os.path.join(self.working_dir, "cmd_finished")
-
-        pathlib.Path(self._stdin).touch()
-        self._stdout_f = open(self._stdout, "wt")
-        self._stderr_f = open(self._stderr, "wt")
 
         self._payloads = os.path.join(self.working_dir, "payloads")
         os.mkdir(self._payloads)
@@ -52,8 +54,8 @@ class SubprocessWorker(base.WorkerBase):
         self._proc = subprocess.Popen(
             args=self.args,
             stdin=subprocess.PIPE,
-            stdout=io.TextIOWrapper(self._stdout_f, encoding="utf-8", write_through=True),
-            stderr=io.TextIOWrapper(self._stderr_f, encoding="utf-8", write_through=True),
+            stdout=self._stdout_f,
+            stderr=self._stderr_f,
             encoding="utf-8",
             bufsize=1,
         )
@@ -76,9 +78,14 @@ class SubprocessWorker(base.WorkerBase):
             f.write(f"# {now}\n{msg}\n")
 
         # Actually write to proc stdin.
-        self._proc.stdin.flush()
-        self._proc.stdin.write(msg)
-        self._proc.stdin.flush()
+        self._write_stdin_raw(msg)
+
+    def _write_stdin_raw(self, msg: str) -> None:
+        proc_stdin = self._proc.stdin
+        assert proc_stdin is not None
+        proc_stdin.flush()
+        proc_stdin.write(msg)
+        proc_stdin.flush()
 
     @property
     def working_dir(self) -> str:
@@ -127,8 +134,8 @@ class SubprocessWorker(base.WorkerBase):
 
         # Get initial state for stdout and stderr so we can print new lines
         # if the command fails.
-        stdout_stat = os.stat(self._stdout)
-        stderr_stat = os.stat(self._stderr)
+        stdout_stat = os.stat(self._stdout_f.name)
+        stderr_stat = os.stat(self._stderr_f.name)
 
         for fname in (
             self._cmd_begin,
@@ -163,11 +170,11 @@ class SubprocessWorker(base.WorkerBase):
         # the void, so we grab all new additions to stdout and stderr and
         # include them in the error message.
         if os.path.exists(self._cmd_failed):
-            with open(self._stdout, "rb") as f:
+            with open(self._stdout_f.name, "rb") as f:
                 _ = f.seek(stdout_stat.st_size)
                 stdout = f.read().decode("utf-8").strip()
 
-            with open(self._stderr, "rb") as f:
+            with open(self._stderr_f.name, "rb") as f:
                 _ = f.seek(stderr_stat.st_size)
                 stderr = f.read().decode("utf-8").strip()
 
@@ -177,7 +184,7 @@ class SubprocessWorker(base.WorkerBase):
                 f"    stderr:\n{textwrap.indent(stderr, ' ' * 8)}"
             )
 
-    def __del__(self):
+    def __del__(self) -> None:
         if self._proc.poll() is None:
             try:
                 self._proc.terminate()
@@ -188,8 +195,7 @@ class SubprocessWorker(base.WorkerBase):
                 # called during program shutdown, we can't use
                 # `self.write_stdin`. (Because some of the modules will have
                 # already been unloaded.)
-                self._proc.stdin.write("exit()\n")
-                self._proc.stdin.flush()
+                self._write_stdin_raw("exit()\n")
 
         self._stdout_f.close()
         self._stderr_f.close()

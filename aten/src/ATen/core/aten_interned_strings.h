@@ -534,6 +534,10 @@ _(aten, native_zero) \
 _(aten, special_ndtr) \
 _(aten, nextafter) \
 _(aten, special_ndtri) \
+_(aten, logical_and) \
+_(aten, logical_not) \
+_(aten, logical_or) \
+_(aten, logical_xor) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
