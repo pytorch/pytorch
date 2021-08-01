@@ -723,110 +723,46 @@ succeed.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification,
-there are many situations where files get rebuilt when a previous
-compilation was exactly the same.
+Even when dependencies are tracked with file modification, there are many
+situations where files get rebuilt when a previous compilation was exactly the
+same. Using ccache in a situation like this is a real time-saver.
 
-Using ccache in a situation like this is a real time-saver. The ccache manual
-describes [two ways to use ccache](https://ccache.samba.org/manual/latest.html#_run_modes).
-In the PyTorch project, currently only the latter method of masquerading as
-the compiler via symlinks works for CUDA compilation.
-
-Here are the instructions for installing ccache from source (tested at commit
-`3c302a7` of the `ccache` repo):
-
+Before building pytorch, install ccache from your package manager of choice:
 ```bash
-#!/bin/bash
-
-if ! ls ~/ccache/bin/ccache
-then
-    set -ex
-    sudo apt-get update
-    sudo apt-get install -y cmake
-    mkdir -p ~/ccache
-    pushd ~/ccache
-    rm -rf ccache
-    git clone https://github.com/ccache/ccache.git
-    mkdir -p ccache/build
-    pushd ccache/build
-    cmake -DCMAKE_INSTALL_PREFIX=${HOME}/ccache -DENABLE_TESTING=OFF -DZSTD_FROM_INTERNET=ON ..
-    make -j$(nproc) install
-    popd
-    popd
-
-    mkdir -p ~/ccache/lib
-    mkdir -p ~/ccache/cuda
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/cc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/c++
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/gcc
-    ln -s ~/ccache/bin/ccache ~/ccache/lib/g++
-    ln -s ~/ccache/bin/ccache ~/ccache/cuda/nvcc
-
-    ~/ccache/bin/ccache -M 25Gi
-fi
-
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
+conda install ccache -f conda-forge
+sudo apt install ccache
+sudo yum install ccache
+brew install ccache
 ```
 
-Alternatively, `ccache` provided by newer Linux distributions (e.g. Debian/sid)
-also works, but the `nvcc` symlink to `ccache` as described above is still required.
-
-Note that the original `nvcc` binary (typically at `/usr/local/cuda/bin`) must
-be on your `PATH`, otherwise `ccache` will emit the following error:
-
-    ccache: error: Could not find compiler "nvcc" in PATH
-
-For example, here is how to install/configure `ccache` on Ubuntu:
+You may also find the default cache size in ccache is too small to be useful.
+The cache sizes can be increased from the command line:
 
 ```bash
-# install ccache
-sudo apt install ccache
-
-# update symlinks and create/re-create nvcc link
-sudo /usr/sbin/update-ccache-symlinks
-sudo ln -s /usr/bin/ccache /usr/lib/ccache/nvcc
-
 # config: cache dir is ~/.ccache, conf file ~/.ccache/ccache.conf
 # max size of cache
 ccache -M 25Gi  # -M 0 for unlimited
 # unlimited number of files
 ccache -F 0
-
-# deploy (and add to ~/.bashrc for later)
-export PATH="/usr/lib/ccache:$PATH"
-```
-
-It is also possible to install `ccache` via `conda` by installing it from the
-community-maintained `conda-forge` channel. Here is how to set up `ccache` this
-way:
-
-```bash
-# install ccache
-conda install -c conda-forge ccache
-
-# set up ccache compiler symlinks
-mkdir ~/ccache
-mkdir ~/ccache/lib
-mkdir ~/ccache/cuda
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/cc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/c++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/gcc
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/lib/g++
-ln -s $CONDA_PREFIX/bin/ccache ~/ccache/cuda/nvcc
-
-# update PATH to reflect symlink locations, consider
-# adding this to your .bashrc
-export PATH=~/ccache/lib:$PATH
-export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
-
-# increase ccache cache size to 25 GiB
-ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
+build should be substantially and noticeably faster than the first build. If
+this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
+rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
+Each of these 3 variables should contain the ccache, e.g.
+```
+//CXX compiler launcher
+CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
+```
 
+If not, you can define these variables on the command line before invoking `setup.py`.
+```bash
+export CMAKE_C_COMPILER_LAUNCHER=ccache
+export CMAKE_CXX_COMPILER_LAUNCHER=ccache
+export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
+python setup.py develop
+```
 
 #### Use a faster linker
 If you are editing a single file and rebuilding in a tight loop, the time spent
