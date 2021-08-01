@@ -56,10 +56,8 @@ bool BatchBucketizeOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BatchBucketize, BatchBucketizeOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BatchBucketize)
     .NumInputs(4)
     .NumOutputs(1)
@@ -123,7 +121,6 @@ after running this operator.
         "2-D dense tensor, with 1st dim = float_features.dim(0), 2nd dim = size(indices)"
         "in the arg list, the tensor is of the same data type as `feature`.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BatchBucketize);
 
 } // namespace caffe2
