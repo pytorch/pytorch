@@ -17,7 +17,7 @@ class TimeitTask(task_base.TaskBase):
     def __init__(
         self,
         work_spec: constants.WorkSpec,
-        timer: typing.Optional[typing.Callable[[],float]] = None,
+        timer: typing.Optional[typing.Callable[[], float]] = None,
         worker: typing.Optional[worker_base.WorkerBase] = None,
     ) -> None:
         self._work_spec = work_spec
