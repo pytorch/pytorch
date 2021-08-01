@@ -11,10 +11,10 @@ def f(a):
 
 fw_compiler = partial(tvm_compile, name='fw_keops')
 bw_compiler = partial(tvm_compile, name='bw_keops')
-# fw_compiler = lambda x, _: x
-# bw_compiler = lambda x, _: x
 compiled_f = compiled_function(f, fw_compiler, bw_compiler).apply
 
+# fw_compiler = lambda x, _: x
+# bw_compiler = lambda x, _: x
 iters = 10
 out = compiled_f(a)
 out.sum().backward()
