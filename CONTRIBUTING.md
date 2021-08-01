@@ -775,6 +775,20 @@ The easiest way to use `lld` this is download the
 ln -s /path/to/downloaded/ld.lld /usr/local/bin/ld
 ```
 
+#### Workaround for header dependency bug in nvcc
+If re-building without modifying any files results in several CUDA files being
+re-compiled, you may be running into an `nvcc` bug where header dependencies are
+not converted to absolute paths before reporting it to the build system. This
+makes `ninja` think one of the header files has been deleted, so it runs the
+build again.
+
+A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can use
+this as a compiler launcher, similar to `ccache`
+```bash
+export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
+python setup.py develop
+```
+
 ### C++ frontend development tips
 
 We have very extensive tests in the [test/cpp/api](test/cpp/api) folder. The
