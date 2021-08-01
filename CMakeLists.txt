@@ -319,20 +319,6 @@ if(USE_CCACHE)
   endif()
 endif()
 
-if(USE_CUDA)
-  include(CheckLanguage)
-  check_language(CUDA)
-
-  if(CMAKE_CUDA_COMPILER)
-    enable_language(CUDA)
-    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-  else()
-    message(WARNING "CUDA language support not found, disabling")
-    set(USE_CUDA OFF)
-  endif()
-endif()
-
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -564,6 +550,23 @@ endif()
 
 # ---[ Utils
 include(cmake/public/utils.cmake)
+
+# -- [ CUDA language
+if(USE_CUDA)
+  include(CheckLanguage)
+  check_language(CUDA)
+
+  if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  else()
+    message(WARNING
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
+	caffe2_update_option(USE_CUDA OFF)
+  endif()
+endif()
 
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)

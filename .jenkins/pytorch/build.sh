@@ -42,6 +42,7 @@ echo "GCC version:"
 gcc --version
 
 echo "CMake version:"
+which cmake
 cmake --version
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
