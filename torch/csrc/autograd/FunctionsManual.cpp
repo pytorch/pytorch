@@ -35,15 +35,14 @@ namespace details {
 void print_stub(const Tensor& t, std::string val) {
 }
 
-void print(const Tensor& t, std::string val) {
-  if (t.defined()) {
-    std::cout << "- tensor " << val << " dim: " << t.dim();
-    printf("\t\t%zu, %zu\n", t.size(0), t.dim() >= 2 ? t.size(1) : 0);
-  } else {
-    std::cout << "- tensor " << val << " not defined" << std::endl;
-  }
-}
-
+// void print(const Tensor& t, std::string val) {
+//   if (t.defined()) {
+//     std::cout << "- tensor " << val << " dim: " << t.dim();
+//     printf("\t\t%zu, %zu\n", t.size(0), t.dim() >= 2 ? t.size(1) : 0);
+//   } else {
+//     std::cout << "- tensor " << val << " not defined" << std::endl;
+//   }
+// }
 //#define PRINT_T(EXP) print(EXP, #EXP)
 #define PRINT_T(EXP) print_stub(EXP, #EXP)
 
