@@ -1,5 +1,4 @@
 import statistics
-import textwrap
 import timeit
 import typing
 
@@ -16,7 +15,7 @@ TimerCallback = typing.Callable[[int, float], typing.NoReturn]
 
 class CommonStatistics:
 
-    sorted_x: typing.Tuple[float]
+    sorted_x: typing.Tuple[float, ...]
     median: float
     mean: float
     p25: float
@@ -31,7 +30,7 @@ class CommonStatistics:
         self.p75 = _sorted_x.quantile(.75).item()
 
     @property
-    def iqr(self):
+    def iqr(self) -> float:
         return self.p75 - self.p25
 
 
@@ -43,7 +42,7 @@ class TimeitTask(task_base.TaskBase):
     def __init__(
         self,
         work_spec: constants.WorkSpec,
-        timer: typing.Optional[typing.Callable[[],float]] = None,
+        timer: typing.Optional[typing.Callable[[], float]] = None,
         worker: typing.Optional[worker_base.WorkerBase] = None,
     ) -> None:
         self._work_spec = work_spec
@@ -74,15 +73,17 @@ class TimeitTask(task_base.TaskBase):
             custom_timer=self._custom_timer,
             should_cuda_sync=self._should_cuda_sync
         )
+        assert isinstance(result, float)
         return result
 
     @task_base.run_in_worker(scoped=True)
+    @staticmethod
     def measure(
         n_iter: int,
         num_threads: int,
         custom_timer: bool,
         should_cuda_sync: typing.Optional[bool],
-    ) -> typing.Tuple[float, bool]:
+    ) -> typing.Tuple[float, bool]:  # noqa: B902
         from torch.utils.benchmark._impl import runtime_utils
         from torch.utils.benchmark._impl.templates import jit as jit_template
 
