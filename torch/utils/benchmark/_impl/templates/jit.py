@@ -69,7 +69,7 @@ class CompileEnv:
             "GLOBAL_SETUP_TEMPLATE_LOCATION": global_setup,
         }
 
-        line_pattern = re.compile(f"^(\s*)(?:#|//) ({'|'.join(pattern_map.keys())})$")
+        line_pattern = re.compile(f"^(\\s*)(?:#|//) ({'|'.join(pattern_map.keys())})$")
         template_lines: typing.List[str] = template.splitlines(keepends=False)
 
         segments: typing.List[str] = []
@@ -171,4 +171,5 @@ def get() -> CompiledTemplate:
             "Did you run the result of `generate`?"
         )
 
+    assert isinstance(compiled_module, CompiledTemplate)
     return compiled_module

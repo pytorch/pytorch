@@ -86,6 +86,7 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
     case DispatchKey::CPU:
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
+    case DispatchKey::XLA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();

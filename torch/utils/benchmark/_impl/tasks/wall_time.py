@@ -1,4 +1,3 @@
-import textwrap
 import timeit
 import typing
 
@@ -16,7 +15,7 @@ class TimeitTask(task_base.TaskBase):
     def __init__(
         self,
         work_spec: constants.WorkSpec,
-        timer: typing.Optional[typing.Callable[[],float]] = None,
+        timer: typing.Optional[typing.Callable[[], float]] = None,
         worker: typing.Optional[worker_base.WorkerBase] = None,
     ) -> None:
         self._work_spec = work_spec
@@ -38,10 +37,13 @@ class TimeitTask(task_base.TaskBase):
         return self._worker
 
     def timeit(self, number: int) -> float:
-        return self.measure(n_iter=number, custom_timer=self._custom_timer)
+        result = self.measure(n_iter=number, custom_timer=self._custom_timer)
+        assert isinstance(result, float)
+        return result
 
     @task_base.run_in_worker(scoped=True)
-    def measure(n_iter: int, custom_timer: bool) -> float:
+    @staticmethod
+    def measure(n_iter: int, custom_timer: bool) -> float:  # noqa: B902
         from torch.utils.benchmark._impl.templates import jit as jit_template
 
         # This is placed in the global namespace during Task init.
