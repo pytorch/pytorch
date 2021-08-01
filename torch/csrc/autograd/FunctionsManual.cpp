@@ -32,6 +32,9 @@ namespace autograd {
 namespace generated {
 namespace details {
 
+void print_stub(const Tensor& t, std::string val) {
+}
+
 void print(const Tensor& t, std::string val) {
   if (t.defined()) {
     std::cout << "- tensor " << val << " dim: " << t.dim();
@@ -41,7 +44,8 @@ void print(const Tensor& t, std::string val) {
   }
 }
 
-#define PRINT_T(EXP) print(EXP, #EXP)
+//#define PRINT_T(EXP) print(EXP, #EXP)
+#define PRINT_T(EXP) print_stub(EXP, #EXP)
 
 using at::Tensor;
 using at::Scalar;
@@ -3068,36 +3072,6 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
-// Helper for layer_norm_double_backward
-// sum across normalized_shape (inner dimensions)
-Tensor sum_inner(const Tensor& to_sum, int axis, bool keepdim=true) {
-  auto r = to_sum;
-  for (int64_t dim = r.dim() - 1; dim >= axis; dim--) {
-    r = r.sum(dim, keepdim);
-  }
-  return r;
-}
-
-// Helper for batchnorm_double_backward
-// sum across batch size (outer dimensions)
-Tensor sum_outer(const Tensor& to_sum, int axis, bool keepdim=true) {
-  auto r = to_sum;
-  for (int64_t pos = 0; pos < axis; pos++) {
-    r = r.sum((keepdim) ? pos : 0, keepdim);
-  }
-  return r;
-}
-
-// Helper for batchnorm_double_backward
-// sum across normalized_shape (inner dimensions)
-Tensor unsqueeze_inner(const Tensor& src, int ndim) {
-  auto src_expanded = src;
-  while (src_expanded.sizes().size() < ndim) {
-    src_expanded = src_expanded.unsqueeze(-1);
-  }
-  return src_expanded;
-}
-
 std::tuple<Tensor, Tensor, Tensor>
 infinitely_differentiable_native_layer_norm_backward(
     const Tensor& dY,
@@ -3227,7 +3201,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
       c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
-  printf("M: %ld, N: %ld", M, N);
+  //printf("M: %ld, N: %ld", M, N);
 
   PRINT_T(input_t);
   auto input = input_t.reshape({M, N});
@@ -3260,6 +3234,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     ggI_expanded = ggI.reshape({M, N});
   }
 
+  PRINT_T(gO_t);
+  PRINT_T(gO);
   PRINT_T(input);
   PRINT_T(save_mean);
   PRINT_T(save_invstd);
@@ -3307,40 +3283,53 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
 
   // add contribution of gamma term to gI
   if (affine && ggG.defined()) {
-    auto t0 = gO * sigma2_eps_neg_1_2;
-    PRINT_T(t0);
-    auto t1 = (sigma2_eps_neg_1_2 * gO_sum).div_(-N);
-    PRINT_T(t1);
-    auto t2 = (input_mu_sigma2_neg_3_2 * (gO * input_sub_mu).sum(1,true)).div_(-N);
-    PRINT_T(t2);
-    auto gI_G_term = ggG_expanded * (t0.add_(t1).add_(t2));
-    PRINT_T(gI_G_term);
+
+    auto ggG_gO = ggG_expanded * gO;
+    auto t0 = ggG_gO * sigma2_eps_neg_1_2;
+    auto t1 = (sigma2_eps_neg_1_2 * ggG_gO.sum(1, true)).div_(N);
+    auto t2 = (input_mu_sigma2_neg_3_2 * (ggG_gO * input_sub_mu).sum(1, true)).div_(N);
+    auto gI_G_term = (t0.sub_(t1).sub_(t2));
     gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+
+    // auto t0 = gO * sigma2_eps_neg_1_2;
+    // PRINT_T(t0);
+    // auto t1 = (sigma2_eps_neg_1_2 * gO_sum).div_(-N);
+    // PRINT_T(t1);
+    // auto t2 = (input_mu_sigma2_neg_3_2 * (gO * input_sub_mu).sum(1,true)).div_(-N);
+    // PRINT_T(t2);
+    // auto gI_G_term = ggG_expanded * (t0.add_(t1).add_(t2));
+    // PRINT_T(gI_G_term);
+    // gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
   }
 
 
   if (gI.defined()) {
-    printf("=== computing gI\n");
+    //printf("=== computing gI\n");
     gI = gI.reshape_as(input_t);
   }
   PRINT_T(gI);
 
   // this is the grad_input for the first backward function
-  auto first_bwd_fn_grad_input = [&](const Tensor& gO, const Tensor& gamma) -> Tensor {
-    auto h0 = (gamma * sigma2_eps_neg_1_2).div_(N);
-    auto h1 = (N * gO).sub_(gO_sum).sub_(
-                input_sub_mu.mul(sigma2_eps_neg_1) * gOinmu_sum);
+  auto first_bwd_fn_grad_input = [&](const Tensor& gO_local, const Tensor& gamma_local) -> Tensor {
+    auto h0 = (gamma_local * sigma2_eps_neg_1_2).div_(N);
+    auto h1 = (N * gO_local).sub_(gO_local.sum(1,true)).sub_(
+                input_sub_mu.mul(sigma2_eps_neg_1) * (gO_local * input_sub_mu).sum(1,true));
     return h0 * h1;
   };
 
   // calculate gG
   Tensor gG;
   if (affine && ggI.defined()) {
-    // gG is the first backward fn with the gamma term removed (then shaped properly)
-    gG = ggI_expanded * first_bwd_fn_grad_input(gO, at::ones({}, sigma2_eps_neg_1_2.options()));
-    gG = gG.sum(0);
-    printf("=== computing gG\n");
+
+    gG = first_bwd_fn_grad_input(ggI_expanded, at::ones({}, sigma2_eps_neg_1_2.options()));
+    gG = (gO * gG).sum(0);
     gG = gG.reshape_as(*gamma);
+
+    // // gG is the first backward fn with the gamma term removed (then shaped properly)
+    // gG = ggI_expanded * first_bwd_fn_grad_input(gO, at::ones({}, sigma2_eps_neg_1_2.options()));
+    // gG = gG.sum(0);
+    // printf("=== computing gG\n");
+    // gG = gG.reshape_as(*gamma);
   }
   PRINT_T(gG);
 
@@ -3349,27 +3338,27 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   // contribution of input term
   if (ggI.defined()) {
     PRINT_T(ggI_expanded);
-    printf("=== compute ggO from ggI\n");
+    //printf("=== compute ggO from ggI\n");
     ggO = first_bwd_fn_grad_input(ggI_expanded, gamma_expanded);
     PRINT_T(ggO);
   }
   if (ggG.defined()) {
     PRINT_T(ggG_expanded);
-    printf("=== compute ggO from ggG\n");
+    //printf("=== compute ggO from ggG\n");
     auto ggO_G_term = ggG_expanded * input_sub_mu * sigma2_eps_neg_1_2;
     ggO = ggO.defined() ? ggO.add_(ggO_G_term) : ggO_G_term;
     PRINT_T(ggO);
   }
   if (ggB.defined()) {
     PRINT_T(ggB_expanded);
-    printf("=== compute ggO from ggB\n");
+    //printf("=== compute ggO from ggB\n");
     auto ggO_B_term = ggB_expanded;
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
     PRINT_T(ggO);
   }
   if (ggO.defined()) {
     PRINT_T(ggO);
-    printf("=== reshaping ggO\n");
+    //printf("=== reshaping ggO\n");
     ggO = ggO.expand({M, N}).reshape_as(input_t);
   }
   PRINT_T(ggO);
