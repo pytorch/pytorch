@@ -374,7 +374,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          win_length: Optional[int] = None, window: Optional[Tensor] = None,
          center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
          onesided: Optional[bool] = None,
-         return_complex: Optional[bool] = True) -> Tensor:
+         return_complex: bool = True) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
     The STFT computes the Fourier transform of short overlapping windows of the
