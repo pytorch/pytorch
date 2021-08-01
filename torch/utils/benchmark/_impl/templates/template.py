@@ -6,7 +6,6 @@ This template will replace:
     `STMT_TEMPLATE_LOCATION`
 sections with user provided statements.
 """
-import timeit
 import typing
 
 import torch

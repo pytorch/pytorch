@@ -7,7 +7,7 @@
 namespace torch {
 namespace deploy {
 
-struct DeployLinkerError : public std::runtime_error {
+struct DeployLoaderError : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
