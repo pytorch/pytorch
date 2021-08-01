@@ -757,6 +757,12 @@ def configure_extension_build():
     main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
+        if 'CUDA_CUDA_LIB' not in cmake_cache_vars:
+            print('CUDA_CUDA_LIB not in CMake cache, USE_CUDA={cmake_cache_vars["USE_CUDA"]}')
+            print('#########################################################################')
+            for k, v in cmake_cache_vars.items():
+                print(f'cmake[{k}] = {v}')
+
         library_dirs.append(
             os.path.dirname(cmake_cache_vars['CUDA_CUDA_LIB']))
 

@@ -292,7 +292,7 @@ class CMake:
                 key = low_priority_options[var]
                 if key not in build_options:
                     build_options[key] = val
-            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')):
+            elif var.startswith(('BUILD_', 'USE_', 'CMAKE_')) or var.endswith(('EXITCODE', 'EXITCODE__TRYRUN_OUTPUT')):
                 build_options[var] = val
 
         # Some options must be post-processed. Ideally, this list will be shrunk to only one or two options in the
