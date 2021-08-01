@@ -25,6 +25,9 @@ from typing import List, Tuple, Union
 __IN_ONNX_EXPORT = False
 
 
+class ONNXCheckerError(Exception):
+    pass
+
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
@@ -82,9 +85,10 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         else:
             operator_export_type = OperatorExportTypes.ONNX
     if enable_onnx_checker is not None:
-        warnings.warn("`enable_onnx_checker' is deprecated and ignored. Will be removed in "
-                      "next PyTorch release. The code now will work as it is True so that the onnx "
-                      "model checker is always run to ensure the exported model is a valid ONNX model.")
+        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in"
+                      "the next PyTorch release. To proceed despite ONNX checker failures, you"
+                      "can catch torch.onnx.ONNXCheckerError.")
+
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             _retain_param_name=_retain_param_name, do_constant_folding=do_constant_folding,
@@ -749,7 +753,10 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
             # string in memory.
             if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
-                _check_onnx_proto(proto)
+                try:
+                    _check_onnx_proto(proto)
+                except RuntimeError as e:
+                    raise ONNXCheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False

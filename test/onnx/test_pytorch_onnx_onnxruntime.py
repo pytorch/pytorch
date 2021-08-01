@@ -37,7 +37,8 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHe
 from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
-from torch.onnx import register_custom_op_symbolic
+from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
+from torch.onnx.utils import ONNXCheckerError
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -9480,32 +9481,14 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x,))
 
     def test_onnx_checker_invalid_graph(self):
-        op_source = """
-        #include <torch/script.h>
-
-        torch::Tensor custom_add(torch::Tensor self, torch::Tensor other) {
-          return self + other;
-        }
-
-        static auto registry =
-          torch::RegisterOperators("custom_namespace::custom_add", &custom_add);
-        """
-
-        torch.utils.cpp_extension.load_inline(
-            name="custom_add",
-            cpp_sources=op_source,
-            is_python_module=False,
-            verbose=True,
-        )
-
         class CustomAddModule(torch.nn.Module):
-            def forward(self, a, b):
-                return torch.ops.custom_namespace.custom_add(a, b)
+            def forward(self, x, y):
+                return torch.add(x, y)
 
-        def invalid_symbolic(g, self, other):
-            return g.op("Add", self, other, invalid_attr_i=1)
+        def symbolic_custom_invalid_add(g, input, other, alpha=None):
+            return g.op("Add", input, other, invalid_attr_i=1)
 
-        register_custom_op_symbolic("custom_namespace::custom_add", invalid_symbolic, 9)
+        register_custom_op_symbolic("::add", symbolic_custom_invalid_add, 1)
 
         x = torch.randn(2, 3, 4)
         y = torch.randn(2, 3, 4)
@@ -9513,10 +9496,14 @@ class TestONNXRuntime(unittest.TestCase):
         test_model = CustomAddModule()
         f = io.BytesIO()
 
-        with self.assertRaises(RuntimeError) as cm:
-            torch.onnx.export(test_model, (x, y), f)
+        try:
+            with self.assertRaises(ONNXCheckerError) as cm:
+                torch.onnx.export(test_model, (x, y), f)
+        finally:
+            unregister_custom_op_symbolic("::add", 1)
 
         self.assertTrue(f.getvalue(), "ONNX graph was not generated")
+        loaded_model = onnx.load_from_string(f.getvalue())
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
