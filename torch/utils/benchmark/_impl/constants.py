@@ -16,7 +16,7 @@ class WorkSpec:
     setup: str
     global_setup: str = ""
     num_threads: int = 1
-    language: Language
+    language: Language = Language.PYTHON
 
     def __init__(
         self,

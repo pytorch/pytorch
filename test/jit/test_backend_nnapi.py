@@ -67,6 +67,51 @@ class TestNnapiBackend(TestNNAPI):
         # Argument input is a Tensor in a list
         self.call_lowering_to_nnapi(traced, [args])
 
+    # Test exceptions for incorrect compile specs
+    def test_compile_spec_santiy(self):
+        args = torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
+        module = torch.nn.PReLU()
+        traced = torch.jit.trace(module, args)
+
+        errorMsgTail = r"""
+method_compile_spec should contain a Tensor or Tensor List which bundles input parameters: shape, dtype, quantization, and dimorder.
+For input shapes, use 0 for run/load time flexible input.
+method_compile_spec must use the following format:
+{"forward": {"inputs": at::Tensor}} OR {"forward": {"inputs": c10::List<at::Tensor>}}"""
+
+        # No forward key
+        compile_spec = {"backward": {"inputs": args}}
+        with self.assertRaisesRegex(RuntimeError, "method_compile_spec does not contain the \"forward\" key." + errorMsgTail):
+            torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
+        # No dictionary under the forward key
+        compile_spec = {"forward": 1}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, "
+                                    "under it's \"forward\" key."
+                                    + errorMsgTail):
+            torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
+        # No inputs key (in the dictionary under the forward key)
+        compile_spec = {"forward": {"not inputs": args}}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "method_compile_spec does not contain a dictionary with an \"inputs\" key, "
+                                    "under it's \"forward\" key."
+                                    + errorMsgTail):
+            torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
+        # No Tensor or TensorList under the inputs key
+        compile_spec = {"forward": {"inputs": 1}}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "method_compile_spec does not contain either a Tensor or TensorList, under it's \"inputs\" key."
+                                    + errorMsgTail):
+            torch._C._jit_to_backend("nnapi", traced, compile_spec)
+        compile_spec = {"forward": {"inputs": [1]}}
+        with self.assertRaisesRegex(RuntimeError,
+                                    "method_compile_spec does not contain either a Tensor or TensorList, under it's \"inputs\" key."
+                                    + errorMsgTail):
+            torch._C._jit_to_backend("nnapi", traced, compile_spec)
+
     def tearDown(self):
         # Change dtype back to default (Otherwise, other unit tests will complain)
         torch.set_default_dtype(self.default_dtype)

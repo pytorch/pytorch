@@ -16,7 +16,7 @@ class TimeitTask(task_base.TaskBase):
     def __init__(
         self,
         work_spec: constants.WorkSpec,
-        timer: typing.Optional[typing.Callable[[],float]] = None,
+        timer: typing.Optional[typing.Callable[[], float]] = None,
         worker: typing.Optional[worker_base.WorkerBase] = None,
     ) -> None:
         self._work_spec = work_spec
@@ -41,7 +41,7 @@ class TimeitTask(task_base.TaskBase):
                 "def _timeit_task_inner_f(_timeit_task_number: int):",
                 textwrap.indent(self._work_spec.setup, " " * 4),
                 "    _timeit_task_start_time = _timeit_task_timer()",
-                f"    for _ in range(_timeit_task_number):",
+                "    for _ in range(_timeit_task_number):",
                 textwrap.indent(self._work_spec.stmt, " " * 8),
                 "    return _timeit_task_timer() - _timeit_task_start_time",
             ]))

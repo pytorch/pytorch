@@ -79,7 +79,7 @@ DEFAULTS = {
     "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
     "compile-commands-dir": "build",
-    "config-file": ".clang-tidy-oss",
+    "config-file": ".clang-tidy",
     "disable-progress-bar": False,
 }
 
