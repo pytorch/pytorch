@@ -158,6 +158,11 @@ name: Bazel Linux CI (!{{ build_environment }})
     needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
