@@ -51,7 +51,7 @@ class PostLocalSGDState(object):
 
 def post_localSGD_hook(
     state: PostLocalSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     """
     This DDP communication hook is used for running post-localSGD algorithm,
     by combining with a model averaging component (e.g.,
@@ -62,7 +62,7 @@ def post_localSGD_hook(
         state (PostLocalSGDState): State information to run post-localSGD.
             Users mainly need to tune ``start_localSGD_iter`` to determine when to start local SGD.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
