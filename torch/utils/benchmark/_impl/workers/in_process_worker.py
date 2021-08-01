@@ -21,13 +21,13 @@ class InProcessWorker(base.WorkerBase):
     def in_process(self) -> bool:
         return True
 
-    def run(self, snippet: str):
+    def run(self, snippet: str) -> None:
         code = compile(
             textwrap.dedent(snippet),
             "<in-process-worker>",
             "exec",
         )
-        exec(code, self._globals)
+        exec(code, self._globals)  # noqa: P204
 
     # Serialize and deserialize during store and load to match the behavior of
     # workers with `in_process=False`.
