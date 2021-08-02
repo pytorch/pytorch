@@ -124,8 +124,7 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda10.1-cudnn7-py3* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]] || \
+if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *macos* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
@@ -141,7 +140,6 @@ fi
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 if [[ "$BUILD_ENVIRONMENT" == *xla-linux-bionic* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda9-cudnn7-py2* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda10.1-cudnn7-py3* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
   if ! which conda; then
