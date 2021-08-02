@@ -1336,25 +1336,29 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase, MultiProcessTestCa
             _sharded_tensor.Shard(sparse_tensor, local_shard_metadata)
         ]
         with self.assertRaisesRegex(ValueError, 'Local shard tensor layout does not match with sharded_tensor_metadata'):
-            sharded_tensor = _sharded_tensor.init_from_local_shards(wrong_layout_shards, sharded_tensor_metadata, init_rrefs=True)
+            sharded_tensor = _sharded_tensor.init_from_local_shards(
+                wrong_layout_shards, sharded_tensor_metadata, init_rrefs=True)
 
         wrong_requires_grad_shards = [
             _sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}", requires_grad=True), local_shard_metadata)
         ]
         with self.assertRaisesRegex(ValueError, 'Local shard tensor requires_grad does not match with sharded_tensor_metadata'):
-            sharded_tensor = _sharded_tensor.init_from_local_shards(wrong_requires_grad_shards, sharded_tensor_metadata, init_rrefs=True)
+            sharded_tensor = _sharded_tensor.init_from_local_shards(
+                wrong_requires_grad_shards, sharded_tensor_metadata, init_rrefs=True)
 
         wrong_pin_memory_shards = [
             _sharded_tensor.Shard(torch.randn(5, 5, pin_memory=True), local_shard_metadata)
         ]
         with self.assertRaisesRegex(ValueError, 'Local shard tensor pin_memory does not match with sharded_tensor_metadata'):
-            sharded_tensor = _sharded_tensor.init_from_local_shards(wrong_pin_memory_shards, sharded_tensor_metadata, init_rrefs=True)
+            sharded_tensor = _sharded_tensor.init_from_local_shards(
+                wrong_pin_memory_shards, sharded_tensor_metadata, init_rrefs=True)
 
         wrong_memory_format_shards = [
             _sharded_tensor.Shard(torch.randn(5, 5, device=f"cuda:{self.rank}").t(), local_shard_metadata)
         ]
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
-            sharded_tensor = _sharded_tensor.init_from_local_shards(wrong_memory_format_shards, sharded_tensor_metadata, init_rrefs=True)
+            sharded_tensor = _sharded_tensor.init_from_local_shards(
+                wrong_memory_format_shards, sharded_tensor_metadata, init_rrefs=True)
 
 
     @with_comms
