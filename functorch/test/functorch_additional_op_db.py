@@ -226,13 +226,6 @@ additional_op_db.extend([
         supports_gradgrad=True,
         supports_out=False,
         autodiff_nonfusible_nodes=["aten::relu"]),
-    OpInfo(
-        'softmax',
-        supports_out=False,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_softmax_variant,
-        assert_autodiffed=True),
 ])
 
 # https://github.com/pytorch/pytorch/pull/61068
