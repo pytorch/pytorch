@@ -196,6 +196,31 @@ class _OverlapInfo():
         self.bucket_index_to_future: Dict[int, torch.futures.Future] = {}
         self.bucket_index_to_bucket: Dict[int, dist.GradBucket] = {}
 
+    def wait_for_broadcasts(self, num_buckets, rank):
+        r"""
+        Waits for all parameter broadcasts. This should be called once all
+        broadcasts have been scheduled, meaning ``self.broadcast_handles`` is
+        filled. This clears ``self.broadcast_handles`` in preparation for the
+        next iteration.
+
+        Arguments:
+            num_buckets (int): total number of buckets.
+            rank (int): the calling process's rank.
+        """
+        assert len(self.broadcast_handles) == num_buckets, \
+            f"Missing at least one broadcast handle on rank {rank}"
+        _ = list(map(lambda x: x.wait(), self.broadcast_handles))
+        self.broadcast_handles.clear()
+
+    def clear_per_iter_info(self):
+        r"""
+        Clears the data structures that are modified per-iteration. This should
+        be called at the end of an iteration.
+        """
+        self.bucket_indices_seen.clear()
+        self.bucket_index_to_future.clear()
+        self.bucket_index_to_bucket.clear()
+
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
     r"""
