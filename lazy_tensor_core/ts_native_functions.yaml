@@ -2,6 +2,8 @@ backend: Lazy
 cpp_namespace: torch_lazy_tensors
 supported:
   - add.Tensor
+  - addcdiv
+  - addcdiv_
   - as_strided
   - as_strided_
   - bernoulli
