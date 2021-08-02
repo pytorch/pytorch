@@ -989,8 +989,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
 
 if(USE_TBB)
-  list(APPEND ATen_CPU_INCLUDE ${TBB_ROOT_DIR}/include)
-  target_link_libraries(torch_cpu PUBLIC tbb)
+  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
+  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
 
@@ -1571,7 +1571,7 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
   if(USE_TBB)
-    target_link_libraries(torch_global_deps tbb)
+    target_link_libraries(torch_global_deps TBB::tbb)
   endif()
 
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
