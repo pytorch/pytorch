@@ -255,8 +255,8 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dim_batching_rule(const Tensor& se
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  OP_DECOMPOSE(broadcast_tensors);
   VMAP_SUPPORT("diag", diag_batch_rule);
-
   OP_DECOMPOSE(expand_as);
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT("flip", flip_batch_rule);
