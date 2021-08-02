@@ -3,19 +3,12 @@
 #include <stdio.h>
 #include <cfloat>
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 namespace {
-
-template <typename T>
-inline __device__ T gpu_atomic_add(const T val, T* address);
-
-template <>
-inline __device__ float gpu_atomic_add(const float val, float* address) {
-  return atomicAdd(address, val);
-}
 
 template <typename T>
 __device__ void bilinear_interpolate_gradient(
@@ -174,13 +167,13 @@ __global__ void RoIAlignBackwardFeature(
 
         if (x_low >= 0 && x_high >= 0 && y_low >= 0 && y_high >= 0) {
           gpu_atomic_add(
-              static_cast<T>(g1), offset_bottom_diff + y_low * width + x_low);
+              offset_bottom_diff + y_low * width + x_low, static_cast<T>(g1));
           gpu_atomic_add(
-              static_cast<T>(g2), offset_bottom_diff + y_low * width + x_high);
+              offset_bottom_diff + y_low * width + x_high, static_cast<T>(g2));
           gpu_atomic_add(
-              static_cast<T>(g3), offset_bottom_diff + y_high * width + x_low);
+              offset_bottom_diff + y_high * width + x_low, static_cast<T>(g3));
           gpu_atomic_add(
-              static_cast<T>(g4), offset_bottom_diff + y_high * width + x_high);
+              offset_bottom_diff + y_high * width + x_high, static_cast<T>(g4));
         } // if
       } // ix
     } // iy

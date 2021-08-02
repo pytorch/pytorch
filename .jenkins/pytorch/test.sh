@@ -10,6 +10,14 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # Get fully qualified path using realpath
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
+TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
+TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
+
+BUILD_DIR="build"
+BUILD_RENAMED_DIR="build_renamed"
+BUILD_BIN_DIR="$BUILD_DIR"/bin
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -17,7 +25,13 @@ echo "Testing pytorch"
 
 export LANG=C.UTF-8
 
-if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
+# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
+# CIRCLE_PULL_REQUEST comes from CircleCI
+# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
+#       see https://github.com/pytorch/pytorch/issues/60111
+IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
+
+if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
 fi
@@ -47,6 +61,13 @@ if [[ "$BUILD_ENVIRONMENT" == *noarch* ]]; then
   export PYTORCH_TEST_SKIP_NOARCH=0
 else
   export PYTORCH_TEST_SKIP_NOARCH=1
+fi
+
+if [[ -n "$IN_PULL_REQUEST" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
+  # skip expensive checks when on PR and CI_MASTER flag is not set
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
+else
+  export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -116,17 +137,14 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
-  export ATEN_CPU_CAPABILITY=avx
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
+  export ATEN_CPU_CAPABILITY=default
+elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+  export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-# CIRCLE_PULL_REQUEST comes from CircleCI
-# NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-#       see https://github.com/pytorch/pytorch/issues/60111
-IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-}
 if [ -n "$IN_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]; then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
@@ -164,7 +182,18 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-    TORCH_LIB_PATH=$(python -c "import site; print(site.getsitepackages()[0])")/torch/lib
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Running test with the install folder"
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
+      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
+    else
+      echo "Running test with the build folder"
+      TEST_BASE_DIR="$BUILD_BIN_DIR"
+    fi
+
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -172,13 +201,20 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libc10* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libcaffe2* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libmkldnn* build/bin
-    ${SUDO} ln -sf "$TORCH_LIB_PATH"/libnccl* build/bin
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
 
-    ls build/bin
-    aten/tools/run_tests.sh build/bin
+    ls "$TEST_BASE_DIR"
+    aten/tools/run_tests.sh "$TEST_BASE_DIR"
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      # Restore the build folder to avoid any impact on other tests
+      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+    fi
+
     assert_git_not_dirty
   fi
 }
@@ -229,6 +265,7 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+    build/bin/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     assert_git_not_dirty
   fi
 }
@@ -256,7 +293,9 @@ test_distributed() {
     build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
-    if [[ -n "$MPIEXEC" ]]; then
+    # TODO: this is disabled on GitHub Actions until this issue is resolved
+    # https://github.com/pytorch/pytorch/issues/60756
+    if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
       MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
@@ -374,7 +413,7 @@ test_bazel() {
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
@@ -431,20 +470,20 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
   install_torchvision
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || "${SHARD_NUMBER}" == 1 ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-cuda11.1-cudnn8-py3-gcc7-test1* ]]; then
     test_torch_deploy
   fi
   test_without_numpy
   install_torchvision
   test_python_shard1
   test_aten
-elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || "${SHARD_NUMBER}" == 2 ]]; then
   install_torchvision
   test_python_shard2
   test_libtorch
@@ -468,7 +507,7 @@ else
   test_distributed
   test_benchmarks
   test_rpc
-  if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-test || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-test ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
   fi
 fi

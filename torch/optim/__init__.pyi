@@ -7,7 +7,9 @@ from .adamax import Adamax as Adamax
 from .adamw import AdamW as AdamW
 from .asgd import ASGD as ASGD
 from .lbfgs import LBFGS as LBFGS
+from .nadam import NAdam as NAdam
 from .optimizer import Optimizer as Optimizer
+from .radam import RAdam as RAdam
 from .rmsprop import RMSprop as RMSprop
 from .rprop import Rprop as Rprop
 from .sgd import SGD as SGD

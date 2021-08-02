@@ -24,7 +24,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.1-cudnn8-py3-gcc7* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -148,8 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export MAX_JOBS=$(($(nproc) - 1))
   fi
 
-  if [[ -n "$IN_CI" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds
+  if [[ -n "$IN_CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
+      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
@@ -206,7 +206,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   apply_patches
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc7-build || "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3.6-gcc5.4-build ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 

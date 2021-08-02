@@ -72,11 +72,10 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
         uint8_t* output_row =
             output_data + row * output_columns / num_elem_per_byte;
 
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (std::size_t col = 0; col < output_columns / num_elem_per_byte;
-             ++col) {
+        // output_columns
+        for (const auto col : c10::irange(output_columns / num_elem_per_byte)) {
           output_row[col] = input_row[col];
-        } // output_columns
+        }
       }
     });
 

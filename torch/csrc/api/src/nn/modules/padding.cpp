@@ -27,6 +27,7 @@ void ReflectionPadImpl<D, Derived>::pretty_print(std::ostream& stream) const {
 
 template class ReflectionPadImpl<1, ReflectionPad1dImpl>;
 template class ReflectionPadImpl<2, ReflectionPad2dImpl>;
+template class ReflectionPadImpl<3, ReflectionPad3dImpl>;
 
 // ============================================================================
 

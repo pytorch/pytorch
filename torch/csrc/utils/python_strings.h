@@ -109,10 +109,11 @@ static py::object PyObject_FastGetAttrString(PyObject *obj, const char *name)
 
     /* Attribute referenced by (char *)name */
     if (tp->tp_getattr != nullptr) {
-        // This is OK per https://bugs.python.org/issue39620
-        res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
-        if (res == nullptr) {
-          PyErr_Clear();
+      // This is OK per https://bugs.python.org/issue39620
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      res = (*tp->tp_getattr)(obj, const_cast<char*>(name));
+      if (res == nullptr) {
+        PyErr_Clear();
         }
     }
     /* Attribute referenced by (PyObject *)name */
