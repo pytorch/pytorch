@@ -226,6 +226,20 @@ struct InnerNanSumCastLoadPolicy {
   }
 };
 
+template <>
+struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
+  static constexpr int64_t memsize() {
+    return LoadPolicy<Vectorized<c10::BFloat16>>::memsize();
+  }
+
+  static Vectorized<float> load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    return load_reduce_vec<float>(ptr, [](float a, c10::BFloat16 b) {
+      return at::_isnan(b) ? a : a + b;
+    }, float(0));
+  }
+};
+
 template <typename scalar_t>
 struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
     NanSumLoadPolicy<scalar_t> {
@@ -603,7 +617,7 @@ void sum_kernel_impl(TensorIterator &iter) {
 }
 
 void nansum_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, 
       ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
     cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
   });

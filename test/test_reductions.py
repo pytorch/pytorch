@@ -1011,6 +1011,8 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
+    @dtypesIfCPU(torch.float, torch.double,
+            torch.int8, torch.short, torch.int, torch.long, torch.bfloat16)
     @dtypesIfCUDA(torch.half, torch.float, torch.double,
                   torch.int8, torch.short, torch.int, torch.long)
     @dtypes(torch.float, torch.double,
