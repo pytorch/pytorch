@@ -10,6 +10,39 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at { namespace functorch {
+// Flattens out all dims except the batch dim, and also moves batch dim
+// (if it exists) to front.
+at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
+  if (bdim.has_value()) {
+    auto result = moveBatchDimToFront(tensor, bdim);
+    if (result.dim() > 1) {
+      return result.flatten(1);
+    } else {
+      return result;
+    }
+  } else {
+    return tensor.flatten();
+  }
+}
+
+std::tuple<at::Tensor,optional<int64_t>>
+mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const at::Tensor& target,
+          optional<int64_t> target_bdim, int64_t reduction) {
+  auto self_ = flatten_logical(self, self_bdim);
+  auto target_ = flatten_logical(target, target_bdim);
+  auto result = at::mse_loss(self_, target_, Reduction::None);
+  if (result.dim() == 1) {
+    return std::make_tuple(result, 0);
+  } else if (reduction == Reduction::None) {
+    return std::make_tuple(result, 0);
+  } else if (reduction == Reduction::Sum) {
+    return std::make_tuple(result.sum(-1), 0);
+  } else if (reduction == Reduction::Mean) {
+    return std::make_tuple(result.mean(-1), 0);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+};
+
 std::tuple<at::Tensor,optional<int64_t>,at::Tensor,optional<int64_t>>
 nll_loss_forward_self_target_batch_rule(
     const at::Tensor & self, optional<int64_t> self_bdim,
@@ -205,6 +238,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(nll_loss);
   OP_DECOMPOSE(cross_entropy_loss);
   m.impl("nll_loss_backward", nll_loss_backward_plumbing);
+  VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
 }
 
 }}
