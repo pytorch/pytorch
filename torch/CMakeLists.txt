@@ -14,7 +14,7 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_ROOT_DIR}/include)
+include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
