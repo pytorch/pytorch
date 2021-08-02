@@ -271,3 +271,12 @@ class TestIsinstance(JitTestCase):
             torch.jit.script(dict_no_contained_type)
         with self.assertRaisesRegex(RuntimeError, err_msg,):
             dict_no_contained_type(x)
+
+    def test_tuple_rhs(self):
+        def type_container(x: Any):
+            assert torch.jit.isinstance(x, (int, List[str]))
+            assert not torch.jit.isinstance(x, (List[str], Tuple[int, str]))
+            assert not torch.jit.isinstance(x, (List[str], str))
+
+        x = 2
+        self.checkScript(type_container, (x,))
