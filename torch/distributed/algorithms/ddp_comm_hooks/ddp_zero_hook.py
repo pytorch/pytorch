@@ -153,7 +153,7 @@ def hook_with_zero_step(
                     f"on rank {rank}"
                 allreduce_future = overlap_info.bucket_index_to_future[bucket_index]
                 allreduce_future.wait()
-                bucket_gradients = overlap_info.bucket_index_to_bucket[bucket_index].get_per_parameter_tensors()
+                bucket_gradients = overlap_info.bucket_index_to_bucket[bucket_index].gradients()
                 for i, grad in enumerate(bucket_gradients):
                     gradients[offset + i] = grad
                 zero._local_step(gradients)
@@ -275,13 +275,13 @@ def hook_with_zero_step_interleaved(
             """
             assert ddp._has_rebuilt_buckets
 
-            bucket_index = bucket.get_index()
+            bucket_index = bucket.index()
             rank = zero.global_rank
             overlap_info = zero._overlap_info
             if overlap_info.status == _OverlapStatus.UNINITIALIZED:
                 overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
 
-            bucket_params = bucket.get_model_params_for_bucket()
+            bucket_params = bucket.parameters()
             assert len(bucket_params) > 0, "Empty bucket"
             rank_to_update = zero._ddp_bucket_index_to_rank(bucket_index)
 
@@ -312,7 +312,7 @@ def hook_with_zero_step_interleaved(
                     f"Bucket index {bucket_index} was not assigned to rank " \
                     f"{rank}"
                 offset = overlap_info.offsets[bucket_index]
-                bucket_gradients = bucket.get_per_parameter_tensors()
+                bucket_gradients = bucket.gradients()
                 for i, grad in enumerate(bucket_gradients):
                     gradients[offset + i] = grad
                 zero._local_step(gradients)
