@@ -2,11 +2,8 @@
 #include <c10/util/typeid.h>
 
 namespace c10 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto default_dtype = caffe2::TypeMeta::Make<float>();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto default_dtype_as_scalartype = default_dtype.toScalarType();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto default_complex_dtype =
     caffe2::TypeMeta::Make<c10::complex<float>>();
 

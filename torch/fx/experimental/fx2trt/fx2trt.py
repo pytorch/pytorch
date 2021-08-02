@@ -1,10 +1,10 @@
+import copy
 import warnings
 from typing import List, NamedTuple, Iterable, Any, Optional
 
 import torch
 import torch.fx
 import tensorrt as trt
-import copy
 from torch.fx.experimental.normalize import NormalizeArgs
 
 
@@ -104,7 +104,12 @@ class TRTModule(torch.nn.Module):
         for i, output_name in enumerate(self.output_names):
             idx: int = self.engine.get_binding_index(output_name)
             dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-            shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
+
+            if self.engine.has_implicit_batch_dimension:
+                shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
+            else:
+                shape = tuple(self.engine.get_binding_shape(idx))
+
             device = torch_device_from_trt(self.engine.get_location(idx))
             output = torch.empty(size=shape, dtype=dtype, device=device)
             outputs.append(output)
@@ -114,9 +119,14 @@ class TRTModule(torch.nn.Module):
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
-        self.context.execute_async(
-            batch_size, bindings, torch.cuda.current_stream().cuda_stream
-        )
+        if self.engine.has_implicit_batch_dimension:
+            self.context.execute_async(
+                batch_size, bindings, torch.cuda.current_stream().cuda_stream
+            )
+        else:
+            self.context.execute_async_v2(
+                bindings, torch.cuda.current_stream().cuda_stream
+            )
 
         if len(outputs) == 1:
             return outputs[0]
@@ -141,43 +151,44 @@ def tensorrt_converter(key):
 class InputTensorSpec(NamedTuple):
     shape : torch.Size
     dtype : torch.dtype
+    device : torch.device = torch.device("cpu")
+    has_batch_dim : bool = True
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
-        return cls(tensor.shape, tensor.dtype)
+        return cls(tensor.shape, tensor.dtype, tensor.device)
 
     @classmethod
     def from_tensors(cls, tensors: Iterable[torch.Tensor]):
         return [cls.from_tensor(t) for t in tensors]
 
 
-class TRTInterpreter(torch.fx.Interpreter):
-    def __init__(self, module : torch.fx.GraphModule, input_shapes : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
-        # Preprocess the model
-        module = copy.deepcopy(module)
-        module = module.cpu().float()
-        module = NormalizeArgs(module).transform()
+class BaseTRTInterpreter(torch.fx.Interpreter):
+    def __init__(
+        self,
+        module : torch.fx.GraphModule,
+        input_specs : List[InputTensorSpec],
+        explicit_batch_dimension : bool = False,
+        logger_level=trt.Logger.WARNING
+    ):
         super().__init__(module)
 
         self.logger = trt.Logger(logger_level)
         self.builder = trt.Builder(self.logger)
 
-        # TODO: explicit batching
-        # EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-        # self.network = self.builder.create_network(EXPLICIT_BATCH)
+        if explicit_batch_dimension:
+            EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+            self.network = self.builder.create_network(EXPLICIT_BATCH)
+        else:
+            self.network = self.builder.create_network()
 
-        self.network = self.builder.create_network()
-
-        self.input_shape_itr = iter(input_shapes)
-
+        self.input_specs_iter = iter(input_specs)
         self._cur_node_name: Optional[str] = None
-
         self._input_names: List[str] = []
         self._output_names: List[str] = []
 
     def run(
         self,
-        *args,
         max_batch_size=64,
         max_workspace_size=1 << 25,
         fp16_mode=True,
@@ -193,7 +204,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         if fp16_mode and not self.builder.platform_has_fast_fp16:
             warnings.warn("Current platform doesn't support fast native fp16!")
 
-        super().run(*args)
+        super().run()
 
         self.builder.max_batch_size = max_batch_size
         builder_config = self.builder.create_builder_config()
@@ -216,9 +227,14 @@ class TRTInterpreter(torch.fx.Interpreter):
         return super().run_node(n)
 
     def placeholder(self, target, args, kwargs):
-        shape, dtype = next(self.input_shape_itr)
         self._input_names.append(target)
-        return self.network.add_input(name=target, shape=tuple(shape[1:]), dtype=torch_dtype_to_trt(dtype))
+        shape, dtype, _, has_batch_dim = next(self.input_specs_iter)
+        if self.network.has_implicit_batch_dimension:
+            if has_batch_dim:
+                shape = shape[1:]
+        else:
+            assert has_batch_dim, "It's required to specify batch dimension when it's explicit in TensorRT network."
+        return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
 
     def call_module(self, target, args, kwargs):
         assert isinstance(target, str)
@@ -255,12 +271,26 @@ class TRTInterpreter(torch.fx.Interpreter):
             raise RuntimeError('TensorRT requires all outputs to be Tensor!')
 
         for i, output in enumerate(outputs):
-            # TODO: set location and dtype?
             name = f'output{i}'
             output.name = name
+            self.network.mark_output(output)
             if self.fp16_mode:
                 output.dtype = trt.float16
             else:
                 output.dtype = trt.float32
-            self.network.mark_output(output)
             self._output_names.append(name)
+
+
+class TRTInterpreter(BaseTRTInterpreter):
+    """
+    Use this for general case where there're PyTorch vanilla ops in the FX mdoule.
+    """
+    def __init__(self, module : torch.nn.Module, input_specs : List[InputTensorSpec], logger_level=trt.Logger.WARNING):
+        # Preprocess the model
+        if not isinstance(module, torch.fx.GraphModule):
+            module = torch.fx.symbolic_trace(module)
+        else:
+            module = copy.deepcopy(module)
+        module = module.cpu().float()
+        module = NormalizeArgs(module).transform()
+        super().__init__(module, input_specs, logger_level=logger_level)

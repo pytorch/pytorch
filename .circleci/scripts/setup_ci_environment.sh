@@ -7,6 +7,9 @@ sudo rm -f /etc/apt/heroku.list
 sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
+# To increase the network reliability, let apt decide which mirror is best to use
+sudo sed -i -e 's/http:\/\/.*archive/mirror:\/\/mirrors/' -e 's/\/ubuntu\//\/mirrors.txt/' /etc/apt/sources.list
+
 retry () {
   $*  || $* || $* || $* || $*
 }
@@ -64,6 +67,7 @@ add_to_env_file() {
 }
 
 add_to_env_file IN_CI 1
+add_to_env_file CI_MASTER "${CI_MASTER:-}"
 add_to_env_file COMMIT_SOURCE "${CIRCLE_BRANCH:-}"
 add_to_env_file BUILD_ENVIRONMENT "${BUILD_ENVIRONMENT}"
 add_to_env_file CIRCLE_PULL_REQUEST "${CIRCLE_PULL_REQUEST}"

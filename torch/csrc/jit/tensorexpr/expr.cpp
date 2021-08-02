@@ -147,8 +147,6 @@ ExprHandle abs(const ExprHandle& v) {
 // The default tanh is quite slow, use the Eigen version from here:
 // https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
 ExprHandle fast_tanh(const ExprHandle& v) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  Dtype dtype = v.dtype();
   // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
   // times. Clamp the input expression to [-9, 9]
   ExprHandle plus_9 = FloatImm::make(9.0f);

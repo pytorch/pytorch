@@ -37,7 +37,6 @@ graph(%a.1 : Tensor,
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, MatchingType) {
   // TypeCheck yields to true! Shape, grad and device matches.
   auto a = at::zeros({2, 2}, at::kFloat);
@@ -51,7 +50,6 @@ TEST_F(TypeCheckTest, MatchingType) {
   ASSERT_TRUE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, SizeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({2, 2}, at::kFloat); // Size mismatch
@@ -62,7 +60,6 @@ TEST_F(TypeCheckTest, SizeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, GradientMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -73,7 +70,6 @@ TEST_F(TypeCheckTest, GradientMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -85,7 +81,6 @@ TEST_F(TypeCheckTest, ScalarTypeMismatch) {
   ASSERT_FALSE(stack[2].toBool());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
   auto a = at::zeros({2, 2}, at::kFloat);
   auto b = at::ones({3, 3}, at::kFloat);
@@ -128,7 +123,6 @@ TEST_F(TypeCheckTest, DeviceMismatch_CUDA) {
 //       vmap));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, Basic_CUDA) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -152,14 +146,13 @@ TEST(InterpreterTest, Basic_CUDA) {
   ASSERT_TRUE(exactlyEqual(outputs[1], cx));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, IgnorableArgsInSchema) {
   auto graph = build_mobile_export_analysis_graph();
   MobileCode function(graph, "");
   auto op_to_specified_args = function.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args.size() == 2);
   ASSERT_TRUE(op_to_specified_args["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 1);
+  ASSERT_TRUE(op_to_specified_args["aten::slice.str"] == 4);
   auto graph_vararg = build_mobile_export_analysis_graph_with_vararg();
   MobileCode function_vararg(graph_vararg, "");
   auto op_to_specified_args_vararg = function_vararg.op_to_num_specified_args();
@@ -172,7 +165,7 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   MobileCode function_nested(graph_nested, "");
   auto op_to_specified_args_nested = function_nested.op_to_num_specified_args();
   ASSERT_TRUE(op_to_specified_args_nested["aten::slice.Tensor"] == 4);
-  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 1);
+  ASSERT_TRUE(op_to_specified_args_nested["aten::slice.str"] == 4);
 
   auto graph_non_const = build_mobile_export_analysis_graph_non_const();
   MobileCode function_non_const(graph_non_const, "");
@@ -181,7 +174,6 @@ TEST(InterpreterTest, IgnorableArgsInSchema) {
   ASSERT_TRUE(op_to_specified_args_non_const["aten::conv2d"] == 6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InterpreterTest, runAsyncBasicTest) {
   /*
   TODO: there are some problem with C++ parsing script program involving

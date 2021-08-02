@@ -7,7 +7,7 @@
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-//#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -395,7 +395,24 @@ struct FunctionValue : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override;
+      size_t n_binders) override {
+    std::vector<const FunctionSchema*> schemas;
+    for (Function* callee : callees_) {
+      try {
+        callee->ensure_defined();
+      } catch (const RecursiveMethodCallError&) {
+        throw ErrorReport(loc)
+            << " function '" << callee->name() << "' is called recursively. "
+            << "Recursive calls are not supported";
+      }
+      schemas.push_back(&callee->getSchema());
+    }
+    auto match = matchSchemas(schemas, loc, *f.graph(), args, kwargs);
+    Value* output =
+        f.graph()->insertFunctionCall(callees_[match.first], match.second);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
+  }
 
   const std::vector<Function*>& callees() {
     return callees_;
@@ -436,7 +453,34 @@ struct MethodValue : public SugaredValue {
       Function& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override;
+      size_t n_binders) override {
+    std::vector<NamedValue> argsWithSelf = {self_};
+    argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
+    std::vector<const FunctionSchema*> schemas;
+    for (const std::string& method_name : method_names_) {
+      if (auto class_type = self_->type()->cast<ClassType>()) {
+        Function& method = class_type->getMethod(method_name);
+        try {
+          method.ensure_defined();
+        } catch (const RecursiveMethodCallError&) {
+          throw ErrorReport(loc)
+              << " method '" << method.name() << "' is called recursively. "
+              << "Recursive calls are not supported";
+        }
+        schemas.push_back(&method.getSchema());
+      } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+        schemas.push_back(interface_type->getMethod(method_name));
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false, "method constructed that is not a class or interface");
+      }
+    }
+    auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
+    Value* output =
+        f.graph()->insertMethodCall(method_names_[match.first], match.second);
+    output->node()->setSourceRange(loc);
+    return std::make_shared<SimpleValue>(output);
+  }
 
  private:
   Value* self_;
@@ -718,7 +762,19 @@ struct TORCH_API ExceptionValue : public SugaredValue {
       Function& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> /*attributes*/,
-      size_t /*n_binders*/) override;
+      size_t /*n_binders*/) override {
+    auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
+    for (auto& input : args) {
+      auto input_str = input.value(*m.graph());
+      if (!input_str->type()->isSubtypeOf(StringType::get())) {
+        input_str =
+            emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
+      }
+      exception_message = emitBuiltinCall(
+          loc, *m.graph(), aten::add, {exception_message, input_str}, {});
+    }
+    return std::make_shared<ExceptionMessageValue>(exception_message);
+  }
 
   std::string message_;
 };

@@ -12,6 +12,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/init.cpp
   ${TORCH_API_TEST_DIR}/jit.cpp
   ${TORCH_API_TEST_DIR}/memory.cpp
+  ${TORCH_API_TEST_DIR}/meta_tensor.cpp
   ${TORCH_API_TEST_DIR}/misc.cpp
   ${TORCH_API_TEST_DIR}/module.cpp
   ${TORCH_API_TEST_DIR}/moduledict.cpp

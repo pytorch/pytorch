@@ -71,6 +71,7 @@ class CudaAnalysis : public IRVisitor {
 // execution parameters, then if those params differ from the max mask each dim.
 class GPUMetaVarRewriter : public IRMutator {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
     gpu_block_vars_ = {
@@ -107,6 +108,7 @@ class GPUMetaVarRewriter : public IRMutator {
 
  private:
   // When processing a block, stores the contents of each sub-segment.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   class Segment {
    public:
     void reset(bool mask) {
@@ -177,12 +179,16 @@ class CudaPrinter : public IRPrinter {
     return rand_func_;
   }
 
+  std::string dtypeToCppString(const Dtype& dtype) override;
+
   using IRPrinter::name_manager;
   using IRPrinter::visit;
 
  private:
   const Var* rand_func_;
   const CudaAnalysis* cuda_analysis_;
+
+  void print_flat_alloc(const Allocate* alloc);
 };
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel

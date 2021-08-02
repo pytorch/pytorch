@@ -1,9 +1,17 @@
 #include <torch/csrc/jit/frontend/environment.h>
 
-#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
-
 namespace torch {
 namespace jit {
+
+Environment::Environment(
+    Function& method,
+    ResolverPtr resolver,
+    Block* b,
+    std::shared_ptr<Environment> next)
+    : method(method),
+      resolver(std::move(resolver)),
+      b(b),
+      next(std::move(next)) {}
 
 void Environment::setVariableTypeError(
     const std::string& name,
@@ -139,7 +147,7 @@ void Environment::setSugaredVar(
     }
 
     auto parent_type = unshapedType(simple_parent->type());
-    as_simple_value = tryConvertToTypeAndPrepareGraph(
+    as_simple_value = tryConvertToType(
         loc,
         *b->owningGraph(),
         parent_type,

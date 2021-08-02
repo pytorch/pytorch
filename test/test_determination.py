@@ -18,7 +18,6 @@ class DeterminationTest(unittest.TestCase):
         "test_torch",
         "distributed/test_distributed_fork",
         "distributed/test_distributed_spawn",
-        "distributed/rpc/test_process_group_agent",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
@@ -68,10 +67,6 @@ class DeterminationTest(unittest.TestCase):
         self.assertEqual(
             self.determined_tests(["test/jit/test_custom_operators.py"]),
             ["test_jit_profiling", "test_jit"],
-        )
-        self.assertEqual(
-            self.determined_tests(["test/distributed/rpc/test_process_group_agent.py"]),
-            ["distributed/rpc/test_process_group_agent"],
         )
         self.assertEqual(
             self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),

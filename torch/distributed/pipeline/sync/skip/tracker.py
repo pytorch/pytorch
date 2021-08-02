@@ -107,7 +107,8 @@ class SkipTrackerThroughPotals(SkipTracker):
             portal.put_tensor(tensor, tensor_life)
 
         phony = portal.blue()
-        batch[0] = join(batch[0], phony)
+        tensor_idx = batch.find_tensor_idx()
+        batch[tensor_idx] = join(batch[tensor_idx], phony)
 
     def load(self, batch: Batch, ns: Namespace, name: str) -> Optional[Tensor]:
         """Loads a skip tensor from the corresponding portal to pop. The given
@@ -118,7 +119,8 @@ class SkipTrackerThroughPotals(SkipTracker):
             return tensor
 
         portal = self.portals[(ns, name)]
-        batch[0], phony = fork(batch[0])
+        tensor_idx = batch.find_tensor_idx()
+        batch[tensor_idx], phony = fork(batch[tensor_idx])
         tensor = portal.orange(phony)
         return tensor
 
@@ -131,12 +133,13 @@ class SkipTrackerThroughPotals(SkipTracker):
         """
         assert self.skip_layout.requires_copy(ns, name)
 
-        batch[0], phony = fork(batch[0])
+        tensor_idx = batch.find_tensor_idx()
+        batch[tensor_idx], phony = fork(batch[tensor_idx])
 
         portal = self.portals[(ns, name)]
         phony = portal.copy(prev_stream, next_stream, phony)
 
-        batch[0] = join(batch[0], phony)
+        batch[tensor_idx] = join(batch[tensor_idx], phony)
 
 
 class ThreadLocal(threading.local):

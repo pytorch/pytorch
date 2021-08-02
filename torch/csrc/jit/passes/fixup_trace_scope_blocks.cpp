@@ -2,7 +2,6 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
-#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -430,8 +429,7 @@ void createMethodCalls(const std::shared_ptr<Graph>& g) {
       for (Value* i : n->inputs()) {
         nvs.emplace_back(i->node()->sourceRange(), i);
       }
-      auto schema = matchSchemaAndPrepareGraph(
-          f->getSchema(), n->sourceRange(), *g, nvs, {});
+      auto schema = matchSchema(f->getSchema(), n->sourceRange(), *g, nvs, {});
       Value* retval = g->insertMethodCall(f->qualname().name(), schema);
       n->output()->replaceAllUsesWith(retval);
       n->destroy();
@@ -461,7 +459,7 @@ void inlineScopeBlocks(Block* b) {
       const auto& old_outputs = n->outputs();
 
       AT_ASSERT(new_outputs.size() == old_outputs.size());
-      for (size_t i = 0; i < old_outputs.size(); ++i) {
+      for (const auto i : c10::irange(old_outputs.size())) {
         old_outputs[i]->replaceAllUsesWith(new_outputs[i]);
       }
       n->destroy();
