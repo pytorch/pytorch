@@ -35,16 +35,16 @@ namespace details {
 void print_stub(const Tensor& t, std::string val) {
 }
 
-// void print(const Tensor& t, std::string val) {
-//   if (t.defined()) {
-//     std::cout << "- tensor " << val << " dim: " << t.dim();
-//     printf("\t\t%zu, %zu\n", t.size(0), t.dim() >= 2 ? t.size(1) : 0);
-//   } else {
-//     std::cout << "- tensor " << val << " not defined" << std::endl;
-//   }
-// }
-//#define PRINT_T(EXP) print(EXP, #EXP)
-#define PRINT_T(EXP) print_stub(EXP, #EXP)
+void print(const Tensor& t, std::string val) {
+  if (t.defined()) {
+    std::cout << "- tensor " << val << " dim: " << t.dim();
+    printf("\t\t%zu, %zu\n", t.size(0), t.dim() >= 2 ? t.size(1) : 0);
+  } else {
+    std::cout << "- tensor " << val << " not defined" << std::endl;
+  }
+}
+#define PRINT_T(EXP) print(EXP, #EXP)
+//#define PRINT_T(EXP) print_stub(EXP, #EXP)
 
 using at::Tensor;
 using at::Scalar;
@@ -3244,38 +3244,55 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   Tensor gI;
   // calculate gI
   auto input_mu_sigma2_neg_3_2 = input_sub_mu * sigma2_eps_neg_3_2;
-  auto gOinmu_sum = (gO * input_sub_mu).sum(1,true);
-  PRINT_T(gOinmu_sum);
-  auto gO_sum = gO.sum(1,true);
-  PRINT_T(gO_sum);
 
   if (ggI.defined()) {
-    auto ggI_sum = ggI_expanded.sum(1,true);
-    PRINT_T(ggI_sum);
-    auto ggIinmu_sum = (ggI_expanded * input_sub_mu).sum(1,true);
-    PRINT_T(ggIinmu_sum );
-    auto all_sub = ((ggI_sum * gO_sum).div_(N)).sub_((gO * ggI_expanded).sum(1,true)).add_(
-                    (sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum).mul_(3. / N));
-    PRINT_T(all_sub );
+
+    auto gxhat = gO * gamma_expanded;
+    auto gxhat_mu_sum = (gxhat * input_sub_mu).sum(1, true);
+    auto gxhat_sum = gxhat.sum(1, true);
+
+    auto ggI_sum = ggI_expanded.sum(1, true);
+    auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
+
+    auto all_sub = ((ggI_sum * gxhat_sum).div_(N)).sub_((ggI_expanded * gxhat).sum(1, true)).add_(
+                    (sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum).mul_(3. / N));
     auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
-    PRINT_T(gI_0t );
-    auto gI_1t = (ggIinmu_sum * sigma2_eps_neg_3_2).div_(N) * (gO_sum.div(N) - gO);
-    PRINT_T(gI_1t );
-    auto gI_2t = (gOinmu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI_expanded);
-    PRINT_T(gI_2t );
-    gI = gamma_expanded * (gI_0t.add_(gI_1t).add_(gI_2t));
+    auto gI_1t = (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
+    auto gI_2t = (gxhat_mu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI_expanded);
+
+    gI = (gI_0t.add_(gI_1t).add_(gI_2t));
+
+    // auto gOinmu_sum = (gO * input_sub_mu).sum(1,true);
+    // PRINT_T(gOinmu_sum);
+    // auto gO_sum = gO.sum(1,true);
+    // PRINT_T(gO_sum);
+
+    // auto ggI_sum = ggI_expanded.sum(1,true);
+    // PRINT_T(ggI_sum);
+    // auto ggIinmu_sum = (ggI_expanded * input_sub_mu).sum(1,true);
+    // PRINT_T(ggIinmu_sum );
+    // auto all_sub = ((ggI_sum * gO_sum).div_(N)).sub_((gO * ggI_expanded).sum(1,true)).add_(
+    //                 (sigma2_eps_neg_1 * gOinmu_sum * ggIinmu_sum).mul_(3. / N));
+    // PRINT_T(all_sub );
+    // auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
+    // PRINT_T(gI_0t );
+    // auto gI_1t = (ggIinmu_sum * sigma2_eps_neg_3_2).div_(N) * (gO_sum.div(N) - gO);
+    // PRINT_T(gI_1t );
+    // auto gI_2t = (gOinmu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI_expanded);
+    // PRINT_T(gI_2t );
+    // gI = gamma_expanded * (gI_0t.add_(gI_1t).add_(gI_2t));
   }
   PRINT_T(gI);
 
   // add contribution of gamma term to gI
   if (affine && ggG.defined()) {
 
-    auto ggG_gO = ggG_expanded * gO;
-    auto t0 = ggG_gO * sigma2_eps_neg_1_2;
-    auto t1 = (sigma2_eps_neg_1_2 * ggG_gO.sum(1, true)).div_(N);
-    auto t2 = (input_mu_sigma2_neg_3_2 * (ggG_gO * input_sub_mu).sum(1, true)).div_(N);
-    auto gI_G_term = (t0.sub_(t1).sub_(t2));
-    gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+    // auto ggG_gO = ggG_expanded * gO;
+    // auto t0 = ggG_gO * sigma2_eps_neg_1_2;
+    // auto t1 = (sigma2_eps_neg_1_2 * ggG_gO.sum(1, true)).div_(N);
+    // auto t2 = (input_mu_sigma2_neg_3_2 * (ggG_gO * input_sub_mu).sum(1, true)).div_(N);
+    // auto gI_G_term = (t0.sub_(t1).sub_(t2));
+    // gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
 
     // auto t0 = gO * sigma2_eps_neg_1_2;
     // PRINT_T(t0);
@@ -3286,6 +3303,16 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     // auto gI_G_term = ggG_expanded * (t0.add_(t1).add_(t2));
     // PRINT_T(gI_G_term);
     // gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+
+    auto t0 = gO * ggG_expanded * sigma2_eps_neg_1_2;
+    PRINT_T(t0);
+    auto t1 = (sigma2_eps_neg_1_2 * (gO * ggG_expanded).sum(1, true)).div_(-N);
+    PRINT_T(t1);
+    auto t2 = (input_mu_sigma2_neg_3_2 * (gO * ggG_expanded * input_sub_mu).sum(1,true)).div_(-N);
+    PRINT_T(t2);
+    auto gI_G_term = t0.add_(t1).add_(t2);
+    PRINT_T(gI_G_term);
+    gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
   }
 
 
