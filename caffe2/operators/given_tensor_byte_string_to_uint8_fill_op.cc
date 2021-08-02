@@ -1,15 +1,12 @@
 #include "caffe2/operators/given_tensor_byte_string_to_uint8_fill_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     GivenTensorByteStringToUInt8Fill,
     GivenTensorByteStringToUInt8FillOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(GivenTensorByteStringToUInt8Fill);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GivenTensorByteStringToUInt8Fill)
     .NumInputs(0, 1)
     .NumOutputs(1)

@@ -19,7 +19,7 @@ class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
  public:
-  virtual ~FreeMemoryCallback(){};
+  virtual ~FreeMemoryCallback() = default;
   virtual bool Execute() = 0;
 };
 

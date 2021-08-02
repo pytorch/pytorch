@@ -3,13 +3,7 @@
 #include <map>
 #include <mutex>
 #include <random>
-
-#ifdef _MSC_VER
-#include <c10/util/win32-headers.h>
-#else
-#include <sys/types.h>
-#include <unistd.h>
-#endif
+#include <string>
 
 namespace torch {
 
@@ -26,13 +20,12 @@ void warnProducerTerminatedBeforeSharedTensorsReleased() {
 
 struct CudaIPCGlobalEntities {
   std::mutex ref_counters_mutex_;
-  std::atomic<int64_t> sync_events_used_;
+  std::atomic<int64_t> sync_events_used_{0};
   std::map<std::string, std::shared_ptr<CudaIPCRefCountersFile>>
       ref_counters_files_;
   std::shared_ptr<CudaIPCRefCountersFile> next_available_ref_counters_file_;
   CudaIPCSentDataLimbo CudaIPCSentDataLimbo_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  CudaIPCGlobalEntities() : ref_counters_files_() {}
+  CudaIPCGlobalEntities()  = default;
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     // Clear shared blocks to avoid releasing shared blocks after
@@ -130,13 +123,12 @@ void ReturnRefCounter(const std::string& handle, uint64_t offset /* unused */) {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 CudaIPCSentData::CudaIPCSentData(
-    const std::string& handle,
+    std::string handle,
     int64_t offset,
     int64_t* counter_ptr,
     at::Device device)
-    : handle_(handle),
+    : handle_(std::move(handle)),
       offset_(offset),
       counter_ptr_(counter_ptr),
       original_ptr_(),
@@ -168,14 +160,15 @@ CudaIPCSentData::CudaIPCSentData(
     event_sync_required_ = true;
   } else {
     auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    at::cuda::stream_synchronize(stream);
+    event_ = nullptr;
     event_sync_required_ = false;
   }
 #else
   // cuIpcGetEventHandle with HIP is not supported, so we have to sync
   // stream instead of passing event
   auto stream = c10::cuda::getCurrentCUDAStream(device.index());
-  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  at::cuda::stream_synchronize(stream);
   event_sync_required_ = false;
 #endif
 }
@@ -203,15 +196,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     std::lock_guard<std::mutex> lock(
         cuda_ipc_global_entities.ref_counters_mutex_);
     if (!cuda_ipc_global_entities.next_available_ref_counters_file_) {
-      static std::random_device rd;
-      std::string ref_counter_handle = "/torch_";
-#ifdef _MSC_VER
-      ref_counter_handle += std::to_string(GetCurrentProcessId());
-#else
-      ref_counter_handle += std::to_string(getpid());
-#endif
-      ref_counter_handle += "_";
-      ref_counter_handle += std::to_string(rd());
+      std::string ref_counter_handle = at::NewProcessWideShmHandle();
 
       int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
       at::DataPtr sptr = at::RefcountedMapAllocator::makeDataPtr(

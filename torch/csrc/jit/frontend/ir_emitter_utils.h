@@ -77,6 +77,11 @@ bool meaningfulName(const std::string& name);
 
 void checkApplyNumInputs(Apply& apply, size_t expected_inputs);
 
+void checkApplyNumInputsRange(
+    Apply& apply,
+    size_t min_expected_inputs,
+    size_t max_expected_inputs);
+
 bool isSupportedListElementType(const TypePtr& type);
 
 // Validate that the `lhs` Expr's in an assignment statement are valid. That

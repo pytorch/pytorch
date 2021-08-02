@@ -3,6 +3,16 @@
 namespace torch {
 namespace jit {
 
+Environment::Environment(
+    Function& method,
+    ResolverPtr resolver,
+    Block* b,
+    std::shared_ptr<Environment> next)
+    : method(method),
+      resolver(std::move(resolver)),
+      b(b),
+      next(std::move(next)) {}
+
 void Environment::setVariableTypeError(
     const std::string& name,
     std::function<std::string()> msg) {

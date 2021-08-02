@@ -31,6 +31,7 @@ class HasRand : public IRVisitor {
 };
 
 template <typename Node>
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
   void visit(const Node* v) override {
@@ -53,6 +54,7 @@ class NodeFinder : public IRVisitor {
   std::vector<Node*> nodes;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class VarFinder : public IRVisitor {
  public:
   void visit(const Var* v) override {
@@ -80,9 +82,37 @@ class VarFinder : public IRVisitor {
   std::unordered_set<const Var*> vars_;
 };
 
+class BufFinder : public IRVisitor {
+ public:
+  void visit(const Buf* v) override {
+    bufs_.insert(v);
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<const Buf*> find(Stmt* s) {
+    BufFinder nf;
+    s->accept(&nf);
+    return nf.bufs();
+  }
+
+  static std::unordered_set<const Buf*> find(const Expr* e) {
+    BufFinder nf;
+    e->accept(&nf);
+    return nf.bufs();
+  }
+
+  const std::unordered_set<const Buf*>& bufs() {
+    return bufs_;
+  }
+
+ private:
+  std::unordered_set<const Buf*> bufs_;
+};
+
 // Finds all kinds of write operations to the provided Buf.
 class WritesToBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   WritesToBuf(const Buf* target) : target_(target) {}
 
   std::vector<const Stmt*> writes() {
@@ -114,6 +144,7 @@ class WritesToBuf : public IRVisitor {
 
 class StmtsReadingBuf : public IRVisitor {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   StmtsReadingBuf(const Buf* target) : target_(target) {}
 
   std::vector<const Stmt*> reads() {
