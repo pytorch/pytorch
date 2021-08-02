@@ -20,6 +20,7 @@ supported:
   - empty.memory_format
   - empty_strided
   - expand
+  - fill_.Scalar
   - leaky_relu
   - leaky_relu_backward
   - mm

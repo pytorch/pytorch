@@ -502,6 +502,13 @@ at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
       lazy_tensors::util::ToVector<lazy_tensors::int64>(size)));
 }
 
+at::Tensor& LazyNativeFunctions::fill_(at::Tensor & self, const at::Scalar & value) {
+  LTC_FN_COUNTER("lazy::");
+  LazyTensor self_tensor = bridge::GetLtcTensor(self);
+  LazyTensor::fill_(self_tensor, value);
+  return self;
+}
+
 at::Tensor LazyNativeFunctions::ge(const at::Tensor& self,
                                    const at::Scalar& other) {
   LTC_FN_COUNTER("lazy::");
