@@ -45,12 +45,12 @@ namespace torch { namespace autograd {
     }
   }
 
-  std::mutex PyDefaultSavedVariableHooks::mutex_;
-  PyObject* PyDefaultSavedVariableHooks::pack_hook_(nullptr);
-  PyObject* PyDefaultSavedVariableHooks::unpack_hook_(nullptr);
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  PyObject* PyDefaultSavedVariableHooks::pack_hook_ = nullptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  PyObject* PyDefaultSavedVariableHooks::unpack_hook_ = nullptr;
 
   void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
-    std::lock_guard<std::mutex> lock(mutex_);
     TORCH_CHECK(!pack_hook_ && !unpack_hook_,
         "Setting default hooks but they have already been set. "
         "Hint: only one pair of hooks is allowed at a time.");
@@ -69,10 +69,10 @@ namespace torch { namespace autograd {
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-    py::gil_scoped_acquire acquire;
     if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
+    py::gil_scoped_acquire gil;
     py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
     return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
