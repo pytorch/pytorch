@@ -3584,12 +3584,12 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
 // dX = P dL U + P L dU => [left-multiply P^T]
 // (P^T dX1 | P^T dX2) = (dL U1 + L dU1 | dL U2 + L dU2) (*)
 // From (*):
-// P^T dX1 = dL U1 + L dU1 => [lef-multiply by L^{-1}, right-multiply by U1^{-1}]
+// P^T dX1 = dL U1 + L dU1 => [left-multiply by L^{-1}, right-multiply by U1^{-1}]
 // L^{-1} P^T dX1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**).
-// Note, L is lower-triangular, and so is its inverse, hence L^{-1} L is lower-triangular.
+// Note, L is lower-triangular, and so is its inverse, hence L^{-1} dL is lower-triangular.
 // Also, since the diagonal of L (all ones) is never exposed explicity (packed representation),
 // the diagonal of dL is zero, and hence diag(L^{-1} dL) = 0.
-// Similarly, dU1 U1^{-1} is upper-triangular.
+// Assuming that U1 is full-rank, similarly, dU1 U1^{-1} is upper-triangular.
 // Combining these observations we conclude:
 //
 // L^{-1} dL = (L^{-1} P^T dX1 U1^{-1}) o 1_L,
