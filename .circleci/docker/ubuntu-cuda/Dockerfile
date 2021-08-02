@@ -61,6 +61,12 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh
 ENV INSTALLED_VISION ${VISION}
 
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+ADD ./common/install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
