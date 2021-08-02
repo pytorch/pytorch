@@ -57,28 +57,16 @@ static IValue Table(
   return Tup(std::move(ivalue_entries));
 }
 
-std::pair<IValue, IValue> getFunctionTuple(
-    const Module& module,
-    const Function& func,
+std::vector<c10::OperatorName> getFunctionTupleOpNames(
+    std::vector<
+        struct torch::jit::Instruction,
+        class std::allocator<struct torch::jit::Instruction>>&
+        instructions_copy,
+    std::shared_ptr<MobileCode>& code,
     BackendDebugInfoRecorder& debug_info_recorder,
-    const std::basic_string<char>& qn,
-    TypeNameUniquer& type_name_uniquer_) {
-  auto graph = func.graph()->copy();
-
-  Inline(*graph);
-
-  std::shared_ptr<MobileCode> code;
-  code = std::make_shared<MobileCode>(
-      graph,
-      func.name(),
-      BytecodeEmitDefaultValueForUnspecifiedArgMode::
-          is_enabled() /* emit_default_input_instructions */);
-  auto instructions_copy = code->instructions();
-
-  // operator names
+    std::vector<std::string>& method_names,
+    std::vector<int64_t>& op_debug_handles) {
   std::vector<c10::OperatorName> opnames;
-  std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
   for (size_t i = 0; i < instructions_copy.size(); ++i) {
     Instruction ins = instructions_copy[i];
     if (ins.op == OP || ins.op == OPN) {
@@ -146,14 +134,25 @@ std::pair<IValue, IValue> getFunctionTuple(
     op_debug_handles.emplace_back(debug_handle);
   }
 
-  // instructions
+  return opnames;
+}
+
+std::vector<IValue> getFunctionTupleInstructions(
+    std::vector<
+        struct torch::jit::Instruction,
+        class std::allocator<struct torch::jit::Instruction>>&
+        instructions_copy) {
   std::vector<IValue> instructions;
   instructions.reserve(instructions_copy.size());
   for (Instruction ins : instructions_copy) {
     instructions.emplace_back(Tup({toString(ins.op), ins.X, ins.N}));
   }
+  return instructions;
+}
 
-  // operators
+std::vector<IValue> getFunctionTupleOperators(
+    std::shared_ptr<MobileCode>& code,
+    std::vector<c10::OperatorName>& opnames) {
   std::vector<IValue> operators;
   auto op_to_specified_args = code->op_to_num_specified_args();
   operators.reserve(opnames.size());
@@ -176,16 +175,10 @@ std::pair<IValue, IValue> getFunctionTuple(
     }
   }
 
-  // constants
-  //
-  // Make a copy of the constants and append the method names
-  // that we emitted for the converted INTERFACE_CALL nodes above.
-  auto constants = code->constant_table();
-  for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
-  }
+  return operators;
+}
 
-  // types
+std::vector<IValue> getFunctionTupleTypes(std::shared_ptr<MobileCode>& code) {
   std::vector<IValue> types;
   types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
@@ -203,18 +196,23 @@ std::pair<IValue, IValue> getFunctionTuple(
     types.emplace_back(type_str);
   }
 
-  // since the register location is embedded into the bytecode, pass the
-  // register size
-  auto register_size = static_cast<int>(code->register_size());
+  return types;
+}
 
-  auto codeTable = Table(
-      {{"instructions", Tup(instructions)},
-       {"operators", Tup(operators)},
-       {"constants", Tup(constants)},
-       {"types", Tup(types)},
-       {"register_size", register_size}});
+std::vector<IValue> getFunctionTupleConstants(
+    std::shared_ptr<MobileCode>& code,
+    std::vector<std::string>& method_names) {
+  auto constants = code->constant_table();
+  for (auto& method_name : method_names) {
+    constants.emplace_back(std::move(method_name));
+  }
 
-  // schema
+  return constants;
+}
+
+IValue getFunctionTupleSchemaTable(
+    const Function& func,
+    TypeNameUniquer& type_name_uniquer_) {
   const auto& schema = func.getSchema();
   auto type_printer =
       [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
@@ -265,6 +263,65 @@ std::pair<IValue, IValue> getFunctionTuple(
       {"returns", makeArgTuple(schema.returns())},
   });
 
+  return schemaTable;
+}
+
+std::pair<IValue, IValue> getFunctionTuple(
+    const Module& module,
+    const Function& func,
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::basic_string<char>& qn,
+    TypeNameUniquer& type_name_uniquer_) {
+  auto graph = func.graph()->copy();
+
+  Inline(*graph);
+
+  std::shared_ptr<MobileCode> code;
+  code = std::make_shared<MobileCode>(
+      graph,
+      func.name(),
+      BytecodeEmitDefaultValueForUnspecifiedArgMode::
+          is_enabled() /* emit_default_input_instructions */);
+  auto instructions_copy = code->instructions();
+  std::vector<std::string> method_names;
+  std::vector<int64_t> op_debug_handles;
+
+  // operator names
+  std::vector<c10::OperatorName> opnames = getFunctionTupleOpNames(
+      instructions_copy,
+      code,
+      debug_info_recorder,
+      method_names,
+      op_debug_handles);
+
+  // instructions
+  std::vector<IValue> instructions =
+      getFunctionTupleInstructions(instructions_copy);
+
+  // operators
+  std::vector<IValue> operators = getFunctionTupleOperators(code, opnames);
+  // constants
+  //
+  // Make a copy of the constants and append the method names
+  // that we emitted for the converted INTERFACE_CALL nodes above.
+  std::vector<IValue> constants = getFunctionTupleConstants(code, method_names);
+
+  // types
+  std::vector<IValue> types = getFunctionTupleTypes(code);
+
+  // since the register location is embedded into the bytecode, pass the
+  // register size
+  auto register_size = static_cast<int>(code->register_size());
+
+  auto codeTable = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
+
+  // schema
+  auto schemaTable = getFunctionTupleSchemaTable(func, type_name_uniquer_);
   // function tuple
   auto bytecode_vals = Tup({qn, codeTable, schemaTable});
 
