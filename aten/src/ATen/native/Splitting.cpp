@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
 
@@ -35,5 +37,30 @@ Tensor split_key(const Tensor& self, int64_t ctr) {
   return res;
 }
 
+Tensor randn(IntArrayRef size, const Tensor& key,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  TORCH_CHECK(key.is_rng_key(), "`randn` only accepts key created from `torch.PRNGKey`");
+  TORCH_CHECK(key.dim() == 0 && key.numel() == 1, "key is required to be a Scalar PRNGKey");
+
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  auto result = at::empty(size, options);
+
+  const auto& device_ = result.device();
+  uint64_t seed = static_cast<uint64_t>(*(key.data_ptr<int64_t>()));
+  if (device_.is_cpu()) {
+    auto gen = at::detail::createCPUGenerator(seed);
+    return result.normal_(0, 1, gen);
+  } else if (device_.is_cuda()) {
+    auto gen = at::cuda::detail::createCUDAGenerator(device_.index());
+    gen.set_current_seed(seed);
+    return result.normal_(0, 1, gen);
+  }
+  TORCH_CHECK(false, "Device: " + result.device().str() + " is not supported.");
+}
+
 } // namespace native
+
 } // namespace at

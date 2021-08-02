@@ -3279,6 +3279,18 @@ class TestRandomTensorCreation(TestCase):
             torch.randn(size, size, out=res2)
             self.assertEqual(res1, res2)
 
+    @skipMeta
+    @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
+            torch.complex32, torch.complex64, torch.complex128)
+    def test_randn_key(self, device, dtype):
+        key = torch.PRNGKey(123456)
+        SIZE = 100
+        for size in [0, SIZE]:
+            res1 = torch.randn(size, size, key=key, dtype=dtype, device=device)
+            torch.manual_seed(123456)
+            res2 = torch.randn(size, size, dtype=dtype, device=device)
+            self.assertEqual(res1, res2)
+
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_rand(self, device, dtype):
         SIZE = 100
