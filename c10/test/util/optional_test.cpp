@@ -182,4 +182,161 @@ TYPED_TEST(CmpTest, Cmp) {
   EXPECT_THAT(y, Ge(x));
 }
 
+// Identifies a comparison operator.
+enum class Operator { eq, ne, lt, le, gt, ge };
+
+// Implements the stringable interface for Operator.
+std::string to_string(Operator op) {
+  switch (op) {
+  case Operator::eq: return "==";
+  case Operator::ne: return "!=";
+  case Operator::lt: return "<";
+  case Operator::le: return ">=";
+  case Operator::gt: return ">";
+  case Operator::ge: return ">=";
+  default:
+    TORCH_INTERNAL_ASSERT("unreachable");
+    return "";
+  }
+}
+
+// Implements the printable interface for Operator.
+std::ostream& operator<<(std::ostream& out, Operator op) {
+  return out << to_string(op);
+}
+
+// A simple class that tracks the most recent comparison operator
+// applied to it.
+//
+// This can only keep track of a single operator at a time and for
+// sanity checking requires clearing the operator before a new one may
+// be invoked.
+//
+// OperatorSpy has value semantics but only one possible value, the
+// tracked operator is considered transient and not part of the
+// objects value.
+class OperatorSpy {
+public:
+  // Returns and releases the most recent operator.
+  //
+  // REQUIRES: an operator has been invoked on this object since the
+  // constructor or most recent call to this function.
+  Operator release_most_recent_operator() const {
+    TORCH_INTERNAL_ASSERT(op_.has_value());
+    Operator op = *op_;
+    op_.reset();
+    return op;
+  }
+
+  bool operator==(OperatorSpy const& that) const {
+    set_operator(Operator::eq);
+    that.set_operator(Operator::eq);
+    return true;
+  }
+
+  bool operator!=(OperatorSpy const& that) const {
+    set_operator(Operator::ne);
+    that.set_operator(Operator::ne);
+    return false;
+  }
+
+  bool operator<(OperatorSpy const& that) const {
+    set_operator(Operator::lt);
+    that.set_operator(Operator::lt);
+    return false;
+  }
+
+  bool operator<=(OperatorSpy const& that) const {
+    set_operator(Operator::le);
+    that.set_operator(Operator::le);
+    return true;
+  }
+
+  bool operator>(OperatorSpy const& that) const {
+    set_operator(Operator::gt);
+    that.set_operator(Operator::gt);
+    return false;
+  }
+
+  bool operator>=(OperatorSpy const& that) const {
+    set_operator(Operator::ge);
+    that.set_operator(Operator::ge);
+    return true;
+  }
+
+private:
+  // Sets the operator.
+  //
+  // REQUIRES: no operator has been invoked since the constructor or
+  // most recent call to release_most_recent_operator.
+  void set_operator(Operator op) const {
+    TORCH_INTERNAL_ASSERT(!op_.has_value());
+    op_ = op;
+  }
+
+  mutable c10::optional<Operator> op_;  // transient data
+};
+
+// Ensure operators delegate properly...
+using OperatorDelegationTestTypes = testing::Types<
+    // between two optionals
+    std::pair<c10::optional<OperatorSpy>, c10::optional<OperatorSpy>>,
+
+    // between an optional and a value
+    std::pair<c10::optional<OperatorSpy>, OperatorSpy>,
+    // between a value and an optional
+    std::pair<OperatorSpy, c10::optional<OperatorSpy>>>;
+
+template <typename T>
+class OperatorDelegationTest : public testing::Test {};
+TYPED_TEST_CASE(OperatorDelegationTest, OperatorDelegationTestTypes);
+
+// Get the underlying OperatorSpy, which may be wrapped in an
+// optional.
+OperatorSpy const& underlying_spy(OperatorSpy const& value) { return value; }
+OperatorSpy const& underlying_spy(c10::optional<OperatorSpy> const& opt) { return *opt; }
+
+// Matches that a pair of OperatorSpy instances both have the most
+// recent operator invoked as specified by "op".
+//
+// ENSURES: args have released their most recent operators.
+MATCHER_P(most_recent_op_is, op, "") {
+  Operator x_op = underlying_spy(arg.first).release_most_recent_operator();
+  Operator y_op = underlying_spy(arg.second).release_most_recent_operator();
+  if (x_op != y_op) {
+    *result_listener << "OperatorSpy instances have different operators: "
+		     << x_op << " != " << y_op << '\n';
+    return false;
+  }
+  if (x_op != op) {
+    *result_listener << "OperatorSpy instances claim most recent operator is "
+		     << x_op << "; wanted " << op << '\n';
+    return false;
+  }
+  return true;
+}
+
+
+TYPED_TEST(OperatorDelegationTest, Basic) {
+  TypeParam pair = {OperatorSpy(), OperatorSpy()};
+
+  EXPECT_TRUE(pair.first == pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::eq));
+
+  EXPECT_FALSE(pair.first != pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::ne));
+
+  EXPECT_FALSE(pair.first < pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::lt));
+
+  EXPECT_TRUE(pair.first <= pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::le));
+
+  EXPECT_FALSE(pair.first > pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::gt));
+
+  EXPECT_TRUE(pair.first >= pair.second);
+  EXPECT_THAT(pair, most_recent_op_is(Operator::ge));
+}
+
 } // namespace
