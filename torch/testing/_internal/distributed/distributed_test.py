@@ -3322,6 +3322,7 @@ class DistributedTest:
             self._barrier(timeout=20)
 
         @skip_if_no_gpu
+        @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
         @sandcastle_skip_if(BACKEND == "_internal_ucc", "UCC does not support barrier")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
@@ -3379,6 +3380,7 @@ class DistributedTest:
                     self.assertEqual(tensor, expected_tensor)
             self._barrier()
 
+        @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "NCCL broadcast multigpu skipped")
         @sandcastle_skip_if(BACKEND == "_internal_ucc", "UCC does not support broadcast")
         @skip_if_no_gpu
@@ -5115,6 +5117,7 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"),
             )
 
+        @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         @sandcastle_skip_if(BACKEND == "_internal_ucc", "ucc does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):
             model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
