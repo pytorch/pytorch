@@ -14,7 +14,6 @@
 #include <hip/hip_version.h>
 #endif
 #include <cuda_runtime_api.h>
-
 namespace c10 {
 namespace cuda {
 
@@ -35,6 +34,32 @@ C10_CUDA_API void set_device(DeviceIndex device);
 
 C10_CUDA_API void device_synchronize();
 
+C10_CUDA_API void warn_or_error_on_sync();
+
+enum class SyncDebugMode { L_DISABLED = 0, L_WARN, L_ERROR };
+
+// this is a holder for c10 global state (similar to at GlobalContext)
+// currently it's used to store cuda synchronization warning state,
+// but can be expanded to hold other related global state, e.g. to
+// record stream usage
+class WarningState {
+ public:
+  void set_sync_debug_mode(SyncDebugMode l) {
+    sync_debug_mode = l;
+  }
+
+  SyncDebugMode get_sync_debug_mode() {
+    return sync_debug_mode;
+  }
+
+ private:
+  SyncDebugMode sync_debug_mode = SyncDebugMode::L_DISABLED;
+};
+
+C10_CUDA_API __inline__ WarningState& warning_state() {
+  static WarningState warning_state_;
+  return warning_state_;
+}
 // the subsequent functions are defined in the header because for performance
 // reasons we want them to be inline
 C10_CUDA_API void __inline__ memcpy_and_sync(
@@ -43,6 +68,10 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     int64_t nbytes,
     cudaMemcpyKind kind,
     cudaStream_t stream) {
+  if (C10_UNLIKELY(
+          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+    warn_or_error_on_sync();
+  }
 #if defined(HIP_VERSION) && (HIP_VERSION >= 301)
   C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
 #else
@@ -52,6 +81,10 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
 }
 
 C10_CUDA_API void __inline__ stream_synchronize(cudaStream_t stream) {
+  if (C10_UNLIKELY(
+          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+    warn_or_error_on_sync();
+  }
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));
 }
 
