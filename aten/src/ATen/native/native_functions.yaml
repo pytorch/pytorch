@@ -3886,6 +3886,10 @@
 
 - func: split_key(Tensor self, int ctr=1) -> Tensor
   variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: split_key
 
 - func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
   variants: function, method
