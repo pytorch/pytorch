@@ -26,11 +26,23 @@ from torch.distributed.algorithms.ddp_comm_hooks.default_hooks import (
     allreduce_hook,
 )
 from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
-from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
+from torch.distributed.zero import ZeroRedundancyOptimizer
+from torch.distributed.zero.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    NO_MULTIPROCESSING_SPAWN,
+)
+
+if TEST_WITH_ASAN:
+    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    sys.exit(0)
+
+if NO_MULTIPROCESSING_SPAWN:
+    print("Spawn not available, skipping tests.", file=sys.stderr)
+    sys.exit(0)
 
 try:
     import torchvision

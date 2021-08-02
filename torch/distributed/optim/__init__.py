@@ -7,4 +7,6 @@ apply the gradients on each worker.
 """
 from .optimizer import DistributedOptimizer
 from .post_localSGD_optimizer import PostLocalSGDOptimizer
-from .zero_redundancy_optimizer import ZeroRedundancyOptimizer
+# For backwards compatibility, please import from torch.distributed.zero
+# instead.
+from torch.distributed.zero import ZeroRedundancyOptimizer

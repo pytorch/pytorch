@@ -3,7 +3,7 @@ from typing import Any, Callable, List, Optional
 import torch
 import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus
+from torch.distributed.zero.zero_redundancy_optimizer import _OverlapStatus
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 # Functional optimizers require passing a list of gradients to their `step()`
