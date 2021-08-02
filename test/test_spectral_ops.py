@@ -822,7 +822,7 @@ class TestFFT(TestCase):
             result = []
             for xi in x:
                 ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center)
-                result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
+                result.append(torch.from_numpy(ri))
             result = torch.stack(result, 0)
             if input_1d:
                 result = result[0]
@@ -840,7 +840,7 @@ class TestFFT(TestCase):
                                 center=center)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
-                ref_result = torch.view_as_complex(librosa_stft(x, n_fft, hop_length, win_length, window, center))
+                ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
                 self.assertEqual(result, ref_result, atol=7e-6, rtol=0, msg='stft comparison against librosa', exact_dtype=True)
             else:
                 self.assertRaises(expected_error,
