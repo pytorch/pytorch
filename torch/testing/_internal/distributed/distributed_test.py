@@ -1412,7 +1412,7 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND == "_internal_ucc", "UCC does not support send/recv from any source"
         )
         def test_send_recv_any_source(self):
@@ -1421,7 +1421,7 @@ class DistributedTest:
         @sandcastle_skip_if(
             BACKEND == "nccl", "Nccl does not support send/recv from any source"
         )
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND == "_internal_ucc", "UCC does not support send/recv from any source"
         )
         def test_send_recv_any_source_autograd_profiler(self):

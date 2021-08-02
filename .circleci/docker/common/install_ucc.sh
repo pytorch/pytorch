@@ -5,6 +5,7 @@ set -ex
 export UCX_HOME="/usr"
 export UCC_HOME="/usr"
 
+cd /tmp
 git clone https://github.com/openucx/ucx.git
 git clone https://github.com/openucx/ucc.git
 
@@ -24,3 +25,5 @@ pushd ucc
 make -j
 make install
 popd
+
+rm -rf ucx ucc
