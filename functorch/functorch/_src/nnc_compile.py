@@ -12,7 +12,7 @@ import torch._C._te as te
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx import map_arg
-from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.passes.shape_prop import ShapeProp, TensorMetadata
 import operator
 import functools
 scope = te.KernelScope()
@@ -255,16 +255,25 @@ def process_shape(x):
         return torch.Size([1])
     return x
 
+def map_node_meta(f, node_meta):
+    if isinstance(node_meta, TensorMetadata):
+        return f(node_meta)
+    elif isinstance(node_meta, tuple):
+        return tuple([map_node_meta(f, i) for i in node_meta])
+    elif isinstance(node_meta, list):
+        return list([map_node_meta(f, i) for i in node_meta])
+    return f(node_meta)
+
 def lower_function(node, op, nnc_args, args):
     inp_shapes = fx.node.map_aggregate(args, lambda arg: (process_shape(arg.meta['tensor_meta'].shape), arg.meta['tensor_meta'].dtype) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None)
     nnc_args = [x.data() if isinstance(x, te.Placeholder) else x for x in nnc_args]
-    out_shape = pytree.tree_map(lambda x: process_shape(x.shape), node.meta['tensor_meta'])
+    out_shape = map_node_meta(lambda x: process_shape(x.shape), node.meta['tensor_meta'])
     if op in lowering_functions:
         out = lowering_functions[op](node.name, out_shape, inp_shapes, nnc_args)
     else:
         out_shape = pytree.tree_map(lambda x: get_te_shapes(x), out_shape)
         aten_str = f'aten::{op.__name__}'
-        out_type = pytree.tree_map(lambda x: get_nnc_type(x.dtype), node.meta['tensor_meta'])
+        out_type = map_node_meta(lambda x: get_nnc_type(x.dtype), node.meta['tensor_meta'])
         out = te.lower(aten_str, list(nnc_args), out_shape, out_type)
     if isinstance(out, te.Tensor):
         return out.buf(), [out.stmt()]
