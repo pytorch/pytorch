@@ -959,7 +959,6 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
-
   // Array access is faster than .size(n) and .stride(n)
   const auto self_sizes = self.sizes();
   auto m1_strides = m1.strides();
@@ -1003,6 +1002,7 @@ static void addmm_impl_cpu_(
   } else {
     transpose_c = false;
     // make c FORTRAN contiguous
+    // conjugation is resolved in contiguous()
     c = result.transpose(0, 1).contiguous().transpose_(0, 1);
   }
 
@@ -1049,11 +1049,16 @@ static void addmm_impl_cpu_(
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
   if (a.is_conj() && !transpose_a) {
-    a = a.conj_physical();
+    // verify the tensor strides are not changed
+    a = a.resolve_conj();
   }
   if (b.is_conj() && !transpose_b) {
-    b = b.conj_physical();
+    // verify the tensor strides are not changed
+    b = b.resolve_conj();
   }
+
+  // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
+  TORCH_CHECK(!c.is_conj());
 
   // Apply BLAS routine
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16,
