@@ -406,6 +406,14 @@ class TORCH_API Tensor {
     impl_->_set_neg(negative);
   }
 
+  inline bool is_rng_key() const {
+    return impl_->is_rng_key();
+  }
+
+  inline void _set_rng_key(bool value) const {
+    impl_->_set_rng_key(value);
+  }
+
   /// Returns a `Tensor`'s layout.
   Layout layout() const noexcept {
     return impl_->layout();

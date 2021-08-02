@@ -450,6 +450,14 @@ static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* k
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_PRNGKey(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  jit::tracer::warn("torch.PRNGKey", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::splittable_tensor_ctor(torch::tensors::get_default_dispatch_key(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_get_device(PyObject* self_, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -702,6 +710,7 @@ static PyMethodDef torch_functions[] = {
   {"_validate_sparse_csr_tensor_args", castPyCFunctionWithKeywords(THPVariable__validate_sparse_csr_tensor_args), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", castPyCFunctionWithKeywords(THPVariable_mm), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", castPyCFunctionWithKeywords(THPVariable_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"PRNGKey", castPyCFunctionWithKeywords(THPVariable_PRNGKey), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"get_device", castPyCFunctionWithKeywords(THPVariable_get_device), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"numel", castPyCFunctionWithKeywords(THPVariable_numel), METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}

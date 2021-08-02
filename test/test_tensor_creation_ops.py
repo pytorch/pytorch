@@ -2982,6 +2982,17 @@ class TestTensorCreation(TestCase):
             t = torch.tensor(a)
             self.assertEqual(len(w), 0)
 
+    def test_PRNGKey(self):
+        key = torch.PRNGKey(1)
+        keys = key.split_key(3)
+        self.assertEqual(keys.size(), [3])
+        self.assertTrue(keys.is_rng_key())
+
+        t = torch.tensor(1)
+        self.assertFalse(t.is_rng_key())
+        with self.assertRaises(RuntimeError):
+            ts = t.split_key()
+
 
 # Class for testing random tensor creation ops, like torch.randint
 class TestRandomTensorCreation(TestCase):

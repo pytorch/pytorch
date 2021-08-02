@@ -94,6 +94,10 @@ enum class DispatchKey : uint8_t {
   // intended for out of tree use; tested by aten/src/ATen/test/rng_test.cpp
   CustomRNGKeyId,
 
+  // Splittable RNG Key
+  // Out-of-tree for functorch
+  SplittableRNGKey,
+
   // Here are backends which specify more specialized operators
   // based on the layout of the tensor.  Note that the sparse backends
   // are one case where ordering matters: sparse multi-dispatches with

@@ -1033,6 +1033,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * Whether or not the tensor is Splittable RNG Key
+   */
+  inline bool is_rng_key() const {
+    return key_set_.has(DispatchKey::SplittableRNGKey);
+  }
+
+  /**
+   * Set tensor to Splittable RNG Key
+   */
+  void _set_rng_key(bool value) {
+    if (value) {
+      key_set_ = key_set_.add(DispatchKey::SplittableRNGKey);
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::SplittableRNGKey);
+    }
+  }
+
+  /**
    * Return the accumulated gradient of a tensor. This gradient is computed
    * using forward mode AD.
    *

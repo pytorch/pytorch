@@ -226,4 +226,8 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
+inline bool is_rng_key(const Tensor& tensor) {
+  return tensor.is_rng_key();
+}
+
 }

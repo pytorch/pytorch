@@ -42,6 +42,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
+    case DispatchKey::SplittableRNGKey:
+      return "SplittableRNGKey";
 
     case DispatchKey::MkldnnCPU:
       return "MkldnnCPU";

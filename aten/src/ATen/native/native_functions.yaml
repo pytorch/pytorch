@@ -2351,6 +2351,12 @@
   device_guard: False
   manual_cpp_binding: True
 
+- func: is_rng_key(Tensor self) -> bool
+  variants: function, method
+  device_check: NoCheck
+  device_guard: False
+  manual_cpp_binding: True
+
 - func: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
   dispatch:
     CompositeExplicitAutograd: kl_div
@@ -3877,6 +3883,9 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+
+- func: split_key(Tensor self, int ctr=1) -> Tensor
+  variants: function, method
 
 - func: hsplit.int(Tensor(a) self, int sections) -> Tensor(a)[]
   variants: function, method

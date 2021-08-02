@@ -50,6 +50,10 @@ bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }
 
+bool is_rng_key(const Tensor& self) {
+  return self.is_rng_key();
+}
+
 // True if `self` and `from` have compatible tensor type so that `from`'s
 // TensorImpl can be copied to `self`.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {

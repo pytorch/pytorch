@@ -370,6 +370,10 @@ def _str_intern(inp):
             # a meta tensor, which it could be, but it isn't right now
             tensor_str = '...'
         else:
+            if self.is_rng_key():
+                prefix = 'PRNGKey('
+                indent = len(prefix)
+
             if self.numel() == 0 and not self.is_sparse:
                 # Explicitly print the shape if it is not (0,), to match NumPy behavior
                 if self.dim() != 1:

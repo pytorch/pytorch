@@ -70,6 +70,7 @@ class DispatchKey(Enum):
     QuantizedCUDA = auto()
     QuantizedXPU = auto()
     CustomRNGKeyId = auto()
+    SplittableRNGKey = auto()
     MkldnnCPU = auto()
     SparseCPU = auto()
     SparseCUDA = auto()

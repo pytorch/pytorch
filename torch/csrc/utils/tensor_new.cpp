@@ -918,6 +918,47 @@ Tensor tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, Py
   throw std::runtime_error("tensor(): invalid arguments");
 }
 
+Tensor splittable_tensor_ctor(c10::DispatchKey dispatch_key, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "PRNGKey(PyObject* data, *, Device? device=None, DimnameList? names=None)",
+  });
+
+  constexpr int ctor_num_args = 3;
+  ParsedArgs<ctor_num_args> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    PyObject* data = r.pyobject(0);
+    if (THPVariable_Check(data)) {
+      auto ret = PyErr_WarnEx(PyExc_UserWarning,
+        "To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() "
+        "rather than torch.PRNGKey(sourceTensor).", 1);
+      if (ret != 0) throw python_error();
+    }
+
+    // TODO: Add CUDA PRNGKey
+    auto device = r.deviceOptional(1);
+    TORCH_CHECK(!device.has_value() || device->is_cpu(), "torch.PRNGKey currently only support CPU device");
+    auto new_tensor = internal_new_from_data(
+               typeIdWithDefault(r, 1, dispatch_key),
+               at::ScalarType::Long,
+               device,
+               data,
+               /*copy_variables=*/true,
+               /*copy_numpy=*/true,
+               /*type_inference=*/false,
+               /*pin_memory*/false);
+    auto names = r.toDimnameListOptional(2);
+    if (names) {
+      at::namedinference::propagate_names(new_tensor, *names, /*validate_names=*/true);
+    }
+    new_tensor.detach_(); // ensure new_tensor a leaf node
+    new_tensor.set_requires_grad(false);
+    new_tensor._set_rng_key(true);
+    return new_tensor;
+  }
+  throw std::runtime_error("PRNGKey(): invalid arguments");
+}
+
 Tensor as_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   // TODO: add requires_grad once we decide on semantics for sharing data.
   static PythonArgParser parser({
