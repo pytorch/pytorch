@@ -764,12 +764,16 @@ class Module:
         This can be called as
 
         .. function:: to(device=None, dtype=None, non_blocking=False)
+           :noindex:
 
         .. function:: to(dtype, non_blocking=False)
+           :noindex:
 
         .. function:: to(tensor, non_blocking=False)
+           :noindex:
 
         .. function:: to(memory_format=torch.channels_last)
+           :noindex:
 
         Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
         floating point or complex :attr:`dtype`\ s. In addition, this method will
