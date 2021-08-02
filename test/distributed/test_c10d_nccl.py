@@ -1607,12 +1607,12 @@ class DistributedDataParallelTest(
         sgd_lr = 1e-2
         sgd_momentum = 0.9
         sgd_weight_decay = 0.01
-        opt_hook_state = default.OptimizerHookState(
+        opt_hook_state = default._OptimizerHookState(
             _FunctionalSGD, sgd_lr, momentum=sgd_momentum, weight_decay=sgd_weight_decay
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
-            default.hook_then_optimizer(hook, opt_hook_state),
+            default._hook_then_optimizer(hook, opt_hook_state),
             gradient_as_bucket_view,
             hook_state,
         )
