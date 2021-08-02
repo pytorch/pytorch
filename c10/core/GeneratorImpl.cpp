@@ -2,6 +2,10 @@
 #include <chrono>
 #include <random>
 
+#if defined(__SGX_ENABLED__)
+#include <sgx_trts.h>
+#endif
+
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
@@ -57,7 +61,9 @@ static uint64_t readURandomLong() {
 /**
  * Gets a non deterministic random number number from either the
  * /dev/urandom or the current time. For CUDA, gets random from
- * std::random_device and adds a transformation on it.
+ * std::random_device and adds a transformation on it. For Intel SGX
+ * platform use sgx_read_rand as reading from /dev/urandom is
+ * prohibited on that platfrom.
  *
  * FIXME: The behavior in this function is from legacy code
  * (THRandom_seed/THCRandom_seed) and is probably not the right thing to do,
@@ -76,6 +82,10 @@ uint64_t getNonDeterministicRandom(bool is_cuda) {
     s = (uint64_t)std::chrono::high_resolution_clock::now()
             .time_since_epoch()
             .count();
+#elif defined(__SGX_ENABLED__)
+    TORCH_CHECK(
+        sgx_read_rand(reinterpret_cast<uint8_t*>(&s), sizeof(s)) == SGX_SUCCESS,
+        "Could not generate random number with sgx_read_rand.");
 #else
     s = readURandomLong();
 #endif

@@ -56,19 +56,14 @@ class TORCH_API DistEngine {
   // to distributed autograd.
   std::unordered_map<std::string, int> getDebugInfo() const;
 
+  DistEngine(const DistEngine&) = delete;
+  DistEngine& operator=(const DistEngine&) = delete;
+  DistEngine(DistEngine&&) = delete;
+  DistEngine& operator=(DistEngine&&) = delete;
  private:
   // Make sure this is a singleton.
   DistEngine();
   ~DistEngine();
-
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine(const DistEngine&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine& operator=(const DistEngine&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine(DistEngine&&) = delete;
-  // NOLINTNEXTLINE(modernize-use-equals-delete)
-  DistEngine& operator=(DistEngine&&) = delete;
 
   // Validates the input roots for the backward computations and retrieves the
   // appropriate root edges and corresponding gradients. Populates root_edges

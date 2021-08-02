@@ -366,9 +366,6 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
 }
 
 TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
-  m.def("static_runtime::pure_inputs() -> Tensor", []() -> at::Tensor {
-    return at::randn({1});
-  });
   m.def("static_runtime::permute_copy(Tensor self, int[] dims) -> Tensor");
   m.def(
       "static_runtime::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)");
@@ -386,24 +383,10 @@ bool HasInplaceOp(std::shared_ptr<Graph>& graph, const AliasDb& alias_db) {
   return HasInplaceOp(graph->block(), alias_db);
 }
 
-void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
-  auto* fake_input =
-      graph->insert(Symbol::fromQualString("static_runtime::pure_inputs"), {});
-  fake_input->node()->moveBefore(*graph->nodes().begin());
-
-  std::vector<std::pair<Value*, Use>> old_inputs;
-  for (auto* input : graph->inputs()) {
-    for (const auto& use : input->uses()) {
-      old_inputs.emplace_back(std::make_pair(input, use));
-    }
-    input->replaceAllUsesWith(fake_input);
-  }
-
+void ReplaceWithCopy(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    bool outputs_are_immutable) {
   AliasDb db(graph);
-  for (const auto& p : old_inputs) {
-    p.second.user->replaceInput(p.second.offset, p.first);
-  }
-  fake_input->node()->destroy();
 
   const std::map<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
@@ -474,7 +457,7 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
     }
 
     auto* out = n->output();
-    if (db.mayContainAlias({out}, graph->outputs())) {
+    if (!outputs_are_immutable && db.mayContainAlias({out}, graph->outputs())) {
       continue;
     }
     auto* new_node = graph->create(new_symbol, n->outputs().size());
@@ -488,11 +471,19 @@ void ReplaceWithCopy(std::shared_ptr<torch::jit::Graph>& graph) {
   for (const auto& p : replacement) {
     auto* old_node = p.first;
     auto* new_node = p.second;
+    new_node->output()->copyMetadata(old_node->output());
     old_node->replaceAllUsesWith(new_node);
     old_node->destroy();
   }
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
 }
 
+// NB: The alias type of the fused op needs to be changed to
+// c10::AliasAnalysisKind::PURE_FUNCTION to make alias analysis work.
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   auto nodes = graph->nodes();
   for (auto it = nodes.begin(); it != nodes.end(); ++it) {
@@ -530,6 +521,11 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       node->eraseOutput(0);
     }
   }
+#ifndef NDEBUG
+  graph->lint();
+  AliasDb db2(graph);
+  torch::jit::Lint(&db2);
+#endif
 }
 
 } // namespace jit

@@ -193,13 +193,14 @@ class TORCH_API LoopNest {
   // For example, consider the following code. This will be used to
   // demonstrate the methods below.
   //
-  // S1:  for i
-  // S2:    A[i] = 0
-  // S3:    for j
-  // S4:      A[i] = A[i] +
-  // S5:    B[i] = A[i]
-  // S6:    for k
-  // S7:      B[i] = B[i] +
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  // S5:      B[i] = A[i]
+  // S6:      for k
+  // S7:        B[i] = B[i] +
 
   // This method distributes the given loop over its body by splitting
   // after every given pivot stmt.
@@ -209,15 +210,16 @@ class TORCH_API LoopNest {
   // For the above example:
   //   distributeLoop(S1, {S3, S5})
   // will result in:
-  // S1:  for i
-  // S2:    A[i] = 0
-  // S3:    for j
-  // S4:      A[i] = A[i] +
-  //   :  for i
-  // S5:    B[i] = A[i]
-  //   :  for i
-  // S6:    for k
-  // S7:      B[i] = B[i] +
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  //   :    for i
+  // S5:      B[i] = A[i]
+  //   :    for i
+  // S6:      for k
+  // S7:        B[i] = B[i] +
   static std::vector<For*> distributeLoop(
       For* loop,
       const std::unordered_set<Stmt*>& pivots);
@@ -227,17 +229,38 @@ class TORCH_API LoopNest {
   // For the above example:
   //   distributeLoop(S1)
   // will result in:
-  // S1:  for i
-  // S2:    A[i] = 0
-  //   :  for i
-  // S3:    for j
-  // S4:      A[i] = A[i] +
-  //   :  for i
-  // S5:    B[i] = A[i]
-  //   :  for i
-  // S6:    for k
-  // S7:      B[i] = B[i] +
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  //   :    for i
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  //   :    for i
+  // S5:      B[i] = A[i]
+  //   :    for i
+  // S6:      for k
+  // S7:        B[i] = B[i] +
   static std::vector<For*> distributeLoop(For* loop);
+  // Same as above, but also distribute parent loops.
+  // Returns the result of distributing the outermost loop.
+  //
+  // For the above example:
+  //   distributeLoopAndParents(S1) will result in:
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  //   :  for m
+  //   :    for i
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  //   :  for m
+  //   :    for i
+  // S5:      B[i] = A[i]
+  //   :  for m
+  //   :    for i
+  // S6:      for k
+  // S7:        B[i] = B[i] +
+  static std::vector<For*> distributeLoopAndParents(For* loop);
 
   // This method distributes the given loop over its body by splitting
   // after every For stmt in its body.
@@ -245,15 +268,33 @@ class TORCH_API LoopNest {
   // For the above example:
   //   distributeLoopOverInnerLoops(S1)
   // will result in:
-  // S1:  for i
-  // S2:    A[i] = 0
-  // S3:    for j
-  // S4:      A[i] = A[i] +
-  //   :  for i
-  // S5:    B[i] = A[i]
-  // S6:    for k
-  // S7:      B[i] = B[i] +
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  //   :    for i
+  // S5:      B[i] = A[i]
+  // S6:      for k
+  // S7:        B[i] = B[i] +
   static std::vector<For*> distributeLoopOverInnerLoops(For* loop);
+  // Same as above, but also distribute parent loops.
+  // Returns the result of distributing the outermost loop.
+  //
+  // For the above example:
+  //   distributeLoopAndParentsOverInnerLoops(S1)
+  // will result in:
+  // S0:  for m
+  // S1:    for i
+  // S2:      A[i] = 0
+  // S3:      for j
+  // S4:        A[i] = A[i] +
+  //   :  for m
+  //   :    for i
+  // S5:      B[i] = A[i]
+  // S6:      for k
+  // S7:        B[i] = B[i] +
+  static std::vector<For*> distributeLoopAndParentsOverInnerLoops(For* loop);
 
   // This method performs loop fusion.
   // For example, consider the following code.
@@ -276,6 +317,14 @@ class TORCH_API LoopNest {
   // S6:    for k
   // S7:      B[m] = B[m] +
   //
+  // This transformation is unsafe as it simply add all loops into the body of
+  // the first loop for fusion without correctness checks.
+  //
+  // Below are the two requirements to apply unsafeFuseLoops:
+  //  * All the loops have the same parent.
+  //  * There are no statements between these loops in their parent body.
+  static bool unsafeFuseLoops(const std::vector<For*>& loops, For** fused);
+
   // Loop fusion is done only when all the conditions below are satisfied.
   //  * All the loops have the same parent.
   //  * There are no statements between these loops in their parent body.
@@ -287,7 +336,8 @@ class TORCH_API LoopNest {
   static void reorderAxis(For* a, For* b);
 
   // Reorder the given list of loops according to the permutation specified.
-  // Here permutation[i] represents the location of the loop i in the result.
+  // Here `permutation[i]` represents the position of the loop in the input
+  // which will end up at position `i` after the reorder.
   //
   // For example, consider the following code:
   //   for p
@@ -365,6 +415,11 @@ class TORCH_API LoopNest {
   static bool flatten(const std::vector<For*>& f);
 
   // Compresses the given buffer based on its use in the given Stmts.
+  //
+  // NOTE: This API assumes that there are no accesses to the given buffer
+  // outside the given statement. So, this should be called with the entire
+  // kernel statement to avoid incorrect buffer compressions.
+  //
   // For example, given the input:
   //
   // for (int i = 0; i < 100; ++i) {
@@ -388,6 +443,15 @@ class TORCH_API LoopNest {
   //   }
   // }
   static void compressBuffer(Buf* buf, Stmt* stmt);
+
+  // Compresses all buffers in the given statement.
+  //
+  // NOTE: This API assumes that there are no accesses to buffers outside
+  // the given statement. So, this should be called with the entire
+  // kernel statement to avoid incorrect buffer compressions.
+  //
+  // TODO: Add an IR verifier check to detect invalidly compressed buffers.
+  static void compressAllBuffers(Stmt* stmt);
 
   // Get 'num' loops from the loopnest starting at 'f'.
   static std::vector<For*> getLoopStmtsInLoopNest(For* f, size_t num);
