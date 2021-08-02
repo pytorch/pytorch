@@ -102,12 +102,3 @@ endif()
 add_executable(parallel_benchmark ${TORCH_API_TEST_DIR}/parallel_benchmark.cpp)
 target_include_directories(parallel_benchmark PRIVATE ${ATen_CPU_INCLUDE})
 target_link_libraries(parallel_benchmark PRIVATE torch)
-
-if(USE_DEPLOY)
-  add_custom_target(deploy_generated_examples ALL
-    COMMAND python torch/csrc/deploy/example/generate_examples.py
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    COMMENT "Generating torch::deploy examples"
-    VERBATIM
-  )
-endif()
