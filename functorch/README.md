@@ -66,6 +66,7 @@ If you already have a nightly of PyTorch installed and wanted to upgrade it
 
 Install functorch:
 ```
+pip install ninja  # Makes the build go faster
 pip install --user "git+https://github.com/facebookresearch/functorch.git"
 ```
 
