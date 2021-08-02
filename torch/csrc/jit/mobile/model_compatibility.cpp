@@ -1,4 +1,5 @@
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
@@ -137,6 +138,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     std::vector<IValue> bytecode_ivalues) {
   constexpr uint64_t min_version_with_schema = 6;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (_get_model_bytecode_version(bytecode_ivalues) < min_version_with_schema) {
     TORCH_WARN(
         "Only models with bytecode version 6 and above contain operator schema information. Please re-export your model to generate it");
@@ -147,7 +149,7 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
     return result;
   }
   // loop over all the functions in the bytecode
-  for (int i = 1; i < bytecode_ivalues.size(); i++) {
+  for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     // descend to the operators list
     auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
     auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];

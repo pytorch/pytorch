@@ -1,6 +1,5 @@
 import os
 import sys
-import unittest
 from contextlib import closing
 
 import torch.distributed as dist
@@ -22,12 +21,15 @@ from torch.testing._internal.common_utils import (
 def path(script):
     return os.path.join(os.path.dirname(__file__), script)
 
+if TEST_WITH_ASAN:
+    print("Skip ASAN as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    sys.exit(0)
 
-@unittest.skipIf(
-    TEST_WITH_ASAN or TEST_WITH_TSAN,
-    "Skip ASAN as torch + multiprocessing spawn have known issues",
-)
-class TestDistirbutedLaunch(TestCase):
+if TEST_WITH_TSAN:
+    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    sys.exit(0)
+
+class TestDistributedLaunch(TestCase):
     def test_launch_user_script(self):
         nnodes = 1
         nproc_per_node = 4

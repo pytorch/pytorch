@@ -64,6 +64,7 @@ Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
 class TORCH_API Block : public StmtNode<Block> {
  public:
   static Block* make(const std::vector<Stmt*>& stmts) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Stmt*> valid_stmts;
     for (auto& stmt : stmts) {
       if (!stmt) {
@@ -159,7 +160,9 @@ class TORCH_API Block : public StmtNode<Block> {
           "Block replace Stmt with existing parent", new_stmt);
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Stmt*> stmts(stmts_.begin(), stmts_.end());
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Stmt*> cloned_stmts(stmts.size());
     bool found = false;
     for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
@@ -198,6 +201,7 @@ class TORCH_API Block : public StmtNode<Block> {
     stmts_.clear();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Block(const std::vector<Stmt*>& stmts) {
     for (Stmt* s : stmts) {
       if (!s) {
@@ -257,6 +261,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   static const Block* getSharedParent(const Stmt* p1, const Stmt* p2) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::unordered_set<const Block*> enclosing;
 
     const Stmt* p1_p = p1;
@@ -743,6 +748,7 @@ class TORCH_API For : public StmtNode<For> {
 // TODO: make IR nodes extensible.
 class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AtomicAdd(const Buf* buf, std::vector<const Expr*> indices, const Expr* value)
       : buf_(buf), indices_(std::move(indices)), value_(value) {}
 
@@ -821,6 +827,7 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
     return args_;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExternalCall(
       const Buf* buf,
       std::string func_name,

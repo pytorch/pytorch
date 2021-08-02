@@ -185,7 +185,7 @@ __global__ void atomicadaptivemaxgradinput(
       int argmax = (*ptr_ind);
 
       // atomic add since different threads could update same variable
-      gpuAtomicAdd(&(gradInput[argmax]), z);
+      gpuAtomicAddNoReturn(&(gradInput[argmax]), z);
     }
   }
 }

@@ -942,6 +942,13 @@ resolve_conj() -> Tensor
 See :func:`torch.resolve_conj`
 """)
 
+add_docstr_all('resolve_neg',
+               r"""
+resolve_neg() -> Tensor
+
+See :func:`torch.resolve_neg`
+""")
+
 add_docstr_all('copysign',
                r"""
 copysign(other) -> Tensor
@@ -1002,6 +1009,18 @@ add_docstr_all('count_nonzero',
 count_nonzero(dim=None) -> Tensor
 
 See :func:`torch.count_nonzero`
+""")
+
+add_docstr_all('cov', r"""
+cov(*, correction=1, fweights=None, aweights=None) -> Tensor
+
+See :func:`torch.cov`
+""")
+
+add_docstr_all('corrcoef', r"""
+corrcoef() -> Tensor
+
+See :func:`torch.corrcoef`
 """)
 
 add_docstr_all('cross',
@@ -2037,6 +2056,13 @@ add_docstr_all('is_conj',
 is_conj() -> bool
 
 Returns True if the conjugate bit of :attr:`self` is set to true.
+""")
+
+add_docstr_all('is_neg',
+               r"""
+is_neg() -> bool
+
+Returns True if the negative bit of :attr:`self` is set to true.
 """)
 
 add_docstr_all('is_signed',
@@ -3786,14 +3812,16 @@ inferred from the arguments of ``self.to(*args, **kwargs)``.
 
 Here are the ways to call ``to``:
 
-.. function:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(dtype, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+   :noindex:
 
     Returns a Tensor with the specified :attr:`dtype`
 
     Args:
         {memory_format}
 
-.. function:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+.. method:: to(device=None, dtype=None, non_blocking=False, copy=False, memory_format=torch.preserve_format) -> Tensor
+   :noindex:
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
@@ -3806,7 +3834,8 @@ Here are the ways to call ``to``:
     Args:
         {memory_format}
 
-.. function:: to(other, non_blocking=False, copy=False) -> Tensor
+.. method:: to(other, non_blocking=False, copy=False) -> Tensor
+   :noindex:
 
     Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
     the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
@@ -4355,7 +4384,8 @@ Example::
     False
 
 
-.. function:: view(dtype) -> Tensor
+.. method:: view(dtype) -> Tensor
+   :noindex:
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
 different :attr:`dtype`. :attr:`dtype` must have the same number of bytes per

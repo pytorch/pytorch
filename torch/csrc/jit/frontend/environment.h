@@ -39,15 +39,9 @@ struct Environment {
       Function& method,
       ResolverPtr resolver,
       Block* b,
-      std::shared_ptr<Environment> next = nullptr)
-      : method(method),
-        resolver(std::move(resolver)),
-        b(b),
-        next(std::move(next)) {}
+      std::shared_ptr<Environment> next = nullptr);
 
-  std::shared_ptr<Environment> getNext() {
-    return next;
-  }
+  std::shared_ptr<Environment> next;
 
   // set type error in the lowest environment. if the variable is used after an
   // error has been set, then we will use the more informative error message
@@ -111,7 +105,6 @@ struct Environment {
   ResolverPtr resolver;
   std::unordered_map<std::string, std::function<std::string()>> error_messages;
   Block* b;
-  std::shared_ptr<Environment> next;
   friend struct to_ir;
 
  private:

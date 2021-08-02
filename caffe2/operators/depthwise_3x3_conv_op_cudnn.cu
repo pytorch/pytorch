@@ -4,6 +4,7 @@
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -176,7 +177,7 @@ __global__ void DepthwiseConv2dBackpropFilterGPUKernelNCHW(
 #endif
           T* addr = filter_backprop + (in_d * filter_rows * filter_cols) +
               (f_c + filter_cols * f_r);
-          atomicAdd(addr, partial_sum);
+          gpu_atomic_add(addr, partial_sum);
         }
       }
     } else {
@@ -199,7 +200,7 @@ __global__ void DepthwiseConv2dBackpropFilterGPUKernelNCHW(
 #endif
             T* addr = filter_backprop + (in_d * filter_rows * filter_cols) +
                 (f_c + filter_cols * f_r);
-            atomicAdd(addr, partial_sum);
+            gpu_atomic_add(addr, partial_sum);
           }
         }
       }

@@ -259,6 +259,7 @@ struct to_ir {
       at::ArrayRef<NamedValue> kwargs);
   std::shared_ptr<SugaredValue> emitRpcExpr(const Apply& apply, Symbol rpc_op);
   Value* emitBinaryOp(const TreeRef& tree);
+  Value* emitListLiteral(ListLiteral ll, TypePtr type_hint);
   Value* emitSimpleExpr(
       const TreeRef& tree,
       const TypePtr& type_hint = nullptr);
