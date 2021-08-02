@@ -20,7 +20,6 @@ pushd ucc
 ./autogen.sh
 ./configure --prefix=$UCC_HOME              \
     --with-ucx=$UCX_HOME                    \
-    --with-nccl=no                          \
     --with-cuda=/usr/local/cuda/
 make -j
 make install
