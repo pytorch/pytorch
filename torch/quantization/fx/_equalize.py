@@ -1,9 +1,16 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
 
-from .utils import get_new_attr_name_with_prefix, maybe_get_next_module
+from .utils import (
+    WEIGHT_INDEX_DICT,
+    get_new_attr_name_with_prefix,
+    maybe_get_next_module,
+    _parent_name,
+)
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
@@ -12,8 +19,16 @@ from ..observer import (
 from ..utils import check_min_max_valid
 
 from collections import namedtuple
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional
 import warnings
+
+
+def reshape_scale(scale: torch.Tensor, axis: int, input: torch.Tensor) -> torch.Tensor:
+    """Reshapes the scale so that we can multiply it to the input by the given axis.
+    """
+    new_shape = [1] * input.ndim
+    new_shape[axis] = input.size(axis)
+    return scale.view(new_shape)
 
 
 class _InputEqualizationObserver(nn.Module):
@@ -52,19 +67,25 @@ class _InputEqualizationObserver(nn.Module):
                                                   factory_kwargs=factory_kwargs)
 
         self.equalization_scale = torch.empty(0)
+        self.equalization_shape: List[int] = []
 
     def forward(self, x_orig):
-        # TODO: Allow for convoluational layers
-        if not (x_orig.ndim == 2):
-            raise ValueError("InputEqualizationObserver only supports Linear layers")
+        if not (x_orig.ndim >= 2 and x_orig.ndim <= 5):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
+
+        # Calculate the shape needed to reshape the equalization scale later (needed for Conv layers)
+        self.equalization_shape = [1] * x_orig.ndim
+        self.equalization_shape[1] = x_orig.size(1)
 
         return self.input_obs(x_orig)
 
     def get_input_minmax(self):
-        return (self.input_obs.min_vals, self.input_obs.max_vals)
+        return (self.input_obs.min_val, self.input_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
-        self.equalization_scale = equalization_scale
+        # Reshape the equalization scale along axis=1 so that it can be
+        # multiplied with the input along axis=1
+        self.equalization_scale = torch.reshape(equalization_scale, self.equalization_shape)
 
     def calculate_scaled_minmax(self):
         r""" Returns the scaled min/max inputs
@@ -80,8 +101,9 @@ class _InputEqualizationObserver(nn.Module):
         # Scale the input by the equalization scale located at the same column
         # index
         (min_inputs, max_inputs) = self.get_input_minmax()
-        min_input_scaled = torch.min(torch.mul(min_inputs, self.equalization_scale))
-        max_input_scaled = torch.max(torch.mul(max_inputs, self.equalization_scale))
+        equalization_scale_reshaped = reshape_scale(self.equalization_scale, 0, min_inputs)
+        min_input_scaled = torch.min(torch.mul(min_inputs, equalization_scale_reshaped))
+        max_input_scaled = torch.max(torch.mul(max_inputs, equalization_scale_reshaped))
 
         return min_input_scaled, max_input_scaled
 
@@ -126,13 +148,13 @@ class _WeightEqualizationObserver(nn.Module):
         self.equalization_scale = torch.empty(0)
 
     def forward(self, w_orig):
-        # TODO: Allow for convoluational layers
-        if not (w_orig.ndim == 2):
-            raise ValueError("WeightEqualizationObserver only supports Linear layers")
+        if not (w_orig.ndim >= 2 and w_orig.ndim <= 5):
+            raise ValueError("InputEqualizationObserver only supports Linear and Conv layers")
+
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
-        return (self.weight_col_obs.min_vals, self.weight_col_obs.max_vals)
+        return (self.weight_col_obs.min_val, self.weight_col_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale
@@ -163,6 +185,9 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
+    # Replace all 'inf', 'nan', 0's with 1s to prevent errors
+    equalization_scale[equalization_scale == 0.] = 1
+    equalization_scale = torch.nan_to_num(equalization_scale, nan=1, posinf=1, neginf=1)
     return equalization_scale
 
 
@@ -199,14 +224,24 @@ weight_equalization_observer = _WeightEqualizationObserver.with_args(
 default_equalization_qconfig = EqualizationQConfig(input_activation=input_equalization_observer,
                                                    weight=weight_equalization_observer)
 
+
+def fused_module_supports_equalization(module) -> bool:
+    """ Checks if the fused node supports equalization. """
+    return type(module) in [nni.LinearReLU, nni.ConvReLU1d, nni.ConvReLU2d, nni.ConvReLU3d]
+
+def nn_module_supports_equalization(module) -> bool:
+    """ Checks if the torch.nn node supports equalization. """
+    return type(module) in [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d]
+
 def node_supports_equalization(node: Node, modules) -> bool:
     """ Checks if the current node supports equalization
-    Currently we only support nn.Linear and F.Linear layers
+    Currently we only support nn.Linear/F.Linear and nn.Conv/F.conv layers
     """
     if node.op == 'call_module':
-        return isinstance(modules[node.target], nn.Linear)
+        return nn_module_supports_equalization(modules[str(node.target)]) or \
+            fused_module_supports_equalization(modules[str(node.target)])
     elif node.op == 'call_function':
-        return node.target == nn.functional.linear
+        return node.target in [F.linear, F.conv1d, F.conv2d, F.conv3d]
     return False
 
 def is_equalization_observer(observer: nn.Module) -> bool:
@@ -221,8 +256,8 @@ def get_op_node_and_weight_eq_obs(
     """ Gets the following weight equalization observer. There should always
     exist a weight equalization observer after an input equalization observer.
 
-    Returns the node containing the weight equalization observer, and the weight
-    equalization observer if it has been newly created
+    Returns the operation node that follows the input equalizatoin observer node
+    and the weight equalization observer
     """
 
     # Find the op node that comes directly after the input equaliation observer
@@ -244,10 +279,24 @@ def get_op_node_and_weight_eq_obs(
         return op_node, weight_eq_obs
 
     elif op_node.op == 'call_function':
-        # TODO
-        return None, None
+        weight_node = maybe_get_weight_eq_obs_node(op_node, modules)
+        if weight_node is not None:
+            weight_eq_obs = modules[str(weight_node.target)]
+            assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
+            return op_node, weight_eq_obs
 
     return None, None
+
+def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> Optional[Node]:
+    """ Gets the weight equalization observer node if it exists.
+    """
+    assert(op_node.op == 'call_function' and op_node.target in WEIGHT_INDEX_DICT)
+    for i, node_arg in enumerate(op_node.args):
+        if i in WEIGHT_INDEX_DICT[op_node.target]:  # type: ignore[index]
+            assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
+                   isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
+            return node_arg
+    return None
 
 def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Optional[_InputEqualizationObserver]:
     """ Gets the following input equalization observer if it exists.
@@ -260,12 +309,27 @@ def maybe_get_next_input_eq_obs(node: Node, modules: Dict[str, nn.Module]) -> Op
     However, if there are no connecting layers:
         x -> inp_obs1 -> eq_obs1 -> linear1 -> out_obs1 -> add
     Then we want to return None.
+
+    In the case of an unfused linear-relu layer with a connecting linear layer:
+        linear1 -> relu -> out_obs1 -> eq_obs2 -> linear2 -> out_obs2
+    Since it is unfused, we want to skip over the relu layer and return eq_obs2,
+    the following equalization observer for linear2.
     """
 
     assert(node_supports_equalization(node, modules))
 
-    # Locate the following output observer if it exists
-    maybe_obs_node = maybe_get_next_module(node, modules, ObserverBase)
+    # Locate the following nn.ReLU or F.relu node if it exists
+    maybe_relu_node = maybe_get_next_module(node, modules, nn.ReLU)
+    if maybe_relu_node is None:
+        maybe_relu_node = maybe_get_next_module(node, modules, target_functional_type=F.relu)
+
+    # Locate the following output observer if it exists.
+    # We will skip the relu node if it exists.
+    maybe_obs_node = (
+        maybe_get_next_module(node, modules, ObserverBase)
+        if maybe_relu_node is None
+        else maybe_get_next_module(maybe_relu_node, modules, ObserverBase)
+    )
     if maybe_obs_node is None:
         return None
 
@@ -324,28 +388,146 @@ def scale_weight_node(
         next_equalization_scale: Next node's calculated equalization scale if
            the following node needs to be equalized, 1 otherwise
     """
-    assert(isinstance(node.target, str))
+    if fused_module_supports_equalization(modules[str(node.target)]):
+        op_module = modules[str(node.target)][0]    # type: ignore[index]
+    else:
+        op_module = modules[str(node.target)]
+    assert(nn_module_supports_equalization(op_module))
 
     # Scale the weights for input-weight equalization
     # If the following layer needs to be equalized then we will multiply its scale
-    weight = modules[node.target].weight
+    weight = op_module.weight
     assert(isinstance(weight, torch.Tensor))
 
-    scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale))
+    # Scale the weights by the reciprocal of the equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
+    equalization_scale_reshaped = reshape_scale(equalization_scale, 1, weight)
+    scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale_reshaped))
 
     if next_equalization_scale is None:
-        modules[node.target].weight = nn.Parameter(scaled_weight)
+        op_module.weight = nn.Parameter(scaled_weight)
         return
 
-    scaled_weight = torch.mul(scaled_weight, next_equalization_scale)
-    modules[node.target].weight = nn.Parameter(scaled_weight)
+    # Multiply the weights row wise by the next equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=0
+    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, weight)
+    scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
 
-    # TODO: The bias may need to be scaled for connecting linear layers
-    bias = modules[node.target].bias
+    op_module.weight = nn.Parameter(scaled_weight)
+
+    # Multiply the bias element wise by the next equalization scale
+    bias = op_module.bias
+    if bias is None:
+        return
     assert(isinstance(bias, torch.Tensor))
 
-    scaled_bias = torch.mul(bias, next_equalization_scale)
-    modules[node.target].bias = nn.Parameter(scaled_bias)
+    # Reshape the equalization scale so that we can multiply it element-wise to the bias
+    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, bias)
+    scaled_bias = torch.mul(bias, next_equalization_scale_reshaped)
+    op_module.bias = nn.Parameter(scaled_bias)
+
+def scale_weight_functional(
+    op_node: Node,
+    model: GraphModule,
+    modules: Dict[str, nn.Module],
+    equalization_scale: torch.Tensor,
+    next_equalization_scale: Optional[torch.Tensor],
+) -> None:
+    """ Scales the weight value for functional layers
+    """
+
+    # From the given op_node, the path looks like:
+    #   get_attr(weight) -> weight_quant_obs -> weight_eq_obs -> op_node
+    # So we want to trace back from the op_node to get the equalization observer
+    # node, then the quantization observer node, and then finally the weight
+    # node which contains the weight values.
+
+    # Get the equalization observer node
+    weight_eq_obs_node = maybe_get_weight_eq_obs_node(op_node, modules)
+    if weight_eq_obs_node is None:
+        return
+
+    # Get the quantization observer node
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
+    if weight_quant_obs_node is None:
+        return
+    assert(isinstance(weight_quant_obs_node, Node) and
+           isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
+
+    # Get the get_attr(weight) node
+    weight_node = weight_quant_obs_node.args[0]
+    if weight_node is None:
+        return
+    assert(isinstance(weight_node, Node) and weight_node.op == 'get_attr')
+
+    weight_parent_name, weight_name = _parent_name(weight_node.target)
+    weight = getattr(modules[weight_parent_name], weight_name)
+
+    # Scale the weights for input-weight equalization
+    # If the following layer needs to be equalized then we will multiply its scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
+    equalization_scale_reshaped = reshape_scale(equalization_scale, 1, weight)
+    scaled_weight = torch.mul(weight, torch.reciprocal(equalization_scale_reshaped))
+
+    if next_equalization_scale is None:
+        setattr(modules[weight_parent_name], weight_name, scaled_weight)
+        return
+
+    # Multiply the weights row wise by the next equalization scale
+    # Reshape the equalization scale so that we can multiply it to the weight along axis=1
+    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, scaled_weight)
+    scaled_weight = torch.mul(scaled_weight, next_equalization_scale_reshaped)
+
+    setattr(modules[weight_parent_name], weight_name, scaled_weight)
+    assert(torch.allclose(model.get_buffer(str(weight_node.target)), scaled_weight))
+
+    # Multiply the bias element wise by the next equalization scale
+    bias_node = None
+    for node in op_node.args:
+        # Find the node containing the weight values
+        if isinstance(node, Node) and node.op == 'get_attr' and 'bias' in node.name:
+            bias_node = node
+            break
+    if bias_node is None:
+        return
+
+    bias_parent_name, bias_name = _parent_name(bias_node.target)
+    bias = getattr(modules[bias_parent_name], bias_name)
+
+    # Reshape the equalization scale so that we can multiply it element-wise to the bias
+    next_equalization_scale_reshaped = reshape_scale(next_equalization_scale, 0, bias)
+    scaled_bias = torch.mul(bias, next_equalization_scale_reshaped)
+    setattr(modules[bias_parent_name], bias_name, scaled_bias)
+
+def clear_weight_quant_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -> None:
+    """ Given the operation node, we want find the corresponding quantization
+    observer and reset its min/max values
+    """
+    weight_eq_obs_node = maybe_get_weight_eq_obs_node(op_node, modules)
+    if weight_eq_obs_node is None:
+        return
+
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
+    if weight_quant_obs_node is None:
+        return
+    assert(isinstance(weight_quant_obs_node, Node))
+
+    weight_quant_obs = modules[str(weight_quant_obs_node.target)]
+    assert(isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
+    weight_quant_obs.reset_min_max_vals()   # type: ignore[operator]
+
+def remove_node(model: GraphModule, node: Node, prev_node: Node):
+    """ Removes the given node from the model by replacing all of its users with
+    the given previous node
+    """
+    # For all of the current node's users, replace the current node with
+    # the input quantization observer node
+    orig_users = list(node.users.keys())
+    for user_node in orig_users:
+        user_node.replace_input_with(node, prev_node)
+
+    # Erase the InputEqualizationObserver node
+    model.graph.erase_node(node)
 
 def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module]) -> Dict[str, _WeightEqualizationObserver]:
     """ Update all of the observer's equalization scale. For each
@@ -366,7 +548,15 @@ def update_obs_for_equalization(model: GraphModule, modules: Dict[str, nn.Module
             if op_node is None or weight_eq_obs is None:
                 continue
 
-            weight_eq_obs(modules[str(op_node.target)].weight)
+            if op_node.op == 'call_module':
+                # Calibrate the weight equalization observer since it has just
+                # been created
+                if fused_module_supports_equalization(modules[str(op_node.target)]):
+                    module = modules[str(op_node.target)][0]   # type: ignore[index]
+                    assert(nn_module_supports_equalization(module))
+                    weight_eq_obs(module.weight)
+                else:
+                    weight_eq_obs(modules[str(op_node.target)].weight)
 
             # Calculate and set the equalization scale values
             equalization_scale = calculate_equalization_scale(input_eq_obs, weight_eq_obs)
@@ -433,7 +623,16 @@ def convert_eq_obs(
             inp_quant_obs_node = node.args[0]
             prev_node = inp_quant_obs_node.args[0]
 
-            # TODO: Possible special handling for connected linear layers
+            # If the previous node is a layer that needs to be equalized, then
+            # we will remove the current node because we do not need to add any
+            # equalization nodes between two layers that need to be equalized
+
+            # Before: linear1/relu (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> input_eq_obs2 (node) -> linear2
+            # After: linear1/relu (prev_node) -> output_quant_obs1 (inp_quant_obs_node) -> linear2
+            if node_supports_equalization(prev_node, modules) or "relu" in prev_node.name:
+                remove_node(model, node, inp_quant_obs_node)
+                continue
+
             # Update the following input quantization observer's min/max values
             scale_input_observer(node, modules)
 
@@ -457,25 +656,35 @@ def convert_eq_obs(
             # Set the mul nod to be the input_quant_obs_node's input instead of
             # the previous node
             inp_quant_obs_node.replace_input_with(prev_node, mul_node)
-
-            # For all of the current node's users, replace the current node with
-            # the input quantization observer node
-            orig_users = list(node.users.keys())
-            for user_node in orig_users:
-                user_node.replace_input_with(node, inp_quant_obs_node)
-
-            # Erase the InputEqualizationObserver node
-            model.graph.erase_node(node)
+            remove_node(model, node, inp_quant_obs_node)
 
         elif weight_eq_obs_dict.get(node.name, None) is not None:
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
-
             equalization_scale = weight_eq_obs.equalization_scale
-
-            # Scales the weights and runs the weight quantization observers
             maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
-            scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
+
+            # Scale the weight nodes
+            if node.op == 'call_module':
+                scale_weight_node(node, modules, equalization_scale, maybe_next_equalization_scale)
+            elif node.op == 'call_function':
+                scale_weight_functional(node, model, modules, equalization_scale, maybe_next_equalization_scale)
+
+                weight_eq_obs_node = maybe_get_weight_eq_obs_node(node, modules)
+                if weight_eq_obs_node is None:
+                    return
+                assert(isinstance(modules[str(weight_eq_obs_node.target)], _WeightEqualizationObserver))
+
+                # Clear the quantization observer's min/max values so that they
+                # can get updated later based on the new scale values
+                clear_weight_quant_obs_node(node, modules)
+
+                # Erase the weight equalization observer node
+                prev_node = weight_eq_obs_node.args[0]
+                remove_node(model, weight_eq_obs_node, prev_node)
+            else:
+                raise ValueError("Expected operation node to be 'call_module' or 'call_function" +
+                                 f"Instead got node {node.name} as '{node.op}'.")
 
 def _convert_equalization_ref(model: GraphModule):
     """ Reference function which applies changes needed for equalization, but

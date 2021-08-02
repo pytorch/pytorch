@@ -2,10 +2,32 @@ import functools
 import os
 import warnings
 
+from collections import defaultdict
+
 from torch.utils.data import IterDataPipe, functional_datapipe
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
+from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar, DefaultDict
 
 T_co = TypeVar('T_co', covariant=True)
+
+
+@functional_datapipe('sharding_filter')
+class ShardingFilterIterDataPipe(IterDataPipe):
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+        self.num_of_instances = 1
+        self.instance_id = 0
+
+    def is_shardable(self):
+        return True
+
+    def apply_sharding(self, num_of_instances, instance_id):
+        self.num_of_instances = num_of_instances
+        self.instance_id = instance_id
+
+    def __iter__(self):
+        for i, item in enumerate(self.source_datapipe):
+            if i % self.num_of_instances == self.instance_id:
+                yield item
 
 
 @functional_datapipe('batch')
@@ -19,6 +41,8 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
+        unbatch_level: Specifies if it necessary to unbatch source data before
+            applying new batching rule
     """
     datapipe: IterDataPipe[T_co]
     batch_size: int
@@ -29,10 +53,15 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
                  datapipe: IterDataPipe[T_co],
                  batch_size: int,
                  drop_last: bool = False,
+                 unbatch_level: int = 0,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        self.datapipe = datapipe
+        if unbatch_level == 0:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.unbatch_level = unbatch_level
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
@@ -43,16 +72,16 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
             batch.append(x)
             if len(batch) == self.batch_size:
                 yield batch
-                batch.clear()
+                batch = []
         if len(batch) > 0:
             if not self.drop_last:
                 yield batch
-            batch.clear()
+            batch = []
 
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized):
+        if isinstance(self.datapipe, Sized) and self.unbatch_level == 0:
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -72,6 +101,7 @@ class UnBatchIterDataPipe(IterDataPipe):
         unbatch_level: Defaults to `1` (only flattening the top level). If set to `2`, it will flatten the top 2 levels,
         and `-1` will flatten the entire DataPipe.
     """
+
     def __init__(self, datapipe, unbatch_level: int = 1):
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
@@ -178,7 +208,7 @@ def default_group_key_fn(dataitem: Tuple[str, Any]):
 def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
     txt_ext = ['.json', '.jsn', '.txt', '.text']
 
-    def cmp_fn(a : Tuple[str, Any], b : Tuple[str, Any]):
+    def cmp_fn(a: Tuple[str, Any], b: Tuple[str, Any]):
         a_is_txt = os.path.splitext(a[0])[1] in txt_ext
         b_is_txt = os.path.splitext(b[0])[1] in txt_ext
 
@@ -196,6 +226,79 @@ def default_sort_data_fn(datalist: List[Tuple[str, Any]]):
         return 0
 
     return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
+
+
+@functional_datapipe('groupby')
+class GroupByIterDataPipe(IterDataPipe):
+    # TODO(VtalyFedyunin): Add inline docs and tests (they are partially available in notebooks)
+    def __init__(self,
+                 datapipe: IterDataPipe[T_co],
+                 group_key_fn: Callable,
+                 *,
+                 buffer_size: int = 10000,
+                 group_size: Optional[int] = None,
+                 unbatch_level: int = 0,
+                 guaranteed_group_size: Optional[int] = None,
+                 drop_remaining: bool = False):
+        if unbatch_level == 0:
+            self.datapipe = datapipe
+        else:
+            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
+        self.group_key_fn = group_key_fn
+        self.buffer_size = buffer_size
+        self.group_size = group_size
+        self.guaranteed_group_size = None
+        if group_size is not None and buffer_size is not None:
+            assert group_size > 0 and group_size <= buffer_size
+            self.guaranteed_group_size = group_size
+        if guaranteed_group_size is not None:
+            assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
+            self.guaranteed_group_size = guaranteed_group_size
+        self.drop_remaining = drop_remaining
+
+    def _remove_biggest_key(self, buffer_elements, buffer_size):
+        biggest_key = None
+        biggest_size = 0
+        result_to_yield = None
+        for findkey in buffer_elements.keys():
+            if len(buffer_elements[findkey]) > biggest_size:
+                biggest_size = len(buffer_elements[findkey])
+                biggest_key = findkey
+
+        if self.guaranteed_group_size is not None and biggest_size < self.guaranteed_group_size and not self.drop_remaining:
+            raise RuntimeError('Failed to group items', str(buffer_elements[biggest_key]))
+
+        if self.guaranteed_group_size is None or biggest_size >= self.guaranteed_group_size:
+            result_to_yield = buffer_elements[biggest_key]
+
+        new_buffer_size = buffer_size - biggest_size
+        del buffer_elements[biggest_key]
+
+        return (result_to_yield, new_buffer_size)
+
+    def __iter__(self):
+        buffer_elements: DefaultDict[Any, List] = defaultdict(list)
+        buffer_size = 0
+        for x in self.datapipe:
+            key = self.group_key_fn(x)
+
+            if self.group_size is not None and self.group_size == len(buffer_elements[key]):
+                yield buffer_elements[key]
+                buffer_size -= len(buffer_elements[key])
+                del buffer_elements[key]
+
+            if buffer_size == self.buffer_size:
+                (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
+                if result_to_yield is not None:
+                    yield result_to_yield
+
+            buffer_elements[key].append(x)
+            buffer_size += 1
+
+        while buffer_size:
+            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
+            if result_to_yield is not None:
+                yield result_to_yield
 
 
 @functional_datapipe('group_by_key')

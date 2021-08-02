@@ -261,7 +261,7 @@ class PowerSGDState(object):
 
 def powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -306,7 +306,7 @@ def powerSGD_hook(
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank``, ``start_powerSGD_iter``
             and ``min_compression_rate``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -477,16 +477,16 @@ def powerSGD_hook(
             idx += tensor.numel()
 
         # Since these Ps will be orthogonalized later, no need to divide them by world size.
-        return [
+        return (
             dist.all_reduce(
                 state.p_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def compute_qs(fut):
-        state.p_memory_dict[bucket_index] = fut.value()[0]
+        state.p_memory_dict[bucket_index] = fut.value()
         for p in ps:
             _orthogonalize(p, state.orthogonalization_epsilon)
 
@@ -499,16 +499,16 @@ def powerSGD_hook(
         # For warm-start, can take one such step at a time, and alternate between them.
 
         # Allreduce Qs.
-        return [
+        return (
             dist.all_reduce(
                 state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
 
         for p, q, tensor in zip(ps, qs, tensors_to_compress):
             torch.matmul(p, q.t(), out=tensor)
@@ -524,7 +524,7 @@ def powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [input_tensor]
+        return input_tensor
 
     return (
         allreduce_contiguous_uncompressed_tensors_fut.then(
@@ -537,7 +537,7 @@ def powerSGD_hook(
 
 def batched_powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -581,7 +581,7 @@ def batched_powerSGD_hook(
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -707,16 +707,16 @@ def batched_powerSGD_hook(
         # one left multiplication and one right multiplication.
         # For warm-start, can take one such step at a time, and alternate between them.
 
-        return [
+        return (
             dist.all_reduce(
                 state.q_memory_dict[bucket_index], group=group_to_use, async_op=True
             )
             .get_future()
             .wait()[0]
-        ]
+        )
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value().div_(world_size)
         torch.matmul(
             state.p_memory_dict[bucket_index],
             state.q_memory_dict[bucket_index].t(),
@@ -737,6 +737,6 @@ def batched_powerSGD_hook(
 
         state.maybe_increase_iter(bucket)
 
-        return [ret]
+        return ret
 
     return allreduce_p_fut.then(compute_q).then(decompress)

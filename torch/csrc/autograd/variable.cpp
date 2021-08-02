@@ -111,7 +111,6 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::Tensor singleton_undefined_tensor;
 
 struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
@@ -123,10 +122,8 @@ struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ConcreteAutogradMetaFactory meta_factory;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
 
 }
@@ -285,7 +282,6 @@ namespace impl {
   }
 
   namespace {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
   }
 
@@ -354,9 +350,7 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void requires_grad_(const Tensor& self, bool _requires_grad) const override;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 VariableHooks variableHooks;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
 
 Tensor VariableHooks::variable_data(const Tensor& self) const {
@@ -518,7 +512,6 @@ const Tensor& VariableHooks::base(const Tensor& self) const {
 }
 
 namespace {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::string singleton_string;
 }
 
@@ -532,7 +525,6 @@ const std::string& VariableHooks::name(const Tensor& self) const {
 }
 
 namespace {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 }
 

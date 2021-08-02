@@ -56,7 +56,6 @@ Operation createStaticSubgraphRuntime(const Node* node) {
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators StaticSubgraphOps({torch::jit::Operator(
     prim::StaticSubgraph,
     createStaticSubgraphRuntime,
