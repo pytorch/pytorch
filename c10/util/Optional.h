@@ -964,7 +964,7 @@ constexpr bool operator==(const optional<T>& x, const optional<T>& y) {
 
 template <class T>
 constexpr bool operator!=(const optional<T>& x, const optional<T>& y) {
-  return !(x == y);
+  return x ? *x != y : bool(y);
 }
 
 template <class T>
@@ -974,17 +974,17 @@ constexpr bool operator<(const optional<T>& x, const optional<T>& y) {
 
 template <class T>
 constexpr bool operator>(const optional<T>& x, const optional<T>& y) {
-  return (y < x);
+  return x && *x > y;
 }
 
 template <class T>
 constexpr bool operator<=(const optional<T>& x, const optional<T>& y) {
-  return !(y < x);
+  return x ? *x <= y : !y;
 }
 
 template <class T>
 constexpr bool operator>=(const optional<T>& x, const optional<T>& y) {
-  return !(x < y);
+  return x ? *x >= y : !y;
 }
 
 // 20.5.9, Comparison with nullopt
