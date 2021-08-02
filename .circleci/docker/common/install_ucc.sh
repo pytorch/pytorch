@@ -17,8 +17,9 @@ popd
 
 pushd ucc
 ./autogen.sh
-./configure --prefix=$UCC_HOME      \
-    --with-ucx=$UCX_HOME            \
+./configure --prefix=$UCC_HOME              \
+    --with-ucx=$UCX_HOME                    \
+    --with-nccl=/usr/lib/x86_64-linux-gnu/  \
     --with-cuda=/usr/local/cuda/
 make -j
 make install
