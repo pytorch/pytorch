@@ -261,7 +261,7 @@ class PowerSGDState(object):
 
 def powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -306,7 +306,7 @@ def powerSGD_hook(
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank``, ``start_powerSGD_iter``
             and ``min_compression_rate``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
@@ -537,7 +537,7 @@ def powerSGD_hook(
 
 def batched_powerSGD_hook(
     state: PowerSGDState, bucket: dist.GradBucket
-) -> torch.futures.Future:
+) -> torch.futures.Future[torch.Tensor]:
     r"""
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in the `paper <https://arxiv.org/abs/1905.13727>`_.
@@ -581,7 +581,7 @@ def batched_powerSGD_hook(
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
             To tune the compression configs, mainly need to tune ``matrix_approximation_rank`` and ``start_powerSGD_iter``.
         bucket (dist.GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
-            Note that since DDP comm hook only supports single process single device mode at this time,
+            Note that since DDP comm hook only supports single process single device mode,
             only exactly one tensor is stored in this bucket.
 
     Returns:
