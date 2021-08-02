@@ -13,7 +13,7 @@ namespace tensorexpr {
 class HalfChecker : public IRVisitor {
  public:
   HalfChecker(const std::vector<CodeGen::BufferArg>& args) {
-    for (auto& BA : args) {
+    for (const auto& BA : args) {
       hasHalf_ |= BA.dtype().scalar_type() == ScalarType::Half;
     }
   }
