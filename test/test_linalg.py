@@ -2969,6 +2969,26 @@ class TestLinalg(TestCase):
         for batch, (m, n) in itertools.product(batches, product(ns, ns)):
             run_test((*batch, m, n))
 
+    @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
+    @skipCUDAIfRocm
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svd_memory_allocation(self, device, dtype):
+        # test for https://github.com/pytorch/pytorch/issues/61949
+        # the problem was that tensors of incorrect size were allocated and then narrowed
+        m = 3
+        n = 2**20
+        a = make_tensor((m, n), dtype=dtype, device=device)
+        # the following should run without errors
+        result = torch.linalg.svdvals(a)
+        result = torch.linalg.svd(a, full_matrices=False)
+
+        out0 = torch.empty_like(result[0])
+        out1 = torch.empty_like(result[1])
+        out2 = torch.empty_like(result[2])
+        torch.linalg.svdvals(a, out=out0)
+        torch.linalg.svd(a, full_matrices=False, out=(out0, out1, out2))
+
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
