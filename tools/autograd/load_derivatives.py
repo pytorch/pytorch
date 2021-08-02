@@ -64,6 +64,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
                 args_with_derivatives=info.args_with_derivatives,
                 non_differentiable_arg_names=info.non_differentiable_arg_names,
                 output_differentiability=info.output_differentiability,
+                output_differentiability_conditions=info.output_differentiability_conditions,
             )
             for info, op_name in zip(infos, op_names)]
 
@@ -381,6 +382,17 @@ def create_differentiability_info(
     # NB: Removes 'output_differentiability' from defn dictionary
     #     `None` means all differentiable.
     output_differentiability = defn.pop('output_differentiability', None)
+    output_differentiability_conditions = None
+    if output_differentiability and any([isinstance(diff, str) for diff in output_differentiability]):
+        if len(output_differentiability) != 1:
+            raise RuntimeError(f'Not supported: for {specification},'
+                               f'output_differentiability must either be '
+                               f'List[bool] or a List[str] where each str is a '
+                               f'condition. In the case where it is a condition, '
+                               f'we only support single-output functions. '
+                               f'Please file us an issue. ')
+        output_differentiability_conditions = output_differentiability
+        output_differentiability = [True]
 
     schema_function = functions_by_schema.get(specification)
     if not schema_function:
@@ -423,6 +435,7 @@ def create_differentiability_info(
         args_with_derivatives=args_with_derivatives,
         non_differentiable_arg_names=non_differentiable_arg_names,
         output_differentiability=output_differentiability,
+        output_differentiability_conditions=output_differentiability_conditions,
     )
 
 GRAD_INDEX_REGEX = r'(?:^|\W)grads\[(\d+)\]'
