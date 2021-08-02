@@ -1963,7 +1963,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *, low=None, hig
         high = clamp(high, lowest, highest)
 
         if dtype in integral_types():
-            return math.ceil(low), math.floor(high)
+            return math.floor(low), math.ceil(high)
 
         return low, high
 
