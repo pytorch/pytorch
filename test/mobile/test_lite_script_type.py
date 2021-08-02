@@ -3,34 +3,13 @@ import torch.utils.bundled_inputs
 import io
 from typing import NamedTuple
 
-from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
+from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_quantization import (
-    AnnotatedSingleLayerLinearModel,
-    TwoLayerLinearModel,
-    AnnotatedNestedModel
-)
-from torch.testing._internal.common_quantization import QuantizationLiteTestCase
+
 
 class TestLiteScriptModule(TestCase):
 
-    def test_unsupported_classtype(self):
-        class Foo():
-            def __init__(self):
-                return
-
-            def func(self, x: int, y: int):
-                return x + y
-
-        class MyTestModule(torch.nn.Module):
-            def forward(self, arg):
-                f = Foo()
-                return f.func(1, 2)
-
-        script_module = torch.jit.script(MyTestModule())
-
-
-    def test_unsupported_classtype(self):
+    def test_namedtuple_custom_classtype(self):
         class Foo(NamedTuple):
             id: torch.Tensor
 

@@ -438,16 +438,25 @@ void BytecodeDeserializer::parseMethods(
           function->append_type(c10::parseType(t.toStringRef()));
         }
       } else {
-        auto difinition = t.toTuple()->elements();
-        const std::string name = difinition[0].toString()->string();
+        //  Example NamedTuple type structure:
+        //  ('__torch__.A.B.CType',z
+        //   ('NamedTuple',
+        //     ('id_list_features', 'Dict[int, Tensor]'),
+        //     ('label', 'Tuple[Tensor, Tensor]'),
+        //     ('weight', 'Tuple[Tensor, Tensor]'),
+        //     ('id_score_list_features', 'Dict[int, Tensor]')))),
+        auto tuple_difinition = t.toTuple()->elements();
+        // get type name: '__torch__.A.B.CType'
+        const std::string name = tuple_difinition[0].toString()->string();
+        // get namedtuple definition
         std::vector<IValue> name_type_pairs =
-            difinition[1].toTuple()->elements();
+            tuple_difinition[1].toTuple()->elements();
 
         at::QualifiedName qualified_name = at::QualifiedName(name);
         std::vector<std::string> field_names;
         std::vector<TypePtr> field_types;
 
-        std::string super_class_name = name_type_pairs[0].toString()->string();
+        // Find all type names and it's corresponding type
         for (auto const& name_type_pair :
              name_type_pairs[1].toTuple()->elements()) {
           std::vector<IValue> name_type_vector =
@@ -458,6 +467,7 @@ void BytecodeDeserializer::parseMethods(
           field_names.emplace_back(field_name);
           field_types.emplace_back(field_type);
         }
+        // Create the NamedTuple type after reading from the tuple, and add it to function
         auto tt =
             TupleType::createNamed(qualified_name, field_names, field_types);
         function->append_type(tt);

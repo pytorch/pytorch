@@ -188,10 +188,18 @@ std::pair<IValue, IValue> getFunctionTuple(
       if (named_tuple_type != nullptr) {
         IValue named_tuple{"NamedTuple"};
         std::vector<IValue> name_type_pairs;
+        // Get the field name and field type for the NamedTuple
         for (auto const& argument : named_tuple_type->schema()->arguments()) {
           name_type_pairs.emplace_back(c10::ivalue::Tuple::create(
               {argument.name(), argument.type()->repr_str()}));
         }
+        // Create a tuple with following structure
+        // ('type_name',
+        //   ('NamedTuple,
+        //     ('filed_name_1', 'field_type_1')
+        //     ('filed_name_2', 'field_type_2')
+        //   )
+        // )
         IValue named_tuple_type_definition =
             c10::ivalue::Tuple::create(std::vector<IValue>{
                 named_tuple, c10::ivalue::Tuple::create(name_type_pairs)});
