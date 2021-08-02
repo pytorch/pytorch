@@ -1158,6 +1158,7 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
+    torch._ops.ops.quantized.elu: ['inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
@@ -1176,6 +1177,7 @@ ARGS_TO_SKIP = {
 # until they receive a proper fp16 kernel. To use the reference pattern, use a custom qconfig
 # @register_quant_pattern(torch.nn.GELU)
 # @register_quant_pattern(torch.nn.Softmax)
+@register_quant_pattern(torch.nn.functional.elu)
 @register_quant_pattern(torch.nn.functional.hardswish)
 @register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
@@ -1240,6 +1242,7 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
             torch.nn.Mish: fp16_dtypes,
             torch.nn.GELU: int8_dtypes,
             torch.nn.Softmax: int8_dtypes,
+            torch.nn.functional.elu: int8_dtypes,
             torch.nn.functional.hardswish: int8_dtypes,
             torch.nn.functional.instance_norm: int8_dtypes,
             torch.nn.functional.layer_norm: all_dtypes,
@@ -1328,35 +1331,6 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 return quantize_node(
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
-
-
-# TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
-@register_quant_pattern(torch.nn.functional.elu)
-class ELUQuantizeHandler(QuantizeHandler):
-    def convert(self,
-                node: Node,
-                qconfig: QConfigAny,
-                modules: Dict[str, torch.nn.Module],
-                quantized_graph: Graph,
-                node_name_to_scope: Dict[str, Tuple[str, type]],
-                load_arg: Callable,
-                is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        activation_post_process = \
-            self._maybe_get_last_node_only_observer(modules)
-        assert activation_post_process is not None
-        scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[operator]
-        scale = float(scale)
-        zero_point = int(zero_point)
-        scale_arg, zero_point_arg = create_qparam_nodes(
-            node.name, scale, zero_point, modules, quantized_graph, node_name_to_scope)
-
-        quantized_op = get_quantized_operator(node.target)
-        args = load_arg(quantized=[0])(node.args)
-        kwargs = {**load_arg(quantized=torch.float)(node.kwargs), 'output_scale': scale_arg, 'output_zero_point': zero_point_arg}
-        kwargs.pop('inplace')
-        return quantized_graph.create_node(
-            'call_function', quantized_op, args, kwargs)  # type: ignore[arg-type]
 
 @register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_fake_quant)
 @register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_fake_quant)
