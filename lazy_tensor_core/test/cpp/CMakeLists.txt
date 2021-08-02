@@ -36,7 +36,7 @@ ExternalProject_Add(
   LOG_CONFIGURE ON
   LOG_BUILD ON
   CMAKE_ARGS
-    "-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=${PT_CXX_ABI}")
+    "-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=${PT_CXX_ABI} -Wno-error=maybe-uninitialized")
 
 ExternalProject_Get_Property(googletest SOURCE_DIR)
 
