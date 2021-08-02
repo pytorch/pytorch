@@ -39,7 +39,6 @@ from torch.testing._internal.dist_utils import (
     wait_until_pending_futures_and_users_flushed,
     wait_until_owners_and_forks_on_rank,
     worker_name,
-    single_threaded_process_group_agent,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -1478,7 +1477,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_remote_events_profiled(self):
         self._run_test_profiler_remote_events_profiled()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_remote_events_profiled_single_threaded(self):
         self._run_test_profiler_remote_events_profiled()
@@ -1546,7 +1544,6 @@ class RpcTest(RpcAgentTestFixture):
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
@@ -1652,7 +1649,6 @@ class RpcTest(RpcAgentTestFixture):
 
             self.validate_profiling_workload(dst, prof)
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_autograd_context_single_threaded(self):
         self._run_test_profiler_with_autograd_context()
@@ -1727,7 +1723,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_sync_rpc_udf(self):
         self._run_test_profiler_with_sync_rpc_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_udf_single_threaded(self):
         self._run_test_profiler_with_sync_rpc_udf()
@@ -1745,7 +1740,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_sync_rpc_builtin(self):
         self._run_test_profiler_with_sync_rpc_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_builtin_single_threaded(self):
         self._run_test_profiler_with_sync_rpc_builtin()
@@ -1759,7 +1753,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_async_rpc_udf(self):
         self._run_test_profiler_with_async_rpc_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_udf_single_threaded(self):
         self._run_test_profiler_with_async_rpc_udf()
@@ -1777,7 +1770,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_async_rpc_builtin(self):
         self._run_test_profiler_with_async_rpc_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_builtin_single_threaded(self):
         self._run_test_profiler_with_async_rpc_builtin()
@@ -1796,7 +1788,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_remote_udf(self):
         self._run_test_profiler_with_remote_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_udf_single_threaded(self):
         self._run_test_profiler_with_remote_udf()
@@ -1821,7 +1812,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_remote_builtin(self):
         self._run_test_profiler_with_remote_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_builtin_single_threaded(self):
         self._run_test_profiler_with_remote_builtin()
@@ -1841,7 +1831,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_async_rpc(self):
         self._run_test_profiler_with_script_async_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_async_rpc_single_threaded(self):
         self._run_test_profiler_with_script_async_rpc()
@@ -1861,7 +1850,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_sync_rpc(self):
         self._run_test_profiler_with_script_sync_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_sync_rpc_single_threaded(self):
         self._run_test_profiler_with_script_sync_rpc()
@@ -1885,7 +1873,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_remote_rpc(self):
         self._run_test_profiler_with_script_remote_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_remote_rpc_single_threaded(self):
         self._run_test_profiler_with_script_remote_rpc()
