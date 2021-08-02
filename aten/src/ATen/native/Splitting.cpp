@@ -2,7 +2,9 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/CPUGeneratorImpl.h>
+#ifdef USE_CUDA
 #include <ATen/CUDAGeneratorImpl.h>
+#endif
 #include <ATen/native/cpu/Loops.h>
 #include <c10/util/irange.h>
 
@@ -53,10 +55,12 @@ Tensor randn(IntArrayRef size, const Tensor& key,
   if (device_.is_cpu()) {
     auto gen = at::detail::createCPUGenerator(seed);
     return result.normal_(0, 1, gen);
+#ifdef USE_CUDA
   } else if (device_.is_cuda()) {
     auto gen = at::cuda::detail::createCUDAGenerator(device_.index());
     gen.set_current_seed(seed);
     return result.normal_(0, 1, gen);
+#endif
   }
   TORCH_CHECK(false, "Device: " + result.device().str() + " is not supported.");
 }
