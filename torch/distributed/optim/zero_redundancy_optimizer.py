@@ -180,7 +180,7 @@ class _OverlapInfo():
         bucket_indices_seen (List[int]): :class:`list` of the bucket indices
             seen on this iteration.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
 
         # Modified per bucket reconstruction
@@ -196,7 +196,7 @@ class _OverlapInfo():
         self.bucket_index_to_future: Dict[int, torch.futures.Future] = {}
         self.bucket_index_to_bucket: Dict[int, dist.GradBucket] = {}
 
-    def wait_for_broadcasts(self, num_buckets, rank):
+    def wait_for_broadcasts(self, num_buckets, rank) -> None:
         r"""
         Waits for all parameter broadcasts. This should be called once all
         broadcasts have been scheduled, meaning ``self.broadcast_handles`` is
@@ -212,7 +212,7 @@ class _OverlapInfo():
         _ = list(map(lambda x: x.wait(), self.broadcast_handles))
         self.broadcast_handles.clear()
 
-    def clear_per_iter_info(self):
+    def clear_per_iter_info(self) -> None:
         r"""
         Clears the data structures that are modified per-iteration. This should
         be called at the end of an iteration.

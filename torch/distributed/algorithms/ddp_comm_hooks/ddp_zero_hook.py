@@ -53,7 +53,7 @@ def _perform_local_step(
 
 
 def _broadcast_bucket(
-    bucket_index: dist.GradBucket,
+    bucket_index: int,
     zero: ZeroRedundancyOptimizer,
     source_rank: int,
 ):
