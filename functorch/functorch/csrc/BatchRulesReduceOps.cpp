@@ -52,6 +52,7 @@ optional<std::tuple<decltype(ret_type(Func)), optional<int64_t>>> reduction_dima
   return std::make_tuple( result, 0 );
 }
 
+// For reductions that take in an array of dimensions to reduce over.
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims, ExtraArgs... extra_args) {
@@ -65,39 +66,47 @@ std::tuple<Tensor,optional<int64_t>> reduction_dimarray_batch_rule(
 
 // Optional implies the weird case with 0-dim tensors i.e. torch.sum(torch.randn(()), 0)
 template <typename F, F Func, typename... ExtraArgs>
-optional<std::tuple<decltype(ret_type(Func)), optional<int64_t>>> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
+std::tuple<decltype(ret_type(Func)), optional<int64_t>, bool> reduction_dim_batch_rule_impl(const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
-  if (logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim)) {
-    return nullopt;
-  }
   auto self_ = moveBatchDimToFront(self, self_bdim);
   int64_t new_dim = getPhysicalDim(self, self_bdim.has_value(), dim);
+  bool is_scalar_case = logical_dim == 0 && is_allowed_dim_on_scalar_tensor(dim);
+  if (is_scalar_case) {
+    self_ = self_.unsqueeze(-1);
+    new_dim = 1;
+  }
   auto result = Func(self_, new_dim, std::forward<ExtraArgs>(extra_args)...);
-  return std::make_tuple( result, 0 );
+  if (is_scalar_case) {
+    return std::make_tuple( result, 0, true);
+  }
+  return std::make_tuple( result, 0 , false);
 }
 
+// For reductions that reduce over one dimension and return a tensor
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
   auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
-  if (!out) {
-    return std::make_tuple( self.clone(), 0 );
+  if (std::get<2>(out)) {
+    return std::make_tuple(std::get<0>(out).squeeze(-1), 0);
   }
-  return *out;
+  return std::make_tuple(std::get<0>(out), std::get<1>(out));
 }
 
+// For reductions that reduce over one dimension and return a pair of tensors
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>> reduction_dim_ret_pair_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, int64_t dim, ExtraArgs... extra_args) {
   auto out = reduction_dim_batch_rule_impl<F, Func, ExtraArgs...>(self, self_bdim, dim, std::forward<ExtraArgs>(extra_args)...);
-  if (!out) {
-    return std::make_tuple(self.clone(), 0, at::zeros({self.size(0)}, {}, self.options().dtype(kLong)), 0);
+  auto tensors = std::get<0>(out);
+  auto bdim = std::get<1>(out);
+  if (std::get<2>(out)) {
+    return std::make_tuple(std::get<0>(tensors).squeeze(-1), bdim, std::get<1>(tensors).squeeze(-1), bdim);
   }
-  auto tensors = std::get<0>(*out);
-  auto bdim = std::get<1>(*out);
   return std::make_tuple(std::get<0>(tensors), bdim, std::get<1>(tensors), bdim);
 }
 
+// For reductions that are implicitly reducing over all dimensions.
 template <typename F, F Func, typename G, G DimRule, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> reduction_no_dim_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim, ExtraArgs... extra_args) {
