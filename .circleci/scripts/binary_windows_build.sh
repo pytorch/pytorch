@@ -19,6 +19,41 @@ if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
+echo "Free Space for CUDA DEBUG BUILD"
+if [[ "$CIRCLECI" == 'true' ]]; then
+    if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\Microsoft.NET" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Microsoft.NET"
+    fi
+
+    if [[ -d "C:\\Program Files\\dotnet" ]]; then
+        rm -rf "C:\\Program Files\\dotnet"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\dotnet" ]]; then
+        rm -rf "C:\\Program Files (x86)\\dotnet"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\Microsoft SQL Server" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Microsoft SQL Server"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\Xamarin" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Xamarin"
+    fi
+
+    if [[ -d "C:\\Program Files (x86)\\Google" ]]; then
+        rm -rf "C:\\Program Files (x86)\\Google"
+    fi
+fi
+
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
