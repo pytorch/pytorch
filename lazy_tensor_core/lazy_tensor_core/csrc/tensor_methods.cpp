@@ -13,6 +13,8 @@
 #include "lazy_tensor_core/csrc/ops/all.h"
 #include "lazy_tensor_core/csrc/ops/all_reduce.h"
 #include "lazy_tensor_core/csrc/ops/all_to_all.h"
+#include "lazy_tensor_core/csrc/ops/amax.h"
+#include "lazy_tensor_core/csrc/ops/amin.h"
 #include "lazy_tensor_core/csrc/ops/amp_foreach_non_finite_check_and_unscale.h"
 #include "lazy_tensor_core/csrc/ops/amp_update_scale.h"
 #include "lazy_tensor_core/csrc/ops/any.h"
@@ -576,6 +578,26 @@ LazyTensor LazyTensor::all(const LazyTensor& input,
       result_type);
 }
 
+LazyTensor LazyTensor::amax(const LazyTensor& input,
+                            std::vector<lazy_tensors::int64> dimensions,
+                            bool keep_reduced_dimensions) {
+  return input.CreateFrom(
+      ir::MakeNode<ir::ops::Amax>(input.GetIrValue(),
+                                  Helpers::GetCanonicalDimensionIndices(
+                                      dimensions, input.shape().get().rank()),
+                                  keep_reduced_dimensions));
+}
+
+LazyTensor LazyTensor::amin(const LazyTensor& input,
+                            std::vector<lazy_tensors::int64> dimensions,
+                            bool keep_reduced_dimensions) {
+  return input.CreateFrom(
+      ir::MakeNode<ir::ops::Amin>(input.GetIrValue(),
+                                  Helpers::GetCanonicalDimensionIndices(
+                                      dimensions, input.shape().get().rank()),
+                                  keep_reduced_dimensions));
+}
+
 LazyTensor LazyTensor::any(const LazyTensor& input,
                            std::vector<lazy_tensors::int64> dimensions,
                            bool keep_reduced_dimensions) {
@@ -760,6 +782,11 @@ LazyTensor LazyTensor::binary_cross_entropy_backward(
   return input.CreateFrom(ir::MakeNode<ir::ops::BinaryCrossEntropyBackward>(
       grad_output.GetIrValue(), input.GetIrValue(), target.GetIrValue(),
       GetOptionalIrValue(weight), GetReductionMode(reduction)));
+}
+
+void LazyTensor::logical_and_out(LazyTensor& out, const LazyTensor& input,
+                                 const LazyTensor& other) {
+  out.SetIrValue(ir::ops::LogicalAnd(input.GetIrValue(), other.GetIrValue()));
 }
 
 LazyTensor LazyTensor::bitwise_and(const LazyTensor& input,
@@ -1497,7 +1524,8 @@ LazyTensor LazyTensor::leaky_relu_backward(const LazyTensor& grad_output,
                                            double negative_slope,
                                            bool self_is_result) {
   return grad_output.CreateFrom(ir::MakeNode<ir::ops::LeakyReluBackward>(
-      grad_output.GetIrValue(), input.GetIrValue(), negative_slope, self_is_result));
+      grad_output.GetIrValue(), input.GetIrValue(), negative_slope,
+      self_is_result));
 }
 
 LazyTensor LazyTensor::lerp(const LazyTensor& input, const LazyTensor& end,

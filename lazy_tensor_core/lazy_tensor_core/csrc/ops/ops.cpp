@@ -465,6 +465,13 @@ NodePtr Lerp(const Value& start, const Value& end, const Value& weight) {
   return start + weight * (end - start);
 }
 
+NodePtr LogicalAnd(const Value& input, const Value& other) {
+  NodePtr node = GenericOp(OpKind(at::aten::logical_and), {input, other});
+  node->SetShapeDeferred(
+      [&]() { return compiler::NodeLowering::Get()->Infer(node.get()); });
+  return node;
+}
+
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

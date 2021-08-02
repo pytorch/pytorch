@@ -219,6 +219,8 @@ NodePtr BaddBmm(const Value& lhs, const Value& rhs, const Value& bias,
 
 NodePtr Lerp(const Value& start, const Value& end, const Value& weight);
 
+NodePtr LogicalAnd(const Value& input, const Value& other);
+
 }  // namespace ops
 }  // namespace ir
 }  // namespace torch_lazy_tensors

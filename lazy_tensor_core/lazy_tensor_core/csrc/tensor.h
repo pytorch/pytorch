@@ -286,6 +286,14 @@ class LazyTensor {
                         std::vector<lazy_tensors::int64> dimensions,
                         bool keep_reduced_dimensions);
 
+  static LazyTensor amax(const LazyTensor& input,
+                         std::vector<lazy_tensors::int64> dimensions,
+                         bool keep_reduced_dimensions);
+
+  static LazyTensor amin(const LazyTensor& input,
+                         std::vector<lazy_tensors::int64> dimensions,
+                         bool keep_reduced_dimensions);
+
   static LazyTensor any(const LazyTensor& input,
                         std::vector<lazy_tensors::int64> dimensions,
                         bool keep_reduced_dimensions);
@@ -360,6 +368,9 @@ class LazyTensor {
       const LazyTensor& grad_output, const LazyTensor& input,
       const LazyTensor& target, const LazyTensor& weight,
       lazy_tensors::int64 reduction);
+
+  static void logical_and_out(LazyTensor& out, const LazyTensor& input,
+                              const LazyTensor& other);
 
   static LazyTensor bitwise_and(const LazyTensor& input,
                                 const at::Scalar& other);
