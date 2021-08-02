@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
+#include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
 namespace jit {
