@@ -3644,8 +3644,7 @@ Tensor plu_backward_base(
   auto U_principal_H = U_principal.transpose(-2, -1).conj();
   auto U_grad_principal = U_grad.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  auto phi_L = L_principal_H.matmul(L_grad_principal).tril_();
-  phi_L.diagonal(0, -2, -1).fill_(0.0);
+  auto phi_L = L_principal_H.matmul(L_grad_principal).tril_(-1);
   auto phi_U = U_grad_principal.matmul(U_principal_H).triu_();
 
   auto phi = phi_L + phi_U;
@@ -3656,8 +3655,7 @@ Tensor plu_backward_base(
     auto U_complement = U.narrow(-2, 0, k).narrow(-1, k, n - k);
     auto U_grad_complement = U_grad.narrow(-2, 0, k).narrow(-1, k, n - k);
 
-    auto phi_complement = U_grad_complement.matmul(U_complement.transpose(-2, -1).conj()).tril_();
-    phi_complement.diagonal(0, -2, -1).fill_(0.0);
+    auto phi_complement = U_grad_complement.matmul(U_complement.transpose(-2, -1).conj()).tril_(-1);
     phi.sub_(phi_complement);
 
     // recall the result for X1_grad and X2_grad from above.
