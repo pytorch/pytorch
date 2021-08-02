@@ -83,22 +83,32 @@ else()
 endif()
 
 if(USE_TBB)
-  message(STATUS "Compiling TBB from source")
-  # Unset our restrictive C++ flags here and reset them later.
-  # Remove this once we use proper target_compile_options.
-  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  set(CMAKE_CXX_FLAGS)
+  if(USE_SYSTEM_TBB)
+    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
 
-  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
+  else()
+    message(STATUS "Compiling TBB from source")
+    # Unset our restrictive C++ flags here and reset them later.
+    # Remove this once we use proper target_compile_options.
+    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    set(CMAKE_CXX_FLAGS)
 
-  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
+    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+
+    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
+
+    add_library(TBB::tbb ALIAS tbb)
+  endif()
 endif()
 
 # ---[ protobuf
@@ -1542,8 +1552,7 @@ set(USE_LAPACK 0)
 
 if(NOT INTERN_BUILD_MOBILE)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-  set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-  separate_arguments(TORCH_NVCC_FLAGS)
+  string(APPEND CMAKE_CUDA_FLAGS " $ENV{TORCH_NVCC_FLAGS}")
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 
   # Top-level build config
@@ -1578,8 +1587,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(CMAKE_CXX_STANDARD 14)
   endif()
-
-  string(APPEND CMAKE_CUDA_FLAGS " ${TORCH_NVCC_FLAGS}")
 
   if(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
     message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
