@@ -2,15 +2,15 @@ import argparse
 
 
 from tools.linter.lint import Linter
+from tools.linter.utils import run_cmd, CommandResult
 
 
-class Misc(Linter):
-    name = "miscellaneous lints"
+class Quickchecks(Linter):
+    name = "Miscallenous lints"
     exe = __file__
 
-    def parse_args(self, args):
-        parser = argparse.ArgumentParser(f"Run {self.name} on PyTorch")
-        return parser.parse_args(args)
+    def build_parser(self, parser):
+        return
 
     def run(self, options=None):
-        print("ran misc")
+        result = CommandResult(0, "", "")

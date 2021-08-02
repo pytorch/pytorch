@@ -9,7 +9,7 @@ from typing import List, Any
 # Here we are appending the path to the root of pytorch to sys.path
 sys.path.insert(0, "")
 
-from tools.linter.utils.filter_helpers import filter_files
+from tools.linter.utils.filter_helpers import filter_files, filter_files_from_diff_file
 from tools.linter.utils import (
     CommandResult,
     kebab2snake,
@@ -21,11 +21,16 @@ from tools.linter.utils import (
     indent,
 )
 
-# SUPPORTED_LINTERS = ["shellcheck", "flake8", "mypy", "clang-tidy", "clang-format", "misc"]
 # This list is used for quickly discovering linters The names provided here are
 # not used when initializing the linter. Instead, they are declared in the
 # corresponding class
-SUPPORTED_LINTERS = ["shellcheck", "flake8", "mypy", "clang-tidy", "clang-format"]
+SUPPORTED_LINTERS = [
+    "shellcheck",
+    "flake8",
+    "mypy",
+    "clang-tidy",
+    "clang-format",
+]
 
 
 class LinterBinaryNotFound(Exception):
@@ -44,15 +49,15 @@ class Linter:
         if not exists:
             raise LinterBinaryNotFound(self.exe)
 
-        # TODO check if required options are defined
-
     def filter_files(self, files, glob: List[str], regex: List[str]):
         return filter_files(files, glob, regex)
 
     def build_parser(self, parser: argparse.ArgumentParser) -> None:
         raise NotImplementedError
 
-    async def run(self, files: List[str], options: Any = options) -> CommandResult:
+    async def run(
+        self, files: List[str], line_filters: List[str] = None, options: Any = options
+    ) -> CommandResult:
         raise NotImplementedError
 
     def __str__(self) -> str:
@@ -67,11 +72,11 @@ def build_parser(linters) -> argparse.Namespace:
 
     # Setting default values here will prevent linters from overriding option values
     # For example, it doesn't make sense for a linter to override
-    # --changed-only set to true because this breaks the semantics of the
+    # --all set to true because this breaks the semantics of the
     # linter running on all filtered files by default
     parser.add_argument(
-        "--changed-only",
-        help="Run on changes (and not the whole codebase)",
+        "--all",
+        help="Run linters without filtering for changed files",
         default=False,
         action="store_true",
     )
@@ -94,7 +99,17 @@ def build_parser(linters) -> argparse.Namespace:
         "-p", "--paths", nargs="+", help="Lint only the given paths (recursively)",
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Print verbose output", default=False,
+        "-d",
+        "--diff-file",
+        default=None,
+        help="Lint files filtered by a file containing a diff",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Print verbose output",
+        default=False,
     )
 
     subparsers = parser.add_subparsers()
@@ -127,7 +142,7 @@ def merge_namespaces(a, b):
     b_dict = vars(b)
     c = a_dict.copy()
     for (k, v) in b_dict.items():
-        if v is not None:
+        if v is not None or k not in c:
             c[k] = v
     return argparse.Namespace(**c)
 
@@ -137,14 +152,14 @@ async def main() -> None:
     parser = build_parser(linters)
     options = parser.parse_args()
 
-    if options.changed_only:
+    if not options.all:
         options.paths = await find_changed_files()
 
     # Run linter
     if "linter" in options:
         linters = [options.linter]
 
-    result = CommandResult(0, "", "")
+    tasks = []
     for linter in linters:
         # We merge user-provided options into linter options
         # This allows the user to override linter-specified defaults
@@ -153,10 +168,22 @@ async def main() -> None:
         files = await linter.filter_files(
             linter_options.paths, linter_options.glob, linter_options.regex
         )
+        if linter_options.diff_file:
+            files, line_filters = filter_files_from_diff_file(
+                files, linter_options.diff_file
+            )
+        else:
+            line_filters = []
 
-        # print(files)
+        async def helper(linter, files, line_filters, linter_options):
+            result = await linter.run(files, line_filters, linter_options)
+            return linter, result
 
-        intermediate_result = await linter.run(files, linter_options)
+        tasks.append(helper(linter, files, line_filters, linter_options))
+
+    result = CommandResult(0, "", "")
+    for task in asyncio.as_completed(tasks):
+        linter, intermediate_result = await task
         if intermediate_result.failed():
             print(color(f"fail: {linter.name}", Color.red))
             print(indent(repr(intermediate_result), 4))
@@ -168,11 +195,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.get_event_loop().run_until_complete(main())
-    except Exception as e:
-        # TODO
-        print(f"Error! Could not find {e.exe}")
-        readme_path = os.path.join(os.path.dirname(__file__), "README.md")
-        print(f"Follow the installation instructions in {readme_path}")
-        sys.exit(-1)
+    asyncio.get_event_loop().run_until_complete(main())

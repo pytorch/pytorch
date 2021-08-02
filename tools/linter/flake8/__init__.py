@@ -13,5 +13,5 @@ class Flake8(Linter):
     def build_parser(self, parser):
         return parser
 
-    async def run(self, files, options=options):
+    async def run(self, files, line_filters=None, options=options):
         return await run_cmd([self.exe, "--config", ".flake8", *files])

@@ -75,7 +75,12 @@ class ProgressMeter:
 
         # Once we've processed all items, clear the progress bar
         if self.num_processed == self.num_items - 1:
-            self._write(self._clear_to_end)
+            self._write(
+                self._move_to_start_of_line
+                + self._clear_to_end
+                + self._move_to_previous_line
+                + self._clear_to_end
+            )
             return
 
         # NOP if we've already processed all items
@@ -133,8 +138,8 @@ async def run_cmd(
     cmd: Union[str, List[str]],
     env: Optional[Dict[str, Any]] = None,
     on_completed=None,
-    on_completed_args=None):
-
+    on_completed_args=None,
+):
     if isinstance(cmd, list):
         cmd_str = " ".join(shlex.quote(arg) for arg in cmd)
     else:
@@ -146,12 +151,15 @@ async def run_cmd(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
+
     output = await proc.communicate()
+
     result = CommandResult(
         returncode=proc.returncode if proc.returncode is not None else -1,
         stdout=output[0].decode("utf-8").strip(),
         stderr=output[1].decode("utf-8").strip(),
     )
+
     if on_completed:
         if not on_completed_args:
             on_completed_args = []

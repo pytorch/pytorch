@@ -15,4 +15,7 @@ OUTPUT_DIR = os.path.join(PYTORCH_ROOT, ".clang-format-bin")
 INSTALLATION_PATH = os.path.join(OUTPUT_DIR, "clang-format")
 
 if __name__ == "__main__":
-    pass
+    ok = download("clang-format", OUTPUT_DIR, PLATFORM_TO_URL, PLATFORM_TO_HASH)
+    if not ok:
+        print("Installation failed!")
+        exit(1)

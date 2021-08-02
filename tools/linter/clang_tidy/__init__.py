@@ -80,10 +80,8 @@ class ClangTidy(Linter):
         ],
         paths=["torch/csrc/"],
         regex=[r"^.*\.c(c|pp)?$"],
-        # clang-tidy specific options
         clang_tidy_exe=exe,
         compile_commands_dir="build",
-        diff_file=None,
         dry_run=None,
         quiet=False,
         config_file=".clang-tidy-oss",
@@ -106,11 +104,6 @@ class ClangTidy(Linter):
             "--compile-commands-dir",
             default=self.options.compile_commands_dir,
             help="Path to the folder containing compile_commands.json",
-        )
-        parser.add_argument(
-            "--diff-file",
-            default=self.options.diff_file,
-            help="File containing diff to use for determining files to lint and line filters",
         )
         parser.add_argument(
             "-n",
@@ -165,10 +158,10 @@ class ClangTidy(Linter):
         )
         return parser
 
-    async def run(self, files, options=options) -> CommandResult:
+    async def run(self, files, line_filters=None, options=options) -> CommandResult:
         if not pathlib.Path("build").exists():
             generate_build_files()
 
-        result, _ = await run(files, options)
+        result, _ = await run(files, line_filters, options)
 
         return result

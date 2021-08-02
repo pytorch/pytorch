@@ -16,7 +16,7 @@ class Mypy(Linter):
     def build_parser(self, parser):
         return parser
 
-    async def run(self, files, options):
+    async def run(self, files, line_filters=None, options=options):
         result = CommandResult(0, "", "")
 
         # Run autogen code

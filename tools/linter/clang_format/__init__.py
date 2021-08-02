@@ -13,27 +13,28 @@ class ClangFormat(Linter):
     options = argparse.Namespace(
         paths=["c10", "torch/csrc/jit", "test/cpp/jit", "test/cpp/tensorexpr"],
         regex=[".*\\.(h|cpp|cc|c|hpp)$"],
-        glob=[]
+        glob=[],
+        error_if_changed=False,
+        max_processes=50,
     )
 
     def build_parser(self, parser):
         parser.add_argument(
-            "-d",
-            "--diff",
+            "--error-if-changed",
             action="store_true",
-            default=False,
+            default=self.options.error_if_changed,
             help="Determine whether running clang-format would produce changes",
         )
         parser.add_argument(
             "--max-processes",
             type=int,
-            default=50,
+            default=self.options.max_processes,
             help="Maximum number of subprocesses to create to format files in parallel",
         )
 
     async def run_clang_format_on_file(
         self, filename: str, semaphore: asyncio.Semaphore, verbose: bool = False,
-    ) -> None:
+    ) -> CommandResult:
         """
         Run clang-format on the provided file.
         """
@@ -47,7 +48,7 @@ class ClangFormat(Linter):
 
     async def file_clang_formatted_correctly(
         self, filename: str, semaphore: asyncio.Semaphore, verbose: bool = False,
-    ) -> bool:
+    ) -> CommandResult:
         """
         Checks if a file is formatted correctly and returns True if so.
         """
@@ -59,7 +60,6 @@ class ClangFormat(Linter):
             result = await run_cmd(cmd)
 
         formatted_contents = result.stdout
-
 
         # Compare the formatted file to the original file.
         with open(filename) as orig:
@@ -76,10 +76,10 @@ class ClangFormat(Linter):
             result.stdout = ""
         return result
 
-    async def run(self, files, options=options):
+    async def run(self, files, line_filters=None, options=options):
         result = CommandResult(0, "", "")
         semaphore = asyncio.Semaphore(options.max_processes)
-        if options.diff:
+        if options.error_if_changed:
             for task in asyncio.as_completed(
                 [
                     self.file_clang_formatted_correctly(f, semaphore, options.verbose)

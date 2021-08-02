@@ -20,7 +20,6 @@ import os.path
 import re
 import shutil
 import asyncio
-import shlex
 import multiprocessing
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
@@ -58,31 +57,6 @@ class ClangTidyWarning:
         return base
 
 
-async def run_shell_command(
-    cmd: List[str], on_completed: Any = None, *args: Any
-) -> CommandResult:
-    """Executes a shell command and runs an optional callback when complete"""
-    if VERBOSE:
-        log("Running: ", " ".join(cmd))
-
-    proc = await asyncio.create_subprocess_shell(
-        " ".join(shlex.quote(x) for x in cmd),  # type: ignore[attr-defined]
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    output = await proc.communicate()
-    result = CommandResult(
-        returncode=proc.returncode if proc.returncode is not None else -1,
-        stdout=output[0].decode("utf-8").strip(),
-        stderr=output[1].decode("utf-8").strip(),
-    )
-
-    if on_completed:
-        on_completed(result, *args)
-
-    return result
-
-
 async def _run_clang_tidy_in_parallel(
     commands: List[Tuple[List[str], str]], disable_progress_bar: bool
 ) -> CommandResult:
@@ -111,7 +85,7 @@ async def _run_clang_tidy_in_parallel(
             progress_meter.update(f"Processed {filename}")
 
         coros = [
-            run_cmd(cmd, on_completed, on_completed_args=[filename])
+            run_cmd(cmd, on_completed=on_completed, on_completed_args=[filename])
             for (cmd, filename) in commands
         ]
         return await gather_with_concurrency(multiprocessing.cpu_count(), coros)
@@ -231,66 +205,12 @@ def map_filenames(build_folder: str, fnames: Iterable[str]) -> List[str]:
     return [map_filename(build_folder, fname) for fname in fnames]
 
 
-def find_changed_lines(diff: str) -> Dict[str, List[Tuple[int, int]]]:
-    # Delay import since this isn't required unless using the --diff-file
-    # argument, which for local runs people don't care about
-    try:
-        import unidiff  # type: ignore[import]
-    except ImportError as e:
-        e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
-        raise e
-
-    files = collections.defaultdict(list)
-
-    for file in unidiff.PatchSet(diff):
-        for hunk in file:
-            start = hunk[0].target_line_no
-            if start is None:
-                start = 1
-            end = int(hunk[-1].target_line_no or 0)
-            if end == 0:
-                continue
-
-            files[file.path].append((start, end))
-
-    return dict(files)
-
-
-def filter_from_diff(
-    paths: List[str], diffs: List[str]
-) -> Tuple[List[str], List[Dict[Any, Any]]]:
-    files = []
-    line_filters = []
-
-    for diff in diffs:
-        changed_files = find_changed_lines(diff)
-        changed_files = {
-            filename: v
-            for filename, v in changed_files.items()
-            if any(filename.startswith(path) for path in paths)
-        }
-        line_filters += [
-            {"name": name, "lines": lines} for name, lines, in changed_files.items()
-        ]
-        files += list(changed_files.keys())
-
-    return files, line_filters
-
-
-def filter_from_diff_file(
-    paths: List[str], filename: str
-) -> Tuple[List[str], List[Dict[Any, Any]]]:
-    with open(filename, "r") as f:
-        diff = f.read()
-    return filter_from_diff(paths, [diff])
-
-
 def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
     return paths, []
 
 
 async def run(
-    files: List[str], options: Any
+    files: List[str], line_filters: List[str], options: Any
 ) -> Tuple[CommandResult, List[ClangTidyWarning]]:
     # These flags are pervasive enough to set it globally. It makes the code
     # cleaner compared to threading it through every single function.
@@ -299,15 +219,10 @@ async def run(
     VERBOSE = options.verbose
     QUIET = options.quiet
 
-    # Filter files
-    if options.diff_file:
-        files, line_filters = filter_from_diff_file(files, options.diff_file)
-    else:
-        files, line_filters = filter_default(files)
-
     # clang-tidy errors when it does not get input files.
     if not files:
-        log("No files detected")
+        if VERBOSE:
+            log("No files detected")
         return CommandResult(0, "", ""), []
 
     result = await _run_clang_tidy(options, line_filters, files)

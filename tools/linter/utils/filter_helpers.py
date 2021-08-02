@@ -1,4 +1,5 @@
 import re
+import collections
 from typing import Pattern, List, Tuple
 
 from tools.linter.utils import run_cmd, glob2regex
@@ -48,3 +49,50 @@ async def filter_files(
         if not any(n.match(file) for n in negative_patterns)
         and any(p.match(file) for p in positive_patterns)
     ]
+
+
+def map_files_to_line_filters(diff):
+    # Delay import since this isn't required unless using the --diff-file
+    # argument, which for local runs people don't care about
+    try:
+        import unidiff  # type: ignore[import]
+    except ImportError as e:
+        e.msg += ", run 'pip install unidiff'"  # type: ignore[attr-defined]
+        raise e
+
+    files = collections.defaultdict(list)
+
+    for file in unidiff.PatchSet(diff):
+        for hunk in file:
+            start = hunk[0].target_line_no
+            if start is None:
+                start = 1
+            end = int(hunk[-1].target_line_no or 0)
+            if end == 0:
+                continue
+
+            files[file.path].append((start, end))
+
+    return dict(files)
+
+
+def filter_files_from_diff(paths, diff):
+    files = []
+    line_filters = []
+    changed_files = map_files_to_line_filters(diff)
+    changed_files = {
+        filename: v
+        for filename, v in changed_files.items()
+        if any(filename.startswith(path) for path in paths)
+    }
+    line_filters += [
+        {"name": name, "lines": lines} for name, lines, in changed_files.items()
+    ]
+    files += list(changed_files.keys())
+    return files, line_filters
+
+
+def filter_files_from_diff_file(paths, diff_file):
+    with open(diff_file, "r") as f:
+        diff = f.read()
+    return filter_files_from_diff(paths, diff)
