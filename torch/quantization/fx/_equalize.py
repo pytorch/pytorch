@@ -80,7 +80,7 @@ class _InputEqualizationObserver(nn.Module):
         return self.input_obs(x_orig)
 
     def get_input_minmax(self):
-        return (self.input_obs.min_vals, self.input_obs.max_vals)
+        return (self.input_obs.min_val, self.input_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         # Reshape the equalization scale along axis=1 so that it can be
@@ -154,7 +154,7 @@ class _WeightEqualizationObserver(nn.Module):
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
-        return (self.weight_col_obs.min_vals, self.weight_col_obs.max_vals)
+        return (self.weight_col_obs.min_val, self.weight_col_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale

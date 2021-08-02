@@ -55,7 +55,7 @@ jobs:
             echo ::set-output \
               name=sha::"$(grep -Em1 '^[[:xdigit:]]{40}$' commit-sha.txt)"
           fi
-      - if: steps.unzip.outputs.sha
+      - if: ${{ steps.unzip.outputs.sha }}
         name: Add annotations
         uses: pytorch/add-annotations-github-action@master
         env:
