@@ -5150,9 +5150,8 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    decorators=[
                        DecorateInfo(
-                           toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-04)}),
-                           'TestUnaryUfuncs', 'test_reference_numerics', device_type='cuda',
-                           dtypes=[torch.float16]),
+                           toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-04)}),
+                           'TestUnaryUfuncs', 'test_reference_numerics', device_type='cuda'),
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
                    skips=(
