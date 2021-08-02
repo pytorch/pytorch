@@ -3710,12 +3710,12 @@ Tensor plu_backward_base(
     psi.narrow(-2, 0, k).narrow(-1, 0, k).copy_(psi_principal);
 
     self_grad = std::get<0>(at::triangular_solve(
-      psi.transpose(-2, -1).conj(),
-      U_principal,
+      P.matmul(psi).transpose(-2, -1),
+      U_principal.conj(),
       /*upper=*/true,
       /*transpose=*/false,
       /*unitriangular=*/false
-    )).matmul(P.transpose(-2, -1)).transpose(-2, -1).conj();
+    )).transpose(-2, -1);
   }
 
   return self_grad;
