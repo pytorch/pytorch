@@ -1615,14 +1615,14 @@ class DistributedDataParallelTest(
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         hook, hook_state = default.allreduce_hook, process_group
-        opt_hook_state = default.OptimizerHookState(
+        opt_hook_state = default._OptimizerHookState(
             functional_optim_cls,
             *functional_optim_args,
             **functional_optim_kwargs,
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
-            default.hook_then_optimizer(hook, opt_hook_state),
+            default._hook_then_optimizer(hook, opt_hook_state),
             gradient_as_bucket_view,
             hook_state,
         )
