@@ -3498,6 +3498,22 @@ TEST_F(AtenLtcTsTensorTest, TestAddCDiv) {
   });
 }
 
+TEST_F(AtenLtcTsTensorTest, TestAddCDivWithBroadcast) {
+  torch::Tensor a = torch::rand({1, 3}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor b = torch::rand({3, 1}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor c =
+      torch::abs(torch::rand({1, 3}, torch::TensorOptions(torch::kFloat))) +
+      1.0;
+  torch::Tensor d = torch::addcdiv(a, b, c, 3.1165);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_a = CopyToDevice(a, device);
+    torch::Tensor xla_b = CopyToDevice(b, device);
+    torch::Tensor xla_c = CopyToDevice(c, device);
+    torch::Tensor xla_d = torch::addcdiv(xla_a, xla_b, xla_c, 3.1165);
+    AllClose(d, xla_d);
+  });
+}
+
 TEST_F(AtenLtcTsTensorTest, TestSize) {
   torch::Tensor input =
       torch::rand({2, 1, 4, 6}, torch::TensorOptions(torch::kFloat));
