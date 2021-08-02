@@ -28,6 +28,62 @@ typedef at::detail::Array<uint32_t, 2> UINT2;
 typedef at::detail::Array<double, 2> DOUBLE2;
 typedef at::detail::Array<float, 2> FLOAT2;
 
+static const uint32_t kPhilox10A = 0x9E3779B9;
+static const uint32_t kPhilox10B = 0xBB67AE85;
+static const uint32_t kPhiloxSA = 0xD2511F53;
+static const uint32_t kPhiloxSB = 0xCD9E8D57;
+
+C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
+                                  uint32_t *result_high) {
+  #ifdef __CUDA_ARCH__
+    *result_high = __umulhi(a, b);
+    return a*b;
+  #else
+    const uint64_t product = static_cast<uint64_t>(a) * b;
+    *result_high = static_cast<uint32_t>(product >> 32);
+    return static_cast<uint32_t>(product);
+  #endif
+}
+
+C10_HOST_DEVICE inline UINT4 single_round(UINT4 ctr, UINT2 in_key) {
+  uint32_t hi0;
+  uint32_t hi1;
+  uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
+  uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
+  UINT4 ret;
+  ret[0] = hi1 ^ ctr[1] ^ in_key[0];
+  ret[1] = lo1;
+  ret[2] = hi0 ^ ctr[3] ^ in_key[1];
+  ret[3] = lo0;
+  return ret;
+}
+
+C10_HOST_DEVICE inline UINT4 philox_round(UINT4 ctr, UINT2 key) {
+  UINT4 ctr_ = ctr;
+  UINT2 key_ = key;
+
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+  ctr_ = single_round(ctr_, key_);
+  key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
+
+  return single_round(ctr_, key_);
+}
+
 } // namespace detail
 
 /**
@@ -85,29 +141,7 @@ public:
    */
   C10_HOST_DEVICE inline uint32_t operator()() {
     if(STATE == 0) {
-      detail::UINT4 counter_ = counter;
-      detail::UINT2 key_ = key;
-
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-      counter_ = single_round(counter_, key_);
-      key_[0] += (kPhilox10A); key_[1] += (kPhilox10B);
-
-      output = single_round(counter_, key_);
+      output = detail::philox_round(counter, key);
       incr();
     }
     uint32_t ret = output[STATE];
@@ -168,36 +202,25 @@ private:
   detail::UINT2 key;
   uint32_t STATE;
 
-  C10_HOST_DEVICE inline uint32_t mulhilo32(uint32_t a, uint32_t b,
-                                    uint32_t *result_high) {
-    #ifdef __CUDA_ARCH__
-      *result_high = __umulhi(a, b);
-      return a*b;
-    #else
-      const uint64_t product = static_cast<uint64_t>(a) * b;
-      *result_high = static_cast<uint32_t>(product >> 32);
-      return static_cast<uint32_t>(product);
-    #endif
-  }
-
-  C10_HOST_DEVICE inline detail::UINT4 single_round(detail::UINT4 ctr, detail::UINT2 in_key) {
-    uint32_t hi0;
-    uint32_t hi1;
-    uint32_t lo0 = mulhilo32(kPhiloxSA, ctr[0], &hi0);
-    uint32_t lo1 = mulhilo32(kPhiloxSB, ctr[2], &hi1);
-    detail::UINT4 ret;
-    ret[0] = hi1 ^ ctr[1] ^ in_key[0];
-    ret[1] = lo1;
-    ret[2] = hi0 ^ ctr[3] ^ in_key[1];
-    ret[3] = lo0;
-    return ret;
-  }
-  static const uint32_t kPhilox10A = 0x9E3779B9;
-  static const uint32_t kPhilox10B = 0xBB67AE85;
-  static const uint32_t kPhiloxSA = 0xD2511F53;
-  static const uint32_t kPhiloxSB = 0xCD9E8D57;
 };
 
 typedef philox_engine Philox4_32_10;
+
+uint64_t _philox(uint64_t key, uint64_t ctr) {
+  uint64_t ctr_v = ctr / 2;
+  uint8_t ctr_idx = static_cast<uint8_t>(ctr % 2);
+
+  detail::UINT2 key_;
+  detail::UINT4 ctr_(0);
+  key_[0] = static_cast<uint32_t>(key);
+  key_[1] = static_cast<uint32_t>(key>> 32);
+  ctr_[2] = static_cast<uint32_t>(ctr_v);
+  ctr_[3] = static_cast<uint32_t>(ctr_v >> 32);
+
+  auto keys = detail::philox_round(ctr_, key_);
+  uint64_t val = static_cast<uint64_t>(keys[ctr_idx * 2 + 1]) << 32;
+  val += keys[ctr_idx * 2];
+  return val;
+}
 
 } // namespace at
