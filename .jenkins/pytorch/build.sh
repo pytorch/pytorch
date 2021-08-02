@@ -44,6 +44,8 @@ gcc --version
 echo "CMake version:"
 which cmake
 cmake --version
+ls /usr/local/bin | grep cmake
+exit 1
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   echo "NVCC version:"
