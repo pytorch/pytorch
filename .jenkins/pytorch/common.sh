@@ -124,8 +124,8 @@ if [ -z "$COMPACT_JOB_NAME" ]; then
   exit 1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *macos* ]]; then
+# TODO: Renable libtorch testing for MacOS, see https://github.com/pytorch/pytorch/issues/62598
+if [[ "$BUILD_ENVIRONMENT" == *linux-trusty-py3.6-gcc7* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   # shellcheck disable=SC2034
