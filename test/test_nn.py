@@ -16634,6 +16634,20 @@ class TestNNDeviceType(NNTestCase):
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
+
+    @onlyOnCPUAndCUDA
+    @skipCUDAIfNoCudnn
+    @dtypes(torch.float, torch.double, torch.float16)
+    def test_cudnn_convolution_relu(self, device, dtype):
+        for batch in [1, 2, 3]:
+            for groups in [1, 2, 4]:
+                for kernel_size in [(1, 1), (3, 3)]:
+                    inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
+                    w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
+                    cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+                    conv2d_mod = nn.Conv2d(groups, 8, kernel_size=kernel_size, groups=groups, dtype=dtype, device=device)
+                    self.assertEqual(conv2d_mod(inp).relu(), cudnn_out)
+
     @onlyCUDA
     @skipCUDAIfRocm
     @skipCUDAIfCudnnVersionLessThan(7603)
