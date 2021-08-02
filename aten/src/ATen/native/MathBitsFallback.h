@@ -25,7 +25,6 @@ struct MathOpFallback {
   // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
   virtual Tensor& math_op_(Tensor&) = 0;
   void linalg_fallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-    std::cout<<"Entering linalg_fallback";
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
     const auto stack_start = stack->size() - num_arguments;
