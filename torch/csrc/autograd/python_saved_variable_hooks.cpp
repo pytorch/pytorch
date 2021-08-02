@@ -72,6 +72,7 @@ namespace torch { namespace autograd {
     if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
+    py::gil_scoped_acquire gil;
     py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
     return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
