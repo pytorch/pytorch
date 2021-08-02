@@ -14,7 +14,6 @@ import traceback
 import warnings
 import unittest
 from math import sqrt
-from pathlib import Path
 from torch.multiprocessing import Process
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import op_db
@@ -29,18 +28,28 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.operator_schemas import get_signature_for_torch_op
 from copy import deepcopy
+from collections import namedtuple
 
 from torch.fx.proxy import TraceError
 
 from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
+from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow  # noqa: F401
+
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_FBCODE, IS_MACOS
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    IS_MACOS,
+    IS_WINDOWS,
+    TEST_WITH_ROCM,
+    find_library_location,
+    run_tests,
+)
 from torch.testing._internal.jit_utils import JitTestCase
 
 from fx.named_tup import MyNamedTup
@@ -58,6 +67,11 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+# used in test_pytree. It's all the way out here because pickling a GraphModule
+# that uses Point errors out if Point is local to the function
+Point = namedtuple('Point', ['x', 'y'])
+
 
 # Test wrap() passing both a function name as well as a function
 # directly
@@ -109,9 +123,8 @@ class TestFX(JitTestCase):
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
-        torch_root = Path(__file__).resolve().parent.parent
-        p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
-        torch.ops.load_library(str(p))
+        lib_file_path = find_library_location('libtorchbind_test.so')
+        torch.ops.load_library(str(lib_file_path))
 
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
@@ -1151,6 +1164,49 @@ class TestFX(JitTestCase):
         ms = torch.jit.script(m)
         with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
             ms(torch.rand(4, 3))
+
+    def test_fx_create_arg(self):
+        class CustomArgObject:
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+            def __fx_create_arg__(self, tracer: torch.fx.Tracer):
+                return tracer.create_node(
+                    "call_function",
+                    CustomArgObject,
+                    args=(
+                        tracer.create_arg(self.x),
+                        tracer.create_arg(self.y),
+                    ),
+                    kwargs={},
+                )
+
+        class HasCustomArgObjectWhenLeaf(torch.nn.Module):
+            def forward(self, o: CustomArgObject):
+                # Not normally traceable; good reason to make
+                # this module a leaf.
+                for x in o.x:
+                    o.y += x
+                return o.y
+
+        class Root(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = HasCustomArgObjectWhenLeaf()
+
+            def forward(self, x, y):
+                o = CustomArgObject(x, y)
+                return self.inner(o)
+
+        class CreateArgTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return type(m) is HasCustomArgObjectWhenLeaf
+
+        m = Root()
+        graph = CreateArgTracer().trace(m)
+        gm = torch.fx.GraphModule(m, graph)
+        assert "CustomArgObject(" in gm.code
 
     def test_trace_fn_constant(self):
         some_constant = torch.rand(3, 4)
@@ -2562,6 +2618,8 @@ class TestFX(JitTestCase):
         def f_dict_add(x):
             return x['a'] + sum(x['z'])
 
+        def f_namedtuple_add(x):
+            return x.x + x.y
 
         pytree._register_pytree_node(
             Foo,
@@ -2591,6 +2649,7 @@ class TestFX(JitTestCase):
             (f_custom, Foo(PH, 3)),
             (f_custom_dict, Foo({'a': PH, 'b': PH}, PH)),
             # (f_return_custom, Foo(PH, PH)), # Don't currently support output pytrees
+            (f_namedtuple_add, Point(PH, PH)),
         ]
 
         def verify_pytree(f, inp):
@@ -2662,6 +2721,7 @@ class TestOperatorSignatures(JitTestCase):
                            'linalg.multi_dot',
                            'norm',
                            'polygamma',
+                           'special.polygamma',
                            'repeat',
                            'reshape_as',
                            'resize_',
