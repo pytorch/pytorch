@@ -70,10 +70,10 @@ namespace torch { namespace autograd {
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-    std::lock_guard<std::mutex> lock(mutex_);
     if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
+    std::lock_guard<std::mutex> lock(mutex_);
     py::gil_scoped_acquire gil;
     py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
