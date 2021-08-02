@@ -726,7 +726,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  // This code path is hit when doing `Tensor(2.) * other`, which will actually
+  // This code path is also hit when doing `0dim-Tensor * other`, which can
   // be mul(dense, sparse). Make sure we use the sparse exemplar for result.
   auto result_options = self.is_sparse() ?
     self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
