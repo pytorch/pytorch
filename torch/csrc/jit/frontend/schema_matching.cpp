@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
 
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
 namespace torch {
@@ -50,10 +50,11 @@ inline bool convertibleToList(const TypePtr& type, const TypePtr& list_type_) {
   return false;
 }
 
+// Applies implicit conversion from value trying to turn it into type
+// concrete_type. It succeeds if `return_value->isSubtypeOf(concrete_type)`
 Value* tryConvertToType(
     const SourceRange& loc,
     Graph& graph,
-    std::shared_ptr<Graph> additions,
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
@@ -62,12 +63,7 @@ Value* tryConvertToType(
     if (value->type()->kind() != OptionalType::Kind &&
         !value->type()->isSubtypeOf(NoneType::get())) {
       return tryConvertToType(
-          loc,
-          graph,
-          additions,
-          op->getElementType(),
-          value,
-          allow_conversions);
+          loc, graph, op->getElementType(), value, allow_conversions);
     }
   }
 
@@ -78,8 +74,7 @@ Value* tryConvertToType(
       auto unpacked = createTupleUnpack(value);
       auto elem_type =
           unwrapOptional(concrete_type)->expectRef<ListType>().getElementType();
-      value = additions->insertNode(additions->createList(elem_type, unpacked))
-                  ->output();
+      value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
     // inductively apply implicit conversions to tuples
@@ -92,13 +87,11 @@ Value* tryConvertToType(
           converted.emplace_back(tryConvertToType(
               loc,
               graph,
-              additions,
               concrete_tuple->elements().at(i),
               unpacked.at(i),
               allow_conversions));
         }
-        value =
-            additions->insertNode(additions->createTuple(converted))->output();
+        value = graph.insertNode(graph.createTuple(converted))->output();
       }
     }
   }
@@ -114,28 +107,28 @@ Value* tryConvertToType(
     bool concrete_number = *concrete_type == *NumberType::get();
     if (value_isa_tensor) {
       if (concrete_float) {
-        value = additions->insert(aten::FloatImplicit, {value}, {}, loc);
+        value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
       } else if (concrete_complex) {
-        value = additions->insert(aten::ComplexImplicit, {value}, {}, loc);
+        value = graph.insert(aten::ComplexImplicit, {value}, {}, loc);
       } else if (concrete_int) {
-        value = additions->insert(aten::IntImplicit, {value}, {}, loc);
+        value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = additions->insert(aten::ScalarImplicit, {value}, {}, loc);
+        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
       }
     } else if (value_equals_number) {
       if (concrete_float) {
-        value = additions->insert(aten::Float, {value}, {}, loc);
+        value = graph.insert(aten::Float, {value}, {}, loc);
       } else if (concrete_complex) {
-        value = additions->insert(aten::Complex, {value}, {}, loc);
+        value = graph.insert(aten::Complex, {value}, {}, loc);
       } else if (concrete_int) {
-        value = additions->insert(aten::Int, {value}, {}, loc);
+        value = graph.insert(aten::Int, {value}, {}, loc);
       }
     }
 
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
         concrete_type->isSubtypeOf(DeviceObjType::get())) {
-      return additions->insert(aten::device, {value}, {}, loc);
+      return graph.insert(aten::device, {value}, {}, loc);
     }
   }
 
@@ -149,7 +142,6 @@ Value* tryConvertToType(
 static Value* tryMatchArgument(
     const Argument& arg,
     Graph& graph,
-    std::shared_ptr<Graph> additions,
     const SourceRange& loc,
     const NamedValue& named_value,
     std::ostream* failure_messages,
@@ -164,8 +156,7 @@ static Value* tryMatchArgument(
   if (isIntOrFloatUsedAsList(value, arg)) {
     std::vector<Value*> repeated(*arg.N(), value);
     value =
-        additions->insertNode(additions->createList(value->type(), repeated))
-            ->output();
+        graph.insertNode(graph.createList(value->type(), repeated))->output();
   }
 
   // Resolve VarType variables
@@ -191,8 +182,7 @@ static Value* tryMatchArgument(
 
   // Check if the value can be matched to the arg through any implicit
   // conversions
-  value = tryConvertToType(
-      loc, graph, additions, concrete_type, value, allow_conversions);
+  value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
@@ -232,17 +222,21 @@ static Value* tryMatchArgument(
 c10::optional<size_t> findInputWithName(
     const std::string& name,
     at::ArrayRef<NamedValue> kwargs) {
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     if (kwargs[i].name() == name)
       return i;
   }
   return c10::nullopt;
 }
 
+/// Creates a list with the provided values if each value's type can be matched
+/// to an argument with type `elem_type`. If a type in `varargs` does not match
+/// `elem_type`, nullptr is returned. This is used for creating lists from
+/// varargs so that calls like torch.zeros(1, 2, 3) will be matched to
+/// aten::zeros(int[]).
 static Value* tryCreateList(
     const TypePtr& elem_type,
     Graph& graph,
-    std::shared_ptr<Graph> additions,
     const SourceRange& loc,
     at::ArrayRef<NamedValue> varargs,
     std::ostream* failure_messages,
@@ -256,7 +250,6 @@ static Value* tryCreateList(
     Value* matched_value = tryMatchArgument(
         /*arg=*/elem_arg,
         graph,
-        additions,
         loc,
         named_value,
         failure_messages,
@@ -269,8 +262,7 @@ static Value* tryCreateList(
     list_elements.push_back(matched_value);
   }
 
-  return additions->insertNode(additions->createList(elem_type, list_elements))
-      ->output();
+  return graph.insertNode(graph.createList(elem_type, list_elements))->output();
 }
 
 // Check if it is possible to convert all the remaining non-kwarg arguments
@@ -335,11 +327,10 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   TypeEnv type_env;
   std::vector<Value*> positional_inputs;
   std::vector<bool> used_kwarg(kwargs.size(), false);
-  auto additions = std::shared_ptr<Graph>(new Graph());
 
   // if we finish the loop will we have consumed all arguments?
   size_t used_args = 0;
-  for (size_t schema_i = 0; schema_i < schema.arguments().size(); ++schema_i) {
+  for (const auto schema_i : c10::irange(schema.arguments().size())) {
     const auto& arg = schema.arguments()[schema_i];
     c10::optional<NamedValue> actual_named_value;
     if (arg.name() == "self" && self) {
@@ -362,7 +353,6 @@ static c10::optional<MatchedSchema> tryMatchSchema(
           Value* list = tryCreateList(
               formal_type,
               graph,
-              additions,
               loc,
               at::ArrayRef<NamedValue>(args).slice(used_args),
               failure_messages,
@@ -409,7 +399,6 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     Value* positional = tryMatchArgument(
         arg,
         graph,
-        additions,
         loc,
         *actual_named_value,
         failure_messages,
@@ -441,7 +430,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return c10::nullopt;
   }
   // check for unused kwargs
-  for (size_t i = 0; i < kwargs.size(); ++i) {
+  for (const auto i : c10::irange(kwargs.size())) {
     const auto& nv = kwargs[i];
     if (!used_kwarg[i]) {
       if (failure_messages) {
@@ -476,7 +465,6 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   return MatchedSchema{
       std::move(positional_inputs),
       std::move(return_types),
-      {std::move(additions)},
       std::move(return_field_names)};
 }
 
@@ -546,7 +534,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   for (bool allow_conversions : {false, true}) {
     // clear previous error messages
     failure_messages.str("");
-    for (size_t i = 0; i < schemas.size(); ++i) {
+    for (const auto i : c10::irange(schemas.size())) {
       const auto matched_schema = tryMatchSchema(
           *schemas[i],
           loc,
@@ -574,6 +562,101 @@ std::pair<size_t, MatchedSchema> matchSchemas(
                          << prefixLine(failure_messages.str(), "  ")
                          << "\nThe original call is";
   throw ErrorReport(loc) << failure_messages.str();
+}
+
+// pack outputs of a function following python rules. If there is a single value
+// return a SimpleValue, otherwise pack all the values into a Tuple.
+static Value* packOutputs(
+    Graph& g,
+    at::ArrayRef<Value*> values,
+    c10::OptNameList field_names) {
+  if (values.size() == 1) {
+    return values[0];
+  }
+  std::shared_ptr<FunctionSchema> schema;
+  TupleTypePtr named_tuple = nullptr;
+  if (field_names) {
+    auto types = fmap(values, [](Value* v) { return v->type(); });
+    named_tuple =
+        TupleType::createNamed(c10::nullopt, field_names.value(), types);
+  }
+  return g.insertNode(g.createTuple(values, named_tuple))->output();
+}
+
+// Given a successful match between operator schema and symbol, emit a node
+// with the appropriate inputs and outputs.
+static Value* emitBuiltinNode(
+    const MatchedSchema& matched_schema,
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name) {
+  auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
+               ->setSourceRange(loc);
+
+  for (auto& ret : matched_schema.return_types) {
+    n->addOutput()->setType(ret);
+  }
+
+  // assert that we did indeed create an op that has implementation
+  // otherwise schema and dispatch are not in sync
+  n->getOperation();
+
+  return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
+}
+
+// Search for operators matching the provided symbol name and input types.
+// If one is found, emit a node to the graph for that operator.
+Value* emitBuiltinCall(
+    const SourceRange& loc,
+    Graph& graph,
+    Symbol name,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    const c10::optional<NamedValue>& self) {
+  const auto& variants = getAllOperatorsFor(name);
+  const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
+
+  std::stringstream failure_messages;
+  std::vector<const FunctionSchema*> schemas;
+  schemas.reserve(variants.size());
+  for (const std::shared_ptr<Operator>& op : variants) {
+    schemas.push_back(&op->schema());
+  }
+  for (const auto method : builtin_functions) {
+    method->ensure_defined();
+    schemas.push_back(&method->getSchema());
+  }
+
+  // no operators found with the same name, print out similarly named operators
+  if (schemas.size() == 0) {
+    const auto close_symbols = findSimilarOperators(name);
+    auto error = ErrorReport(loc);
+    const auto& user_function_name = name.toQualString();
+    error << "Unknown builtin op: " << user_function_name << ".\n";
+    if (close_symbols.size() == 0) {
+      error
+          << "Could not find any similar ops to " << user_function_name
+          << ". This op may not exist or may not be currently supported in TorchScript.\n";
+    } else {
+      error << "Here are some suggestions: \n";
+      for (const auto& sym : close_symbols) {
+        error << "\t" << sym.toQualString() << "\n";
+      }
+      error << "\nThe original call is";
+    }
+    throw error;
+  }
+
+  auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
+
+  if (matched.first < variants.size()) {
+    return emitBuiltinNode(matched.second, loc, graph, name);
+  } else {
+    Function* fn = builtin_functions[matched.first - variants.size()];
+    // we inline builtin calls because they are normally very small
+    // wrappers and are not useful for keeping around to debug
+    return insertGraph(graph, *fn->graph(), matched.second.inputs).at(0);
+  }
 }
 
 } // namespace jit

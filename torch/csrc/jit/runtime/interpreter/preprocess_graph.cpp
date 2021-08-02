@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/runtime/interpreter/preprocess_graph.h>
 
-#include <torch/csrc/jit/frontend/ir_emitter_utils.h>
+#include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/runtime/interpreter/can_emit_inline.h>
 
 namespace torch {
@@ -45,7 +45,7 @@ void insertEnterMethodCalls(Graph& g) {
   for (auto& enter : enter_nodes) {
     auto cls = enter->input(0)->type()->expect<ClassType>();
 
-    MatchedSchema enter_matched_schema = matchSchemaAndPrepareGraph(
+    MatchedSchema enter_matched_schema = matchSchema(
         cls->findMethod("__enter__")->getSchema(),
         enter->input(0)->node()->sourceRange(),
         g,

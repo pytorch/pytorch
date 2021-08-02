@@ -18,6 +18,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/cub.cuh>
 #include <c10/util/irange.h>
+#include <c10/core/QScheme.h>
 #include <THC/THCAtomics.cuh>
 
 #include <limits>
@@ -369,7 +370,7 @@ __global__ void indexAddSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
           cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+      gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
     }
   }
 }
@@ -419,7 +420,7 @@ __global__ void indexAddLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+    gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
   }
 }
 
@@ -730,24 +731,31 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
 
 }
 
-template<typename scalar_t>
-void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
-                                const Tensor& index) {
+template <typename scalar_t>
+void index_select_out_cuda_impl(
+    Tensor& out,
+    const Tensor& self,
+    long dim,
+    const Tensor& index) {
   ptrdiff_t numIndices = index.numel();
-
   int selfDims = self.dim() == 0 ? 1 : self.dim();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  TORCH_CHECK(index.dim() <= 1,
-             "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(
+      index.dim() <= 1, "Index is supposed to be an empty tensor or a vector");
   TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
 
   std::vector<int64_t> newSize = self.sizes().vec();
   if (self.dim() > 0) {
     newSize[dim] = numIndices;
   }
-  at::native::resize_output(out, newSize);
+
+  if (self.is_quantized()){
+      out = at::empty_quantized(newSize, out);
+  } else {
+    at::native::resize_output(out, newSize);
+  }
 
   ptrdiff_t outTotalSize = out.numel();
   if (outTotalSize == 0) {
@@ -859,13 +867,16 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 }
 } // anonymous namespace
 
-Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
-                              const Tensor& index, Tensor& out) {
+Tensor& index_select_out_cuda(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    Tensor& out) {
   static constexpr string_view DIM_WARNING =
-    "Tensor too large or too many (> 25) dimensions";
-
-  TORCH_CHECK(at::cuda::check_device({out, self, index}),
-              "Input, output and indices must be on the current device");
+      "Tensor too large or too many (> 25) dimensions";
+  TORCH_CHECK(
+      at::cuda::check_device({out, self, index}),
+      "Input, output and indices must be on the current device");
   at::assert_no_internal_overlap(out);
   at::assert_no_overlap(out, self);
   at::assert_no_overlap(out, index);
@@ -873,17 +884,36 @@ Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      out.scalar_type(), "index_select_cuda",
-      [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+  if (self.is_quantized()){
+    TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per_tensor quantized quantized tensors are supported by index_select.")
+    AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
+      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half,
+        at::ScalarType::Bool,
+        at::ScalarType::BFloat16,
+        out.scalar_type(),
+        "index_select_cuda",
+        [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+  }
 
   return out;
 }
 
 Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  Tensor out = at::empty({0}, self.options());
+  Tensor out;
+  if (self.is_quantized()){
+    TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per_tensor quantized quantized tensors are supported by index_select.")
+    out = at::empty_quantized({0}, self);
+  } else {
+    out = at::empty({0}, self.options());
+  }
   at::native::index_select_out_cuda(self, dim, index, out);
   return out;
 }

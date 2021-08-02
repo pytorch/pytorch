@@ -70,7 +70,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
       futPtr->markCompleted(
           deserializeRespToIValue(
               *future.constValue().toCustomClass<Message>()),
-          future.dataPtrs());
+          future.storages());
     }
   }));
   if (shouldProfile) {

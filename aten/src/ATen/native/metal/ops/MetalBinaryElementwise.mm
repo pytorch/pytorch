@@ -2,7 +2,7 @@
 #import <ATen/native/metal/MetalTensorImpl.h>
 #import <ATen/native/metal/MetalTensorImplStorage.h>
 #import <ATen/native/metal/MetalTensorUtils.h>
-#import <ATen/native/metal/mpscnn/MPSCNNContext.h>
+#import <ATen/native/metal/MetalContext.h>
 #import <ATen/native/metal/mpscnn/MPSCNNUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
@@ -72,14 +72,17 @@ Tensor binaryElementwiseShaderKernel(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
+  if(c10::multiply_integers(outputSize) == 0){
+    return makeTensor({outputSize.vec()}, input1.options());
+  }
   MetalTensorImplStorage mt{outputSize.vec()};
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryStorage(outputSize, cb1);
   MPSImage* Y = mt.texture()->image();
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       pipelineState:mpscnn::kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
@@ -91,8 +94,6 @@ Tensor binaryElementwiseShaderKernel(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X1 markRead];
-  [X2 markRead];
   auto output = makeTensor(std::move(mt), input1.options());
   return output;
 }
@@ -111,12 +112,15 @@ Tensor& binaryElementwiseShaderKernel_(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  if(c10::multiply_integers(outputSize) == 0){
+      return input1;
+  }
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
-  id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
+  id<MTLComputePipelineState> state = [[MetalContext sharedInstance]
       pipelineState:mpscnn::kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
@@ -128,8 +132,6 @@ Tensor& binaryElementwiseShaderKernel_(
   [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
           threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
   [encoder endEncoding];
-  [X1 markRead];
-  [X2 markRead];
   MetalTensorImpl* impl = (MetalTensorImpl*)input1.unsafeGetTensorImpl();
   MetalTensorImplStorage& implStorage = impl->unsafe_opaque_handle();
   implStorage.texture()->setImage(Y);
@@ -149,14 +151,17 @@ Tensor binaryElementwiseMPSCNNKernel(
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
+  if(c10::multiply_integers(outputSize) == 0){
+      return makeTensor({outputSize.vec()}, input1.options());
+  }
   MetalTensorImplStorage mt{outputSize.vec()};
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   mt.texture()->allocateTemporaryStorage(outputSize, cb1);
   MPSImage* Y = mt.texture()->image();
-  T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
+  T* kernel = [[T alloc] initWithDevice:[MetalContext sharedInstance].device];
   kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
   kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
   kernel.secondaryStrideInPixelsY = X2.height == 1 ? 0 : 1;
@@ -180,12 +185,15 @@ Tensor& binaryElementwiseMPSCNNKernel_(Tensor& input1, const Tensor& input2) {
   if (broadCastFirstInput(X1, X2)) {
     outputSize = input2.sizes();
   }
-  MetalCommandBuffer* cb1 = getCommandBufferFromTensor(input1);
-  MetalCommandBuffer* cb2 = getCommandBufferFromTensor(input2);
+  if(c10::multiply_integers(outputSize) == 0){
+    return input1;
+  }
+  MetalCommandBuffer* cb1 = getCommandBuffer(input1);
+  MetalCommandBuffer* cb2 = getCommandBuffer(input2);
   TORCH_CHECK(
       [cb1 isEqual:cb2], @"inputs have different Metal command buffers");
   MPSImage* Y = createTemporaryImage(cb1, outputSize.vec());
-  T* kernel = [[T alloc] initWithDevice:[MPSCNNContext sharedInstance].device];
+  T* kernel = [[T alloc] initWithDevice:[MetalContext sharedInstance].device];
   kernel.primaryStrideInPixelsY = X1.height == 1 ? 0 : 1;
   kernel.primaryStrideInPixelsX = X1.width == 1 ? 0 : 1;
   kernel.secondaryStrideInPixelsY = X2.height == 1 ? 0 : 1;

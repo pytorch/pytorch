@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -157,7 +158,7 @@ __global__ void AxpySliceKernel(
       float a = *alpha[b];
       const float* x_offset = X[b] + (i * slice_size);
       for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-        atomicAdd(&y_offset[j], a * x_offset[j]);
+        gpu_atomic_add(&y_offset[j], a * x_offset[j]);
       }
     }
   }
@@ -182,19 +183,22 @@ __global__ void AxpySliceKernel2(
     T_INDEX idx = Indices[i];
     float* y_offset = Y + (idx * slice_size);
     for (int j = threadIdx.x; j < slice_size; j += blockDim.x) {
-      atomicAdd(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
+      gpu_atomic_add(&y_offset[j], alpha[0] * X[(i * slice_size) + j]);
     }
   }
 }
 
 template <>
-bool ScatterWeightedSumOp<float, CUDAContext>::RunOnDevice() {
-  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(2));
+bool ScatterWeightedSumOp<CUDAContext>::RunOnDevice() {
+  const auto& x0 = Input(0);
+  const auto x0Type = TypeMetaToDataType(x0.dtype());
+  CAFFE_ENFORCE_EQ(x0Type, TensorProto_DataType_FLOAT, "Only float type is allowed for X0 on GPU.");
+  return ScatterWeightedSumOp<CUDAContext>::template DoRun<float>();
 }
 
 template <>
-template <typename Index>
-bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
+template <typename T, typename Index>
+bool ScatterWeightedSumOp<CUDAContext>::DoRunWithType() {
   CAFFE_ENFORCE_EQ(InputSize() % 2, 1);
   auto& X0 = Input(0);
   auto& weight0 = Input(1);
@@ -279,7 +283,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
 
 REGISTER_CUDA_OPERATOR(
     ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CUDAContext>);
+    ScatterWeightedSumOp<CUDAContext>);
 
 namespace {
 

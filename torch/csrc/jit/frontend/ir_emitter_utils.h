@@ -12,58 +12,6 @@
 namespace torch {
 namespace jit {
 
-struct MagicMethod;
-using SugaredValuePtr = std::shared_ptr<SugaredValue>;
-
-/* ================================================= */
-/*                 Function Emission                 */
-/* ================================================= */
-
-struct MatchedSchema {
-  std::vector<Value*> inputs;
-  std::vector<TypePtr> return_types;
-  // Holds the extra Nodes that need to be added to the Graph
-  std::shared_ptr<Graph> additions;
-  c10::OptNameList return_field_names;
-};
-
-TORCH_API MatchedSchema matchSchemaAndPrepareGraph(
-    const FunctionSchema& schema,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self = c10::nullopt);
-
-TORCH_API std::pair<size_t, MatchedSchema> matchSchemasAndPrepareGraph(
-    std::vector<const FunctionSchema*> schemas,
-    const SourceRange& loc,
-    Graph& graph,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self = c10::nullopt);
-
-TORCH_API Value* tryConvertToTypeAndPrepareGraph(
-    const SourceRange& loc,
-    Graph& graph,
-    const TypePtr& concrete_type,
-    Value* value,
-    bool allow_conversions);
-
-Value* emitBuiltinNode(
-    const MatchedSchema& matched_schema,
-    const SourceRange& loc,
-    Graph& graph,
-    Symbol name);
-
-TORCH_API Value* emitBuiltinCall(
-    const SourceRange& loc,
-    Graph& graph,
-    Symbol name,
-    at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<NamedValue>& self = c10::nullopt);
-
 /* =============================================== */
 /*                  Program Status                 */
 /* =============================================== */
@@ -128,6 +76,11 @@ bool meaningfulName(const std::string& name);
 /* ======================================================== */
 
 void checkApplyNumInputs(Apply& apply, size_t expected_inputs);
+
+void checkApplyNumInputsRange(
+    Apply& apply,
+    size_t min_expected_inputs,
+    size_t max_expected_inputs);
 
 bool isSupportedListElementType(const TypePtr& type);
 

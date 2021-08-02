@@ -16,9 +16,9 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "2",
-        "@DNNL_VERSION_MINOR@": "1",
-        "@DNNL_VERSION_PATCH@": "2",
-        "@DNNL_VERSION_HASH@": "98be7e8afa711dc9b66c8ff3504129cb82013cdb",
+        "@DNNL_VERSION_MINOR@": "2",
+        "@DNNL_VERSION_PATCH@": "3",
+        "@DNNL_VERSION_HASH@": "7336ca9f055cf1bfa13efb658fe15dc9b41f0740",
     },
 )
 
@@ -45,6 +45,7 @@ cc_library(
         "src/cpu/**/*.hpp",
         "src/cpu/**/*.h",
         "src/common/*.hpp",
+        "src/common/ittnotify/jitprofiling.h",
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
         "src/cpu/aarch64/**/*.h",

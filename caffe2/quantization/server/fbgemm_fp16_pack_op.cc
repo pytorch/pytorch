@@ -25,18 +25,15 @@ namespace caffe2 {
 // Expilictly register TypeMeta
 CAFFE_KNOWN_TYPE(unique_ptr<fbgemm::PackedGemmMatrixFP16>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FbGemmPack,
     FbGemmPackOp<CPUContext, DefaultEngine, true, fbgemm::float16>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FbGemmPackTranspose,
     FbGemmPackOp<CPUContext, DefaultEngine, false, fbgemm::float16>);
 
 using namespace std::placeholders;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FbGemmPack)
     .NumInputs(1)
     .NumOutputs(1)
@@ -53,7 +50,6 @@ OPERATOR_SCHEMA(FbGemmPack)
     .Input(0, "X", "row major format weight matrix")
     .Output(0, "Y", "Block row major packed format weight matrix");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FbGemmPackTranspose)
     .NumInputs(1)
     .NumOutputs(1)

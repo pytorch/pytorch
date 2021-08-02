@@ -176,6 +176,7 @@ bool ProcessGroupAgent::hasPendingMessage() {
   // allgather both send and recv messages in one shot
   std::vector<std::vector<torch::Tensor>> outputSnapshots(1);
 
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(worldSize)) {
     outputSnapshots[0].emplace_back(
         torch::zeros({2, worldSize}, {torch::kInt64}));

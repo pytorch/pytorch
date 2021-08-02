@@ -1,4 +1,5 @@
 import torch
+from . import _functional as F
 from ..optimizer import Optimizer
 from collections import defaultdict
 
@@ -57,7 +58,6 @@ class Adamax(Optimizer):
             exp_infs = []
 
             beta1, beta2 = group['betas']
-            eps = group['eps']
 
             for p in group['params']:
                 if p.grad is not None:
@@ -81,26 +81,16 @@ class Adamax(Optimizer):
                     state['step'] += 1
                     states.append(state)
 
-            if group['weight_decay'] != 0:
-                torch._foreach_add_(grads, params_with_grad, alpha=group['weight_decay'])
-
-            # Update biased first moment estimate.
-            torch._foreach_mul_(exp_avgs, beta1)
-            torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
-
-            # Update the exponentially weighted infinity norm.
-            torch._foreach_mul_(exp_infs, beta2)
-
-            for exp_inf, grad in zip(exp_infs, grads):
-                norm_buf = torch.cat([
-                    exp_inf.unsqueeze(0),
-                    grad.abs().add_(eps).unsqueeze_(0)
-                ], 0)
-                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
-
-            bias_corrections = [1 - beta1 ** state['step'] for state in states]
-            clr = [-1 * (group['lr'] / bias_correction) for bias_correction in bias_corrections]
-            torch._foreach_addcdiv_(params_with_grad, exp_avgs, exp_infs, clr)
+            F.adamax(params_with_grad,
+                     grads,
+                     exp_avgs,
+                     exp_infs,
+                     states,
+                     beta1=beta1,
+                     beta2=beta2,
+                     lr=group['lr'],
+                     weight_decay=group['weight_decay'],
+                     eps=group['eps'])
 
         return loss
 

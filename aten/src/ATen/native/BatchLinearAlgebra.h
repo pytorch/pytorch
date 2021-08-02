@@ -1,18 +1,17 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cpu/zmath.h>
-
-#include <TH/TH.h> // for USE_LAPACK
 
 
 namespace at { namespace native {
 
 enum class LapackLstsqDriverType : int64_t { Gels, Gelsd, Gelsy, Gelss};
 
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
 // Define per-batch functions to be used in the implementation of batched
 // linear algebra operations
 
@@ -192,9 +191,9 @@ using ormqr_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const 
 DECLARE_DISPATCH(ormqr_fn, ormqr_stub);
 
 using linalg_eigh_fn = void (*)(
-    Tensor& /*eigenvalues*/,
-    Tensor& /*eigenvectors*/,
-    Tensor& /*infos*/,
+    const Tensor& /*eigenvalues*/,
+    const Tensor& /*eigenvectors*/,
+    const Tensor& /*infos*/,
     bool /*upper*/,
     bool /*compute_eigenvectors*/);
 DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
@@ -231,5 +230,13 @@ using lu_solve_fn = void (*)(
     const Tensor& /*lu*/,
     const Tensor& /*pivots*/);
 DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
+
+using lu_solve_trans_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/,
+    char /*trans*/);
+DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+
 
 }} // namespace at::native

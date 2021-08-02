@@ -16,6 +16,7 @@ namespace cuda {
 
 class TORCH_CUDA_CU_API StatefulExpressionEvaluator : private OptOutDispatch {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit StatefulExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
 
   Fusion* fusion() const {

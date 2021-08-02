@@ -11,6 +11,7 @@
 #include <sstream>
 #include <iostream>
 #include <cstring>
+#include <cstddef>
 
 #include <libshm/err.h>
 #include <libshm/alloc_info.h>

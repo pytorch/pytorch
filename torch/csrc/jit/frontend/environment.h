@@ -39,11 +39,7 @@ struct Environment {
       Function& method,
       ResolverPtr resolver,
       Block* b,
-      std::shared_ptr<Environment> next = nullptr)
-      : method(method),
-        resolver(std::move(resolver)),
-        b(b),
-        next(std::move(next)) {}
+      std::shared_ptr<Environment> next = nullptr);
 
   std::shared_ptr<Environment> next;
 

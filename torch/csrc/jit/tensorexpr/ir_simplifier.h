@@ -91,6 +91,7 @@ inline const Expr* newBinaryOpOfType(
     const Expr* rhs,
     bool option) {
   switch (expr_type) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case IRNodeType::kAdd:
       return new Add(lhs, rhs);
     case IRNodeType::kSub:
@@ -146,6 +147,7 @@ inline Expr* evaluateOp(const Expr* v) {
 class Term : public ExprNode<Term> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(HashProvider& hasher, const Expr* s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
@@ -153,6 +155,7 @@ class Term : public ExprNode<Term> {
     sort();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(HashProvider& hasher, const Expr* s, std::vector<const Expr*> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
@@ -162,6 +165,7 @@ class Term : public ExprNode<Term> {
   }
 
   // Convenience constructor from a map of hash -> var, used when merging Terms.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Term(
       HashProvider& hasher,
       const Expr* s,
@@ -212,6 +216,7 @@ class Term : public ExprNode<Term> {
 class Polynomial : public ExprNode<Polynomial> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, const Expr* s, Args... ts)
       : ExprNodeBase(promoteTypesVar(s, ts...)), scalar_(s), hasher_(hasher) {
     CHECK(s->isConstant());
@@ -219,6 +224,7 @@ class Polynomial : public ExprNode<Polynomial> {
     sort();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, const Expr* s, std::vector<const Term*> v)
       : ExprNodeBase(promoteTypesVec(s, v)),
         variables_(std::move(v)),
@@ -228,6 +234,7 @@ class Polynomial : public ExprNode<Polynomial> {
   }
 
   // Helper constructor for list of terms with no scalar component.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(HashProvider& hasher, std::vector<const Term*> terms)
       : ExprNodeBase(promoteTypesVec(terms)),
         variables_(std::move(terms)),
@@ -238,6 +245,7 @@ class Polynomial : public ExprNode<Polynomial> {
 
   // Convenience constructor for map of hash -> var, used when merging
   // Polynomials.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Polynomial(
       HashProvider& hasher,
       const Expr* s,
@@ -288,6 +296,7 @@ class RoundOff : public BinaryOpNode<RoundOff> {
 class MaxTerm : public ExprNode<MaxTerm> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MaxTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
       : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
         scalar_(s),
@@ -297,6 +306,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
     uniquefy();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MaxTerm(
       HashProvider& hasher,
       const Expr* s,
@@ -347,6 +357,7 @@ class MaxTerm : public ExprNode<MaxTerm> {
 class MinTerm : public ExprNode<MinTerm> {
  public:
   template <class... Args>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MinTerm(HashProvider& hasher, const Expr* s, bool p, Args... ts)
       : ExprNodeBase(s ? promoteTypesVar(s, ts...) : promoteTypesVar(ts...)),
         scalar_(s),
@@ -356,6 +367,7 @@ class MinTerm : public ExprNode<MinTerm> {
     uniquefy();
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   MinTerm(
       HashProvider& hasher,
       const Expr* s,
@@ -403,10 +415,25 @@ class MinTerm : public ExprNode<MinTerm> {
   void uniquefy();
 };
 
-// Stmt simplification should occur in both modes.
-class TORCH_API IRSimplifierBase : public IRMutator {
+// Context-sensitive IR simplification
+using VarBoundInfo =
+    std::unordered_map<const Var*, std::pair<const Expr*, const Expr*>>;
+class TORCH_API SimplifierUnderContext : public IRMutator {
  public:
-  ~IRSimplifierBase() override = default;
+  ~SimplifierUnderContext() override = default;
+  // Add boundary info for index variables in for-loops
+  Stmt* mutate(const For* v) override;
+
+ protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  HashProvider hasher_;
+  VarBoundInfo var_bound_info_;
+};
+
+// Stmt simplification should occur in both modes.
+class TORCH_API PolynomialBase : public IRMutator {
+ public:
+  ~PolynomialBase() override = default;
 
   Stmt* mutate(const Block* v) override;
 
@@ -427,9 +454,9 @@ class TORCH_API IRSimplifierBase : public IRMutator {
 };
 
 // Simplify the IR by combining arithmetic expressions over common terms.
-class TORCH_API PolynomialTransformer : public IRSimplifierBase {
+class TORCH_API PolynomialTransformer : public PolynomialBase {
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
   // Inserts term into the provided map, in the case of a hash collision
   // combines the term with the existing and updates the map.
   void addOrUpdateTerm(
@@ -536,12 +563,13 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.
-class TORCH_API TermExpander : public IRSimplifierBase {
+class TORCH_API TermExpander : public PolynomialBase {
   PolynomialTransformer* simplifier_;
   std::set<const Var*> eliminated_allocations_;
 
  public:
-  using IRSimplifierBase::mutate;
+  using PolynomialBase::mutate;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   TermExpander(PolynomialTransformer* simplifier) : simplifier_(simplifier) {}
   bool check_safe() {
     return eliminated_allocations_.empty();
@@ -575,6 +603,9 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 class TORCH_API IRSimplifier {
  public:
   static const Expr* simplify(const Expr* e) {
+    SimplifierUnderContext ctxsimplifier;
+    e = e->accept_mutator(&ctxsimplifier);
+
     PolynomialTransformer simplifier;
     e = e->accept_mutator(&simplifier);
 
@@ -594,6 +625,9 @@ class TORCH_API IRSimplifier {
   }
 
   static Stmt* simplify(Stmt* s) {
+    SimplifierUnderContext ctxsimplifier;
+    s = s->accept_mutator(&ctxsimplifier);
+
     PolynomialTransformer simplifier;
     s = s->accept_mutator(&simplifier);
     if (s == nullptr) {

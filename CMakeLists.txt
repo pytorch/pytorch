@@ -290,6 +290,12 @@ cmake_dependent_option(
     USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
+    USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
+cmake_dependent_option(
+    USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
+cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
@@ -479,7 +485,7 @@ if(MSVC)
   foreach(flag_var
       CMAKE_SHARED_LINKER_FLAGS CMAKE_STATIC_LINKER_FLAGS
       CMAKE_EXE_LINKER_FLAGS CMAKE_MODULE_LINKER_FLAGS)
-    string(APPEND ${flag_var} " /ignore:4049 /ignore:4217")
+    string(APPEND ${flag_var} " /ignore:4049 /ignore:4217 /ignore:4099")
   endforeach(flag_var)
 
   # Try harder

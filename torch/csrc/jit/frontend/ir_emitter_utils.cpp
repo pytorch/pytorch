@@ -266,6 +266,26 @@ void checkApplyNumInputs(Apply& apply, size_t expected_inputs) {
   }
 }
 
+void checkApplyNumInputsRange(
+    Apply& apply,
+    size_t min_expected_inputs,
+    size_t max_expected_inputs) {
+  const SourceRange& loc = apply.range();
+  size_t position_arg_size = apply.inputs().size();
+  if (position_arg_size < min_expected_inputs ||
+      position_arg_size > max_expected_inputs) {
+    throw ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " expected to have number of arguments between "
+                           << min_expected_inputs << " and "
+                           << max_expected_inputs << " but found "
+                           << position_arg_size;
+  }
+  if (apply.attributes().size() > 0) {
+    throw ErrorReport(loc) << Var(apply.callee()).name().name()
+                           << " takes no keyword arguments";
+  }
+}
+
 inline bool isSupportedListElementType(const TypePtr& type) {
   return type->isSubtypeOf(TensorType::get()) ||
       type->isSubtypeOf(NumberType::get());

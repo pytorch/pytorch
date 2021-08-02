@@ -297,21 +297,31 @@ Tensor& sigmoid_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(sigmoid_));
 }
 
+Tensor tanh(const Tensor& self) {
+  return ops::activation(self, VK_KERNEL(tanh));
+}
+
+Tensor& tanh_(Tensor& self) {
+  return ops::activation_(self, VK_KERNEL(tanh_));
+}
+
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("clamp", TORCH_FN(clamp));
-  m.impl("clamp_", TORCH_FN(clamp_));
-  m.impl("hardsigmoid", hardsigmoid);
-  m.impl("hardsigmoid_", hardsigmoid_);
-  m.impl("hardswish", hardswish);
-  m.impl("hardswish_", hardswish_);
-  m.impl("hardtanh", hardtanh);
-  m.impl("hardtanh_", hardtanh_);
-  m.impl("sigmoid", sigmoid);
-  m.impl("sigmoid_", sigmoid_);
-  m.impl("relu", relu);
-  m.impl("relu_", relu_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::clamp"), TORCH_FN(clamp));
+  m.impl(TORCH_SELECTIVE_NAME("aten::clamp_"), TORCH_FN(clamp_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid"), hardsigmoid);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), hardswish);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), hardswish_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), hardtanh);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh_"), hardtanh_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::sigmoid"), sigmoid);
+  m.impl(TORCH_SELECTIVE_NAME("aten::sigmoid_"), sigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::tanh"), tanh);
+  m.impl(TORCH_SELECTIVE_NAME("aten::tanh_"), tanh_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::relu"), relu);
+  m.impl(TORCH_SELECTIVE_NAME("aten::relu_"), relu_);
 }
 
 #endif /* USE_VULKAN_API */

@@ -85,8 +85,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   if (type->cast<TensorType>()) {
     return;
   }
-  // NOLINTNEXTLINE(performance-for-range-copy)
-  for (auto t : type->containedTypes()) {
+  for (const auto& t : type->containedTypes()) {
     TORCH_INTERNAL_ASSERT(!t->cast<TensorType>());
   }
 }
@@ -148,9 +147,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
       continue;
     }
     Node* last = nullptr;
-    // NOLINTNEXTLINE(modernize-loop-convert)
-    for (auto it = set.second->begin(); it != set.second->end(); it++) {
-      Value* v = *it;
+    for (const auto& v : *set.second) {
       auto k = v->node()->kind();
       if (k == prim::Constant || k == prim::ConstantMKLDNNTensor ||
           k == prim::Param) {
@@ -453,7 +450,6 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not

@@ -1475,11 +1475,10 @@ struct PythonPrintImpl {
               method.arguments().at(0).name() == "self");
           for (const Argument& arg :
                at::ArrayRef<Argument>(method.arguments()).slice(1)) {
-            // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-            auto type = arg.type();
-            registerClassDependencies(type);
+            const auto& arg_type = arg.type();
+            registerClassDependencies(arg_type);
             body_ << ", " << arg.name() << ": "
-                  << type->annotation_str(type_printer_);
+                  << arg_type->annotation_str(type_printer_);
           }
           auto return_type = method.returns().at(0).type();
           registerClassDependencies(return_type);

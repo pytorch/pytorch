@@ -185,6 +185,10 @@ def _rebuild_mlc_tensor(data, dtype, device, requires_grad):
     return tensor
 
 
+def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
+    return torch.empty_strided(size, stride, dtype=dtype, device='meta', requires_grad=requires_grad)
+
+
 def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, requires_grad, backward_hooks):
     qscheme = quantizer_params[0]
     if qscheme == torch.per_tensor_affine:
@@ -422,7 +426,13 @@ class ExceptionWrapper(object):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
             raise self.exc_type(message=msg)
-        raise self.exc_type(msg)
+        try:
+            exception = self.exc_type(msg)
+        except TypeError:
+            # If the exception takes multiple arguments, don't try to
+            # instantiate since we don't know how to
+            raise RuntimeError(msg) from None
+        raise exception
 
 
 def _get_available_device_type():

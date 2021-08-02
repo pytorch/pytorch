@@ -407,7 +407,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_precedence_semantics(self):
         """Test semantics for __torch_function__ for functions that take
-        multiple arugments
+        multiple arguments
 
         For functions that take multiple arguments, the appropriate
         __torch_function__ implementation to call is determined by
@@ -539,6 +539,16 @@ class TestTorchFunctionOverride(TestCase):
             s1 + sn2
         with self.assertRaises(TypeError):
             sn1 + s2
+
+    def test_base(self):
+        # https://github.com/szagoruyko/pytorchviz/issues/65
+        class DummyTensor(torch.Tensor):
+            pass
+
+        a = torch.ones(1)
+        c = DummyTensor(a)
+        self.assertTrue(c._is_view())
+        self.assertTrue(c._base is a)
 
 
 def generate_tensor_like_override_tests(cls):

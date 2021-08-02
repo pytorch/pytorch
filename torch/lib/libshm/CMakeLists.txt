@@ -31,7 +31,6 @@ endif()
 target_include_directories(shm PUBLIC
   ${CMAKE_BINARY_DIR}/aten/src # provides "ATen/TypeExtendedInterface.h" to ATen.h
   ${TORCH_ROOT}/torch/lib # provides "libshm/libshm.h"
-  ${CMAKE_BINARY_DIR}/caffe2/aten/src # provides <TH/THGeneral.h> to THC.h
   )
 
 add_executable(torch_shm_manager manager.cpp)
