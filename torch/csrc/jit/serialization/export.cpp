@@ -231,7 +231,7 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
-  size_t GetGraphProtoSizes(
+  size_t GetGraphProtoSize(
       onnx::GraphProto* graph_proto,
       const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
@@ -442,7 +442,7 @@ void EncoderBase::EncodeGraph(
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
   if (!use_external_data_format && !onnx_file_path.empty() &&
-      GetGraphProtoSizes(graph_proto, graph, initializers) > INT_MAX) {
+      GetGraphProtoSize(graph_proto, graph, initializers) > INT_MAX) {
     use_external_data_format = true;
   }
   EncodeBlock(
@@ -629,7 +629,7 @@ void EncoderBase::AddInitializersIntoGraphProto(
   }
 }
 
-size_t EncoderBase::GetGraphProtoSizes(
+size_t EncoderBase::GetGraphProtoSize(
     onnx::GraphProto* graph_proto,
     const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
