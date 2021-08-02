@@ -521,18 +521,10 @@ class GraphTypeChecker:
             else:
                 raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
 
-
         elif n.op == 'output':
-            if isinstance(n.args[0], Node):
-                n.type = n.args[0].type
-
-            elif isinstance(n.args[0], tuple):
-                t = n.args[0]
-                t1 = n.args[0][0]
-                t2 = n.args[0][1]
-                assert isinstance(t1, Node)
-                assert isinstance(t2, Node)
-                n.type = (t1.type, t2.type)
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
 
         # TODO
