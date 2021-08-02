@@ -750,7 +750,7 @@ To check this is working, do two clean builds of pytorch in a row. The second
 build should be substantially and noticeably faster than the first build. If
 this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
 rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
-Each of these 3 variables should contain the ccache, e.g.
+Each of these 3 variables should contain ccache, e.g.
 ```
 //CXX compiler launcher
 CMAKE_CXX_COMPILER_LAUNCHER:STRING=/usr/bin/ccache
