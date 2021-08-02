@@ -4295,7 +4295,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
-                fq_count = 0
+                fq_count = 13
             else:
                 m.train()
                 qconfig = default_qat_qconfig
@@ -4305,6 +4305,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # nothing to fuse so skipping the fuse step
             qconfig_dict = {'': qconfig}
             prepared = prepare(m, qconfig_dict)
+            prepared_copy = copy.deepcopy(prepared)
             # check the correct number of activation_post_process is inserted
             count_check = {
                 ns.call_module(FixedQParamsFakeQuantize) : fq_count,
@@ -4314,6 +4315,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_occurrence=count_check)
             # not runnable
             quantized = convert_fx(prepared)
+            quantized_reference = convert_fx(prepared_copy, is_reference=True)
 
             # This checks that the dequantize from the output of first conv
             # is being propagated to the end, so that we don't insert extra
@@ -4334,6 +4336,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized,
                 expected_node_occurrence=count_check,
                 expected_node_list=order_check)
+
+            reference_count_check = {
+                ns.call_function(torch.quantize_per_tensor) : 16,
+                ns.call_method('dequantize') : 13
+            }
+            reference_order_check = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
+                ns.call_module(nn.Conv2d),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
+                ns.call_module(nn.Sigmoid),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
+                ns.call_module(nn.Conv2d),
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_method('dequantize'),
+            ]
+            self.checkGraphModuleNodes(
+                quantized_reference,
+                expected_node_occurrence=reference_count_check,
+                expected_node_list=reference_order_check)
+
 
     def test_float_functional(self):
         class TorchAdd(nn.Module):
