@@ -138,8 +138,6 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    '__getitem__',
-    '__rpow__',
     'linalg.cholesky',
     'linalg.inv',
     'linalg.matrix_power',
@@ -361,7 +359,6 @@ class TestOperators(TestCase):
         op_skip = {
             'nn.functional.pad.circular',
             '__getitem__',
-            '__rpow__',
             'broadcast_to',
             'dsplit',
             'gradient',
