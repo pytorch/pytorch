@@ -341,9 +341,9 @@ def maybe_get_following_observer(
     """
 
     temp_node = node
-    while len(temp_node.users.items()) > 0:
+    while len(temp_node.users) > 0:
         possible_node = None
-        for user, _ in temp_node.users.items():
+        for user in temp_node.users:
             if user.op == 'call_module' and isinstance(modules[str(user.target)], target_observer_type):
                 # If the node has the observer type specified, return the obsever node
                 return user
@@ -367,6 +367,9 @@ def maybe_get_prev_node(node, modules):
     skipping the pooling layer, finding the quantization observer, skipping the
     relu layer, and finally finding the linear1 op node.
 
+    Note that if there are multiple paths in the graph, this will just follow
+    through one path and find the first previous node and quantization observer.
+
     Returns:
         - The previous op node if it exists
         - The previous quantization observer node that appears before the
@@ -378,19 +381,18 @@ def maybe_get_prev_node(node, modules):
 
     temp_node = node
     while len(temp_node.args) > 0:
-        possible_node = temp_node.args[0]
+        temp_node = temp_node.args[0]
 
-        if is_skippable_node(possible_node, modules):
+        if is_skippable_node(temp_node, modules):
             # If the node is skippable then we can just continue
-            temp_node = possible_node
-        elif possible_node.op == 'call_module' and isinstance(modules[str(possible_node.target)], ObserverBase):
+            continue
+        elif temp_node.op == 'call_module' and isinstance(modules[str(temp_node.target)], ObserverBase):
             # If the node is an observer, then this is the quantization
             # observer node that we need to rescale
-            inp_quant_obs_node = possible_node
-            temp_node = possible_node
+            inp_quant_obs_node = temp_node
         else:
             # If the node is not skippable, then it must be an op node
-            return possible_node, inp_quant_obs_node
+            return temp_node, inp_quant_obs_node
 
     return prev_node, inp_quant_obs_node
 
