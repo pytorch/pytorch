@@ -4616,6 +4616,15 @@ def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
         for shape, num_classes in itertools.product(shapes, num_classess)
     ]
 
+def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(make_input()),
+        SampleInput(make_input(), kwargs=dict(beta=3)),
+        SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4870,6 +4879,12 @@ def reference_mvlgamma(x, d):
         return scipy.special.multigammaln(x, d).astype(np.float16)
 
     return scipy.special.multigammaln(x, d)
+
+def reference_softplus(input, beta=1, threshold=20):
+    non_linear = input * beta <= threshold
+    output = input.copy()
+    output[non_linear] = np.log(1 + np.exp(beta * input[non_linear])) / beta
+    return output
 
 
 def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
@@ -8058,7 +8073,22 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=_dispatch_dtypes((torch.int64,)),
         sample_inputs_func=sample_inputs_one_hot,
-    )
+    ),
+    OpInfo(
+        "nn.functional.softplus",
+        ref=reference_softplus,
+        sample_inputs_func=sample_inputs_softplus,
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
 ]
 
 # Common operator groupings
