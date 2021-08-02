@@ -233,7 +233,7 @@ class EncoderBase {
 
   size_t GetGraphProtoSizes(
       onnx::GraphProto* graph_proto,
-      const Block* block,
+      const std::shared_ptr<Graph>& graph,
       const std::map<std::string, at::Tensor>& initializers =
           std::map<std::string, at::Tensor>());
 
@@ -439,6 +439,12 @@ void EncoderBase::EncodeGraph(
     bool add_node_names,
     bool use_external_data_format,
     const std::string& onnx_file_path) {
+  // If graph proto size exceed maximum protobuf size of 2GB, set
+  // use_external_data_format to true.
+  if (!use_external_data_format && !onnx_file_path.empty() &&
+      GetGraphProtoSizes(graph_proto, graph, initializers) > INT_MAX) {
+    use_external_data_format = true;
+  }
   EncodeBlock(
       graph_proto,
       graph->block(),
@@ -607,12 +613,6 @@ void EncoderBase::AddInitializersIntoGraphProto(
     bool use_external_data_format,
     const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  // If model size exceed maximum protobuf size of 2GB, set
-  // use_external_data_format to true.
-  if (!use_external_data_format && !onnx_file_path.empty() &&
-      GetGraphProtoSizes(graph_proto, block, initializers) > INT_MAX) {
-    use_external_data_format = true;
-  }
   for (auto input : block->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
@@ -631,10 +631,10 @@ void EncoderBase::AddInitializersIntoGraphProto(
 
 size_t EncoderBase::GetGraphProtoSizes(
     onnx::GraphProto* graph_proto,
-    const Block* block,
+    const std::shared_ptr<Graph>& graph,
     const std::map<std::string, at::Tensor>& initializers) {
   size_t sizes = 0;
-  for (auto input : block->inputs()) {
+  for (auto input : graph->inputs()) {
     auto name_tensor_pair = initializers.find(input->debugName());
     if (name_tensor_pair == initializers.end()) {
       continue;
@@ -642,6 +642,10 @@ size_t EncoderBase::GetGraphProtoSizes(
     onnx::GraphProto* graph_proto_copy = new onnx::GraphProto(*graph_proto);
     auto tensor_proto = graph_proto_copy->add_initializer();
     const at::Tensor tensor = name_tensor_pair->second;
+    for (auto d : tensor.sizes()) {
+      tensor_proto->add_dims(d);
+    }
+    tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.scalar_type()));
     at::Tensor t;
     if (tensor.is_quantized()) {
       t = tensor.contiguous();
@@ -651,7 +655,7 @@ size_t EncoderBase::GetGraphProtoSizes(
     tensor_proto->set_raw_data(std::string(
         static_cast<char*>(t.data_ptr()), t.element_size() * t.numel()));
     sizes += tensor_proto->ByteSizeLong();
-    free(tensor_proto);
+    delete tensor_proto;
   }
   return sizes;
 }
