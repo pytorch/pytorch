@@ -1,5 +1,7 @@
 #include <torch/library.h>
+#include <ATen/ATen.h>
 #include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/VmapMode.h>
 
 using torch::CppFunction;
 
@@ -30,6 +32,14 @@ template <typename... Args> Tensor& unsupportedRandomOp_(Args... args) {
               "Please perform random operations outside of vmap as a workaround");
 }
 
+template <typename Fn, Fn fn, typename... Args>
+Tensor randomOpFallback(Args... args) {
+  impl::VmapMode::decrement_nesting();
+  auto res = fn(std::forward<Args>(args)...);
+  impl::VmapMode::increment_nesting();
+  return res;
+}
+
 TORCH_LIBRARY_IMPL(_, VmapMode, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
@@ -40,6 +50,22 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
   // only works for operators that support boxing.
 #define TENSOROPTIONS c10::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>
+
+#define RANDOM_KEY_FALLBACK(op) \
+  { \
+    using fn_type = Tensor (*)(IntArrayRef, const Tensor&, TENSOROPTIONS); \
+    m.impl(#op".key", randomOpFallback<fn_type, at::op, IntArrayRef, const Tensor&, TENSOROPTIONS>); \
+  }
+
+  RANDOM_KEY_FALLBACK(randn);
+#undef RANDOM_KEY_FALLBACK
+
+#define RANDOM_KEY_FALLBACK_VA(op, ...) \
+  { \
+    using fn_type = Tensor (*)(__VA_ARGS__, IntArrayRef, const Tensor&, TENSOROPTIONS); \
+    m.impl(#op".key", randomOpFallback<fn_type, at::op, __VA_ARGS__, IntArrayRef, const Tensor&, TENSOROPTIONS>); \
+  }
+#undef RANDOM_KEY_FALLBACK_VA
 
   // random operations (out-of-place)
   m.impl("bernoulli", unsupportedRandomOp<const Tensor&, optional<Generator>>);

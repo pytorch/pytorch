@@ -2151,6 +2151,44 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self.assertTrue(new_keys.is_rng_key())
         self.assertEqual(new_keys.size(), [3, 4])
 
+    @allowVmapFallbackUsage
+    def test_random_op_with_key(self):
+        B0 = 2
+
+        def _test(op):
+            # Single Key
+            key = torch.PRNGKey(0)
+            # Reference tensor for batch size
+            x = torch.randn(3)
+
+            def _helper(x, k):
+                return op(B0, key=k)
+
+            res = vmap(_helper, in_dims=(0, None))(x, key)
+            # All new keys are same along the batch dimension
+            r0 = res[0]
+            for r in res:
+                self.assertEqual(r, r0)
+
+            # Batched Key
+            keys = key.split_key(3)
+
+            def _helper(k):
+                return op(B0, key=k)
+
+            res = vmap(_helper)(keys)
+            for k, r in zip(keys, res):
+                torch.manual_seed(k)
+                ref = op(B0)
+                self.assertEqual(r, ref)
+
+        random_ops = [
+            torch.randn,
+        ]
+
+        for op in random_ops:
+            _test(op)
+
     def test_no_random_op_support(self):
         B0 = 2
 
