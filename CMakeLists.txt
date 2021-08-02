@@ -551,23 +551,6 @@ endif()
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# -- [ CUDA language
-if(USE_CUDA)
-  include(CheckLanguage)
-  check_language(CUDA)
-
-  if(CMAKE_CUDA_COMPILER)
-    enable_language(CUDA)
-    set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-  else()
-    message(WARNING
-      "Not compiling with CUDA. Suppress this warning with "
-      "-DUSE_CUDA=OFF.")
-	caffe2_update_option(USE_CUDA OFF)
-  endif()
-endif()
-
 # ---[ Version numbers for generated libraries
 file(READ version.txt TORCH_DEFAULT_VERSION)
 # Strip trailing newline
