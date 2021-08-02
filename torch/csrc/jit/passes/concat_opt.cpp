@@ -46,7 +46,7 @@ class ConcatCommonInputsEliminator {
  private:
   void handleBlock(Block* block) {
     for (auto node : block->nodes()) {
-      if (node->kind() == prim::Concat) {
+      if (node->kind() == prim::VarConcat) {
         handleCat(node);
       }
       for (Block* block : node->blocks()) {
@@ -84,16 +84,17 @@ class ConcatCommonInputsEliminator {
     // the previous cat ops.
     //
     // Example:
-    //    %11 = prim::Concat(%0, %1, <dim>)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %13 = prim::Concat(%0, %1, %2, <dim>) // first 2 inputs same as %11
+    //    %13 = prim::VarConcat(%0, %1, %2, <dim>) // first 2 inputs same as %11
     //    ...
     //        = %13 ... // Use %13
     //
     // After CSE opt:
-    //    %11 = prim::Concat(%0, %1, <dim>)
+    //    %11 = prim::VarConcat(%0, %1, <dim>)
     //    ...
-    //    %14 = prim::Concat(%11, %2, <dim>) // Replace first 2 inputs with %11
+    //    %14 = prim::VarConcat(%11, %2, <dim>) // Replace first 2 inputs
+    //                                          // with %11
     //    ...
     //        = %14 ... // Replace use of %13 with %14
 
@@ -114,7 +115,8 @@ class ConcatCommonInputsEliminator {
 
         std::vector<Value*> new_inputs = {
             prev->output(), curr_tensor_inputs.back(), curr_dim};
-        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
         new_concat->output()->setType(node->output()->type());
         concats_to_replace_[node] = new_concat;
         return;
@@ -158,7 +160,8 @@ class ConcatCommonInputsEliminator {
 
         std::vector<Value*> new_inputs = {
             curr_tensor_inputs.front(), prev->output(), curr_dim};
-        auto new_concat = node->owningGraph()->create(prim::Concat, new_inputs);
+        auto new_concat =
+            node->owningGraph()->create(prim::VarConcat, new_inputs);
         new_concat->output()->setType(node->output()->type());
         concats_to_replace_[node] = new_concat;
         return;
@@ -535,7 +538,7 @@ class VariadicCatUpdater {
     }
     std::vector<Value*> inputs = list->inputs().vec();
     inputs.push_back(cat->input(1));
-    auto var_cat = cat->owningGraph()->create(prim::Concat, inputs);
+    auto var_cat = cat->owningGraph()->create(prim::VarConcat, inputs);
     GRAPH_UPDATE("Adding\n", *var_cat);
     var_cat->insertBefore(cat);
     GRAPH_UPDATE("Replacing\n", *cat, "with\n", *var_cat);
