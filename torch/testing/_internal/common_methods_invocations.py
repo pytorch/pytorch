@@ -3694,19 +3694,27 @@ def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
             SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
 
 
-def sample_inputs_log_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+# Used for both log_softmax and softmax
+def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if with_dtype:
-        cases = (((S, S, S), (1, ), {'dtype': torch.float64}),)
-    else:
-        cases = (((S, S, S), (1,), {}),)  # type:ignore[assignment]
+    cases = [
+        ((S, ), (0, )),
+        ((S, S), (0, )),
+        ((S, S), (1, )),
+        ((S, S), (-1, )),
+        ((S, M, S), (2, )),
+    ]
 
-    def generator():
-        for shape, args, kwargs in cases:
-            yield SampleInput(make_arg(shape), args=args, kwargs=kwargs)
+    # PyTorch on XLA throws an error when passed with dim argument for 0d tensor.
+    # See https://github.com/pytorch/xla/issues/3061 for more details.
+    if torch.device(device).type != 'xla':
+        cases.append(((), (0, )))
 
-    return list(generator())
+    return [
+        SampleInput(make_arg(shape), args=dim, kwargs=dict(dtype=torch.float64) if with_dtype else None)
+        for shape, dim in cases
+    ]
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -4614,6 +4622,25 @@ def sample_inputs_kthvalue(op_info, device, dtype, requires_grad, **kwargs):
 
     return [SampleInput(tensor, args=args) for tensor, args in test_cases]
 
+def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input(shape, *, low, high):
+        return make_tensor(shape, device=device, dtype=dtype, low=low, high=high, requires_grad=requires_grad)
+
+    shapes = ((), (S,), (L, M, S))
+    num_classess = (-1, 10)
+
+    return [
+        SampleInput(
+            make_input(
+                shape,
+                low=0,
+                high=10 if num_classes == -1 else num_classes // 2,
+            ),
+            kwargs=dict(num_classes=num_classes),
+        )
+        for shape, num_classes in itertools.product(shapes, num_classess)
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4868,6 +4895,16 @@ def reference_mvlgamma(x, d):
         return scipy.special.multigammaln(x, d).astype(np.float16)
 
     return scipy.special.multigammaln(x, d)
+
+
+def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
+    if num_classes == -1:
+        num_classes = int(np.amax(a) + 1)
+
+    idcs = a.reshape(-1) + np.arange(0, a.size, dtype=np.int64) * num_classes
+    one_hot = np.zeros((a.size, num_classes), dtype=a.dtype)
+    np.put(one_hot, idcs, 1)
+    return one_hot.reshape(*a.shape, -1)
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -6405,6 +6442,24 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_binary,),
+    # `softmax` supports different dtypes based on whether `dtype` argument,
+    # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    OpInfo('softmax',
+           aliases=('nn.functional.softmax',),
+           aten_name='softmax',
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_softmax_variant,
+           assert_autodiffed=True,
+           supports_out=False),
+    OpInfo('softmax',
+           aliases=('nn.functional.softmax',),
+           variant_test_name="with_dtype",
+           aten_name='softmax',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
+           assert_autodiffed=True,
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -7918,7 +7973,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_log_softmax,
+        sample_inputs_func=sample_inputs_softmax_variant,
         assert_autodiffed=True),
     OpInfo(
         'log_softmax',
@@ -7926,24 +7981,7 @@ op_db: List[OpInfo] = [
         aliases=('special.log_softmax', 'nn.functional.log_softmax'),
         supports_out=False,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        sample_inputs_func=partial(sample_inputs_log_softmax, with_dtype=True),
-        skips=(
-            # NOTE: This should work once https://github.com/pytorch/pytorch/pull/58838 is in
-            # RuntimeError:
-            # Unknown type name 'dtype':
-            # File "<string>", line 2
-            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
-            #                                     ~~~~~ <--- HERE
-            #             return variant(t0, s0, dtype=torch.float64)
-
-            # 'defaults' is being compiled since it was called from '_fn'
-            # File "<string>", line 2
-            #         def _fn(t0, s0: int, dtype: dtype = torch.float64):
-            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            #             return variant(t0, s0, dtype=torch.float64)
-            #             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-            SkipInfo('TestJit', 'test_jit_alias_remapping'),
-        ),
+        sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
         assert_autodiffed=True),
     UnaryUfuncInfo('logit',
                    ref=scipy.special.logit if TEST_SCIPY else _NOTHING,
@@ -8045,6 +8083,13 @@ op_db: List[OpInfo] = [
                    decorators=(toleranceOverride({torch.float32: tol(atol=0, rtol=4e-6), }),),
                    dtypes=all_types_and(torch.bool),
                    safe_casts_outputs=True),
+    OpInfo(
+        "nn.functional.one_hot",
+        ref=reference_one_hot,
+        supports_out=False,
+        dtypes=_dispatch_dtypes((torch.int64,)),
+        sample_inputs_func=sample_inputs_one_hot,
+    )
 ]
 
 # Common operator groupings
