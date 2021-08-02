@@ -18,6 +18,61 @@
 namespace torch {
 namespace jit {
 
+TEST(LiteTrainerTest, CustomOp) {
+  // std::string mobile_model =
+  //     "/home/chenlai/local/notebooks/tmp/ads_dper_fl_model_dummy_f286591080_debug.ptl";
+
+  std::string jit_model =
+      "/home/chenlai/local/notebooks/ads_dper_fl_model_282250609.pt";
+  // std::string jit_model =
+  //     "/home/chenlai/local/ads_dper_fl_model_simple.pt";
+  // std::string mobile_model =
+  //     "/home/chenlai/local/notebooks/tmp/ads_dper_fl_model_simple.ptl";
+  // std::string mobile_model = "/home/chenlai/local/notebooks/tmp/tmp.ptl";
+
+  Module jit_m = load(jit_model);
+  // torch::jit::Module module_freeze = freeze(jit_m);
+  // module_freeze._save_for_mobile(mobile_model);
+  // jit_m._save_for_mobile(mobile_model);
+
+  // Module jit_m = load(mobile_model);
+  jit_m.eval();
+  torch::jit::Module module_freeze = freeze(jit_m);
+  // // jit_m.train();
+  // std::vector<IValue> inputs{
+  //     {1 * torch::ones(10, 1034), 3 * torch::ones(10, 1034)},
+  // };
+  IValue tuple = c10::ivalue::Tuple::create(
+      {1 * torch::ones({10, 1034}), 3 * torch::ones({10, 1034})});
+  std::vector<IValue> inputs_1{tuple};
+  auto jit_output = jit_m.forward(inputs_1);
+  std::cout << "jit output: " << std::endl;
+  jit_output.dump();
+
+  std::stringstream ss;
+  jit_m._save_for_mobile(ss);
+  // jit_m._save_for_mobile(mobile_model);
+  // // jit_m._save_for_mobile(mobile_model_debug);
+  // jit_m._save_for_mobile(ss);
+  jit_m._save_for_mobile("/home/chenlai/local/notebooks/tmp/tmp.ptl");
+
+  // // // jit_m.forward(inputs);
+  torch::jit::mobile::Module mobile_m = _load_for_mobile(ss);
+  // // torch::jit::mobile::Module mobile_m = _load_for_mobile(mobile_model);
+  // // mobile_m.train();
+  auto mobile_output = mobile_m.forward(inputs_1);
+  std::cout << "mobile output: " << std::endl;
+  mobile_output.dump();
+  auto mobile_list =
+      mobile_output.toGenericDict().at("prediction").toTuple()->elements();
+  auto jit_list =
+      jit_output.toGenericDict().at("prediction").toTuple()->elements();
+  for (auto i = 0; i < mobile_list.size(); i++) {
+    mobile_list[i].toTensor().equal(jit_list[i].toTensor());
+  }
+  std::cout << "mobile output: " << std::endl;
+}
+
 TEST(LiteTrainerTest, Params) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);

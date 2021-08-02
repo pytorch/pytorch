@@ -110,18 +110,7 @@ std::pair<IValue, IValue> getFunctionTuple(
       auto node = code->instructions_source()[i];
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
-        if (input_type->kind() == TypeKind::TupleType) {
-          if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
-            TORCH_CHECK(
-                !name_typed_input->name(),
-                "A named tuple type is not supported in mobile module. ",
-                "Workaround: instead of using a named tuple type's fields, ",
-                "use a dictionary type's key-value pair itmes or ",
-                "a pytorch class (class Foo(torch.nn.Module))'s attributes.'");
-          }
-        } else if (
-            input_type->kind() == TypeKind::ListType ||
+        if (input_type->kind() == TypeKind::ListType ||
             input_type->kind() == TypeKind::DictType) {
           for (const TypePtr& element_type : input_type->containedTypes()) {
             TORCH_CHECK(
@@ -190,9 +179,27 @@ std::pair<IValue, IValue> getFunctionTuple(
   types.reserve(code->type_table().size());
   static const std::string torch_prefix("__torch__");
   static const std::string class_prefix("__torch__.torch.classes");
+  std::shared_ptr<torch::jit::CompilationUnit> cu =
+      module._ivalue()->compilation_unit();
   for (const TypePtr& t : code->type_table()) {
     auto type_str = t->annotation_str();
-    if (type_str.find(torch_prefix) == 0) {
+    if (cu->get_named_tuple(t->str())) {
+      auto named_tuple_type = cu->get_named_tuple(t->str());
+      if (named_tuple_type != nullptr) {
+        IValue named_tuple{"NamedTuple"};
+        std::vector<IValue> name_type_pairs;
+        for (auto const& argument : named_tuple_type->schema()->arguments()) {
+          name_type_pairs.emplace_back(c10::ivalue::Tuple::create(
+              {argument.name(), argument.type()->repr_str()}));
+        }
+        IValue named_tuple_type_definition =
+            c10::ivalue::Tuple::create(std::vector<IValue>{
+                named_tuple, c10::ivalue::Tuple::create(name_type_pairs)});
+        types.emplace_back(c10::ivalue::Tuple::create(std::vector<IValue>{
+            IValue(t->str()), named_tuple_type_definition}));
+        continue;
+      }
+    } else if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
           "__torch__ types other than torchbind (__torch__.torch.classes)"

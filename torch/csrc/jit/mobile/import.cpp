@@ -424,17 +424,43 @@ void BytecodeDeserializer::parseMethods(
 
     static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto& t : types_list) {
-      c10::QualifiedName qn(t.toStringRef());
-      if (classPrefix.isPrefixOf(qn)) {
-        auto classType = getCustomClass(qn.qualifiedName());
-        TORCH_CHECK(
-            classType,
-            "The implementation of class ",
-            qn.qualifiedName(),
-            " cannot be found.");
-        function->append_type(classType);
+      if (t.isString()) {
+        c10::QualifiedName qn(t.toStringRef());
+        if (classPrefix.isPrefixOf(qn)) {
+          auto classType = getCustomClass(qn.qualifiedName());
+          TORCH_CHECK(
+              classType,
+              "The implementation of class ",
+              qn.qualifiedName(),
+              " cannot be found.");
+          function->append_type(classType);
+        } else {
+          function->append_type(c10::parseType(t.toStringRef()));
+        }
       } else {
-        function->append_type(c10::parseType(t.toStringRef()));
+        auto difinition = t.toTuple()->elements();
+        const std::string name = difinition[0].toString()->string();
+        std::vector<IValue> name_type_pairs =
+            difinition[1].toTuple()->elements();
+
+        at::QualifiedName qualified_name = at::QualifiedName(name);
+        std::vector<std::string> field_names;
+        std::vector<TypePtr> field_types;
+
+        std::string super_class_name = name_type_pairs[0].toString()->string();
+        for (auto const& name_type_pair :
+             name_type_pairs[1].toTuple()->elements()) {
+          std::vector<IValue> name_type_vector =
+              name_type_pair.toTuple()->elements();
+          std::string field_name = name_type_vector[0].toString()->string();
+          TypePtr field_type =
+              c10::parseType(name_type_vector[1].toString()->string());
+          field_names.emplace_back(field_name);
+          field_types.emplace_back(field_type);
+        }
+        auto tt =
+            TupleType::createNamed(qualified_name, field_names, field_types);
+        function->append_type(tt);
       }
     }
 
