@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import \
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_methods_invocations import (
     OpInfo, SkipInfo, SampleInput, sample_inputs_hardshrink_hardtanh,
-    sample_inputs_log_softmax,
+    sample_inputs_softmax_variant, S
 )
 
 # List of OpInfos that aren't in PyTorch Core yet.
@@ -231,7 +231,7 @@ additional_op_db.extend([
         supports_out=False,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        sample_inputs_func=sample_inputs_log_softmax,
+        sample_inputs_func=sample_inputs_softmax_variant,
         assert_autodiffed=True),
 ])
 
@@ -432,3 +432,50 @@ for reduction in ['mean', 'sum', 'none']:
                sample_inputs_func=partial(sample_inputs_cross_entropy, reduction=reduction),
                dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                supports_out=True))
+
+# Taken from https://github.com/pytorch/pytorch/pull/62254
+def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
+
+def reference_mse_loss(input, target, reduction="mean"):
+    se = (input - target) ** 2
+    if reduction == "mean":
+        return np.mean(se)
+    elif reduction == "sum":
+        return np.sum(se)
+    else:  # reduction == "none"
+        return se
+
+additional_op_db.append(
+OpInfo(
+        "nn.functional.mse_loss",
+        ref=reference_mse_loss,
+        sample_inputs_func=sample_inputs_mse_loss,
+        supports_out=False,
+        dtypesIfCPU=floating_types_and(torch.float16),
+        backward_dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+   )
+)
