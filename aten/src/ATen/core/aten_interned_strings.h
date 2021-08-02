@@ -410,6 +410,7 @@ _(aten, is_distributed) \
 _(aten, is_floating_point) \
 _(aten, is_inference) \
 _(aten, is_nonzero) \
+_(aten, is_rng_key) \
 _(aten, is_same_size) \
 _(aten, is_set_to) \
 _(aten, is_signed) \
@@ -669,6 +670,7 @@ _(aten, sparse_mask) \
 _(aten, sparse_resize) \
 _(aten, sparse_resize_and_clear) \
 _(aten, split) \
+_(aten, split_key) \
 _(aten, split_with_sizes) \
 _(aten, sqrt) \
 _(aten, square) \
