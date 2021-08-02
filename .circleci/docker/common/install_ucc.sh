@@ -21,6 +21,7 @@ pushd ucc
 ./configure --prefix=$UCC_HOME              \
     --with-ucx=$UCX_HOME                    \
     --with-cuda=/usr/local/cuda/
+gcc --version
 make -j
 make install
 popd
