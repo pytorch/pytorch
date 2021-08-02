@@ -25,33 +25,21 @@ if(NOT MSVC)
   set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE INTERNAL "")
 endif()
 
-# CUDA language support
-include(CheckLanguage)
-check_language(CUDA)
-
-if(CMAKE_CUDA_COMPILER)
-  enable_language(CUDA)
-  set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
-  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-else()
-  set(CAFFE2_USE_CUDA OFF)
-endif()
-
-# Find CUDA libraries
-if(CAFFE2_USE_CUDA)
-  find_package(CUDA)
-  if(NOT CUDA_FOUND)
-    set(CAFFE2_USE_CUDA OFF)
-  endif()
-endif()
-
-if(NOT CAFFE2_USE_CUDA)
+# Find CUDA.
+find_package(CUDA)
+if(NOT CUDA_FOUND)
   message(WARNING
     "Caffe2: CUDA cannot be found. Depending on whether you are building "
     "Caffe2 or a Caffe2 dependent library, the next warning / error will "
     "give you more info.")
+  set(CAFFE2_USE_CUDA OFF)
   return()
 endif()
+
+# Enable CUDA language support
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
