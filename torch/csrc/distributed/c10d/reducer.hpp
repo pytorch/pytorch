@@ -51,6 +51,13 @@ class TORCH_API Timer {
   virtual ~Timer() = default;
 };
 
+// Local accumulator type for a single bucket.
+struct BucketAccumulator {
+  std::vector<size_t> indices;
+  size_t size = 0;
+  size_t size_limit = 0;
+};
+
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {
@@ -83,9 +90,9 @@ class TORCH_API Reducer {
   // a call to this function can simply be omitted.
   void prepare_for_backward(const std::vector<at::Tensor>& outputs);
 
-  // Called at the beginning of forward() inside DistributedDataParallel,
+  // Called at the begginning of forward() inside DistributedDataParallel,
   // right now it caputures the starting time of forward in each iteration.
-  void prepare_for_forward(bool will_run_grad_reduction = true);
+  void prepare_for_forward();
 
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
@@ -164,15 +171,14 @@ class TORCH_API Reducer {
   // Delay all reduce to be after all gradients' calculation is complete.
   void delay_all_reduce();
 
-  bool static_graph_first_bwd();
-
-  // Resets various counters Reducer uses to manager internal state such as
-  // buckets that need to be reduced across workers.
-  void reset_variable_counting();
-
   // Weak reference to associated DDP logger. The reference is weak to avoid
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
+
+  // When graph is not explicitly set by user as static and has unused
+  // parameters, this will return whether the graph has been static until the
+  // current iteration, which means unused params set has not changed.
+  bool ddp_graph_static();
 
  protected:
   // Forward declaration.
@@ -180,32 +186,46 @@ class TORCH_API Reducer {
 
   void push_rebuilt_params(const size_t& index);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<std::vector<at::Tensor>> replicas_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
-      grad_accumulators_;
+      grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
-      hooks_;
+      hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
-  // Whether we need to run autograd hooks (only false if user runs with
-  // no_grad or no_sync context manager)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool expect_autograd_hooks_;
-  // Flag controlling whether we are in a backwards pass initiated by DDP module
-  // or not. It is true from when prepare_for_backward is called until
-  // finalize_backward is called at the end of autograd execution. Used for
-  // disabling hooks called by local modules that are wrapped by DDP.
-  bool in_ddp_backwards_{false};
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool require_finalize_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t next_bucket_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_marked_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool find_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
+  // Previous iteration's unused params, used for checking if unused parameters
+  // change between iterations. Only filled during the first backwards call.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<size_t> prev_iteration_unused_parameters_;
+  // Whether graph is static or not. When user does not explicitly set static
+  // graph, the only possible dynamism is set of unused parameters changing
+  // between iterations which is tracked by this flag.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
@@ -240,6 +260,12 @@ class TORCH_API Reducer {
   void finalize_bucket_dense(Bucket& replica);
 
   void finalize_backward();
+
+  // Returns list of model parameters corresponding to the given bucket.
+  // bucket_index is a key to cache after buckets are rebuilt, after which this
+  // mapping never changes.
+  std::vector<at::Tensor> get_variables_for_bucket(
+      size_t bucket_index, const Bucket& bucket) const;
 
   // Asserts that the reduction for the previous iteration has finished before
   // rebuilding buckets or kicking off the next one.
@@ -385,13 +411,7 @@ class TORCH_API Reducer {
   std::vector<VariableLocator> variable_locators_;
 
   // track the number of iterations to synchronize grads in training so far.
-  // This is the number of calls to the forward pass, not necessarily equal to
-  // number of calls to backward pass.
   long num_iterations_;
-  // Number of times backward() has been called. This is mainly used for static
-  // graph training to know when to populate the map of how many times grad
-  // hooks have been triggered.
-  long num_backward_calls_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
   int num_buckets_ready_;
@@ -418,13 +438,7 @@ class TORCH_API Reducer {
   bool is_multi_device_module_ = false;
 
   // Following variables are to help build dynamic bucket order
-  // Whether the process of rebuilding buckets has occured.
   bool has_rebuilt_bucket_;
-  // Flag indicating all rebuilt param indices have been pushed. This is needed
-  // because there can be multiple calls to backward with retain_graph=True
-  // without a forward that actually rebuilds the buckets. In this case, we use
-  // this flag to avoid pushing parameters multiple times.
-  bool all_rebuilt_params_pushed_{false};
   std::vector<at::Tensor> rebuilt_params_;
   std::vector<int64_t> rebuilt_param_indices_;
   const int64_t bucket_bytes_cap_;
@@ -489,7 +503,8 @@ class TORCH_API Reducer {
   // get current cuda stream
   const c10::Stream get_current_stream();
   bool dynamic_graph_find_unused();
-  bool static_graph_after_first_bwd();
+  bool static_graph_first_iteration();
+  bool static_graph_after_first_iteration();
 
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
@@ -512,8 +527,10 @@ class TORCH_API Reducer {
   // Raises appropriate error if mark_variable_ready is called on the same
   // variable twice, which is unexpected.
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
-  // Retrieves parameter corresponding to the given VariableIndex.
-  at::Tensor& get_param_from_index(size_t index);
+
+  // Cached bucket index to model parameter mapping. Populated after buckets
+  // are rebuilt after which this mapping is static.
+  mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
 
   friend class Logger;
 };
@@ -524,7 +541,8 @@ class TORCH_API Reducer {
 // The index of tensors[i] assigned to bucket is tensor_indices[i],
 // when tensor_indices is empty, the index of tensors[i] assigned to
 // bucket is i.
-TORCH_API std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+TORCH_API std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},

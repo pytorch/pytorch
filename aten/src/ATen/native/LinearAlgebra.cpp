@@ -29,6 +29,9 @@ namespace meta {
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat1.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self);
   set_output(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -42,6 +45,9 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
+  TORCH_CHECK(
+      self.sizes()[1] == mat2.sizes()[0], "mat1 and mat2 shapes cannot be multiplied (",
+      self.sizes()[0], "x", self.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   auto names = at::namedinference::compute_matmul_outnames(self, mat2);
   set_output(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
@@ -54,9 +60,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
 } // namespace meta
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(addr_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(linalg_vector_norm_stub);
 
 // Helper function for det methods.
@@ -76,6 +80,26 @@ static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Te
   return std::make_tuple(c10::ExclusivelyOwned<Tensor>(std::move(num_exchanges)), c10::ExclusivelyOwned<Tensor>(std::move(u_diagonal)));
 }
 
+// Given a pivoted LU factorization A = P L U,
+// det(A) = det(P) * det(L) * det(U).
+// Since det(P) = +- 1 (even or odd permutation), and diag(L) = I, we get that
+// det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
+std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
+  Tensor lu, pivs, infos;
+  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors*/false);
+  TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
+
+  // find det(P)
+  auto n = self.size(-1);
+  auto n_transpositions_mod_2 = (at::arange(1, n + 1, pivs.options()) != pivs)
+    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong).fmod_(2);
+  auto p_det = n_transpositions_mod_2.mul_(-2).add_(1);
+
+  auto det = p_det * at::prod(lu.diagonal(0, -2, -1), /*dim=*/-1);
+
+  return std::make_tuple(det, lu, pivs);
+}
+
 // torch.det, alias for torch.linalg.det
 Tensor det(const Tensor& self) {
   return at::linalg_det(self);
@@ -91,19 +115,17 @@ Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
   IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
   at::native::resize_output(out, out_sizes);
 
-  c10::ExclusivelyOwned<Tensor> det_P, diag_U;
-  std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  // complete_det is 0 when U is singular (U(i, i) = 0 for some i in [1, self.size(-1)]).
-  // The product accumulation takes care of this case, and hence no special case handling is required.
-  at::prod_out(out, *diag_U, -1);
-  out.mul_(*det_P);
+  auto det = std::get<0>(at::native::_det_lu_based_helper(self));
+  out.copy_(det);
   return out;
 }
 
 Tensor linalg_det(const Tensor& self) {
-  auto out = at::empty({0}, self.options());
-  at::native::linalg_det_out(self, out);
-  return out;
+  squareCheckInputs(self);
+  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
+              "Expected a floating point or complex tensor as input");
+
+  return std::get<0>(at::_det_lu_based_helper(self));
 }
 
 Tensor logdet(const Tensor& self) {
@@ -945,12 +967,6 @@ static void addmm_impl_cpu_(
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
 
-  // keeping TORCH_CHECKs here because othe mm methods also utilize this impl.
-  // TODO move this to meta once all methods have migrated to structured kernel.
-  TORCH_CHECK(
-      m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
-      m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
-
   TORCH_CHECK(
       self_sizes[0] == m1_sizes[0] && self_sizes[1] == m2_sizes[1],
       "input shape is incompatible with matrix multiplication (",
@@ -976,14 +992,14 @@ static void addmm_impl_cpu_(
   if (result_strides[0] == 1 &&
       (result_sizes[1] == 1 || result_strides[1] >= std::max(int64_t{1}, result_sizes[0]))) {
     transpose_c = false;
-    c = result;
+    c = result.resolve_conj();
   } else if (result_strides[1] == 1 &&
              (result_sizes[0] == 1 || result_strides[0] >= std::max(int64_t{1}, result_sizes[1]))) {
     std::swap(m1, m2);
     std::swap(m1_sizes, m2_sizes);
     std::swap(m1_strides, m2_strides);
     transpose_c = true;
-    c = result;
+    c = result.resolve_conj();
   } else {
     transpose_c = false;
     // make c FORTRAN contiguous
@@ -1033,12 +1049,10 @@ static void addmm_impl_cpu_(
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
 
   if (a.is_conj() && !transpose_a) {
-    a.conj_physical_();
-    a.set_conj(false);
+    a = a.conj_physical();
   }
   if (b.is_conj() && !transpose_b) {
-    b.conj_physical_();
-    b.set_conj(false);
+    b = b.conj_physical();
   }
 
   // Apply BLAS routine

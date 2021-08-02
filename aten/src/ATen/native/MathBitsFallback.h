@@ -1,9 +1,10 @@
 #include <ATen/ATen.h>
-#include <ATen/core/op_registration/op_registration.h>
-#include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/NativeFunctions.h>
+#include <c10/util/irange.h>
+#include <torch/library.h>
 
 namespace at {
 
@@ -56,11 +57,22 @@ struct MathOpFallback {
         TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
         if (mut_arg) {
           // TODO: This is a waste if the argument is write only
-          set_bit(tensor, false);
+          _set_bit(tensor, false);
           math_op_(tensor);
           mutable_inputs.emplace_back(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensor);
+      } else if (ivalue.isTensorList()) {
+        auto tensors = std::move(ivalue).toTensorList();
+        if (mut_arg) {
+          for(const auto j : c10::irange(tensors.size())) {
+            Tensor t = tensors[j];
+            _set_bit(t, false);
+            math_op_(t);
+            mutable_inputs.emplace_back(t);
+          }
+        }
+        (*stack)[stack_start + i] = std::move(tensors);
       }
     }
 
@@ -68,7 +80,7 @@ struct MathOpFallback {
 
     for (auto& mutable_input : mutable_inputs) {
       math_op_(mutable_input);
-      set_bit(mutable_input, true);
+      _set_bit(mutable_input, true);
     }
   }
   void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
@@ -88,9 +100,10 @@ struct MathOpFallback {
 
     const auto& arguments = op.schema().arguments();
     const auto num_arguments = arguments.size();
+    const auto stack_start = stack->size() - num_arguments;
 
     c10::optional<bool> is_write;
-    for (int64_t i = 0; i < num_arguments; ++i) {
+    for (const auto i : c10::irange(num_arguments)) {
       // Three possible states:
       // 1. alias_info has no value --> out-of-place operation
       // 2. alias_info does have a value, alias_info->is_write=True --> in-place or out= operation
@@ -121,7 +134,7 @@ struct MathOpFallback {
     // Mutable inputs to be tracked separately
     std::vector<Tensor> mutable_inputs;
 
-    for (int64_t i = 0; i < num_arguments; ++i) {
+    for (const auto i : c10::irange(num_arguments)) {
       auto& ivalue = (*stack)[stack_start + i];
       if (!(ivalue.isTensor() || ivalue.isTensorList())) {
         continue;

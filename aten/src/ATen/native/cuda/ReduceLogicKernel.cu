@@ -4,7 +4,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/Dispatch.h>
-
+#include <ATen/CUDAFunctions.h>
 
 namespace at { namespace native {
 
@@ -49,7 +49,7 @@ bool cuda_equal(const Tensor& self, const Tensor &src) {
   if (self.numel() == 0) {
     return true;
   }
-  return at::native::eq(self, src).all().item().to<bool>();
+  return at::cuda::eq(self, src).all().item().to<bool>();
 }
 
 }} // namespace at::native

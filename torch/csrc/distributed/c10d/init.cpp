@@ -299,7 +299,16 @@ Returns:
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A list of ``torch.Tensor``. Each tensor in the list corresponds to a parameter.
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
+)")
+      .def(
+          "get_model_params_for_bucket",
+          &::c10d::GradBucket::getModelParamsForBucket,
+          py::call_guard<py::gil_scoped_release>(),
+                    R"(
+Returns:
+    A list of ``torch.Tensor``. Each tensor in the list corresponds to a model
+    parameter.
 )")
       .def(
           "is_the_last_bucket_to_allreduce",
@@ -348,7 +357,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
-          py::arg("will_run_grad_reduction") = true,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -396,6 +404,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>())
       .def(
+      "_ddp_graph_static",
+      &::c10d::Reducer::ddp_graph_static,
+      py::call_guard<py::gil_scoped_release>())
+      .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
           py::call_guard<py::gil_scoped_release>())
@@ -414,11 +426,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              const std::shared_ptr<::c10d::Logger> logger) {
             std::weak_ptr<::c10d::Logger> logger_weakref = logger;
             reducer.set_logger(logger_weakref);
-          })
-      .def(
-          "_static_graph_first_bwd",
-          &::c10d::Reducer::static_graph_first_bwd,
-          py::call_guard<py::gil_scoped_release>());
+          });
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
       .def(
@@ -1486,7 +1494,7 @@ Example::
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch.futures.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
@@ -1503,10 +1511,7 @@ Example::
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
-                (no support for peer-to-peer operations like send/recv).
-                The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
-                features on top of ``torch.futures.Future``.
+                (no support for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
