@@ -562,8 +562,9 @@ static at::Tensor subtensor(at::Tensor& tensor, int dim, int groups, int g) {
   if (!tensor.defined()) {
     return at::Tensor();
   }
+  auto memory_format = tensor.suggest_memory_format();
   int64_t n = tensor.sizes()[dim] / groups;
-  return tensor.narrow(dim, n * g, n).contiguous();
+  return tensor.narrow(dim, n * g, n).contiguous(memory_format);
 }
 
 
@@ -867,7 +868,7 @@ at::Tensor _convolution(
             padding, stride, dilation, params.groups, params.benchmark, params.deterministic);
       } else {
           if (input.ndimension() == 4) {
-              output = at::thnn_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+              output = at::_conv_depthwise2d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
           }
           else {
              TORCH_CHECK(input.ndimension() == 5);
@@ -987,8 +988,7 @@ at::Tensor _convolution(
           params.padding);
   } else if (input.device().is_cpu() || input.is_cuda()) {
     bool is_channels_last_supported = (input.ndimension() == 4) &&
-        !params.use_nnpack(input, weight) && input.device().is_cpu() &&
-        !params.is_dilated();
+        !params.use_nnpack(input, weight) && input.device().is_cpu();
     if (is_channels_last_supported) {
       auto memory_format = input.suggest_memory_format();
       input = input.contiguous(memory_format);
@@ -997,10 +997,9 @@ at::Tensor _convolution(
     }
     if (params.groups == 1) {
       output = at::_convolution_nogroup(
-          input.contiguous(), weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
+          input, weight, bias, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
     } else {
       std::vector<Tensor> outputs(params.groups);
-      input = input.contiguous();
       for (int g = 0; g < params.groups; ++g) {
         auto input_g = subtensor(input, 1, params.groups, g);
         auto weight_g = subtensor(weight, 0, params.groups, g);
