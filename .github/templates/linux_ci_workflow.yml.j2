@@ -132,7 +132,9 @@ jobs:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
         run: |
+          set -eux
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
+          echo "IMAGE:" $IMAGE_NAME
           cd .circleci/docker && ./build_docker.sh
 {% block build +%}
   build:
