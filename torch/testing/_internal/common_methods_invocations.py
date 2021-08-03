@@ -6469,6 +6469,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_normalize,
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           skips=(
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
+               # please report a bug to PyTorch.
+               SkipInfo('TestJit', 'test_variant_consistency_jit',),
+           ),
            supports_out=True),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
