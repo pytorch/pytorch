@@ -4670,6 +4670,23 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
     ]
 
+def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4940,6 +4957,16 @@ def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
     one_hot = np.zeros((a.size, num_classes), dtype=a.dtype)
     np.put(one_hot, idcs, 1)
     return one_hot.reshape(*a.shape, -1)
+
+
+def reference_mse_loss(input, target, reduction="mean"):
+    se = (input - target) ** 2
+    if reduction == "mean":
+        return np.mean(se)
+    elif reduction == "sum":
+        return np.sum(se)
+    else:  # reduction == "none"
+        return se
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -8136,6 +8163,22 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.mse_loss",
+        ref=reference_mse_loss,
+        sample_inputs_func=sample_inputs_mse_loss,
+        supports_out=False,
+        dtypesIfCPU=floating_types_and(torch.float16),
+        backward_dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         skips=(
             SkipInfo(
                 "TestJit",
