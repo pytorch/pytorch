@@ -5938,8 +5938,7 @@ for shape in [(1,), ()]:
 
     def test_graph_save_on_cpu(self):
         def test(get_input, cuda, pin_memory):
-            try:
-                torch.autograd.graph.set_save_on_cpu_hooks(pin_memory)
+            with torch.autograd.graph.save_on_cpu(pin_memory):
                 a = get_input()
                 if cuda:
                     a.cuda()
@@ -5952,8 +5951,6 @@ for shape in [(1,), ()]:
                     y = y.to_dense()
                 y.sum().backward()
                 self.assertEqual(2 * a, a.grad)
-            finally:
-                torch.autograd.graph.reset_saved_tensors_default_hooks()
 
         for cuda in [False] + ([True] if torch.cuda.is_available() else []):
             for pin_memory in [True, False]:
@@ -5991,14 +5988,11 @@ for shape in [(1,), ()]:
         del y
 
         # with hooks
-        try:
-            torch.autograd.graph.set_save_on_cpu_hooks()
+        with torch.autograd.graph.save_on_cpu():
             a = torch.ones(1, requires_grad=True, device="cuda")
             y = f(a)
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
 
 def index_perm_variable(shape, max_indices):
