@@ -307,6 +307,7 @@ cmake_dependent_option(
     "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
+option(BUILD_FOR_PYPY "Use PyPy-specific C API when necessary" OFF)
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -317,6 +318,13 @@ if(USE_CCACHE)
   else()
     message(STATUS "Could not find ccache. Consider installing ccache to speed up compilation.")
   endif()
+endif()
+
+if(BUILD_FOR_PYPY)
+  if(USE_DEPLOY)
+    message(FATAL "BUILD_FOR_PYPY and USE_DEPLOY cannot both be enabled")
+  endif()
+  add_definitions(-DUSING_PYPY)
 endif()
 
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected

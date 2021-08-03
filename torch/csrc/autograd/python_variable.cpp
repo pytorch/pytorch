@@ -1143,7 +1143,12 @@ static void clear_slots(PyTypeObject* type, PyObject* self) {
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
+  #if defined(USING_PYPY)
+  // TODO: Fix this for real instead of crashing
+  TORCH_CHECK(false);
+  #else
   mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  #endif
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX && !(mp->flags & READONLY)) {
       char* addr = (char*)self + mp->offset;
@@ -1211,10 +1216,15 @@ void THPVariable_subclass_dealloc(PyObject* self) {
        being finalized that has already been destroyed. */
     if (type->tp_weaklistoffset) {
       /* Modeled after GET_WEAKREFS_LISTPTR() */
+
+      #if defined(USING_PYPY)
+      TORCH_CHECK(false);
+      #else
       PyWeakReference** list =
           (PyWeakReference**)PyObject_GET_WEAKREFS_LISTPTR(self);
       while (*list)
         _PyWeakref_ClearRef(*list);
+      #endif
     }
   }
 
@@ -1307,7 +1317,12 @@ static int traverse_slots(
   PyMemberDef* mp;
 
   n = Py_SIZE(type);
+  #if defined(USING_PYPY)
+  // TODO: Fix this for real instead of crashing
+  TORCH_CHECK(false);
+  #else
   mp = PyHeapType_GET_MEMBERS((PyHeapTypeObject*)type);
+  #endif
   for (i = 0; i < n; i++, mp++) {
     if (mp->type == T_OBJECT_EX) {
       char* addr = (char*)self + mp->offset;

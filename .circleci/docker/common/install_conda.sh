@@ -2,6 +2,9 @@
 
 set -ex
 
+echo "Installing $ANACONDA_PYTHON_VERSION"
+echo "PyPy $USE_PYPY"
+
 # Optionally install conda
 if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   BASE_URL="https://repo.anaconda.com/miniconda"
@@ -55,35 +58,50 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Ensure we run conda in a directory that jenkins has write access to
   pushd /opt/conda
 
-  # Track latest conda update
-  as_jenkins conda update -y -n base conda
+  if [ -n "$USE_PYPY" ]; then
+    conda config --set channel_priority strict
+    conda create -c conda-forge -n pypy pypy
+  else
+    # Track latest conda update
+    as_jenkins conda update -y -n base conda
 
-  # Install correct Python version
-  as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
+    # Install correct Python version
+    as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
+  fi
+
+  export PATH="/opt/conda/envs/pypy/bin:$PATH"
 
   conda_install() {
     # Ensure that the install command don't upgrade/downgrade Python
     # This should be called as
     #   conda_install pkg1 pkg2 ... [-c channel]
-    as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
+    if [ -n "$USE_PYPY" ]; then
+      as_jenkins conda install -q -y $*
+    else
+      as_jenkins conda install -q -y python="$ANACONDA_PYTHON_VERSION" $*
+    fi
   }
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.5, but
   # we want to pin to version 3.5.
   SCIPY_VERSION=1.1.0
-  if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
-    SCIPY_VERSION=1.6.0
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
-  elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
-    # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
+  if [ -n "$USE_PYPY" ]; then
+    echo "Not doing anything for pypy"
   else
-    conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
+    if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
+      # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+      conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
+      SCIPY_VERSION=1.6.0
+    elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
+      # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+      conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
+    elif [ "$ANACONDA_PYTHON_VERSION" = "3.7" ]; then
+      # DO NOT install dataclasses if installing python-3.7, since its part of python-3.7 core packages
+      conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six typing_extensions
+    else
+      conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
+    fi
   fi
 
   if [[ "$CUDA_VERSION" == 10.0* ]]; then
@@ -100,41 +118,42 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda113 -c pytorch
   fi
 
-  # TODO: This isn't working atm
-  conda_install nnpack -c killeent
+  if [ -n "$USE_PYPY" ]; then
+    echo "Skipping nnpack for PyPy"
+  else
+    # TODO: This isn't working atm
+    conda_install nnpack -c killeent
+  fi
 
   # Install some other packages, including those needed for Python test reporting
   # TODO: Why is scipy pinned
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   # Pin coverage so we can use COVERAGE_RCFILE
-  as_jenkins pip install --progress-bar off pytest \
-    scipy==$SCIPY_VERSION \
-    scikit-image \
-    psutil \
-    unittest-xml-reporting \
-    boto3==1.16.34 \
-    coverage==5.5 \
+  as_jenkins pip install --progress-bar off \
     hypothesis==4.53.2 \
-    expecttest==0.1.3 \
-    mypy==0.812 \
-    tb-nightly
+    expecttest==0.1.3
 
-  # Install numba only on python-3.8 or below
-  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
-  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+  if [ -n "$USE_PYPY" ]; then
+    echo "Skipping numba for PyPy"
   else
-    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    # Install numba only on python-3.8 or below
+    # For numba issue see https://github.com/pytorch/pytorch/issues/51511
+    if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+      as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+    else
+      as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
+    fi
+
+    # Update scikit-learn to a python-3.8 compatible version
+    if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
+      as_jenkins pip install --progress-bar off -U scikit-learn
+    else
+      # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
+      as_jenkins pip install --progress-bar off scikit-learn==0.20.3
+    fi
   fi
 
-  # Update scikit-learn to a python-3.8 compatible version
-  if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off -U scikit-learn
-  else
-    # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
-    as_jenkins pip install --progress-bar off scikit-learn==0.20.3
-  fi
 
   popd
 fi
