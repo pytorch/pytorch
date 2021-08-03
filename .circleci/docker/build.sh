@@ -125,7 +125,7 @@ case "$image" in
     KATEX=yes
     BREAKPAD=yes
     ;;
-  pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9)
+  pytorch-linux-focal-cuda11.1-cudnn8-pypy7.3.5-gcc9)
     CUDA_VERSION=11.1
     CUDNN_VERSION=8
     USE_PYPY=1
