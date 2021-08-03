@@ -31,8 +31,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       "_distributed_rpc_testing", "distributed rpc testing bindings");
   auto module = py::handle(m).cast<py::module>();
 
-  // Import the rpc_module so we can subclass ProcessGroupAgent and
-  // TensorPipeAgent
+  // Import the rpc_module so we can subclass TensorPipeAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
 
   shared_ptr_class_<FaultyTensorPipeRpcBackendOptions>(
