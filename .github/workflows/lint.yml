@@ -21,15 +21,15 @@ jobs:
         id: requirements
         run: pip3 install -r requirements.txt --user
       - name: Ensure consistent CircleCI YAML config
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: cd .circleci && ./ensure-consistency.py
       - name: Lint native_functions.yaml
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           pip3 install ruamel.yaml==0.17.4 --user
           .github/scripts/lint_native_functions.py
       - name: Ensure correct trailing newlines
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           (! git --no-pager grep -Il '' -- . ':(exclude)**/contrib/**' ':(exclude)third_party' ':(exclude)**.expect' ':(exclude)**.ipynb' ':(exclude)tools/clang_format_hash' | tools/linter/trailing_newlines.py || (echo "The above files do not have correct trailing newlines; please normalize them"; false))
       - name: Ensure no trailing spaces
@@ -73,12 +73,12 @@ jobs:
           # shellcheck disable=SC2016
           (! find . \( -path ./third_party -o -path ./.git -o -path ./torch/bin -o -path ./build \) -prune -o -type f -executable -regextype posix-egrep -not -regex '.+(\.(bash|sh|py|so)|git-pre-commit|git-clang-format|gradlew)$' -print | grep . || (echo 'The above files have executable permission; please remove their executable permission by using `chmod -x`'; false))
       - name: C++ docs check
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           sudo apt-get install -y doxygen
           cd docs/cpp/source && ./check-doxygen.sh
       - name: CUDA kernel launch check
-        if: always() && steps.requirements.outcome == 'success'
+        if: ${{ always() && steps.requirements.outcome == 'success' }}
         run: |
           set -eux
           python torch/testing/_check_kernel_launches.py |& tee "${GITHUB_WORKSPACE}"/cuda_kernel_launch_checks.txt
@@ -93,7 +93,7 @@ jobs:
 
   clang-format:
     runs-on: ubuntu-18.04
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
@@ -199,13 +199,13 @@ jobs:
           rm -r "shellcheck-${scversion}"
           ~/.local/bin/shellcheck --version
       - name: Extract scripts from GitHub Actions workflows
-        if: always() && steps.install_shellcheck.outcome == 'success'
+        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
         run: |
           # For local lints, remove the .extracted_scripts folder if it was already there
           rm -rf .extracted_scripts
           tools/extract_scripts.py --out=.extracted_scripts
       - name: Run ShellCheck
-        if: always() && steps.install_shellcheck.outcome == 'success'
+        if: ${{ always() && steps.install_shellcheck.outcome == 'success' }}
         run: |
           if ! tools/linter/run_shellcheck.sh .extracted_scripts .jenkins/pytorch; then
             echo
@@ -218,9 +218,16 @@ jobs:
             false
           fi
       - name: Check that jobs will be cancelled
-        if: always() && steps.generate_workflows.outcome == 'success'
+        if: ${{ always() && steps.generate_workflows.outcome == 'success' }}
         run: |
           .github/scripts/ensure_actions_will_cancel.py
+      - name: Run actionlint
+        shell: bash
+        run: |
+          set -eux
+          bash <(curl https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint --color
+          rm actionlint
 
   toc:
     runs-on: ubuntu-18.04
@@ -288,7 +295,7 @@ jobs:
           set -eux
           flake8 | tee "${GITHUB_WORKSPACE}"/flake8-output.txt
       - name: Translate annotations
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -331,7 +338,7 @@ jobs:
           cd clang-tidy-output
           echo "$HEAD_SHA" > commit-sha.txt
       - name: Fetch PR diff
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -342,7 +349,7 @@ jobs:
           cd "${GITHUB_WORKSPACE}"
           python3 -m tools.linter.clang_tidy.generate_build_files
       - name: Run clang-tidy
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -355,7 +362,7 @@ jobs:
       # Run clang-tidy on a smaller subset of the codebase on master until we
       # make the repository clang-tidy clean
       - name: Run clang-tidy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
         run: |
           cd "${GITHUB_WORKSPACE}"
 
@@ -365,7 +372,7 @@ jobs:
             --disable-progress-bar 2>&1 | tee "${GITHUB_WORKSPACE}"/clang-tidy-output.txt
 
       - name: Annotate output
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
