@@ -210,12 +210,18 @@ if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVI
   export USE_GLOO_WITH_OPENSSL=ON
 fi
 
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+  fi
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
   get_bazel
 
-  tools/bazel build :torch
+  tools/bazel build --config=no-tty :torch
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."

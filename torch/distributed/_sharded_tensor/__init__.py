@@ -2,7 +2,12 @@ from typing import List
 
 import torch
 from torch.distributed._sharding_spec import ShardingSpec
-from .api import ShardedTensor, Shard, ShardedTensorMetadata
+from .api import (
+    Shard,
+    ShardedTensor,
+    ShardedTensorMetadata,
+    load_with_process_group,
+)
 
 def empty(
         sharding_spec: ShardingSpec,
@@ -12,7 +17,8 @@ def empty(
         requires_grad=False,
         pin_memory=False,
         memory_format=torch.contiguous_format,
-        process_group=None,):
+        process_group=None,
+        init_rrefs=False):
     """
     Creates an empty :class:`ShardedTensor`. Needs to be called on all ranks in an SPMD fashion.
 
@@ -35,6 +41,10 @@ def empty(
             returned Tensor. Default: ``torch.contiguous_format``.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
 
     Returns:
         A :class:`ShardedTensor` object on each rank
@@ -47,13 +57,15 @@ def empty(
         requires_grad=requires_grad,
         pin_memory=pin_memory,
         memory_format=memory_format,
-        process_group=process_group)
-
+        process_group=process_group,
+        init_rrefs=init_rrefs,
+    )
 
 def init_from_local_shards(
         local_shards: List[Shard],
         sharded_tensor_metadata: ShardedTensorMetadata,
-        process_group=None):
+        process_group=None,
+        init_rrefs=False):
     """
     Creates an :class:`ShardedTensor` from local shards and the global metadata.
     Needs to be called on all ranks in an SPMD fashion.
@@ -70,6 +82,10 @@ def init_from_local_shards(
     Keyword args:
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
+        init_rrefs (bool, optional): Whether or not to initialize
+            :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
+            Need to initialize the RPC Framework if specified as ``True``.
+            Default: ``False``.
 
     Returns:
         A :class:`ShardedTensor` object handle on this rank
@@ -77,4 +93,42 @@ def init_from_local_shards(
     return ShardedTensor._init_from_local_shards(
         local_shards,
         sharded_tensor_metadata,
-        process_group=process_group)
+        process_group=process_group,
+        init_rrefs=init_rrefs
+    )
+
+def state_dict_hook(module, destination, prefix, local_metadata):
+    """
+    Hook to add ShardedTensor to Module's ``state_dict``. Needs to be
+    registered to the Module using
+    :meth:`torch.nn.Module._register_state_dict_hook`.
+    """
+    _recurse_update_dict(module, destination, prefix)
+
+def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+    """
+    Pre-load state dict hook to add ShardedTensor to the module.
+    """
+    _recurse_update_module(module, state_dict, prefix)
+
+def _recurse_update_module(module, state_dict, prefix):
+    for attr_name, attr in module.__dict__.items():
+        key = prefix + attr_name
+        if key in state_dict:
+            if isinstance(state_dict[key], ShardedTensor):
+                setattr(module, attr_name, state_dict[key])
+
+    for submodule_name, submodule in module.named_modules():
+        key = prefix + submodule_name
+        if submodule_name:
+            _recurse_update_module(submodule, state_dict, key + '.')
+
+
+def _recurse_update_dict(module, destination, prefix):
+    for attr_name, attr in module.__dict__.items():
+        if isinstance(attr, ShardedTensor):
+            destination[prefix + attr_name] = attr
+
+    for submodule_name, submodule in module.named_modules():
+        if submodule_name != '':
+            _recurse_update_dict(submodule, destination, prefix + submodule_name + '.')
