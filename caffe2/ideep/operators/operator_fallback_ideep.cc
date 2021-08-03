@@ -63,295 +63,223 @@
 namespace caffe2 {
 
 // Boolean operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(EQ);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(GT);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(GE);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(LT);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(LE);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_COMPARE_OPERATOR(NE);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Softmax, IDEEPFallbackOp<SoftmaxOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     LabelCrossEntropy,
     IDEEPFallbackOp<LabelCrossEntropyOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     AveragedLoss,
     IDEEPFallbackOp<AveragedLoss<float, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Flatten, IDEEPFallbackOp<FlattenOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ResizeLike, IDEEPFallbackOp<ResizeLikeOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Slice, IDEEPFallbackOp<SliceOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Clip, IDEEPFallbackOp<ClipOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ScatterAssign,
     IDEEPFallbackOp<ScatterAssignOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Cast,
     IDEEPFallbackOp<CastOp<CPUContext>>);
 
 // filter operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     XavierFill,
     IDEEPFallbackOp<XavierFillOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ConstantFill,
     IDEEPFallbackOp<ConstantFillOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GaussianFill,
     IDEEPFallbackOp<GaussianFillOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     MSRAFill,
     IDEEPFallbackOp<MSRAFillOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorFill,
     IDEEPFallbackOp<GivenTensorFillOp<float, CPUContext>>);
 // Not supported tensor types in below FillOp
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorDoubleFill,
     IDEEPFallbackOp<GivenTensorFillOp<double, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorBoolFill,
     IDEEPFallbackOp<GivenTensorFillOp<bool, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorIntFill,
     IDEEPFallbackOp<GivenTensorFillOp<int, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorInt64Fill,
     IDEEPFallbackOp<GivenTensorFillOp<int64_t, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GivenTensorStringFill,
     IDEEPFallbackOp<GivenTensorFillOp<std::string, CPUContext>, SkipIndices<0>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Load, IDEEPFallbackOp<LoadOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Save, IDEEPFallbackOp<SaveOp<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     RMACRegions,
     IDEEPFallbackOp<RMACRegionsOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(RoIPool, IDEEPFallbackOp<RoIPoolOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     RoIAlign,
     IDEEPFallbackOp<RoIAlignOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     RoIAlignRotated,
     IDEEPFallbackOp<RoIAlignRotatedOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GenerateProposals,
     IDEEPFallbackOp<GenerateProposalsOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     GenerateProposalsCPP,
     IDEEPFallbackOp<GenerateProposalsOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     CollectAndDistributeFpnRpnProposals,
     IDEEPFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     BoxWithNMSLimit,
     IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0,1,2>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     AffineChannel,
     IDEEPFallbackOp<AffineChannelOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     StopGradient,
     IDEEPFallbackOp<StopGradientOp<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     PadImage,
     IDEEPFallbackOp<PadImageOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
 
 // ctc decoder operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     CTCGreedyDecoder,
     IDEEPFallbackOp<CTCGreedyDecoderOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     CTCBeamSearchDecoder,
     IDEEPFallbackOp<CTCBeamSearchDecoderOp<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     AveragedLossGradient,
     IDEEPFallbackOp<AveragedLossGradient<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     LabelCrossEntropyGradient,
     IDEEPFallbackOp<LabelCrossEntropyGradientOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     SoftmaxGradient,
     IDEEPFallbackOp<SoftmaxGradientOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Iter,
     IDEEPFallbackOp<IterOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     LearningRate,
     IDEEPFallbackOp<LearningRateOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Abs,
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, AbsFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Atan,
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, AtanFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Sqrt,
     IDEEPFallbackOp<UnaryElementwiseOp<
       TensorTypes<float>, CPUContext, SqrtFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Sign,
     IDEEPFallbackOp<UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         SignFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Div,
-    IDEEPFallbackOp<BinaryElementwiseOp<
+    IDEEPFallbackOp<BinaryElementwiseBroadcastOp<
       NumericTypes, CPUContext, DivFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Mul,
     IDEEPFallbackOp<
-        BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+        BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>>);
 REGISTER_IDEEP_OPERATOR(
     Sub,
-    IDEEPFallbackOp<BinaryElementwiseOp<
+    IDEEPFallbackOp<BinaryElementwiseBroadcastOp<
       NumericTypes, CPUContext, SubFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Tanh,
     IDEEPFallbackOp<UnaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         TanhFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     L1Distance,
     IDEEPFallbackOp<L1DistanceOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Scale, IDEEPFallbackOp<ScaleOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Accuracy,
     IDEEPFallbackOp<AccuracyOp<float, CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     AddGradient,
-    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+    IDEEPFallbackOp<BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         AddFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     TanhGradient,
     IDEEPFallbackOp<BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
         TanhGradientFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     MulGradient,
-    IDEEPFallbackOp<BinaryElementwiseGradientOp<
+    IDEEPFallbackOp<BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(TensorProtosDBInput, IDEEPFallbackOp<TensorProtosDBInput<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(CloseBlobsQueue, IDEEPFallbackOp<CloseBlobsQueueOp<CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLoss,
     IDEEPFallbackOp<SoftmaxWithLossOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     SoftmaxWithLossGradient,
     IDEEPFallbackOp<SoftmaxWithLossGradientOp<float, CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Expand,
     IDEEPFallbackOp<ExpandOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(Gather, IDEEPFallbackOp<GatherOp<CPUContext>>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     Normalize,
     IDEEPFallbackOp<NormalizeOp<float, CPUContext>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ReduceL2,
     IDEEPFallbackOp<
         ReduceOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ReduceSum,
     IDEEPFallbackOp<ReduceOp<
         TensorTypes<std::int32_t, std::int64_t, float, double>,
         CPUContext,
         SumReducer<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ReduceMean,
     IDEEPFallbackOp<ReduceOp<
         TensorTypes<float>, CPUContext, MeanReducer<CPUContext>>>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     BatchMatMul,
     IDEEPFallbackOp<BatchMatMulOp<CPUContext>>);

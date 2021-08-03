@@ -1,7 +1,11 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+name: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7
+=======
 name: Linux CI (pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9)
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
 
 on:
   # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
@@ -13,21 +17,33 @@ on:
   workflow_dispatch:
 
 env:
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+  BUILD_ENVIRONMENT: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
+=======
   BUILD_ENVIRONMENT: pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  # This is used for the phase of adding wheel tests only, will be removed once completed
+  IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+  group: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+=======
   group: pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9-${{ github.event.pull_request.number || github.sha }}
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
   cancel-in-progress: true
 
 jobs:
   calculate-docker-image:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
     env:
       DOCKER_BUILDKIT: 1
@@ -91,7 +107,7 @@ jobs:
           fi
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
-        if: steps.check.outputs.rebuild
+        if: ${{ steps.check.outputs.rebuild }}
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
@@ -101,10 +117,14 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: calculate-docker-image
+    needs: [calculate-docker-image, ]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+      JOB_BASE_NAME: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-build
+=======
       JOB_BASE_NAME: pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9-build
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
     steps:
       - name: Log in to ECR
         run: |
@@ -139,6 +159,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -148,6 +169,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -224,18 +248,18 @@ jobs:
         run: .github/scripts/generate_pytorch_test_matrix.py
 
   test:
-    if: True
-    needs:
-      - calculate-docker-image
-      - build
-      - generate-test-matrix
+    needs: [calculate-docker-image, build, generate-test-matrix, ]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+      JOB_BASE_NAME: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-test
+=======
       JOB_BASE_NAME: pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9-test
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -308,12 +332,14 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -331,10 +357,13 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
+          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -361,6 +390,7 @@ jobs:
           # Prune all of the docker images
           docker system prune -af
 
+
   # this is a separate step from test because the log files from test are too
   # long: basically, GitHub tries to render all of the log files when you click
   # through an action causing extreme slowdown on actions that contain too many
@@ -368,14 +398,24 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs:
-      - generate-test-matrix
-      - test
+    needs: [generate-test-matrix, test, ]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -407,7 +447,11 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+<<<<<<< HEAD:.github/workflows/generated-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7.yml
+          JOB_BASE_NAME: linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-test
+=======
           JOB_BASE_NAME: pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9-test
+>>>>>>> [wip] PyPy Support:.github/workflows/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9.yml
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
