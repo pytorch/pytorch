@@ -273,8 +273,8 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="pytorch-linux-focal-cuda11.1-cudnn8-pypy7.3.5-gcc9",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        build_environment="pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         # enable_jit_legacy_test=1,
         # enable_multigpu_test=1,
