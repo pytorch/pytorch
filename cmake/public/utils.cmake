@@ -507,3 +507,30 @@ function(torch_set_target_props libname)
     set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
   endif()
 endfunction()
+
+
+##############################################################################
+# Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.
+# Usage:
+#   torch_update_find_cuda_flags()
+function(torch_update_find_cuda_flags)
+  set(FLAGS "${CMAKE_CUDA_FLAGS}")
+  separate_arguments(FLAGS)
+  set(CUDA_NVCC_FLAGS ${FLAGS} PARENT_SCOPE)
+
+  set(FLAGS_DEBUG "${CMAKE_CUDA_FLAGS_DEBUG}")
+  separate_arguments(FLAGS_DEBUG)
+  set(CUDA_NVCC_FLAGS_DEBUG ${FLAGS_DEBUG} PARENT_SCOPE)
+
+  set(FLAGS_RELEASE "${CMAKE_CUDA_FLAGS_RELEASE}")
+  separate_arguments(FLAGS_RELEASE)
+  set(CUDA_NVCC_FLAGS_RELEASE ${FLAGS_RELEASE} PARENT_SCOPE)
+
+  set(FLAGS_MINSIZEREL "${CMAKE_CUDA_FLAGS_MINSIZEREL}")
+  separate_arguments(FLAGS_MINSIZEREL)
+  set(CUDA_NVCC_FLAGS_MINSIZEREL ${FLAGS_MINSIZEREL} PARENT_SCOPE)
+
+  set(FLAGS_RELWITHDEBINFO "${CMAKE_CUDA_FLAGS_RELWITHDEBINFO}")
+  separate_arguments(FLAGS_RELWITHDEBINFO)
+  set(CUDA_NVCC_FLAGS_RELWITHDEBINFO ${FLAGS_RELWITHDEBINFO} PARENT_SCOPE)
+endfunction()
