@@ -38,7 +38,7 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from typing import cast, Any, Dict, List, Iterable, Iterator, Optional, Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -425,6 +425,17 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # run *only* slow tests.  (I could have done an enum, but
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
+
+# Enables tests disabled by existing issues (these tests are disabled by default)
+# This is usually used locally or during fix PRs. This will enable
+# ALL disabled tests, even if IGNORE_DISABLED_ISSUES is set to a smaller set.
+# This does NOT interfere with other test disablement and only disables tests
+# marked by issues.
+RUN_DISABLED_TESTS = os.getenv('PYTORCH_RUN_DISABLED_TESTS', '0') == '1'
+
+# A list of issue numbers. This will re-enable any disabled tests associated with
+# the issues in this list.
+IGNORE_DISABLED_ISSUES: List[str] = os.getenv('IGNORE_DISABLED_ISSUES', '').split(',')
 
 # Disables noarch tests; all but one CI configuration disables these.  We don't
 # disable them for local runs because you still want to run them
@@ -899,20 +910,23 @@ def check_if_enable(test: unittest.TestCase):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
-    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+    if not RUN_DISABLED_TESTS and not IS_SANDCASTLE and disabled_tests_dict is not None:
         if test_name in disabled_tests_dict:
             issue_url, platforms = disabled_tests_dict[test_name]
-            platform_to_conditional: Dict = {
-                "mac": IS_MACOS,
-                "macos": IS_MACOS,
-                "windows": IS_WINDOWS,
-                "linux": IS_LINUX
-            }
-            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
-                raise unittest.SkipTest(
-                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+            issue_number = issue_url.split('/')[-1]
+            if issue_number not in IGNORE_DISABLED_ISSUES:
+                platform_to_conditional: Dict = {
+                    "mac": IS_MACOS,
+                    "macos": IS_MACOS,
+                    "windows": IS_WINDOWS,
+                    "linux": IS_LINUX
+                }
+                if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                    raise unittest.SkipTest(
+                        f"Test is disabled because an issue exists disabling it: {issue_url}" +
+                        f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
+                        " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1 or " +
+                        f"IGNORE_DISABLED_ISSUES={issue_number}")
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
