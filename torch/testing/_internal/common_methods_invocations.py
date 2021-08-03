@@ -3626,6 +3626,23 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+
+def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (S, S), False),
+        ((S, S), (S,), False),
+        ((S, ), (S, S), True)
+    )
+
+    def generator():
+        for shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape), args=(make_arg(other_shape),), broadcasts_input=broadcasts_input)
+
+    return list(generator())
+
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -6488,6 +6505,10 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
         ],
     ),
+    OpInfo('nextafter',
+           dtypes=floating_types_and(torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_nextafter),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
