@@ -23,16 +23,12 @@ TORCH_META_FUNC(_softmax)
     output_options = output_options.dtype(ScalarType::Float);
   }
 
-  set_output(input.sizes(), output_options);
-
-  Tensor input_ = input;
-  if (input_.dim() == 0) {
-    input_ = input_.view(1);
-  }
-
+  int64_t input_dim = input.dim() > 0 ? input.dim() : 1;
   TORCH_CHECK(
-      dim_ >= 0 && dim_ < input_.dim(),
+      dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(input.sizes(), output_options);
 }
 
 TORCH_META_FUNC(_log_softmax) (
@@ -48,16 +44,12 @@ TORCH_META_FUNC(_log_softmax) (
     output_options = output_options.dtype(ScalarType::Float);
   }
 
-  set_output(input.sizes(), output_options);
-
-  Tensor input_ = input;
-  if (input_.dim() == 0) {
-    input_ = input_.view(1);
-  }
-
+  int64_t input_dim = input.dim() > 0 ? input.dim() : 1;
   TORCH_CHECK(
-      dim_ >= 0 && dim_ < input_.dim(),
+      dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(input.sizes(), output_options);
 }
 
 TORCH_META_FUNC(_softmax_backward_data)
@@ -83,21 +75,12 @@ TORCH_META_FUNC(_softmax_backward_data)
     grad_input_options = grad_input_options.dtype(ScalarType::Float);
   }
 
-  set_output(grad.sizes(), grad_input_options);
-
-  Tensor grad_ = grad;
-  if (grad_.dim() == 0) {
-    grad_ = grad_.view(1);
-  }
-
-  Tensor output_;
-  if (output_.dim() == 0) {
-    output_ = output_.view(1);
-  }
-
+  int64_t grad_dim = grad.dim() > 0 ? grad.dim() : 1;
   TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
+      dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(grad.sizes(), grad_input_options);
 }
 
 TORCH_META_FUNC(_log_softmax_backward_data)
@@ -119,16 +102,12 @@ TORCH_META_FUNC(_log_softmax_backward_data)
     grad_input_options = grad_input_options.dtype(ScalarType::Float);
   }
 
-  set_output(grad.sizes(), grad_input_options);
-
-  Tensor grad_ = grad;
-  if (grad_.dim() == 0) {
-    grad_ = grad_.view(1);
-  }
-
+  int64_t grad_dim = grad.dim() > 0 ? grad.dim() : 1;
   TORCH_CHECK(
-      dim_ >= 0 && dim_ < grad_.dim(),
+      dim_ >= 0 && dim_ < grad_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(grad.sizes(), grad_input_options);
 }
 }
 
