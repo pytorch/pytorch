@@ -1,6 +1,6 @@
 import copy
 import warnings
-from typing import List, NamedTuple, Iterable, Any, Optional
+from typing import List, NamedTuple, Iterable, Any, Optional, Tuple
 
 import torch
 import torch.fx
@@ -37,23 +37,6 @@ def torch_dtype_from_trt(dtype):
         return torch.float32
     else:
         raise TypeError("%s is not supported by torch" % dtype)
-
-def torch_device_to_trt(device):
-    if device.type == torch.device("cuda").type:
-        return trt.TensorLocation.DEVICE
-    elif device.type == torch.device("cpu").type:
-        return trt.TensorLocation.HOST
-    else:
-        return TypeError("%s is not supported by tensorrt" % device)
-
-
-def torch_device_from_trt(device):
-    if device == trt.TensorLocation.DEVICE:
-        return torch.device("cuda")
-    elif device == trt.TensorLocation.HOST:
-        return torch.device("cpu")
-    else:
-        return TypeError("%s is not supported by torch" % device)
 
 
 class TRTModule(torch.nn.Module):
@@ -95,29 +78,31 @@ class TRTModule(torch.nn.Module):
         self.output_names = state_dict[prefix + "output_names"]
 
     def forward(self, *inputs):
+        assert len(inputs) == len(self.input_names), f"Wrong number of inputs, expect {len(self.input_names)} get {len(inputs)}."
         batch_size = inputs[0].shape[0]
         contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
         bindings: List[Any] = [None] * (len(self.input_names) + len(self.output_names))
 
+        for i, input_name in enumerate(self.input_names):
+            idx = self.engine.get_binding_index(input_name)
+            bindings[idx] = contiguous_inputs[i].data_ptr()
+
+            if not self.engine.has_implicit_batch_dimension:
+                self.context.set_binding_shape(idx, tuple(contiguous_inputs[i].shape))
+
         # create output tensors
         outputs: List[torch.Tensor] = []
-        for i, output_name in enumerate(self.output_names):
-            idx: int = self.engine.get_binding_index(output_name)
+        for idx in range(len(inputs), len(inputs) + len(self.output_names)):
             dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
 
             if self.engine.has_implicit_batch_dimension:
                 shape = (batch_size,) + tuple(self.engine.get_binding_shape(idx))
             else:
-                shape = tuple(self.engine.get_binding_shape(idx))
+                shape = tuple(self.context.get_binding_shape(idx))
 
-            device = torch_device_from_trt(self.engine.get_location(idx))
-            output = torch.empty(size=shape, dtype=dtype, device=device)
+            output = torch.empty(size=shape, dtype=dtype, device="cuda")
             outputs.append(output)
             bindings[idx] = output.data_ptr()
-
-        for i, input_name in enumerate(self.input_names):
-            idx = self.engine.get_binding_index(input_name)
-            bindings[idx] = contiguous_inputs[i].data_ptr()
 
         if self.engine.has_implicit_batch_dimension:
             self.context.execute_async(
@@ -134,6 +119,8 @@ class TRTModule(torch.nn.Module):
         return tuple(outputs)
 
     def enable_profiling(self):
+        raise RuntimeError("Profiling is not supported right now because it requires calling"
+                           " execute() instead of execute_async().")
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
 
@@ -149,9 +136,31 @@ def tensorrt_converter(key):
 
 
 class InputTensorSpec(NamedTuple):
+    """
+    This class contains the information of a input tensor.
+
+    shape: shape of the tensor.
+
+    dtype: dtyep of the tensor.
+
+    device: device of the tensor. This is only used to generate inputs to the given model
+        in order to run shape prop. For TensorRT engine, inputs have to be on cuda device.
+
+    shape_ranges: If dynamic shape is needed (shape has dimensions of -1), then this field
+        has to be provided (default is empty list). Every shape_range is a tuple of three
+        tuples ((min_input_shape), (optimized_input_shape), (max_input_shape)). Each shape_range
+        is used to populate a TensorRT optimization profile.
+        e.g. If the input shape varies from (1, 224) to (100, 224) and we want to optimize
+        for (25, 224) because it's the most common input shape, then we set shape_ranges to
+        ((1, 224), (25, 225), (100, 224)).
+
+    has_batch_dim: Whether the shape includes batch dimension. Batch dimension has to be provided
+        if the engine want to run with dynamic shape.
+    """
     shape : torch.Size
     dtype : torch.dtype
     device : torch.device = torch.device("cpu")
+    shape_ranges : List[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]] = []
     has_batch_dim : bool = True
 
     @classmethod
@@ -161,6 +170,16 @@ class InputTensorSpec(NamedTuple):
     @classmethod
     def from_tensors(cls, tensors: Iterable[torch.Tensor]):
         return [cls.from_tensor(t) for t in tensors]
+
+
+def get_dynamic_dims(shape):
+    dynamic_dims = []
+
+    for i, s in enumerate(shape):
+        if s == -1:
+            dynamic_dims.append(i)
+
+    return dynamic_dims
 
 
 class BaseTRTInterpreter(torch.fx.Interpreter):
@@ -182,10 +201,46 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         else:
             self.network = self.builder.create_network()
 
-        self.input_specs_iter = iter(input_specs)
+        self.optimization_profiles : Optional[List] = None
+        self.input_specs = input_specs
+        self.input_specs_iter = 0
+        self.validate_input_specs()
         self._cur_node_name: Optional[str] = None
         self._input_names: List[str] = []
         self._output_names: List[str] = []
+
+    def validate_input_specs(self):
+        for shape, dtpe, _, shape_ranges, has_batch_dim in self.input_specs:
+            if not self.network.has_implicit_batch_dimension:
+                assert has_batch_dim, "It's required to specify batch dimension when it's explicit in TensorRT network."
+
+            dynamic_dims = get_dynamic_dims(shape)
+            if len(dynamic_dims):
+                assert not self.network.has_implicit_batch_dimension, "Can't have dynamic dim when " \
+                    f"batch dim is implicit, got {shape}."
+                assert len(shape_ranges), "shape_ranges must be provided when shape has dynamic dim."
+
+                if self.optimization_profiles:
+                    assert len(shape_ranges) == len(self.optimization_profiles), "Number of optimization " \
+                        f"profiles {len(self.optimization_profiles)} doesn't match with the number of shape_range" \
+                        f" {len(shape_ranges)} provided."
+                else:
+                    self.optimization_profiles = [self.builder.create_optimization_profile() for _ in range(len(shape_ranges))]
+
+                for shape_range in shape_ranges:
+                    assert len(shape_range) == 3, f"Expect three elements in shape_range, got {len(shape_range)}"
+                    assert all(len(s) == len(shape) for s in shape_range), "Expect elements in shape_range" \
+                        f" {shape_range} have the same number of dimension as the provided shape {len(shape)}"
+
+                    for i in range(len(shape)):
+                        if i in dynamic_dims:
+                            assert all(shape_range[j][i] <= shape_range[j + 1][i] for j in range(2)), "Expect dynamic dim" \
+                                f" {i} to have incremental value for shapes in shape_range {shape_range}."
+                        else:
+                            assert all(s[i] == shape[i] for s in shape_range), f"Expect non dynamic dim {i} to be the same" \
+                                f" for all shapes in shape_range {shape_range}."
+            else:
+                assert len(shape_ranges) == 0, "shape_ranges are provided for input that doesn't have dynamic dim."
 
     def run(
         self,
@@ -204,6 +259,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         if fp16_mode and not self.builder.platform_has_fast_fp16:
             warnings.warn("Current platform doesn't support fast native fp16!")
 
+        self.input_specs_iter = 0
         super().run()
 
         self.builder.max_batch_size = max_batch_size
@@ -218,6 +274,10 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         if strict_type_constraints:
             builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)
 
+        if self.optimization_profiles:
+            for optimization_profile in self.optimization_profiles:
+                builder_config.add_optimization_profile(optimization_profile)
+
         engine = self.builder.build_engine(self.network, builder_config)
         assert(engine)
         return engine, self._input_names, self._output_names
@@ -228,12 +288,16 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
 
     def placeholder(self, target, args, kwargs):
         self._input_names.append(target)
-        shape, dtype, _, has_batch_dim = next(self.input_specs_iter)
+        shape, dtype, _, shape_ranges, has_batch_dim = self.input_specs[self.input_specs_iter]
+        self.input_specs_iter += 1
+
         if self.network.has_implicit_batch_dimension:
             if has_batch_dim:
                 shape = shape[1:]
         else:
-            assert has_batch_dim, "It's required to specify batch dimension when it's explicit in TensorRT network."
+            for i, shape_range in enumerate(shape_ranges):
+                self.optimization_profiles[i].set_shape(target, *shape_range)
+
         return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
 
     def call_module(self, target, args, kwargs):
