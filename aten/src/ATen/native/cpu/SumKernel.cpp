@@ -231,6 +231,25 @@ struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
     NanSumLoadPolicy<scalar_t> {
 };
 
+template <>
+struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
+  using vec_t = Vectorized<c10::BFloat16>;
+  using vacc_t = Vectorized<float>;
+
+  static constexpr int64_t memsize() {
+    return LoadPolicy<vec_t>::memsize();
+  }
+
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
+    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
+    vacc_t first, second;
+    vec::load_fp32_from_bf16(ptr, first, second);
+    const vacc_t zero(0);
+    return (vacc_t::blendv(first, zero, first.isnan()) +
+            vacc_t::blendv(second, zero, second.isnan()));
+  }
+};
+
 template <typename vec_t, typename vacc_t>
 struct OuterNanSumCastLoadPolicy {
   static constexpr int64_t memsize() {
@@ -603,8 +622,8 @@ void sum_kernel_impl(TensorIterator &iter) {
 }
 
 void nansum_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::BFloat16, ScalarType::Half, iter.dtype(), "nansum_cpu", [&] {
     cascade_sum</*ignore_nan=*/true, scalar_t>(iter);
   });
 }
