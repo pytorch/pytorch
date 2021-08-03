@@ -23,7 +23,7 @@
 
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
-    true,
+    false,
     "If on, static runtime may use use optimizations that cause accurary loss "
     "vs the jit interpreter");
 
