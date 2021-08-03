@@ -1494,7 +1494,7 @@ Example::
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch.futures.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
@@ -1511,10 +1511,7 @@ Example::
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
-                (no support for peer-to-peer operations like send/recv).
-                The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
-                features on top of ``torch.futures.Future``.
+                (no support for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
