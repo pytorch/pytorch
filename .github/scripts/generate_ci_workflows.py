@@ -164,8 +164,8 @@ LINUX_WORKFLOWS = [
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     PyTorchLinuxWorkflow(
-        build_environment="pytorch/pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
@@ -279,7 +279,7 @@ LINUX_WORKFLOWS = [
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
 ]
-
+LINUX_WORKFLOWS = [x for x in LINUX_WORKFLOWS if "pypy" in x["build_environment"]]
 
 BAZEL_WORKFLOWS = [
     PyTorchLinuxWorkflow(
@@ -296,8 +296,8 @@ if __name__ == "__main__":
     )
     template_and_workflows = [
         (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        # (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        # (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
     for template, workflows in template_and_workflows:
         for workflow in workflows:
