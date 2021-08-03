@@ -272,9 +272,8 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         **observer_kwargs: Any
     ) -> None:
         super().__init__(observer, quant_min, quant_max, **observer_kwargs)
-        assert isinstance(
-            self.activation_post_process, MovingAverageMinMaxObserver
-        ), "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
+        assert isinstance(self.activation_post_process, (MovingAverageMinMaxObserver, MovingAveragePerChannelMinMaxObserver)),\
+            "Fused observer+fake_quant module only works with MovingAverageMinMaxObserver"
         self.quant_min: int = quant_min
         self.quant_max: int = quant_max
         self.register_buffer("fake_quant_enabled", torch.tensor([0], dtype=torch.long))
