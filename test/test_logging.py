@@ -3,6 +3,10 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class LoggingTest(TestCase):
+    _ignore_error_on_print_allowlist = {
+        "LoggingTest.testApiUsage",
+    }
+
     def testApiUsage(self):
         """
         This test verifies that api usage logging is not triggered via static

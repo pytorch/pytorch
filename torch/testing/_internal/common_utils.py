@@ -38,7 +38,7 @@ import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, Set
 
 import numpy as np
 
@@ -1045,12 +1045,14 @@ class TestCase(expecttest.TestCase):
     _ignore_not_implemented_error = False
 
     # When True, skip the check that will raise a RuntimeError if the test case
-    # prints anything to stdout or stderr
-    _ignore_error_on_print = False
+    # prints anything to stdout or stderr. As of August 2021 this is set to True
+    # since the PyTorch tests don't follow this closely so we can only enable it
+    # on a case-by-case basis. Eventually this should default to False.
+    _ignore_error_on_print = True
 
     # Test names (by self.id() on a TestCase instance, e.g. "TestClass.test_name")
     # to ignore when checking for output to stdout or stderr
-    _ignore_error_on_print_allowlist = set()
+    _ignore_error_on_print_allowlist: Set[str] = set()
 
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
@@ -1073,9 +1075,10 @@ class TestCase(expecttest.TestCase):
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
 
             clean_id = self.id().replace("__main__.", "")
-            if not self._ignore_error_on_print and \
-               os.getenv("PYTORCH_ERROR_ON_TEST_PRINT", "") == "1" and \
-               clean_id not in self._ignore_error_on_print_allowlist:
+            # if not self._ignore_error_on_print and \
+            #    os.getenv("PYTORCH_ERROR_ON_TEST_PRINT", "") == "1" and \
+            #    clean_id not in self._ignore_error_on_print_allowlist:
+            if True:
                 self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy())
 
     def assertLeaksNoCudaTensors(self, name=None):
