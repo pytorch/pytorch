@@ -392,8 +392,11 @@ function(torch_compile_options libname)
   # ---[ Check if warnings should be errors.
   if(WERROR)
     target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Werror>
-        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler="-Werror">)
+        $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
+    if(USE_CUDA)
+      target_compile_options(${libname} PRIVATE
+          $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler="-Werror">)
+    endif()
   endif()
 
   if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
