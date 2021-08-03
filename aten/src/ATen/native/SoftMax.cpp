@@ -22,16 +22,12 @@ TORCH_META_FUNC(_softmax)
     output_options = output_options.dtype(ScalarType::Float);
   }
 
-  set_output(input.sizes(), output_options);
-
-  Tensor input_ = input;
-  if (input_.dim() == 0) {
-    input_ = input_.view(1);
-  }
-
+  int64_t input_dim = input.dim() > 0 ? input.dim() : 1;
   TORCH_CHECK(
-      dim_ >= 0 && dim_ < input_.dim(),
+      dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(input.sizes(), output_options);
 }
 
 TORCH_META_FUNC(_log_softmax) (
@@ -47,16 +43,12 @@ TORCH_META_FUNC(_log_softmax) (
     output_options = output_options.dtype(ScalarType::Float);
   }
 
-  set_output(input.sizes(), output_options);
-
-  Tensor input_ = input;
-  if (input_.dim() == 0) {
-    input_ = input_.view(1);
-  }
-
+  int64_t input_dim = input.dim() > 0 ? input.dim() : 1;
   TORCH_CHECK(
-      dim_ >= 0 && dim_ < input_.dim(),
+      dim_ >= 0 && dim_ < input_dim,
       "dim must be non-negative and less than input dimensions");
+
+  set_output(input.sizes(), output_options);
 }
 }
 
