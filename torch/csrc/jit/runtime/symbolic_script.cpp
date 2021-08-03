@@ -6,7 +6,6 @@
 namespace torch {
 namespace jit {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex lock;
 const std::vector<std::string> functions = {
     R"(
@@ -883,6 +882,13 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def relu6(self):
+            result = torch.relu6(self)
+            def backward(grad_output):
+                return grad_output * ((result > 0) & (result < 6.0))
+
+            return result, backward
+
         def leaky_relu(self, negative_slope: number):
             result = torch.leaky_relu(self, negative_slope)
             def backward(grad_output):
@@ -904,10 +910,17 @@ const std::vector<std::string> functions = {
         def hardswish(self):
             result = torch.hardswish(self)
             def backward(grad_output):
-                m = (result > 3.).type_as(result)
-                m = torch.where((result >= -3.) & (result <= 3.),  result / 3. + .5, m)
+                m = (self > 3.).type_as(result)
+                m = torch.where((self >= -3.) & (self <= 3.),  self / 3. + .5, m)
                 return grad_output * m
+            return result, backward
 
+        def hardsigmoid(self):
+            result = torch.hardsigmoid(self)
+            def backward(grad_output):
+                m = (self > -3.) & (self < 3.)
+                lhs = grad_output * (1.0 / 6.0)
+                return torch.where(m, lhs, m.type_as(self))
             return result, backward
 
         def erfc(self):
@@ -1505,17 +1518,14 @@ const std::vector<std::string> functions = {
           return torch.clamp(self, min=min, max=max), backward
     )"};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<std::string, GradientPair> schema_to_graphs;
 
 // This map is a workaround to cache compiled gradient_pairs. Ideally this graph
 // should be compiled only once and saved in Operator structure.
 // This should be done along with merging into native_functions.yaml.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<const FunctionSchema*, GradientPair> cached_gradient_pairs;
 
 // CompilationUnit that holds all these Functions and keeps them alive.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CompilationUnit compilation_unit;
 } // anonymous namespace
 

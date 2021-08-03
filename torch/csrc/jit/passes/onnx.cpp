@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -41,6 +42,7 @@ void removePrintOps(Block* block) {
 
 void RemovePrintOps(std::shared_ptr<Graph>& graph) {
   removePrintOps(graph->block());
+  GRAPH_DUMP("After RemovePrintOps: ", graph);
 }
 
 void checkONNXCompatibility(const c10::FunctionSchema& schema) {
@@ -55,6 +57,7 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
     auto type = arg.type();
     if (type->kind() == TypeKind::OptionalType) {
       type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
+      // recursive optional type is not supported
       AT_ASSERT(type->kind() != TypeKind::OptionalType);
     }
     if (type->kind() == TypeKind::ListType) {
@@ -90,14 +93,9 @@ void preprocessCaffe2Ops(Block* block) {
         auto type = arg.type();
         AT_ASSERT(origin_inputs_index < origin_inputs.size());
         const auto& origin_input = origin_inputs[origin_inputs_index++];
-        if (type->kind() == TypeKind::OptionalType) {
-          type = reinterpret_cast<OptionalType*>(type.get())->getElementType();
-          if (origin_input->mustBeNone()) {
-            continue;
-          } else {
-            // recursive optional type is not supported
-            AT_ASSERT(type->kind() != TypeKind::OptionalType);
-          }
+        if (type->kind() == TypeKind::OptionalType &&
+            origin_input->mustBeNone()) {
+          continue;
         }
         if (type->isSubtypeOf(TensorType::get())) {
           it->addInput(origin_input);
@@ -158,6 +156,7 @@ void preprocessCaffe2Ops(Block* block) {
 
 void PreprocessCaffe2Ops(std::shared_ptr<Graph>& graph) {
   preprocessCaffe2Ops(graph->block());
+  GRAPH_DUMP("After PreprocessCaffe2Ops: ", graph);
 }
 
 // Transform PythonOps into Nodes that match ONNX semantics.
@@ -169,6 +168,7 @@ std::shared_ptr<Graph> ToONNX(
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  GRAPH_DUMP("after ToONNX: ", new_graph);
   return new_graph;
 }
 
@@ -258,7 +258,7 @@ void NodeToONNX(
     const ParamMap empty_params_dict = {};
     auto opset_version =
         py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
-    for (size_t i = 0; i < num_old_outputs; ++i) {
+    for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
         // Allow symbolic() to skip specifying the type of the return node.
@@ -316,7 +316,7 @@ void NodeToONNX(
   auto cloneNode = [&](Node* node) {
     auto n_ = new_block->appendNode(
         new_block->owningGraph()->createClone(node, envFn));
-    for (size_t i = 0; i < node->outputs().size(); i++) {
+    for (const auto i : c10::irange(node->outputs().size())) {
       // n_->outputs()[i]->setType(node->outputs()[i]->type());
       env[node->output(i)] = n_->output(i);
     }
@@ -372,7 +372,7 @@ void NodeToONNX(
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
     processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
-    GRAPH_DUMP("after process output:", new_block->owningGraph());
+    GRAPH_DUMP("after processSymbolicOutput: ", new_block->owningGraph());
   };
 
   auto callPySymbolicMethod = [&](ConcretePythonOp* op) {

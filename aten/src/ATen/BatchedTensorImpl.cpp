@@ -2,6 +2,7 @@
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -23,8 +24,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
   sizes_and_strides_.resize(public_dims);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int64_t dim = 0; dim < public_dims; dim++) {
+  for (const auto dim : c10::irange(public_dims)) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
@@ -51,7 +51,7 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   // but it might require newer (>= ~2015) CPUs. We should clean this up
   // if/when we have dropped support for older CPUs.
   int64_t non_bdim_count = 0;
-  for (int64_t actual_dim = 0; actual_dim < kVmapMaxTensorDims; actual_dim++) {
+  for (const auto actual_dim : c10::irange(kVmapMaxTensorDims)) {
     if (is_bdim[actual_dim]) {
       continue;
     }

@@ -221,7 +221,7 @@ class Mypy(Check):
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
-            [sys.executable, "tools/mypy_wrapper.py"]
+            [sys.executable, "tools/linter/mypy_wrapper.py"]
             + [os.path.join(REPO_ROOT, f) for f in files],
             env=self.env(),
         )
@@ -270,7 +270,8 @@ class ShellCheck(Check):
 
     async def quick(self, files: List[str]) -> CommandResult:
         return await shell_cmd(
-            ["tools/run_shellcheck.sh"] + [os.path.join(REPO_ROOT, f) for f in files],
+            ["tools/linter/run_shellcheck.sh"]
+            + [os.path.join(REPO_ROOT, f) for f in files],
         )
 
     async def full(self) -> None:
@@ -285,6 +286,30 @@ class ShellCheck(Check):
                 "--step",
                 "Run ShellCheck",
             ],
+            redirect=False,
+        )
+
+
+class ClangTidy(Check):
+    name = "clang-tidy: Run clang-tidy"
+    common_options = [
+        "--clang-tidy-exe",
+        ".clang-tidy-bin/clang-tidy",
+    ]
+
+    def filter_files(self, files: List[str]) -> List[str]:
+        return self.filter_ext(files, {".c", ".cc", ".cpp"})
+
+    async def quick(self, files: List[str]) -> CommandResult:
+        return await shell_cmd(
+            [sys.executable, "-m", "tools.linter.clang_tidy", "--paths"]
+            + [os.path.join(REPO_ROOT, f) for f in files]
+            + self.common_options,
+        )
+
+    async def full(self) -> None:
+        await shell_cmd(
+            [sys.executable, "-m", "tools.linter.clang_tidy"] + self.common_options,
             redirect=False,
         )
 
@@ -405,6 +430,7 @@ ad_hoc_steps = {
     "mypy": Mypy,
     "flake8-py3": Flake8,
     "shellcheck": ShellCheck,
+    "clang-tidy": ClangTidy,
 }
 
 if __name__ == "__main__":

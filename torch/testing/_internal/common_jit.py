@@ -39,6 +39,12 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
 
 def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
                             allow_unused=True, check_types=True, no_grad=False, no_gradgrad=False):
+    """Verifies a function performs identically to some reference implementation.
+
+    Commonly, this is used to verify that a JIT implementation
+    (output_func) matches the behavior of the eager implementation
+    (reference_func).
+    """
     kwargs = kwargs if kwargs else {}
 
     def allSum(vs):

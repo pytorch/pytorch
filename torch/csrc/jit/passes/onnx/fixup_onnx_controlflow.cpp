@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 
 #include <aten/src/ATen/InitialTensorOptions.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -118,8 +119,6 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   auto* loop_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = loop_node->owningGraph();
 
   TORCH_INTERNAL_ASSERT(loop_node->blocks().size() == 1);
   auto* sub_block = loop_node->blocks()[0];
@@ -164,7 +163,7 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   }
 
   // Remove sequence outputs, and replace with scan outputs.
-  for (size_t i = 0; i < idx_to_remove.size(); ++i) {
+  for (const auto i : c10::irange(idx_to_remove.size())) {
     size_t idx = idx_to_remove[i] - i;
 
     sub_block->eraseInput(idx);
@@ -328,7 +327,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
   // Infer shape and type for subblock outputs
   TORCH_INTERNAL_ASSERT(
       then_block->outputs().size() == else_block->outputs().size())
-  for (size_t i = 0; i < else_block->outputs().size(); i++) {
+  for (const auto i : c10::irange(else_block->outputs().size())) {
     Value* then_block_output = then_block->outputs()[i];
     Value* else_block_output = else_block->outputs()[i];
 
@@ -358,7 +357,7 @@ void ONNXFixupUninitializedOutput(Node* node) {
       std::vector<::c10::ShapeSymbol> dims;
       if (then_shape.rank() && else_shape.rank() &&
           then_shape.rank() == else_shape.rank()) {
-        for (size_t j = 0; j < then_shape.rank().value(); ++j) {
+        for (const auto j : c10::irange(then_shape.rank().value())) {
           if (then_shape[j] == else_shape[j]) {
             dims.emplace_back(then_shape[j]);
           } else {
@@ -378,8 +377,6 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   }
   GRAPH_DUMP("Graph before fixing controlflow: ", node->owningGraph());
   auto* if_node = node;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  auto* graph = if_node->owningGraph();
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(if_node);
   // Copy type of block output to node output.

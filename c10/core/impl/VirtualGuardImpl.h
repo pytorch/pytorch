@@ -69,6 +69,13 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     impl_->destroyEvent(event, device_index);
   }
 
+  bool queryStream(const Stream& stream) const override {
+    return impl_->queryStream(stream);
+  }
+  void synchronizeStream(const Stream& stream) const override {
+    impl_->synchronizeStream(stream);
+  }
+
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     impl_->recordDataPtrOnStream(data_ptr, stream);

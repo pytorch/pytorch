@@ -469,7 +469,7 @@ class C10_API TypeMeta final {
    * convert ScalarType enum values to TypeMeta handles
    */
   static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
-    const size_t index = static_cast<uint16_t>(scalar_type);
+    const auto index = static_cast<uint16_t>(scalar_type);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         index < NumScalarTypes,
         "Unrecognized Scalartype ",

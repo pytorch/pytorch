@@ -70,7 +70,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for the host system
 # Use only 1 thread for build to avoid out-of-memory failures
@@ -97,7 +97,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for Android, and push to device
 scripts/build_android.sh -DANDROID_TOOLCHAIN=clang -DBUILD_BINARY=ON
@@ -127,7 +127,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Build Caffe2 (including binaries) for Android, and push to device
 scripts/build_android.sh -DANDROID_ABI=arm64-v8a -DANDROID_TOOLCHAIN=clang -DBUILD_BINARY=ON
@@ -164,7 +164,7 @@ git clone --recursive https://github.com/pytorch/pytorch.git
 cd pytorch
 
 # Optional: update QNNPACK submodule to latest revision
-git submodule update --remote third_party/QNNPACK
+git submodule update --remote --jobs 0 third_party/QNNPACK
 
 # Clone PEP repo
 cd ~/Code

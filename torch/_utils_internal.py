@@ -3,6 +3,7 @@ import os
 import inspect
 import sys
 import tempfile
+from typing import Any, List, Optional, Tuple
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -20,30 +21,33 @@ else:
     else:
         torch_parent = os.path.dirname(os.path.dirname(__file__))
 
-def get_file_path(*path_components):
+def get_file_path(*path_components: str) -> str:
     return os.path.join(torch_parent, *path_components)
 
 
-def get_file_path_2(*path_components):
+def get_file_path_2(*path_components: str) -> str:
     return os.path.join(*path_components)
 
 
-def get_writable_path(path):
+def get_writable_path(path: str) -> str:
     if os.access(path, os.W_OK):
         return path
     return tempfile.mkdtemp(suffix=os.path.basename(path))
 
 
 
-def prepare_multiprocessing_environment(path):
+def prepare_multiprocessing_environment(path: str) -> None:
     pass
 
 
-def resolve_library_path(path):
+def resolve_library_path(path: str) -> str:
     return os.path.realpath(path)
 
 
-def get_source_lines_and_file(obj, error_msg=None):
+def get_source_lines_and_file(
+    obj: Any,
+    error_msg: Optional[str] = None,
+) -> Tuple[List[str], int, Optional[str]]:
     """
     Wrapper around inspect.getsourcelines and inspect.getsourcefile.
 

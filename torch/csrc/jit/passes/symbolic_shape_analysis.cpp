@@ -1,5 +1,6 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -16,6 +17,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/exception_message.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/utils/memory.h>
 #include <memory>
 #include <unordered_map>
@@ -24,9 +26,6 @@
 /*
 XXX: this is still in prototype phase and has much work left to do, including
 but not limited to:
-- Bind shape functions for operators in C+
-- Make classes of operators share the same shape function (e.g. pointwise,
-broadcast two inputs)
 - Refactor APIs
 - Only iteratively optimize shape function while a change has been made
 - Add decent coverage of common ops
@@ -38,8 +37,20 @@ pointwise ops)
 - Supporting returning partially evaluated shape compute graph
 */
 
+static bool symbolic_shape_analysis_test_mode = false;
+
 namespace torch {
 namespace jit {
+
+bool setSymbolicShapeAnalysisTestMode(bool value) {
+  bool old_value = symbolic_shape_analysis_test_mode;
+  symbolic_shape_analysis_test_mode = value;
+  return old_value;
+}
+
+bool symbolicShapeAnalysisTestModeEnabled() {
+  return symbolic_shape_analysis_test_mode;
+}
 
 // TODO: better registration mechanism
 std::mutex lock;
@@ -80,8 +91,16 @@ struct SymbolicShapeAnalyzer {
     for (size_t i = 0; i < node_->inputs().size(); i++) {
       auto type = node_->input(i)->type();
       if (auto tt = type->castRaw<TensorType>()) {
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
         c10::SymbolicShape symbolic_shapes = tt->symbolic_sizes();
-        if (symbolic_shapes.isComplete()) {
+
+        // for testing, we don't insert complete tensor shapes and rely on our
+        // partial evaluation pipeline to propagate information.
+        // this is a good proxy for our ability to propagate non-complete shape
+        // information.
+
+        if (symbolic_shapes.isComplete() &&
+            !symbolic_shape_analysis_test_mode) {
           replaceWithIValue(
               graph_->inputs().at(i), *tt->sizes().concrete_sizes());
           continue;
@@ -104,8 +123,9 @@ struct SymbolicShapeAnalyzer {
 
   c10::SymbolicShape run() {
     // TODO: only run while the last iteration has made a change
-    size_t num_optimization_iters = 6;
-    for (size_t i = 0; i < num_optimization_iters; i++) {
+    constexpr size_t num_optimization_iters = 6;
+    for (const auto i : c10::irange(num_optimization_iters)) {
+      (void)i; // Suppress unused variable warning
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
@@ -211,12 +231,12 @@ struct SymbolicShapeAnalyzer {
 
     // there are ways to compute this more efficiently but typically number of
     // Values for each symbolic set is low and this is cheap to run
-    for (size_t i = 0; i < symbolic_set.size(); ++i) {
+    for (const auto i : c10::irange(symbolic_set.size())) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
-      for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
-          dominating_value = symbolic_set[j];
+      for (const auto& sym_set : symbolic_set) {
+        if (dominating_value->node()->isDominatedBy(sym_set->node())) {
+          dominating_value = sym_set;
         }
       }
       if (dominating_value != v) {
@@ -269,24 +289,12 @@ void PropagateShapesWithShapeFunction(
       n->output()->type()->expect<TensorType>()->withSymbolicShapes(out));
 }
 
-void RegisterOperatorShapeFunction(Node* n, std::shared_ptr<Graph>& graph) {
-  std::lock_guard<std::mutex> guard(lock);
-  if (!n->maybeSchema()) {
-    return;
-  }
-  if (operator_functions.count(toString(n->schema()))) {
-    return;
-  }
-  operator_functions[toString(n->schema())] = graph;
-}
-
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
   std::lock_guard<std::mutex> guard(lock);
   for (Node* n : graph->nodes()) {
     if (n->maybeSchema()) {
-      if (operator_functions.count(toString(n->schema()))) {
-        PropagateShapesWithShapeFunction(
-            n, operator_functions[toString(n->schema())]);
+      if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
+        PropagateShapesWithShapeFunction(n, *maybe_graph);
       }
     }
   }

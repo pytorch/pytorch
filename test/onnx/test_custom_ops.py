@@ -37,10 +37,10 @@ class TestCustomOps(unittest.TestCase):
                 return torch.ops.custom_namespace.custom_add(a, b)
 
         def symbolic_custom_add(g, self, other):
-            return g.op('Add', self, other)
+            return g.op("Add", self, other)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic('custom_namespace::custom_add', symbolic_custom_add, 9)
+        register_custom_op_symbolic("custom_namespace::custom_add", symbolic_custom_add, 9)
 
         x = torch.randn(2, 3, 4, requires_grad=False)
         y = torch.randn(2, 3, 4, requires_grad=False)
@@ -110,7 +110,7 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 return h
 
         def symbolic_pythonop(g, n, *args, **kwargs):
-            name = kwargs['name']
+            name = kwargs["name"]
             if name == "MyClip":
                 return g.op("Clip", args[0], min_f=args[1])
             elif name == "MyRelu":
@@ -119,11 +119,11 @@ class TestCustomAutogradFunction(unittest.TestCase):
                 return _unimplemented("prim::PythonOp", "unknown node kind: " + name)
 
         from torch.onnx import register_custom_op_symbolic
-        register_custom_op_symbolic('::prim_PythonOp', symbolic_pythonop, 1)
+        register_custom_op_symbolic("::prim_PythonOp", symbolic_pythonop, 1)
 
         x = torch.randn(2, 3, 4, requires_grad=True)
         model = MyModule()
         run_model_test(self, model, input=(x, ))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

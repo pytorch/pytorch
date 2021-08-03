@@ -13,7 +13,7 @@
 #include <ATen/native/cuda/CuFFTUtils.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <c10/util/accumulate.h>
-#include <THC/THCTensorSort.cuh>
+#include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
 
 

@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -16,6 +15,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
     c10::intrusive_ptr<::c10d::ProcessGroup> pg,
     int numSendRecvThreads,
     std::chrono::milliseconds rpcTimeout,
+    std::unique_ptr<RequestCallback> cb,
     const std::vector<std::string>& messagesToFail,
     const std::unordered_map<std::string, float>& messageTypesToDelay,
     int failNumSends)
@@ -25,7 +25,7 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           std::move(pg),
           numSendRecvThreads,
           rpcTimeout,
-          std::make_unique<RequestCallbackImpl>()),
+          std::move(cb)),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}
@@ -60,19 +60,19 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
 
 c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
-    Message&& message,
+    c10::intrusive_ptr<Message> message,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
-  if (!shouldFailMessage(message.type())) {
+  if (!shouldFailMessage(message->type())) {
     return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
   }
   // This send function checks the failMessageCountMap_ to check whether
   // we must fail the next send. If the send must be failed, we set an error
   // on the returned future immediately and increment the counter in the map,
   // otherwise we just call the ProcessGroupAgent send.
-  const auto key = fromVec(message.payload());
+  const auto key = fromVec(message->payload());
   std::unique_lock<std::mutex> lock(failMapMutex_);
   auto it = failMessageCountMap_.find(key);
   if (it == failMessageCountMap_.end()) {
@@ -93,7 +93,7 @@ c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
 }
 
 void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
-  float msgDelay = getDelayForMessage(work.message_.type());
+  float msgDelay = getDelayForMessage(work.message_->type());
   if (msgDelay != 0) {
     // Sleep for the specified delay for the message.
     std::this_thread::sleep_for(std::chrono::milliseconds(
@@ -102,8 +102,8 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
   ProcessGroupAgent::enqueueSend(std::move(work));
 }
 
-void FaultyProcessGroupAgent::sendToSelf(Message&& message) {
-  float msgDelay = getDelayForMessage(message.type());
+void FaultyProcessGroupAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
+  float msgDelay = getDelayForMessage(message->type());
   if (msgDelay != 0) {
     // Sleep for the specified delay for the message.
     std::this_thread::sleep_for(std::chrono::milliseconds(

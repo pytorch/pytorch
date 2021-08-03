@@ -9,6 +9,7 @@ namespace tensorexpr {
 class KernelScopedObject;
 
 // An arena that manages all the underlying kernel-scoped objects.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class KernelArena {
  public:
   static KernelArena* GetCurrentKernelArena();
@@ -36,10 +37,10 @@ class KernelScope {
   KernelScope& operator=(const KernelScope&) = delete;
 
  private:
-  KernelArena* old_kernel_arena_ =
-      nullptr; // previous arena, will be restored in destructor
-  bool owning_ = false; // determines whether the arena will be freed along with
-                        // the scope object
+  KernelArena* kernel_arena_; // maybe owned
+  KernelArena* old_kernel_arena_; // previous arena, restored in destructor
+  bool owning_; // determines whether the arena will be freed along with
+                // the scope object
 };
 
 // The base object managed by the Kernel.

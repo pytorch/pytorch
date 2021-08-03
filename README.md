@@ -223,7 +223,7 @@ git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
 git submodule sync
-git submodule update --init --recursive
+git submodule update --init --recursive --jobs 0
 ```
 
 #### Install PyTorch
@@ -254,12 +254,7 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
-Each CUDA version only supports one particular XCode version. The following combinations have been reported to work with PyTorch.
-
-| CUDA version | XCode version |
-| ------------ | ------------- |
-| 10.0         | XCode 9.4     |
-| 10.1         | XCode 10.1    |
+CUDA is not supported on macOS.
 
 
 On Windows
@@ -353,7 +348,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a docker version > 18.06
 
-The `Dockerfile` is supplied to build images with Cuda support and cuDNN v7.
+The `Dockerfile` is supplied to build images with CUDA 11.1 support and cuDNN v8.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
 ```bash

@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 import typing
 import typing_extensions
 from typing import List, Dict, Optional, Tuple
@@ -729,3 +730,23 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
+
+    def test_override_instance_method_ignore(self):
+        class M(torch.nn.Module):
+            @torch.jit.ignore
+            def i_am_ignored(self):
+                return "old"
+
+        m = M()
+
+        # Override the ignored method by binding a new method to this instance.
+        @torch.jit.ignore
+        def i_am_ignored(self):
+            return "new"
+
+        m.i_am_ignored = types.MethodType(i_am_ignored, m)
+        self.assertEqual(m.i_am_ignored(), "new")
+
+        # ScriptModule should correctly reflect the override.
+        s = torch.jit.script(m)
+        self.assertEqual(s.i_am_ignored(), "new")

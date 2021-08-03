@@ -44,9 +44,9 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, H_{in})` where :math:`*` means any number of
-          additional dimensions and :math:`H_{in} = \text{in\_features}`
-        - Output: :math:`(N, *, H_{out})` where all but the last dimension
+        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{in} = \text{in\_features}`.
+        - Output: :math:`(*, H_{out})` where all but the last dimension
           are the same shape as the input and :math:`H_{out} = \text{out\_features}`.
 
     Attributes:
@@ -104,13 +104,16 @@ class Linear(Module):
         )
 
 
-# This class exists solely for Transformer; it has an annotation stating
-# that bias is never None, which appeases TorchScript
-class _LinearWithBias(Linear):
-    bias: Tensor  # type: ignore[assignment]
-
-    def __init__(self, in_features: int, out_features: int) -> None:
-        super().__init__(in_features, out_features, bias=True)
+# This class exists solely to avoid triggering an obscure error when scripting
+# an improperly quantized attention layer. See this issue for details:
+# https://github.com/pytorch/pytorch/issues/58969
+# TODO: fail fast on quantization API usage error, then remove this class
+# and replace uses of it with plain Linear
+class NonDynamicallyQuantizableLinear(Linear):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 device=None, dtype=None) -> None:
+        super().__init__(in_features, out_features, bias=bias,
+                         device=device, dtype=dtype)
 
 
 class Bilinear(Module):

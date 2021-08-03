@@ -12,13 +12,6 @@
 // read-only
 enum TensorArgType { ReadWrite, ReadOnly };
 
-template <typename IndexType>
-__device__ __forceinline__ IndexType getLinearBlockId() {
-  return blockIdx.z * gridDim.y * gridDim.x +
-    blockIdx.y * gridDim.x +
-    blockIdx.x;
-}
-
 // Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
 // (1, 2), (3, 4), (5, 6), (7, 8), then the return in threadVals for thread 0
 // is (1 + 3 + 5 + 7, 2 + 4 + 6 + 8) = (16, 20)

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 
 #include <torch/csrc/python_headers.h>
@@ -108,7 +109,7 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   const auto num_next = self->cdata->num_outputs();
   THPObjectPtr py_functions(PyTuple_New(num_next));
   if (!py_functions) return nullptr;
-  for (size_t i = 0; i < num_next; ++i) {
+  for (const auto i : c10::irange(num_next)) {
     auto& c_tuple = self->cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple) return nullptr;
@@ -190,7 +191,6 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   return &type;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {

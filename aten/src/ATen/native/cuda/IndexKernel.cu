@@ -1,4 +1,5 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/TensorTransformations.h> // flip
 
 #include <type_traits>
 #include <ATen/ATen.h>
@@ -329,9 +330,9 @@ void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulat
     // Cannot use `OpaqueType`, as we need the actual type for `fastSpecializedgpuAtomicAdd`
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(output) ? ScalarType::Int : ScalarType::Long,
         "put_cuda_index", [&] {
-           auto* __restrict__ indexed_ptr = output.template data<scalar_t>();
+           auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
-             const auto numel = output.numel();
+             index_t numel = output.numel();
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
                  [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
@@ -354,7 +355,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -457,11 +458,54 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
   return self;
 }
 
+template <typename scalar_t>
+void flip_kernel_impl(TensorIterator& iter) {
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      flip_kernel_impl<scalar_t>(sub_iter);
+    }
+    return;
+  }
+
+  char* const __restrict__ out_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  const char* const __restrict__ in_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
+
+  const auto offset_calc = make_offset_calculator<2, /*signed_strides=*/true>(iter);
+
+  auto loop = [=]C10_DEVICE(const int i) {
+    const auto offsets = offset_calc.get(i);
+    // offsets can be negative here, but it's fine
+    scalar_t* const __restrict__ out_data = reinterpret_cast<scalar_t*>(out_ptr + offsets[0]);
+    const scalar_t* const __restrict__ in_data = reinterpret_cast<const scalar_t*>(in_ptr + offsets[1]);
+    *out_data = *in_data;
+  };
+  launch_kernel<launch_size_nd, launch_bound2>(iter.numel(), loop);
+}
+
+void flip_kernel(TensorIterator& iter, const bool quantized) {
+  if (quantized) {
+    AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "flip_quantized_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+                                           iter.dtype(), "flip_cuda",
+    [&] {
+      using dtype = OpaqueType<sizeof(scalar_t)>;
+      flip_kernel_impl<dtype>(iter);
+    });
+  }
+}
+
+
 REGISTER_DISPATCH(index_stub, &index_kernel);
 REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
+REGISTER_DISPATCH(flip_stub, &flip_kernel);
 
 }} // namespace at::native

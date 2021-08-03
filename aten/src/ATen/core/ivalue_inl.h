@@ -366,23 +366,23 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   /**
    * Explicitly mark the future as completed with the output value. Optionally,
-   * the storage pointers for all tensors in IValue can be passed as well. These
-   * DataPtrs are used to synchronize CUDA streams. If data_ptrs isn't given we
-   * will attempt to extract it from the value, if we need to (this happens if a
-   * non-empty set of devices was given to the constructor). Thus one only needs
-   * to provide data_ptrs when 1) DataPtrs cannot be extracted through IValue's
-   * getSubValues() or through pickling in case of Python object; or when 2)
-   * customized DataPtrs extraction is more efficient.
+   * the storages for all tensors in IValue can be passed as well. The DataPtrs
+   * of these storages are used to synchronize CUDA streams. If storages isn't
+   * given we will attempt to extract it from the value, if we need to (this
+   * happens if a non-empty set of devices was given to the constructor). Thus
+   * one only needs to provide storages when 1) they cannot be extracted through
+   * IValue::getSubValues() or through pickling in case of Python object; or
+   * when 2) customized storage extraction is more efficient.
    */
+  using WeakStorage = c10::weak_intrusive_ptr<c10::StorageImpl>;
   void markCompleted(
       IValue value,
-      c10::optional<std::vector<std::reference_wrapper<const at::DataPtr>>>
-          data_ptrs = c10::nullopt) {
+      c10::optional<std::vector<WeakStorage>> storages = c10::nullopt) {
     // Start by performing all steps that can throw, before setting any field.
-    // Do this before even acquiring the mutex, because extractDataPtrs might
+    // Do this before even acquiring the mutex, because extractStorages might
     // acquire the GIL, which could lead to a lock inversion with our mutex.
     // See https://github.com/pytorch/pytorch/issues/58239.
-    std::vector<std::reference_wrapper<const at::DataPtr>> actualDataPtrs;
+    std::vector<WeakStorage> actualStorages;
     std::vector<c10::Device> usedDevices;
     try {
       // FIXME We should always extract DataPtrs, in order to catch the case of
@@ -391,9 +391,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       // might worsen perf in CPU-only cases, we should only do so after careful
       // benchmarks.
       if (impl_.type() != c10::kCPU) {
-        actualDataPtrs =
-            data_ptrs.has_value() ? std::move(*data_ptrs) : extractDataPtrs(value);
-        usedDevices = getDevicesOfDataPtrs(impl_, actualDataPtrs);
+        actualStorages =
+            storages.has_value() ? std::move(*storages) : extractStorages(value);
+        usedDevices = getDevicesOfStorages(impl_, actualStorages);
         ensureIsSubsetOfDevices(usedDevices, devices_);
       }
     } catch (const std::exception&) {
@@ -413,7 +413,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     completed_ = true;
 
     currentDevice_ = impl_.getDevice();
-    dataPtrs_ = std::move(actualDataPtrs);
+    storages_ = std::move(actualStorages);
     for (const c10::Device& device : usedDevices) {
       c10::Event event(impl_.type());
       event.record(impl_.getStream(device));
@@ -482,11 +482,11 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const std::vector<std::reference_wrapper<const at::DataPtr>>& dataPtrs() const {
+  const std::vector<WeakStorage>& storages() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
-    return dataPtrs_;
+    return storages_;
   }
 
   /**
@@ -518,20 +518,35 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
    */
   template <typename T>
   c10::intrusive_ptr<Future> then(T callback, TypePtr type) {
+    using IValueWithStorages = std::tuple<IValue, std::vector<WeakStorage>>;
 #if __cpp_lib_is_invocable >= 201703
     static_assert(
-        std::is_invocable_r<IValue, T, Future&>::value,
-        "The callback must have signature IValue(Future&)");
+        guts::disjunction<
+            std::is_invocable_r<IValue, T, Future&>,
+            std::is_invocable_r<IValueWithStorages, T, Future&>>::value,
+        "The callback must have signature IValue(Future&) or "
+        "std::tuple<IValue, std::vector<Storage>>(Future&)");
 #endif
     auto childFut = createInstance(std::move(type));
-    addCallback(
-        [childFut, cb = std::move(callback)](Future& parentFut) mutable {
-          try {
-            childFut->markCompleted(cb(parentFut));
-          } catch (std::exception&) {
-            childFut->setError(std::current_exception());
-          }
-        });
+    addCallback([childFut,
+                 cb = std::move(callback)](Future& parentFut) mutable {
+      try {
+        guts::if_constexpr<std::is_convertible<
+            typename std::result_of<T && (Future&)>::type,
+            IValueWithStorages>::value>(
+            [&](auto identity) {
+              IValue value;
+              std::vector<WeakStorage> storages;
+              std::tie(value, storages) = identity(cb)(parentFut);
+              childFut->markCompleted(std::move(value), std::move(storages));
+            },
+            [&](auto identity) {
+              childFut->markCompleted(identity(cb)(parentFut));
+            });
+      } catch (std::exception&) {
+        childFut->setError(std::current_exception());
+      }
+    });
     return childFut;
   }
 
@@ -558,7 +573,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
                   childFut->setError(intermediateFut.exception_ptr());
                 } else {
                   childFut->markCompleted(
-                      intermediateFut.value(), intermediateFut.dataPtrs());
+                      intermediateFut.value(), intermediateFut.storages());
                 }
               });
         });
@@ -644,10 +659,14 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
       event.block(impl_.getStream(event.device()));
     }
 
-    for (const at::DataPtr& data_ptr : dataPtrs_) {
-      if (!data_ptr.device().is_cpu()) {
+    for (const WeakStorage& weak_storage : storages_) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      if (!storage->device().is_cpu()) {
         impl_.recordDataPtrOnStream(
-            data_ptr, impl_.getStream(data_ptr.device()));
+            storage->data_ptr(), impl_.getStream(storage->device()));
       }
     }
   }
@@ -687,23 +706,28 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   }
 
   // Defined in ivalue.cpp.
-  static std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+  static std::vector<WeakStorage> extractStorages(
       const at::IValue& value);
 
-  static std::vector<c10::Device> getDevicesOfDataPtrs(
+  static std::vector<c10::Device> getDevicesOfStorages(
       const c10::impl::VirtualGuardImpl& impl,
-      const std::vector<std::reference_wrapper<const at::DataPtr>>& data_ptrs) {
+      const std::vector<WeakStorage>& storages) {
     c10::DeviceIndex deviceCount = impl.deviceCount();
     std::vector<bool> isDeviceUsed(deviceCount, false);
-    for (const at::DataPtr& data_ptr : data_ptrs) {
-      if (!data_ptr.device().is_cpu()) {
+    for (const WeakStorage& weak_storage : storages) {
+      c10::intrusive_ptr<c10::StorageImpl> storage = weak_storage.lock();
+      if (!storage) {
+        continue;
+      }
+      c10::Device device = storage->device();
+      if (!device.is_cpu()) {
         TORCH_CHECK_VALUE(
-            data_ptr.device().type() == impl.type(),
+            device.type() == impl.type(),
             "Expected all data ptrs to be on a device of type ",
             impl.type(),
             ", got one on device ",
-            data_ptr.device());
-        isDeviceUsed[data_ptr.device().index()] = true;
+            device);
+        isDeviceUsed[device.index()] = true;
       }
     }
     std::vector<c10::Device> devices;
@@ -825,9 +849,9 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   // distinct device on which the value's tensors reside.
   std::vector<c10::Event> events_;
 
-  // A cached version of the data ptrs extracted from the value when the future
+  // A cached version of the storages extracted from the value when the future
   // is first marked completed.
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
+  std::vector<WeakStorage> storages_;
 
   // The bounding set of devices that this future, and any of its children, is
   // allowed to use. This is a superset of the set of devices used by the events
@@ -1015,12 +1039,12 @@ inline const ivalue::Object& IValue::toObjectRef() const {
 // toX method to IValue. These named methods are much more discoverable
 // than the to templated function.
 
-#define DEFINE_TO(T, method_name)          \
-  template <>                              \
-  inline T IValue::to<T>()&& {             \
-    return std::move(*this).method_name(); \
-  }                                        \
-  template <>                              \
+#define DEFINE_TO(T, method_name)                          \
+  template <>                                              \
+  inline T IValue::to<T>()&& {                             \
+    return static_cast<T>(std::move(*this).method_name()); \
+  }                                                        \
+  template <>                                              \
   inline c10::detail::ivalue_to_const_ref_overload_return<T>::type IValue::to<T>() const& { \
     return this->method_name();            \
   }

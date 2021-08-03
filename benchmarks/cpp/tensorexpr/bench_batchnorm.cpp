@@ -98,6 +98,12 @@ BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
         return input.load(n, c, h, w) * alpha + beta;
       });
   LoopNest nest({output});
+  auto loops = nest.getLoopStmtsFor(output);
+  LoopNest::flatten({loops[2], loops[3]});
+  loops = nest.getLoopStmtsFor(output);
+  LoopNest::flatten({loops[0], loops[1]});
+  loops = nest.getLoopStmtsFor(output);
+  loops[0]->set_parallel();
   nest.prepareForCodegen();
   Stmt* s = IRSimplifier::simplify(nest.root_stmt());
   LLVMCodeGen cg(s, {input, weight, bias, mean, var, output, eps});

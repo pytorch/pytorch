@@ -74,7 +74,6 @@ TypeMeta GetInt8TensorType(const void* c) {
 }
 
 // TODO(jerryzh): Remove
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CaffeMap<TypeIdentifier, TypeCall> type_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorType},
     {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorType},
@@ -115,7 +114,6 @@ GetInt8TensorInfo(const void* c, size_t* capacity, DeviceOption* device) {
 }
 
 // since we only have one tensor, probably need to remove this at some point?
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static CaffeMap<TypeIdentifier, TensorInfoCall> tensor_info_call_registry_{
     {TypeMeta::Id<Tensor>(), GetTensorInfo},
     {TypeMeta::Id<int8::Int8TensorCPU>(), GetInt8TensorInfo},
@@ -329,7 +327,6 @@ struct TensorStatGetter : BlobStatGetter {
     return nbytes;
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_STAT_GETTER(Tensor, TensorStatGetter);
 } // namespace
 
