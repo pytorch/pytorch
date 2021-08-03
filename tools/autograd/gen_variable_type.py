@@ -70,7 +70,7 @@ DONT_REQUIRE_DERIVATIVE = {
     'argmax', 'argmin', 'argsort', 'searchsorted',
     'bucketize',
     # Functions that return booleans are not differentiable
-    'isnan', 'isposinf', 'isneginf', 'isinf'
+    'isnan', 'isposinf', 'isneginf', 'isinf', 'signbit', 'isin',
     # Functions return none are not differentiable
     'record_stream',
 }
