@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
@@ -1467,7 +1469,7 @@ const Expr* PolynomialTransformer::mutate(const IfThenElse* v) {
   return new IfThenElse(condition_new, true_value_new, false_value_new);
 }
 
-Stmt* IRSimplifierBase::mutate(const Cond* v) {
+Stmt* PolynomialBase::mutate(const Cond* v) {
   const Expr* cond_old = v->condition();
   Stmt* true_old = v->true_stmt();
   Stmt* false_old = v->false_stmt();
@@ -1534,7 +1536,7 @@ Stmt* handleForCondReordering(const For* loop, Cond* cond) {
   return cond->cloneWithNewBody(new_f);
 }
 
-Stmt* IRSimplifierBase::mutate(const For* v) {
+Stmt* PolynomialBase::mutate(const For* v) {
   const Expr* var = v->var();
   const Expr* start = v->start();
   const Expr* stop = v->stop();
@@ -1588,7 +1590,7 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
   return new For(var_new, start_new, stop_new, body_new, loop_options);
 }
 
-Stmt* IRSimplifierBase::mutate(const Block* v) {
+Stmt* PolynomialBase::mutate(const Block* v) {
   std::vector<Stmt*> stmts;
   // Flatten sub-blocks:
   for (Stmt* stmt : *v) {
@@ -2032,7 +2034,7 @@ const Expr* simplifyRoundModPattern(const Polynomial* poly) {
 }
 
 // Trivially factorize terms by GCD of scalar components.
-const Term* IRSimplifierBase::factorizePolynomial(const Polynomial* poly) {
+const Term* PolynomialBase::factorizePolynomial(const Polynomial* poly) {
   const Expr* scalar = poly->scalar();
   const std::vector<const Term*>& variables = poly->variables();
 
@@ -2393,7 +2395,7 @@ Stmt* TermExpander::fuseSyncThreads(Block* block) {
 }
 
 Stmt* TermExpander::mutate(const Block* v) {
-  Stmt* new_stmt = IRSimplifierBase::mutate(v);
+  Stmt* new_stmt = PolynomialBase::mutate(v);
   Block* new_block = dynamic_cast<Block*>(new_stmt);
   if (!new_block) {
     return new_stmt;
@@ -2403,6 +2405,414 @@ Stmt* TermExpander::mutate(const Block* v) {
   new_block = fuseConditions(new_block);
   /// fuseSyncThreads too.
   return fuseSyncThreads(new_block);
+}
+
+// SimplifierUnderContext
+//
+// This function records the bounds(range) info of the index var in a for-stmt.
+// The bounds info will be used later when simplifying expressions with the
+// index var.
+Stmt* SimplifierUnderContext::mutate(const For* v) {
+  const Expr* var = v->var();
+  const Expr* start = v->start();
+  const Expr* stop = v->stop();
+  Stmt* body = v->body();
+  LoopOptions loop_options = v->loop_options();
+  const Expr* var_new_expr = var->accept_mutator(this);
+  const Var* var_new = dynamic_cast<const Var*>(var_new_expr);
+  const Expr* start_new = start->accept_mutator(this);
+  const Expr* stop_new = stop->accept_mutator(this);
+  Stmt* body_new = body;
+
+  // save bounds info before this for-stmt
+  //
+  // The same variable could have appeared in a if-stmt which the for-stmt is
+  // nested inside, and we need to restore its bounds info after the for-stmt.
+  //
+  // An example,
+  // if (i>=0 && i<5) {
+  //   for (i=0; i<3; i++){
+  //     A[i] = ...
+  //   }
+  //   x = (i+20) / 5;
+  //}
+  // Inside the if stmt, i is in the range of [0, 5); and if we can restore this
+  // bound info after the for stmt, we can use it to simplify the assignment
+  // stmt x = (i+20)/5 to x = 4.
+  bool has_bounds = false;
+  std::pair<const Expr*, const Expr*> bound_old;
+  const Var* var_key = dynamic_cast<const Var*>(var);
+  auto got = var_bound_info_.find(var_key);
+  if (got != var_bound_info_.end()) {
+    has_bounds = true;
+    bound_old = got->second;
+  }
+  // set bounds info for index var
+  const std::pair<const Expr*, const Expr*> bound_new =
+      std::make_pair(start_new, stop_new);
+  var_bound_info_[var_key] = bound_new;
+
+  const Expr* iters = new Sub(stop_new, start_new);
+  iters = iters->accept_mutator(this);
+  if (loop_options.isDefault() && iters->isConstant()) {
+    if (immediateEquals(iters, 0)) {
+      return new Block({});
+    } else if (immediateEquals(iters, 1)) {
+      body_new = Substitute(body, {{var_new, start_new}});
+      body_new = body_new->accept_mutator(this);
+
+      // erase index var bounds info or restore old bounds info
+      if (has_bounds) {
+        var_bound_info_[var_key] = bound_old;
+      } else {
+        var_bound_info_.erase(var_key);
+      }
+
+      return body_new;
+    }
+  }
+
+  body_new = body_new->accept_mutator(this);
+
+  // erase index var bounds info or restore old bounds info
+  if (has_bounds) {
+    var_bound_info_[var_key] = bound_old;
+  } else {
+    var_bound_info_.erase(var_key);
+  }
+
+  if (!body_new) {
+    return new Block({});
+  }
+
+  if (auto* block = dynamic_cast<Block*>(body_new)) {
+    if (block->nstmts() == 0) {
+      return new Block({});
+    }
+
+    if (block->nstmts() == 1) {
+      // if the stmt in the loop body is a if-stmt, try to move the branching
+      // out of the loop
+      if (auto* cond = dynamic_cast<Cond*>(block->front())) {
+        Stmt* reordered = handleForCondReordering(v, cond);
+        if (reordered) {
+          return reordered->accept_mutator(this);
+        }
+      }
+    }
+  }
+
+  if (var == var_new && start == start_new && stop == stop_new &&
+      body == body_new) {
+    return (Stmt*)v;
+  }
+  if (body_new == body) {
+    body_new = Stmt::clone(body);
+  }
+  return new For(var_new, start_new, stop_new, body_new, loop_options);
+}
+
+// Simplify division using distributive laws for the following cases:
+// 1) (i + x) / n => x/n, if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) x is a constant and the end value of i's range is less than n - x%n;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when x is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) x is not negative
+//
+// 2) (i + j*n) / n => j, if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) j is an integer variable;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when j is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) j is not negative
+const Expr* distributeDiv(
+    const Expr* lhs,
+    const Expr* rhs,
+    VarBoundInfo var_bound_info) {
+  if (!lhs || !rhs) {
+    return nullptr;
+  }
+  // return if not integer division
+  if (lhs->dtype().is_floating_point() || rhs->dtype().is_floating_point()) {
+    return nullptr;
+  }
+
+  // identify n: a positive integer constant
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (!rhsScalar) {
+    return nullptr;
+  }
+  const Expr* check_n_value =
+      IRSimplifier::simplify(new CompareSelect(rhsScalar, new IntImm(0), kGT));
+  if (!immediateEquals(check_n_value, 1)) {
+    return nullptr;
+  }
+
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  if (!lhsAdd) {
+    return nullptr;
+  }
+  const Expr* lhsAdd1 = lhsAdd->lhs();
+  const Expr* lhsAdd2 = lhsAdd->rhs();
+
+  // identify index var 'i'
+  const Var* var_key = dynamic_cast<const Var*>(lhsAdd1);
+  const Expr* main = lhsAdd2;
+  if (var_key == nullptr) {
+    var_key = dynamic_cast<const Var*>(lhsAdd2);
+    main = lhsAdd1;
+  }
+
+  if (var_key == nullptr) {
+    return nullptr;
+  }
+
+  auto got = var_bound_info.find(var_key);
+  if (got == var_bound_info.end()) {
+    return nullptr;
+  }
+
+  // check the bounds of 'i'
+  auto start = got->second.first;
+  // open upper bound, i.e.,  end is one more than the maximum value in the
+  // range
+  auto end = got->second.second;
+  const Expr* check_start =
+      IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+  const Expr* check_end =
+      IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+  if (!check_start->isConstant() || !check_end->isConstant() ||
+      !immediateEquals(check_start, 1) || !immediateEquals(check_end, 1)) {
+    return nullptr;
+  }
+
+  const Expr* ret = IRSimplifier::simplify(new Div(main, rhsScalar));
+
+  // simplify type 1) exprs: '(i+x)/n' => 'x/n'
+  const Expr* sign_check =
+      IRSimplifier::simplify(new CompareSelect(main, new IntImm(0), kGE));
+  const Expr* main_mod = IRSimplifier::simplify(new Mod(main, rhsScalar));
+  const Expr* mod_check = IRSimplifier::simplify(
+      new CompareSelect(new Add(main_mod, end), rhsScalar, kLE));
+  if (sign_check->isConstant() && immediateEquals(sign_check, 1) &&
+      mod_check->isConstant() && immediateEquals(mod_check, 1)) {
+    return ret;
+  }
+
+  // simplify type 2 exprs: '(i+j*n)/n' => 'j'
+  auto ret_var = dynamic_cast<const Var*>(ret);
+  if (ret_var && ret_var->dtype() == kInt) {
+    // retrieve j's range info
+    auto got = var_bound_info.find(ret_var);
+    if (got == var_bound_info.end()) {
+      return nullptr;
+    }
+
+    // check if j is not negative
+    sign_check = IRSimplifier::simplify(
+        new CompareSelect(got->second.first, new IntImm(0), kGE));
+    if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
+      return ret_var;
+    }
+  }
+
+  return nullptr;
+}
+
+// Simplify mod using distributive laws for the following cases:
+// 1) (i + x) % n => i + x%n if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) x is a constant and the end value of i's range is less than n - x%n;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when x is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, x has to be not negative. d) x is not negative
+//
+// 2) (i + j*n) % n => i if
+//   a) n is a positive integer constant;
+//   b) i is the index var of a for-stmt and the range of i is
+// a subset of [0, n);
+//   c) j is an integer variable;
+//   TODO: remove d) from the requirements because the simplification formula
+//   still holds when j is a negative integer. In integer division, the result
+//   of the division is converted to an integer using `floor` function which
+//   returns the largest integer that is not greater than X. For exmaple, -1/6
+//   returns -1. But currently, both Pytorch and NNC are performing an incorrect
+//   integer division: (-1)/6 = 0. With the current implementation of integer
+//   division, j has to be not negative. d) j is not negative
+const Expr* distributeMod(
+    const Expr* lhs,
+    const Expr* rhs,
+    VarBoundInfo var_bound_info) {
+  if (!lhs || !rhs) {
+    return nullptr;
+  }
+  // return if not integer mod
+  if (lhs->dtype().is_floating_point() || rhs->dtype().is_floating_point()) {
+    return nullptr;
+  }
+
+  // identify n: a positive integer constant
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (!rhsScalar) {
+    return nullptr;
+  }
+  const Expr* check_n_value =
+      IRSimplifier::simplify(new CompareSelect(rhsScalar, new IntImm(0), kGT));
+  if (!immediateEquals(check_n_value, 1)) {
+    return nullptr;
+  }
+
+  auto* lhsAdd = dynamic_cast<const Add*>(lhs);
+  if (!lhsAdd) {
+    return nullptr;
+  }
+  if (!lhsAdd || !rhsScalar) {
+    return nullptr;
+  }
+  const Expr* lhsAdd1 = lhsAdd->lhs();
+  const Expr* lhsAdd2 = lhsAdd->rhs();
+
+  // identify index var 'i'
+  const Var* var_key = dynamic_cast<const Var*>(lhsAdd1);
+  const Expr* main = lhsAdd2;
+  if (var_key == nullptr) {
+    var_key = dynamic_cast<const Var*>(lhsAdd2);
+    main = lhsAdd1;
+  }
+  if (var_key == nullptr) {
+    return nullptr;
+  }
+
+  auto got = var_bound_info.find(var_key);
+  if (got == var_bound_info.end()) {
+    return nullptr;
+  }
+
+  // check the bounds of 'i'
+  auto start = got->second.first;
+  // open upper bound, i.e.,  end is one more than the maximum value in the
+  // range
+  auto end = got->second.second;
+  const Expr* check_start =
+      IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+  const Expr* check_end =
+      IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+  if (!check_start->isConstant() || !check_end->isConstant() ||
+      !immediateEquals(check_start, 1) || !immediateEquals(check_end, 1)) {
+    return nullptr;
+  }
+
+  // simplify type 1) exprs: '(i+x)%n' => 'i+x%n'
+  const Expr* sign_check =
+      IRSimplifier::simplify(new CompareSelect(main, new IntImm(0), kGE));
+  const Expr* main_mod = IRSimplifier::simplify(new Mod(main, rhsScalar));
+  const Expr* mod_check = IRSimplifier::simplify(
+      new CompareSelect(new Add(main_mod, end), rhsScalar, kLE));
+  if (sign_check->isConstant() && immediateEquals(sign_check, 1) &&
+      mod_check->isConstant() && immediateEquals(mod_check, 1)) {
+    return new Add(var_key, main_mod);
+  }
+
+  // simplify type 2) exprs: '(i+j*n)%n' => 'i'
+  const Expr* main_div = IRSimplifier::simplify(new Div(main, rhsScalar));
+  auto j_var = dynamic_cast<const Var*>(main_div);
+  if (j_var && j_var->dtype() == kInt) {
+    // retrieve j's range info
+    auto got = var_bound_info.find(j_var);
+    if (got == var_bound_info.end()) {
+      return nullptr;
+    }
+
+    // check if j is not negative
+    sign_check = IRSimplifier::simplify(
+        new CompareSelect(got->second.first, new IntImm(0), kGE));
+    if (sign_check->isConstant() && immediateEquals(sign_check, 1)) {
+      return var_key;
+    }
+  }
+
+  return nullptr;
+}
+
+const Expr* SimplifierUnderContext::mutate(const Div* v) {
+  const Expr* lhs = v->lhs();
+  const Expr* rhs = v->rhs();
+
+  std::ostringstream oss;
+  if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
+    GRAPH_DEBUG(oss.str());
+    return ret->accept_mutator(this);
+  }
+
+  const Expr* lhs_new = lhs->accept_mutator(this);
+  const Expr* rhs_new = rhs->accept_mutator(this);
+  if (lhs == lhs_new && rhs == rhs_new) {
+    return v;
+  }
+  return new Div(lhs_new, rhs_new);
+}
+
+const Expr* SimplifierUnderContext::mutate(const Mod* v) {
+  const Expr* lhs = v->lhs();
+  const Expr* rhs = v->rhs();
+
+  std::ostringstream oss;
+  if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
+    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
+    GRAPH_DEBUG(oss.str());
+    // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    return ret->accept_mutator(this);
+  }
+
+  // i % N -> i if the range of i's values is a subset of [0, N)
+  // where N is an integer constant
+  auto* lhsVar = dynamic_cast<const Var*>(lhs);
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
+    auto got = var_bound_info_.find(lhsVar);
+    if (got != var_bound_info_.end()) {
+      auto start = got->second.first;
+      auto end = got->second.second;
+      const Expr* check_start =
+          IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+      const Expr* check_end =
+          IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+      if (check_start->isConstant() && check_end->isConstant() &&
+          immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        oss << "SimplifierUnderContext: " << *v << " => " << *lhsVar << "\n";
+        GRAPH_DEBUG(oss.str());
+        return lhsVar;
+      }
+    }
+  }
+
+  const Expr* lhs_new = lhs->accept_mutator(this);
+  const Expr* rhs_new = rhs->accept_mutator(this);
+  if (lhs == lhs_new && rhs == rhs_new) {
+    return v;
+  }
+  return new Mod(lhs_new, rhs_new);
 }
 
 bool exprEquals(const Expr* A, const Expr* B) {

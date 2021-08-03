@@ -2,12 +2,10 @@
 
 namespace caffe2 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FindDuplicateElements,
     FindDuplicateElementsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FindDuplicateElements)
     .NumInputs(1)
     .NumOutputs(1)
@@ -65,7 +63,6 @@ indices:
         "indices",
         "Indices of duplicate elements in data, excluding first occurrences.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(FindDuplicateElements);
 } // namespace
 } // namespace caffe2
