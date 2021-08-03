@@ -18,14 +18,15 @@ namespace torch {
 namespace jit {
 
 // The family of methods below to get bytecode version from a model
-TORCH_API int64_t _get_model_bytecode_version(std::istream& in);
+// Throws if not passed in a well formed model
+TORCH_API uint64_t _get_model_bytecode_version(std::istream& in);
 
-TORCH_API int64_t _get_model_bytecode_version(const std::string& filename);
+TORCH_API uint64_t _get_model_bytecode_version(const std::string& filename);
 
-TORCH_API int64_t _get_model_bytecode_version(
+TORCH_API uint64_t _get_model_bytecode_version(
     std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai);
 
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<c10::IValue>& bytecode_ivalues);
 
 std::vector<c10::IValue> get_bytecode_ivalues(
