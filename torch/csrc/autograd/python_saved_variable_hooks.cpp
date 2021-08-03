@@ -10,7 +10,7 @@ namespace torch { namespace autograd {
     pack_hook_(pack_hook.release().ptr()),
     unpack_hook_(unpack_hook.release().ptr()) {}
 
-  void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
+  void PySavedVariableHooks::call_pack_hook(const at::Tensor &tensor) {
     py::gil_scoped_acquire acquire;
     auto pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     auto wrapped = THPVariable_Wrap(tensor);
@@ -44,4 +44,40 @@ namespace torch { namespace autograd {
       Py_XDECREF(data_);
     }
   }
+
+  std::mutex PyDefaultSavedVariableHooks::mutex_;
+  PyObject* PyDefaultSavedVariableHooks::pack_hook_(nullptr);
+  PyObject* PyDefaultSavedVariableHooks::unpack_hook_(nullptr);
+
+  void PyDefaultSavedVariableHooks::set_hooks(py::function &pack_hook, py::function &unpack_hook) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    TORCH_CHECK(!pack_hook_ && !unpack_hook_,
+        "Setting default hooks but they have already been set. "
+        "Hint: only one pair of hooks is allowed at a time.");
+    pack_hook_ = pack_hook.release().ptr();
+    unpack_hook_ = unpack_hook.release().ptr();
+  }
+
+  void PyDefaultSavedVariableHooks::reset_hooks() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (Py_IsInitialized()) {
+      py::gil_scoped_acquire gil;
+      Py_XDECREF(pack_hook_);
+      Py_XDECREF(unpack_hook_);
+    }
+    pack_hook_ = nullptr;
+    unpack_hook_ = nullptr;
+  }
+
+  std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
+    if (!pack_hook_ || !unpack_hook_) {
+      return nullptr;
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    py::gil_scoped_acquire gil;
+    py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
+    py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
+    return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
+  }
+
 }}
