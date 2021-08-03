@@ -6,7 +6,7 @@
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: !{{ build_environment }}
+name: !{{ ci_workflow_name }}
 {%- endblock %}
 
 on:
@@ -47,7 +47,7 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}
+  group: !{{ ci_workflow_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -141,7 +141,7 @@ jobs:
     needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-build
+      JOB_BASE_NAME: !{{ ci_workflow_name }}-build
     steps:
       - name: Log in to ECR
         run: |
@@ -288,7 +288,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-test
+      JOB_BASE_NAME: !{{ ci_workflow_name }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -489,7 +489,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
+          JOB_BASE_NAME: !{{ ci_workflow_name }}-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}

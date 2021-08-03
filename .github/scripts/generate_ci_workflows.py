@@ -89,6 +89,10 @@ class CIWorkflow:
     build_environment: str
     test_runner_type: str
 
+    # Generated fields
+    # generated fields will be populated in __post_init__
+    ci_workflow_name: str = ''
+
     # Optional fields
     ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
     cuda_version: str = ''
@@ -154,13 +158,22 @@ class CIWorkflow:
             assert self.test_runner_type in LINUX_RUNNERS, err_message
         if self.arch == 'windows':
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
+    
+    def generate_workflow_name(self, workflow) -> str:
+        workflow_name = workflow.build_environment
+        if not workflow.on_pull_request:
+            workflow_name = "master-only-" + workflow_name
+        if workflow.is_scheduled:
+            workflow_name = "periodic-" + workflow_name
+        return workflow_name
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-{workflow.build_environment}.yml"
+        workflow.ci_workflow_name = self.generate_workflow_name(workflow)
+        output_file_path = GITHUB_DIR / f"workflows/generated-{workflow.ci_workflow_name}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            output_file.write(workflow_template.render(asdict(workflow)))
+            output_file.write(workflow_template.render(asdict(self)))
             output_file.write("\n")
         print(output_file_path)
 
@@ -192,7 +205,7 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="periodic-win-vs2019-cuda11-cudnn8-py3",
+        build_environment="win-vs2019-cuda11-cudnn8-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -294,7 +307,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -302,7 +315,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,

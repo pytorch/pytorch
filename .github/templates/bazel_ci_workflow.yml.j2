@@ -3,7 +3,7 @@
 {% block name -%}
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: !{{ build_environment }}
+name: !{{ ci_workflow_name }}
 {%- endblock %}
 
 on:
@@ -27,7 +27,7 @@ on:
     needs: [calculate-docker-image, !{{ ciflow_config.root_job_name }}]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-build-and-test
+      JOB_BASE_NAME: !{{ ci_workflow_name }}-build-and-test
       NUM_TEST_SHARDS: !{{ num_test_shards }}
     steps:
       - name: Log in to ECR
