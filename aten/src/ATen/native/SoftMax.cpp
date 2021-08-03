@@ -14,7 +14,7 @@ namespace at {
 namespace meta {
 TORCH_META_FUNC(_softmax)
 (const Tensor& input, const int64_t dim, const bool half_to_float) {
-  int64_t dim_ = maybe_wrap_dim(dim_, input.dim());
+  int64_t dim_ = maybe_wrap_dim(dim, input.dim());
 
   auto output_options =
       input.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -60,18 +60,68 @@ TORCH_META_FUNC(_log_softmax) (
       "dim must be non-negative and less than input dimensions");
 }
 
+TORCH_META_FUNC(_softmax_backward_data)
+(const Tensor& grad,
+ const Tensor& output,
+ int64_t dim,
+ const Tensor& input) {
+  TensorArg grad_arg{grad, "grad", 1}, output_arg{output, "output", 2};
+  checkSameSize("softmax_backward", grad_arg, output_arg);
+
+  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+
+  auto grad_input_options =
+      grad.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  if (half_to_float) {
+    TORCH_CHECK(
+        (grad.scalar_type() == ScalarType::Float &&
+         input.scalar_type() == ScalarType::Half),
+        "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
+
+    grad_input_options = grad_input_options.dtype(ScalarType::Float);
+  }
+
+  set_output(grad.sizes(), grad_input_options);
+
+  Tensor grad_ = grad;
+  if (grad_.dim() == 0) {
+    grad_ = grad_.view(1);
+  }
+
+  Tensor output_;
+  if (output_.dim() == 0) {
+    output_ = output_.view(1);
+  }
+
+  TORCH_CHECK(
+      dim >= 0 && dim < grad.dim(),
+      "dim must be non-negative and less than input dimensions");
+}
+
 TORCH_META_FUNC(_log_softmax_backward_data)
 (const Tensor& grad,
  const Tensor& output,
  int64_t dim,
  const Tensor& input){
-  auto grad_ = grad.contiguous();
   int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+  TensorOptions grad_input_options(
+      grad.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 
-  TensorOptions options(grad_.options());
-  set_output(
-      grad_.sizes(), options.memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
+  if (half_to_float) {
+    TORCH_CHECK(
+        (grad.scalar_type() == ScalarType::Float &&
+         input.scalar_type() == ScalarType::Half),
+        "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
 
+    grad_input_options = grad_input_options.dtype(ScalarType::Float);
+  }
+
+  set_output(grad.sizes(), grad_input_options);
+
+  Tensor grad_ = grad;
   if (grad_.dim() == 0) {
     grad_ = grad_.view(1);
   }
@@ -249,42 +299,36 @@ TORCH_IMPL_FUNC(log_softmax_cpu_out)
   }
 }
 
-Tensor softmax_backward_cpu(
-    const Tensor& grad_,
-    const Tensor& output_,
-    int64_t dim_,
-    const Tensor& input_) {
-  TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
-  checkSameSize("softmax_backward", grad_arg, output_arg);
-  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-  auto grad = grad_.contiguous();
-  auto output = output_.contiguous();
-  Tensor grad_input = at::native::empty_like(
-      grad,
-      c10::nullopt /* dtype */,
-      c10::nullopt /* layout */,
-      c10::nullopt /* device */,
-      c10::nullopt /* pin_memory */,
-      LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+TORCH_IMPL_FUNC(softmax_backward_cpu_out)
+(const Tensor& grad,
+ const Tensor& output,
+ int64_t dim,
+ const Tensor& input,
+ const Tensor& grad_input) {
+  int64_t dim_ = maybe_wrap_dim(dim, grad.dim());
+  auto grad_ = grad.contiguous();
+  auto output_ = output.contiguous();
 
   if (output.numel() == 0) {
-    return grad_input;
+    return;
   }
-  if (grad.dim() == 0)
-    grad = grad.view(1);
-  if (output.dim() == 0)
-    output = output.view(1);
-  TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
-      "dim must be non-negative and less than input dimensions");
-  if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
-    softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
+
+  if (grad_.dim() == 0) {
+    grad_ = grad_.view(1);
+  }
+
+  if (output_.dim() == 0) {
+    output_ = output_.view(1);
+  }
+
+  if (grad_.ndimension() > 0 && dim_ == grad_.ndimension() - 1) {
+    softmax_backward_lastdim_kernel(kCPU, grad_input, grad_, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
-      host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND(
+        at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
+          host_softmax_backward<scalar_t, false>(grad_input, grad_, output, dim_);
+        });
   }
-  return grad_input;
 }
 
 TORCH_IMPL_FUNC(log_softmax_backward_cpu_out) (

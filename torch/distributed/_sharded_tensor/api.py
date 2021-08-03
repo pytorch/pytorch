@@ -1,4 +1,5 @@
 import collections
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import (
     Dict,
@@ -28,6 +29,24 @@ _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
 
+# Tracks the current process group in the load context manager.
+_CURRENT_PROCESS_GROUP = None
+
+@contextmanager
+def load_with_process_group(process_group):
+    """
+    Context manager to set the process group with which to load a ShardedTensor.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is not None:
+        raise RuntimeError(
+            'ProcessGroup already set by previous "load_with_process_group" '
+            'context manager')
+    _CURRENT_PROCESS_GROUP = process_group
+    try:
+        yield process_group
+    finally:
+        _CURRENT_PROCESS_GROUP = None
 
 @dataclass
 class Shard(object):
@@ -58,6 +77,42 @@ class ShardedTensorMetadata(object):
     requires_grad: bool
     memory_format: torch.memory_format
     pin_memory: bool
+
+    def __getstate__(self):
+        # Since torch.memory_format cannot be pickled!
+        if self.memory_format == torch.contiguous_format:
+            mem_format_encoding = 0
+        elif self.memory_format == torch.channels_last:
+            mem_format_encoding = 1
+        elif self.memory_format == torch.preserve_format:
+            mem_format_encoding = 1
+        else:
+            raise RuntimeError(f'Invalid torch.memory_format: {self.memory_format}')
+
+        return (
+            self.shards_metadata,
+            self.size,
+            self.dtype,
+            self.layout,
+            self.requires_grad,
+            mem_format_encoding,
+            self.pin_memory
+        )
+
+    def __setstate__(
+        self,
+        state,
+    ):
+        self.shards_metadata, self.size, self.dtype, self.layout, self.requires_grad, mem_format_encoding, self.pin_memory = state
+
+        if mem_format_encoding == 0:
+            self.memory_format = torch.contiguous_format
+        elif mem_format_encoding == 1:
+            self.memory_format = torch.channels_last
+        elif mem_format_encoding == 2:
+            self.memory_format = torch.preserve_format
+        else:
+            raise RuntimeError(f'Invalid torch.memory_format encoding: {mem_format_encoding}')
 
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
@@ -187,9 +242,6 @@ class ShardedTensor(object):
             else distributed_c10d._get_default_group()
         )
 
-        if distributed_c10d._rank_not_in_group(self._process_group):
-            raise ValueError(f'Global rank: {dist.get_rank()} not part of process group')
-
         self._local_shards: List[Shard] = []
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
         self._sharding_metadata: List[ShardMetadata] = []
@@ -210,7 +262,7 @@ class ShardedTensor(object):
         with _sharded_tensor_lock:
             global _sharded_tensor_current_id, _sharded_tensor_map
             if self._sharded_tensor_id in _sharded_tensor_map:
-                _sharded_tensor_map.pop(self._sharded_tensor_id)
+                _sharded_tensor_map.pop(self._sharded_tensor_id)  # type: ignore[call-overload]
 
     def _init_rpc(self):
         self._rpc_initialized = True
@@ -226,41 +278,28 @@ class ShardedTensor(object):
             rank_to_name[worker_info.id] = worker_info.name
             name_to_rank[worker_info.name] = worker_info.id
 
-        rpc_workers = set()
-        for rank in range(world_size):
-            if self._process_group == distributed_c10d._get_default_group():
-                global_rank = rank
-            else:
-                global_rank = distributed_c10d._get_global_rank(self._process_group, rank)
-            rpc_workers.add(rank_to_name[global_rank])
-
-        all_tensor_ids = rpc.api._all_gather(self._sharded_tensor_id, rpc_workers)
+        all_tensor_ids = rpc.api._all_gather(self._sharded_tensor_id)
 
         # Share the local shards to the entire world.
         futs = []
         rpc_rank = rpc.get_worker_info().id
-        for rank in range(world_size):
+        for rank in range(dist.get_world_size()):
             # Skip self.
-            if rank == dist.get_rank(self._process_group):
+            if rank == dist.get_rank():
                 continue
-
-            if self._process_group == distributed_c10d._get_default_group():
-                global_rank = rank
-            else:
-                global_rank = distributed_c10d._get_global_rank(self._process_group, rank)
 
             if len(self.local_shards()) != 0:
                 rrefs: List[rpc.RRef[Shard]] = [rpc.RRef(shard) for shard in self.local_shards()]
                 fut = rpc.rpc_async(
-                    global_rank,
+                    rank,
                     _register_remote_shards,
-                    args=(all_tensor_ids[rank_to_name[global_rank]], rrefs, rpc_rank))
+                    args=(all_tensor_ids[rank_to_name[rank]], rrefs, rpc_rank))
                 futs.append(fut)
 
         torch.futures.wait_all(futs)
 
         # Barrier for all RPCs to finish on all ranks.
-        rpc.api._barrier(rpc_workers)
+        rpc.api._all_gather(None)
 
     @classmethod
     def _init_from_local_shards(
@@ -496,9 +535,10 @@ class ShardedTensor(object):
 
         on, local_device = _parse_remote_device(device)
 
-        # Validate rank.
-        if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
-            raise ValueError(f'Invalid rank: {on}')
+        # Validate rank, skip validation if rank is not part of process group.
+        if not distributed_c10d._rank_not_in_group(self._process_group):
+            if isinstance(on, int) and (on < 0 or on >= dist.get_world_size(self._process_group)):
+                raise ValueError(f'Invalid rank: {on}')
 
         if isinstance(on, str):
             if not rpc._is_current_rpc_agent_set():
@@ -539,14 +579,13 @@ class ShardedTensor(object):
 
     def size(self) -> torch.Size:
         """
-        Returns the size of the self tensor. The returned value is a subclass of tuple.
+        Returns the size of the tensor. The returned value is a subclass of tuple.
         """
         return self._metadata.size
 
     def _register_remote_shards(self, remote_shards: List[rpc.RRef[Shard]], rpc_rank: int):
         self._remote_shards[rpc_rank] = remote_shards
 
-    @property
     def remote_shards(self) -> Dict[int, List[rpc.RRef[Shard]]]:
         """
         Returns a Dict[int, RRef] with keys being the RPC rank and values
@@ -559,3 +598,70 @@ class ShardedTensor(object):
                 "torch.distributed.rpc.init_rpc before creating the ShardedTensor for remote_shards support"
             )
         return self._remote_shards
+
+    def __repr__(self):
+        return str(self._metadata)
+
+    @dataclass
+    class ProcessGroupState:
+        """
+        State for ser-de of process group
+        """
+        local_rank: int
+        global_rank: int
+        local_world_size: int
+        global_world_size: int
+
+    def __getstate__(self):
+        pg_state = ShardedTensor.ProcessGroupState(
+            distributed_c10d.get_rank(self._process_group),
+            distributed_c10d.get_rank(),
+            distributed_c10d.get_world_size(self._process_group),
+            distributed_c10d.get_world_size(),
+        )
+
+        return self._local_shards, self._metadata, pg_state, self._sharding_spec
+
+    def __setstate__(self, state):
+        self._sharded_tensor_id = None
+        if not distributed_c10d.is_initialized():
+            raise RuntimeError(
+                'Need to initialize default process group using '
+                '"init_process_group" before loading ShardedTensor')
+
+        self._local_shards, self._metadata, pg_state, self._sharding_spec = state
+        self._rpc_initialized = False
+
+        # Setup process group
+        global _CURRENT_PROCESS_GROUP
+        if _CURRENT_PROCESS_GROUP is None:
+            self._process_group = distributed_c10d._get_default_group()
+        else:
+            self._process_group = _CURRENT_PROCESS_GROUP
+
+        # Validate process group.
+        local_rank = distributed_c10d.get_rank(self._process_group)
+        if pg_state.local_rank != local_rank:
+            raise RuntimeError(
+                f'Local rank at save time was {pg_state.local_rank}, but at '
+                f'load time was {local_rank}')
+
+        global_rank = distributed_c10d.get_rank()
+        if pg_state.global_rank != global_rank:
+            raise RuntimeError(
+                f'Global rank at save time was {pg_state.global_rank}, but at '
+                f'load time was {global_rank}')
+
+        local_world_size = distributed_c10d.get_world_size(self._process_group)
+        if pg_state.local_world_size != local_world_size:
+            raise RuntimeError(
+                f'Local world size at save time was {pg_state.local_world_size}, '
+                f'but at load time was {local_world_size}')
+
+        global_world_size = distributed_c10d.get_world_size()
+        if pg_state.global_world_size != global_world_size:
+            raise RuntimeError(
+                f'Global world size at save time was {pg_state.global_world_size}, '
+                f'but at load time was {global_world_size}')
+
+        self._post_init()
