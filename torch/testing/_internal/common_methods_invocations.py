@@ -2196,8 +2196,6 @@ def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     def generator():
         for input_shape, kwargs in cases:
             yield SampleInput(make_arg(input_shape), kwargs=kwargs)
-        # Extra case to make sure the op works for kw-args passed as positional args 
-        yield SampleInput(make_arg((1, 2, 3, 4)), args=(1., -1))
 
     return list(generator())
 
@@ -6464,16 +6462,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_out=False),
     OpInfo('nn.functional.normalize',
-           aten_name='normalize',
-           sample_inputs_func=sample_inputs_normalize,
            dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           skips=(
-               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
-               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":159,
-               # please report a bug to PyTorch.
-               SkipInfo('TestJit', 'test_variant_consistency_jit',),
-           ),
+           sample_inputs_func=sample_inputs_normalize,
            supports_out=True),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
