@@ -1,10 +1,11 @@
 #include <torch/csrc/autograd/saved_variable.h>
 
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/Tensor.h>
 
@@ -54,6 +55,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     if (!is_output || is_leaf_) {
       saved_original_ = true;
       data_ = variable;
+      register_hooks(Engine::get_default_engine().get_default_saved_variable_hooks());
       return;
     }
 
@@ -70,6 +72,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
+    register_hooks(Engine::get_default_engine().get_default_saved_variable_hooks());
   }
 }
 
@@ -196,6 +199,9 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 }
 
 void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
+  if (!hooks) {
+    return;
+  }
   TORCH_CHECK(!hooks_,
     "Calling register_hooks on a saved tensor whose hooks have already been set. "
     "Hint: only one pair of hooks is allowed at a time.");

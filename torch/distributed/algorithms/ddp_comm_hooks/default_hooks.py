@@ -70,7 +70,7 @@ def fp16_compress_hook(
     return fut.then(decompress)
 
 
-class OptimizerHookState(object):
+class _OptimizerHookState(object):
     """
     Holds state for running optimizer in-line after DDP communication hook.
     Currently contains only optimizer class which must have a method `step_param`.
@@ -93,11 +93,18 @@ class OptimizerHookState(object):
             )
 
 
-def hook_then_optimizer(
+# TODO: Add an example to use such a wrapper.
+def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
-    optimizer_state: OptimizerHookState,
+    optimizer_state: _OptimizerHookState,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
-    """Runs optimizer in a functional fashion after DDP communication hook."""
+    r"""
+    Runs optimizer in a functional fashion after DDP communication hook.
+
+    .. warning ::
+        This API is experimental adn subject to change.
+    """
+
 
     def hook_then_optimizer_wrapper(
         hook_state, bucket: dist.GradBucket
