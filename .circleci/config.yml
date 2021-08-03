@@ -644,6 +644,7 @@ jobs:
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           export JOB_BASE_NAME="$CIRCLE_JOB"
+          export IN_WHEEL_TEST=1
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
@@ -7005,9 +7006,6 @@ workflows:
     when: << pipeline.parameters.run_binary_tests >>
   build:
     jobs:
-      - docker_build_job:
-          name: "docker-pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
-          image_name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9"
       - docker_build_job:
           name: "docker-pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7"
           image_name: "pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7"
