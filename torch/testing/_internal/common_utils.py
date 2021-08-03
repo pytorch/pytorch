@@ -39,6 +39,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -51,6 +52,7 @@ import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
+from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
@@ -499,6 +501,21 @@ class DeterministicGuard:
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
+
+# Context manager for setting cuda sync debug mode and reset it
+# to original value
+# we are not exposing it to the core because sync debug mode is
+# global and thus not thread safe
+class CudaSyncGuard:
+    def __init__(self, sync_debug_mode):
+        self.mode = sync_debug_mode
+
+    def __enter__(self):
+        self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
+        torch.cuda.set_sync_debug_mode(self.mode)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
@@ -2517,16 +2534,37 @@ def sandcastle_skip(reason):
     skipping continuously.
     """
     def decorator(func):
+        if not IS_SANDCASTLE:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if IS_SANDCASTLE:
-                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                return
-            else:
-                raise unittest.SkipTest(reason)
+            print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+            return
         return wrapper
 
     return decorator
+
+def mock_wrapper(method):
+    """
+    Returns a function that calls the real implementation of a method
+    in addition to passing args to a mock object.
+    """
+    mock = MagicMock()
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        mock(*args, **kwargs)
+        return method(self, *args, **kwargs)
+    wrapper.mock = mock  # type: ignore[attr-defined]
+    return wrapper
+
+def get_tensors_from(args, kwargs):
+    """ Returns a set of all Tensor objects in the given args and kwargs. """
+    return set([arg for arg in args if isinstance(arg, Tensor)] +
+               [v for v in kwargs.values() if isinstance(v, Tensor)])
 
 def sandcastle_skip_if(condition, reason):
     """
@@ -2535,14 +2573,17 @@ def sandcastle_skip_if(condition, reason):
     skipping continuously.
     """
     def decorator(func):
+
+        if not IS_SANDCASTLE and condition:
+            func.__unittest_skip__ = True
+            func.__unittest_skip_why__ = reason
+            return func
+
         @wraps(func)
         def wrapper(*args, **kwargs):
-            if condition:
-                if IS_SANDCASTLE:
-                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                    return
-                else:
-                    raise unittest.SkipTest(reason)
+            if condition and IS_SANDCASTLE:
+                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return
             else:
                 return func(*args, **kwargs)
         return wrapper
