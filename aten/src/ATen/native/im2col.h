@@ -18,7 +18,7 @@ using contig_fn = void (*)(
   int64_t dH, int64_t dW);
 
 using channels_last_fn = void (*)(
-    Tensor& im,
+    const Tensor& im,
     const Tensor& col,
     int64_t nbatch,
     int64_t output_channels,
