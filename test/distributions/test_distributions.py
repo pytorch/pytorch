@@ -4204,37 +4204,39 @@ class TestLazyLogitsInitialization(TestCase):
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                probs = param.pop('probs')
-                param['logits'] = probs_to_logits(probs)
-                dist = Dist(**param)
-                # Create new instance to generate a valid sample
-                dist.log_prob(Dist(**param).sample())
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('probs' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('probs' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('probs' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            probs = param.pop('probs')
+            param['logits'] = probs_to_logits(probs)
+            dist = Dist(**param)
+            # Create new instance to generate a valid sample
+            dist.log_prob(Dist(**param).sample())
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('probs', dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                dist = Dist(**param)
-                dist.sample()
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('logits' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('logits' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('logits' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            dist = Dist(**param)
+            dist.sample()
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('logits', dist.__dict__, msg=message)
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
