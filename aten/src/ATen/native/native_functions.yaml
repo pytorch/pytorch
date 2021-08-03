@@ -1459,20 +1459,19 @@
   device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: cumsum.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cumsum
 
 - func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  structured_delegate: cumsum.out
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: cumsum_
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: cumsum_out
+    CPU, CUDA: cumsum_out
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7471,16 +7470,6 @@
   dispatch:
     CPU: _index_copy_impl_
     CUDA: _index_copy_impl_
-
-- func: _cumsum(Tensor self, int dim) -> Tensor
-  dispatch:
-    CPU: _cumsum_cpu
-    CUDA: _cumsum_cuda
-
-- func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cumsum_out_cpu
-    CUDA: _cumsum_out_cuda
 
 - func: _cumprod(Tensor self, int dim) -> Tensor
   dispatch:
