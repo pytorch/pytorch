@@ -340,7 +340,6 @@ test_distributed() {
       # Restore the build folder to avoid any impact on other tests
       mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
     fi
-    exit 1
   fi
 }
 
