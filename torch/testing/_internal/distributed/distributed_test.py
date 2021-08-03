@@ -3865,7 +3865,7 @@ class DistributedTest:
 
                     # Register hook that runs allreduce + functional SGD step.
                     allreduce_hook = default.allreduce_hook
-                    opt_hook_state = default.OptimizerHookState(
+                    opt_hook_state = default._OptimizerHookState(
                         _FunctionalSGD,
                         sgd_lr,
                         momentum=sgd_momentum,
@@ -3873,7 +3873,7 @@ class DistributedTest:
                     )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
-                        default.hook_then_optimizer(allreduce_hook, opt_hook_state),
+                        default._hook_then_optimizer(allreduce_hook, opt_hook_state),
                     )
                     # Create DDP model with no hook that does optimizer after
                     # backward.

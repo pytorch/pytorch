@@ -3626,6 +3626,23 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+
+def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (S, S), False),
+        ((S, S), (S,), False),
+        ((S, ), (S, S), True)
+    )
+
+    def generator():
+        for shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape), args=(make_arg(other_shape),), broadcasts_input=broadcasts_input)
+
+    return list(generator())
+
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -4616,6 +4633,15 @@ def sample_inputs_one_hot(op_info, device, dtype, requires_grad, **kwargs):
         for shape, num_classes in itertools.product(shapes, num_classess)
     ]
 
+def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(make_input()),
+        SampleInput(make_input(), kwargs=dict(beta=3)),
+        SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
+    ]
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -4870,6 +4896,12 @@ def reference_mvlgamma(x, d):
         return scipy.special.multigammaln(x, d).astype(np.float16)
 
     return scipy.special.multigammaln(x, d)
+
+def reference_softplus(input, beta=1, threshold=20):
+    non_linear = input * beta <= threshold
+    output = input.copy()
+    output[non_linear] = np.log(1 + np.exp(beta * input[non_linear])) / beta
+    return output
 
 
 def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
@@ -6383,7 +6415,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('nansum',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     # TODO(@heitorschueroff) Add test for dtype kwarg
@@ -6474,6 +6505,10 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
         ],
     ),
+    OpInfo('nextafter',
+           dtypes=floating_types_and(torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_nextafter),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
@@ -8058,7 +8093,22 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=_dispatch_dtypes((torch.int64,)),
         sample_inputs_func=sample_inputs_one_hot,
-    )
+    ),
+    OpInfo(
+        "nn.functional.softplus",
+        ref=reference_softplus,
+        sample_inputs_func=sample_inputs_softplus,
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        supports_out=False,
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
 ]
 
 # Common operator groupings
