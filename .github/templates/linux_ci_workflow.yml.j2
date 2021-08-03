@@ -10,7 +10,6 @@ name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
@@ -20,6 +19,8 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- endif %}
 
 {%- if is_scheduled %}
