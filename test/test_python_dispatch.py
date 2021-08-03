@@ -97,6 +97,25 @@ def capture_logs() -> Iterator[List[str]]:
     finally:
         logger.removeHandler(handler)
 
+class TestPythonRegistration(TestCase):
+    def test_override_cpu_sum(self) -> None:
+        m = torch._C._dispatch_library("FRAGMENT", "aten", "")
+
+        run = [False]
+
+        def my_sum(*args, **kwargs):
+            run[0] = True
+            return args[0]
+
+        m.impl("sum", "CPU", my_sum)
+
+        x = torch.tensor([1, 2])
+        self.assertEqual(torch.sum(x), x)
+        self.assertTrue(run[0])
+
+        del m
+        self.assertEqual(torch.sum(x), torch.tensor(3))
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:

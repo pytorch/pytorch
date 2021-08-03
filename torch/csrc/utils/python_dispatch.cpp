@@ -1,5 +1,7 @@
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/autograd/python_variable.h>
 
 #include <torch/library.h>
 #include <ATen/ATen.h>
@@ -73,6 +75,72 @@ inline torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
   }
 }
 
+class PythonKernelHolder : public c10::OperatorKernel {
+  PyObject* func_;
+
+public:
+
+  PythonKernelHolder(py::object func) : func_(func.release().ptr()) {}
+  // This is a generally useful pattern and safer than directly using pybind11's
+  // py::object destructor.  This is because this object may outlive
+  // libtorch_python, so we want to disarm the deallocation if that happens.
+  // PyInterpreter does this correctly, pybind11 does not.
+  ~PythonKernelHolder() {
+    getPyInterpreter()->decref(func_);
+  }
+
+  void operator()(const c10::OperatorHandle& op, c10::DispatchKeySet, torch::jit::Stack* stack) {
+    const auto& schema = op.schema();
+    const auto num_returns = schema.returns().size();
+
+    const auto num_arguments = schema.arguments().size();
+    auto arguments = torch::jit::pop(*stack, num_arguments);
+
+    // TODO: Some duplication with torch/csrc/autograd/python_variable.cpp
+
+    py::gil_scoped_acquire g;
+
+    // Pre-scan for arguments that match defaults
+    int64_t default_suffix_len = 0;
+    for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+      const auto& arg = schema.arguments()[idx];
+      if (!arg.default_value().has_value()) {
+        break;
+      }
+      const auto& default_ivalue = *arg.default_value();
+      const auto& ivalue = arguments[idx];
+      if (default_ivalue != ivalue) {
+        break;
+      }
+      default_suffix_len++;
+    }
+
+    auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments - default_suffix_len));
+
+    // TODO: actually populate kwargs sometimes?  At the moment, every argument
+    // just gets passed positionally
+    py::dict kwargs;
+
+    for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
+      PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
+    }
+
+    auto out = py::reinterpret_steal<py::object>(PyObject_Call(func_, args.ptr(), kwargs.ptr()));
+    if (out.ptr() == nullptr) {
+      throw python_error();
+    }
+
+    if (op.schema().returns().size() == 1) {
+      torch::jit::push(stack, torch::jit::toIValue(out.ptr(), op.schema().returns()[0].type()));
+    } else {
+      auto outs = py::cast<py::sequence>(out);
+      for (unsigned idx = 0; idx < outs.size(); idx++) {
+        torch::jit::push(stack, torch::jit::toIValue(outs[idx].ptr(), op.schema().returns()[idx].type()));
+      }
+    }
+  }
+};
+
 void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -145,6 +213,12 @@ void initDispatchBindings(PyObject* module) {
       );
       return self;
     }, "", py::arg("name"), py::arg("dispatch") = "", py::arg("debug") = "")
+    .def("impl", [](py::object self, const char* name, const char* dispatch, py::object func) {
+      self.cast<torch::Library&>().impl(
+        name,
+        dispatch_str(dispatch, CppFunction::makeFromBoxedFunctor(std::make_unique<PythonKernelHolder>(std::move(func))))
+      );
+    }, "", py::arg("name"), py::arg("dispatch"), py::arg("func"))
     .def("fallback_fallthrough", [](py::object self, const char* dispatch) {
       self.cast<torch::Library&>().fallback(
         dispatch_str(dispatch, CppFunction::makeFallthrough())
