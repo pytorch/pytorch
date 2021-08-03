@@ -144,6 +144,14 @@ case "$image" in
     VISION=yes
     BREAKPAD=yes
     ;;
+  pytorch-linux-xenial-py3-clang7-asan)
+    ANACONDA_PYTHON_VERSION=3.6
+    CLANG_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    BREAKPAD=yes
+    ;;
   pytorch-linux-xenial-py3-clang7-onnx)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=7
