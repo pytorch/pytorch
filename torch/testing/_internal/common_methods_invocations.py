@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union, Dict, Any
+from typing import List, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -1864,7 +1864,7 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
 
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
     # Ordered as (input shape, kwargs)
-    test_cases = (  # type: ignore[assignment]
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), {}),
         ((S, S, S), {'dim': 1}),
         ((S, S, S), {'dim': (1, 2,)}),
@@ -1885,7 +1885,7 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
 # TODO (@heitorschueroff) Once aminmax supports multiple dims this should
 # be combined with the above test.
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases = (  # type: ignore[assignment]
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S, S), {}),
         ((S, S, S), {'dim': 1}),
         ((S, S, S), {'dim': 1, 'keepdim': True}),
