@@ -231,16 +231,6 @@ class ShardedTensor(object):
     def _prepare_init(self, process_group=None, init_rrefs=False):
         self._init_rrefs = init_rrefs
         self._sharded_tensor_id = None
-        if rpc._is_current_rpc_agent_set():
-            # Validate PG and RPC ranks match.
-            pg_rank = dist.get_rank()
-            rpc_rank = rpc.get_worker_info().id
-            if pg_rank != rpc_rank:
-                raise ValueError(
-                    f'Default ProcessGroup and RPC ranks must be '
-                    f'the same for ShardedTensor, found process group rank: '
-                    f'{pg_rank} and RPC rank: {rpc_rank}'
-                )
 
         self._process_group = (
             process_group
@@ -275,6 +265,16 @@ class ShardedTensor(object):
                 _sharded_tensor_map.pop(self._sharded_tensor_id)  # type: ignore[call-overload]
 
     def _init_rpc(self):
+        # Validate PG and RPC ranks match.
+        pg_rank = dist.get_rank()
+        rpc_rank = rpc.get_worker_info().id
+        if pg_rank != rpc_rank:
+            raise ValueError(
+                f'Default ProcessGroup and RPC ranks must be '
+                f'the same for ShardedTensor, found process group rank: '
+                f'{pg_rank} and RPC rank: {rpc_rank}'
+            )
+
         self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
