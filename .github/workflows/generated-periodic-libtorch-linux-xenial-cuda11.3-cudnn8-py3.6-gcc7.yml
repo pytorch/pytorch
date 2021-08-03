@@ -4,7 +4,6 @@
 name: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
   pull_request:
     types: [unassigned]
   schedule:
