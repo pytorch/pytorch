@@ -4,10 +4,9 @@
 
 #include <aten/src/ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
-
-#include <memory>
 
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h>
@@ -34,7 +33,6 @@
 #include <llvm/Support/TypeSize.h>
 #endif
 
-#include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
@@ -45,6 +43,8 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <memory>
+
 using namespace torch::jit::tensorexpr;
 
 C10_DEFINE_bool(
@@ -52,13 +52,9 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-DEFINE_TRIGGER(llvm_codegen_created);
-DEFINE_TRIGGER(llvm_codegen_executed);
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-DEFINE_TRIGGER(llvm_codegen_parallel_dispatched);
 namespace {
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
@@ -70,17 +66,17 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
     case CompareSelectOperation::kNE:
       return llvm::ICmpInst::ICMP_NE;
     case CompareSelectOperation::kGT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGT
-                             : llvm::ICmpInst::ICMP_UGT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGT
+                                     : llvm::ICmpInst::ICMP_UGT;
     case CompareSelectOperation::kGE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SGE
-                             : llvm::ICmpInst::ICMP_UGE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SGE
+                                     : llvm::ICmpInst::ICMP_UGE;
     case CompareSelectOperation::kLT:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLT
-                             : llvm::ICmpInst::ICMP_ULT;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLT
+                                     : llvm::ICmpInst::ICMP_ULT;
     case CompareSelectOperation::kLE:
-      return is_signed(type) ? llvm::ICmpInst::ICMP_SLE
-                             : llvm::ICmpInst::ICMP_ULE;
+      return c10::isSignedType(type) ? llvm::ICmpInst::ICMP_SLE
+                                     : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
       throw std::runtime_error("invalid operator type");
@@ -176,8 +172,8 @@ class LLVMCodeGenImpl : public IRVisitor {
   std::unordered_map<const Block*, std::vector<const Var*>> scopeToVar_;
   const Block* scope_;
 
-  std::string llvmCode;
-  std::string asmCode;
+  std::string llvmCode_;
+  std::string asmCode_;
 
  private:
   llvm::LLVMContext& getContext();
@@ -212,7 +208,10 @@ class LLVMCodeGenImpl : public IRVisitor {
       Stmt* stmt,
       const std::vector<CodeGen::BufferArg>& args,
       at::Device device,
-      Dtype dtype);
+      Dtype dtype,
+      c10::optional<std::string> triple,
+      c10::optional<std::string> cpu,
+      c10::optional<std::string> attrs);
   ~LLVMCodeGenImpl() = default;
 
   llvm::JITTargetAddress getKernelAddress() const;
@@ -268,10 +267,10 @@ class LLVMCodeGenImpl : public IRVisitor {
 
   void optimize(llvm::Module& M);
   std::string getLLVMCodeText() {
-    return llvmCode;
+    return llvmCode_;
   }
   std::string getASMCodeText() {
-    return asmCode;
+    return asmCode_;
   }
 };
 
@@ -284,7 +283,6 @@ void DispatchParallel(int8_t* func, int start, int stop, int8_t* packed_data) {
       callee(index, packed_data);
     }
   });
-  USE_TRIGGER(llvm_codegen_parallel_dispatched);
 }
 
 } // namespace tensorexpr
@@ -301,30 +299,16 @@ LLVMCodeGen::LLVMCodeGen(
     const std::vector<BufferArg>& args,
     at::Device device,
     const std::string& kernel_func_name,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : CodeGen(stmt, args, device, kernel_func_name),
-      impl_(std::make_unique<LLVMCodeGenImpl>(stmt, args, device, dtype)) {}
+      impl_(std::make_unique<
+            LLVMCodeGenImpl>(stmt, args, device, dtype, triple, cpu, attrs)) {}
 
-static void* argToPtr(
-    const CodeGen::BufferArg& bufferArg,
-    const CodeGen::CallArg& callArg) {
-  if (!bufferArg.isVar()) {
-    return callArg.data();
-  }
-
-  switch (bufferArg.dtype().scalar_type()) {
-#define TYPE_CASE(_1, Name) \
-  case ScalarType::Name:    \
-    return callArg.Name##Ptr();
-    break;
-
-    AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
-#undef TYPE_CASE
-
-    default:
-      throw unsupported_dtype();
-  }
-  return nullptr;
+void LLVMCodeGen::call_raw(const std::vector<void*>& args) {
+  value<float>(const_cast<void**>(args.data()));
 }
 
 void LLVMCodeGen::call(const std::vector<CallArg>& args) {
@@ -342,7 +326,6 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
     argv[i] = argToPtr(bufferArg, callArg);
   }
   value<float>(argv.data());
-  USE_TRIGGER(llvm_codegen_executed);
 }
 
 at::Tensor LLVMCodeGen::empty_strided(
@@ -372,11 +355,20 @@ llvm::JITTargetAddress LLVMCodeGenImpl::getKernelAddress() const {
   return kernelAddress_;
 }
 
+namespace {
+// Global mutex to protect LLVM initialization.  TargetRegistry::lookupTarget
+// in particular is not thread-safe.
+static std::mutex llvmInitMutex;
+} // namespace
+
 LLVMCodeGenImpl::LLVMCodeGenImpl(
     Stmt* stmt,
     const std::vector<CodeGen::BufferArg>& args,
     at::Device device,
-    Dtype dtype)
+    Dtype dtype,
+    c10::optional<std::string> triple,
+    c10::optional<std::string> cpu,
+    c10::optional<std::string> attrs)
     : context_(std::make_unique<llvm::LLVMContext>()), irb_(getContext()) {
   // Manually map types to LLVM types.
   ByteTy_ = llvm::Type::getInt8Ty(getContext());
@@ -391,10 +383,14 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   VoidTy_ = llvm::Type::getVoidTy(getContext());
   BoolTy_ = ByteTy_;
 
-  llvm::InitializeNativeTarget();
-  llvm::InitializeNativeTargetAsmPrinter();
+  {
+    std::lock_guard<std::mutex> g(llvmInitMutex);
+    llvm::InitializeAllTargets();
+    llvm::InitializeAllTargetMCs();
+    llvm::InitializeAllAsmPrinters();
+    jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>(triple, cpu, attrs);
+  }
 
-  jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
   module_->setDataLayout(jit_->getDataLayout());
   module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
@@ -407,7 +403,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
   std::vector<llvm::Type*> params;
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     auto const& arg = args[i];
     if (arg.isVar()) {
       params.push_back(dtypeToLLVM(arg.dtype()));
@@ -422,7 +418,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   fn_->addAttribute(
       llvm::AttributeList::AttrIndex::FunctionIndex,
       llvm::Attribute::AlwaysInline);
-  for (size_t i = 0; i < args.size(); i++) {
+  for (const auto i : c10::irange(args.size())) {
     if (!args[i].isVar()) {
       fn_->addParamAttr(i, llvm::Attribute::NoAlias);
     }
@@ -434,8 +430,6 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   jit_->addModule(std::move(module_), std::move(context_));
   auto sym = jit_->findSymbol("wrapper");
   kernelAddress_ = assertSuccess(sym.getAddress());
-
-  USE_TRIGGER(llvm_codegen_created);
 }
 
 llvm::LLVMContext& LLVMCodeGenImpl::getContext() {
@@ -471,7 +465,7 @@ void LLVMCodeGenImpl::emitWrapper(const std::vector<llvm::Type*>& params) {
   auto wrapBB = llvm::BasicBlock::Create(getContext(), "wrapBB", wrapper);
   irb_.SetInsertPoint(wrapBB);
   llvm::SmallVector<llvm::Value*, 6> wrappedArgs;
-  for (size_t i = 0; i < params.size(); i++) {
+  for (const auto i : c10::irange(params.size())) {
     auto argp = irb_.CreateGEP(
         wrapper->arg_begin(), llvm::ConstantInt::getSigned(IntTy_, i));
     if (params[i]->isPointerTy()) {
@@ -550,10 +544,13 @@ void LLVMCodeGenImpl::emitKernel(
 
   optimize(*module_);
 
-  // print graph debug info after optimization
   asmBuffer.set_size(0);
   module_->print(asmStream, nullptr);
-  llvmCode = asmStream.str().str();
+  llvmCode_ = asmStream.str().str();
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
+
+  // print graph debug info after optimization
   asmBuffer.set_size(0);
   llvm::legacy::PassManager PM;
   jit_->getTargetMachine().addPassesToEmitFile(
@@ -566,10 +563,9 @@ void LLVMCodeGenImpl::emitKernel(
       llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
   PM.run(*module_);
-  asmCode = asmStream.str().str();
+  asmCode_ = asmStream.str().str();
 
-  GRAPH_DEBUG(
-      "\nLLVM module after optimizations\n\n", llvmCode, "\n", asmCode, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -801,10 +797,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     llvm::Value* cmp_;
     CompareSelectOperation cmp_op_ = v->compare_select_op();
 
-    if (is_integral(type_used)) {
+    if (c10::isIntegralType(type_used, true)) {
       cmp_ = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op_, type_used), lhs, rhs);
-    } else if (is_floating_point(type_used)) {
+    } else if (c10::isFloatingType(type_used)) {
       cmp_ = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op_), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -823,10 +819,10 @@ void LLVMCodeGenImpl::visit(const CompareSelect* v) {
     auto cmp_op = v->compare_select_op();
     llvm::Value* cmp;
 
-    if (is_integral(cmp_type)) {
+    if (c10::isIntegralType(cmp_type, true)) {
       cmp = irb_.CreateICmp(
           llvm_comparison_predicate(cmp_op, cmp_type), lhs, rhs);
-    } else if (is_floating_point(cmp_type)) {
+    } else if (c10::isFloatingType(cmp_type)) {
       cmp = irb_.CreateFCmp(llvm_fp_comparison_predicate(cmp_op), lhs, rhs);
     } else {
       throw std::runtime_error("invalid type for CompareSelect");
@@ -942,9 +938,9 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
       if (v->dtype().scalar_type() == ScalarType::Bool) {
         llvm::Value* zero =
             toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
-        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNE, value_, zero);
         value_ = irb_.CreateICmpEQ(
-            value_, llvm::ConstantInt::get(value_->getType(), 0));
+            value_, llvm::ConstantInt::get(value_->getType(), 1));
         value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
         return;
       }
@@ -1022,8 +1018,7 @@ void LLVMCodeGenImpl::replaceVarMapping(
     const std::vector<const Var*>& vars,
     const std::vector<llvm::Value*>& vals) {
   TORCH_CHECK(vars.size() == vals.size());
-  int i = 0;
-  for (int i = 0; i < vars.size(); i++) {
+  for (const auto i : c10::irange(vars.size())) {
     const Var* var = vars[i];
     llvm::Value* val = vals[i];
     if (val) {
@@ -1117,14 +1112,7 @@ void LLVMCodeGenImpl::visit(const Load* v) {
     v->flat_index()->accept(this);
     auto idx = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      value_ = emitUnmaskedLoad(base, idx);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-      value_ = emitMaskedLoad(base, idx, mask);
-    }
+    value_ = emitUnmaskedLoad(base, idx);
     return;
   }
 
@@ -1143,18 +1131,11 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   }
 
   // Detect whether the vector mask is all true
-  bool unmasked_load = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_load = true;
-    }
-  }
+  bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_load && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       v->base_handle()->accept(this);
@@ -1179,19 +1160,12 @@ void LLVMCodeGenImpl::visit(const Load* v) {
   auto base = this->value_;
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   llvm::Value* load = llvm::UndefValue::get(loadType);
   for (int i = 0; i < v->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     llvm::Value* sub_load = nullptr;
-    if (unmasked_load) {
-      sub_load = emitUnmaskedLoad(base, sub_idx);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      sub_load = emitMaskedLoad(base, sub_idx, sub_mask);
-    }
+    sub_load = emitUnmaskedLoad(base, sub_idx);
     load = irb_.CreateInsertElement(load, sub_load, i);
   }
 
@@ -1207,14 +1181,14 @@ llvm::Value* LLVMCodeGenImpl::packFuncArgs(
     return NullPtr;
   }
   std::vector<llvm::Type*> arg_types(func_args.size());
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     arg_types[i] = func_args[i]->getType();
   }
   llvm::StructType* packed_type = llvm::StructType::create(arg_types);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   llvm::Value* one = llvm::ConstantInt::get(IntTy_, 1);
   llvm::Value* packed = irb_.CreateAlloca(packed_type, one);
-  for (int i = 0; i < func_args.size(); i++) {
+  for (const auto i : c10::irange(func_args.size())) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     irb_.CreateStore(func_args[i], dst_ptr);
@@ -1229,7 +1203,7 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   // TODO: extract arg_count from packed.
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
-  for (int i = 0; i < arg_count; i++) {
+  for (const auto i : c10::irange(arg_count)) {
     llvm::Value* dst_ptr = irb_.CreateInBoundsGEP(
         packed, {zero, llvm::ConstantInt::get(IntTy_, i)});
     func_args[i] = irb_.CreateLoad(dst_ptr);
@@ -1433,28 +1407,10 @@ void LLVMCodeGenImpl::visit(const Store* v) {
     v->value()->accept(this);
     auto val = this->value_;
 
-    auto* maskimm = dynamic_cast<const IntImm*>(v->mask());
-    if (maskimm && maskimm->value() == 1) {
-      emitUnmaskedStore(base, idx, val);
-    } else {
-      v->mask()->accept(this);
-      auto mask = this->value_;
-
-      emitMaskedStore(base, idx, mask, val);
-    }
+    emitUnmaskedStore(base, idx, val);
 
     value_ = llvm::ConstantInt::get(IntTy_, 0);
     return;
-  }
-
-  // Detect whether the vector mask is all true
-  bool unmasked_store = false;
-  auto* mask_broadcast = dynamic_cast<const Broadcast*>(v->mask());
-  if (mask_broadcast) {
-    auto* broadcast_imm = dynamic_cast<const IntImm*>(mask_broadcast->value());
-    if (broadcast_imm && broadcast_imm->value() == 1) {
-      unmasked_store = true;
-    }
   }
 
   v->base_handle()->accept(this);
@@ -1464,7 +1420,7 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   // Handle the case where the store is contiguous and unmasked efficiently
   auto* idx_ramp = dynamic_cast<const Ramp*>(v->flat_index());
-  if (unmasked_store && idx_ramp) {
+  if (idx_ramp) {
     auto* stride_imm = dynamic_cast<const IntImm*>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       idx_ramp->base()->accept(this);
@@ -1486,19 +1442,12 @@ void LLVMCodeGenImpl::visit(const Store* v) {
 
   v->flat_index()->accept(this);
   auto idx = this->value_;
-  v->mask()->accept(this);
-  auto mask = this->value_;
 
   // Fallback to a scalar implementation
   for (int i = 0; i < v->value()->dtype().lanes(); ++i) {
     auto sub_idx = irb_.CreateExtractElement(idx, i);
     auto sub_val = irb_.CreateExtractElement(val, i);
-    if (unmasked_store) {
-      emitUnmaskedStore(base, sub_idx, sub_val);
-    } else {
-      auto sub_mask = irb_.CreateExtractElement(mask, i);
-      emitMaskedStore(base, sub_idx, sub_mask, sub_val);
-    }
+    emitUnmaskedStore(base, sub_idx, sub_val);
   }
 
   value_ = llvm::ConstantInt::get(IntTy_, 0);
@@ -1883,7 +1832,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
         llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
 
     // Store dims of the buf
-    for (int dim = 0; dim < b->dims().size(); dim++) {
+    for (const auto dim : c10::irange(b->dims().size())) {
       gep = irb_.CreateInBoundsGEP(
           buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
       b->dims()[dim]->accept(this);
@@ -2054,7 +2003,6 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
     FPM.run(FF);
   }
   FPM.doFinalization();
-  PM.run(M);
 }
 
 RegisterCodeGen<LLVMCodeGen> llvm_codegen_reg("llvm_codegen");

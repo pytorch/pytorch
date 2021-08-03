@@ -5,7 +5,7 @@ namespace c10 {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensorImpl::UndefinedTensorImpl()
-: TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
+    : TensorImpl(DispatchKey::Undefined, caffe2::TypeMeta(), c10::nullopt) {
   set_storage_access_should_throw();
 }
 
@@ -19,7 +19,8 @@ int64_t UndefinedTensorImpl::stride(int64_t d) const {
 
 #ifdef DEBUG
 bool UndefinedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "UndefinedTensorImpl assumes that storage_ is never set");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !storage_, "UndefinedTensorImpl assumes that storage_ is never set");
   return false;
 }
 #endif
@@ -38,4 +39,4 @@ const char* UndefinedTensorImpl::tensorimpl_type_name() const {
 
 UndefinedTensorImpl UndefinedTensorImpl::_singleton;
 
-}
+} // namespace c10

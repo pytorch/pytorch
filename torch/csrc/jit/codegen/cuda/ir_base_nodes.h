@@ -132,7 +132,9 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   void print() const;
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   StmtNameType name_ = UNINITIALIZED_STMTNAMETYPE;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   Fusion* fusion_ = nullptr;
 };
 
@@ -165,7 +167,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
  */
 class TORCH_CUDA_CU_API Val : public Statement {
  public:
-  virtual ~Val() = default;
+  ~Val() override = default;
 
   Val() = delete;
 
@@ -220,7 +222,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
   Expr* getOrigin();
   const Expr* getOrigin() const;
 
-  virtual bool sameType(const Statement* other) {
+  bool sameType(const Statement* other) override {
     return Statement::sameType(other) &&
         getDataType() == other->as<Val>()->getDataType();
   }
@@ -243,7 +245,9 @@ class TORCH_CUDA_CU_API Val : public Statement {
   static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const ValType vtype_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const DataType dtype_;
 };
 
@@ -291,7 +295,7 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   Expr() = delete;
   explicit Expr(ExprType _type);
   Expr(const Expr* src, IrCloner* ir_cloner);
-  virtual ~Expr() = default;
+  ~Expr() override = default;
 
   Expr(const Expr& other) = delete;
   Expr& operator=(const Expr& other) = delete;

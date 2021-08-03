@@ -1,4 +1,4 @@
-from tools import trailing_newlines
+from tools.linter import trailing_newlines
 import unittest
 import tempfile
 

@@ -8,6 +8,7 @@
 namespace torch {
 namespace nn {
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
  public:
   using Iterator = OrderedDict<std::string, Tensor>::Iterator;

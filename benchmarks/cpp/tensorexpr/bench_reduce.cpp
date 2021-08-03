@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/tensorexpr/operators/operators.h>
 #include <torch/torch.h>
 
 #include <immintrin.h>
@@ -19,9 +20,11 @@ class Reduce1D : public benchmark::Fixture {
     M = state.range(0);
     A = torch::randn({M});
     B = torch::zeros({});
+    ref = torch::sum(A, {0});
   }
 
   void TearDown(benchmark::State& state) override {
+    TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-7));
     state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * M * sizeof(float),
                                                  benchmark::Counter::kIsRate);
   }
@@ -29,6 +32,7 @@ class Reduce1D : public benchmark::Fixture {
   int M;
   at::Tensor A;
   at::Tensor B;
+  at::Tensor ref;
 };
 
 }  // namespace
@@ -266,10 +270,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
     te::For* m = loops[1];
-    te::For* mo;
-    te::For* mi;
-    te::For* tail;
-    loop.splitWithTail(m, kChunkSize, &mo, &mi, &tail);
+    loop.splitWithTail(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
@@ -310,9 +311,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
   {
     auto const& loops = loop.getLoopStmtsFor(BT);
     te::For* m = loops[1];
-    te::For* mo;
-    te::For* mi;
-    loop.splitWithMask(m, kChunkSize, &mo, &mi);
+    loop.splitWithMask(m, kChunkSize);
   }
 
   loop.prepareForCodegen();
@@ -350,26 +349,23 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       {{M, "M"}});
 
   te::LoopNest loop({BT});
+  te::Buf* rfac_buf;
 
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 1);
-    te::For* m = loops[0];
-    te::For* mo;
-    te::For* mi;
-    loop.splitWithMask(m, kChunkSize, &mo, &mi);
-  }
+  auto loops = loop.getLoopStmtsFor(BT);
+  TORCH_CHECK(loops.size() == 1);
+  te::For* mi;
+  loop.splitWithMask(loops.at(0), kChunkSize, &mi);
+  te::For* mo = loops.at(0);
 
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 2);
-    te::For* mo = loops[0];
-    te::For* mi = loops[1];
-    // TODO: rfactor works on the untransformed var set. This is a problem since we need to
-    // look for the loop after Split to rfactor.
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
-  }
+  loop.reorderAxis(mo, mi);
+  loops = loop.getLoopStmtsFor(BT);
+  auto bt_body = const_cast<te::Stmt*>(loop.getAllWritesToBuf(BT->buf())[1]);
+  TORCH_CHECK(loop.rfactor(bt_body, loops.at(0), &rfac_buf));
+  loop.reorderAxis(loops.at(0), loops.at(1));
+
+  loops = loop.getAllInnermostLoopsWritingToBuf(rfac_buf);
+  TORCH_CHECK(loops.size() == 2);
+  loop.vectorize(loops.at(1));
 
   loop.prepareForCodegen();
   te::Stmt* s = loop.root_stmt();
@@ -386,61 +382,233 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
   }
 }
 
-// TODO: add this back when the problem is fixed
-// BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV1)->Args({1 << 24});
+BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV1)->Args({1 << 24});
 
-// Similar to TeRfactor itself. But manually constructed the Split expression.
-BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV2)(benchmark::State& state) {
+BENCHMARK_DEFINE_F(Reduce1D, Op)(benchmark::State& state) {
   te::KernelScope ks;
-
-  int M = A.numel();
+  const int M = A.numel();
   const int kChunkSize = 8;
-  TORCH_CHECK(M % kChunkSize == 0);
 
-  te::Placeholder AP(te::BufHandle("A", {M}, te::kFloat));
-  te::Tensor* BT = te::Reduce(
-      "reduce_full",
-      {},
-      te::Sum(),
-      [&](const te::ExprHandle& mo, const te::ExprHandle& mi) {
-        return AP.load(mo * kChunkSize + mi);
-      },
-      {{M / kChunkSize, "mo"}, {kChunkSize, "mi"}});
+  te::Placeholder a("A", te::kFloat, {M});
+  te::Tensor* b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
+  te::LoopNest nest({b});
 
-  te::LoopNest loop({BT});
-
-  {
-    auto const& loops = loop.getLoopStmtsFor(BT);
-    TORCH_CHECK(loops.size() == 2);
-    te::For* mo = loops[0];
-    te::For* mi = loops[1];
-    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
-    loop.rfactor(bt_body, mi->var());
+  auto loops = nest.getLoopStmtsFor(b);
+  te::For *mi, *mo;
+  te::Buf *rf;
+  nest.splitWithMask(loops[0], kChunkSize, &mi);
+  loops = nest.reorder({loops[0], mi}, {1, 0});
+  nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf);
+  nest.reorderAxis(loops[0], loops[1]);
+  for (auto const& loop : nest.getAllInnermostLoopsWritingToBuf(rf)) {
+    nest.vectorize(loop);
   }
 
-  {
-    // Look for the new For and vectorize, but rfactor didn't return the newly added "For *".
-    // Resort to a hack to find the lost "For *".
-    // TODO: make it easier to find the transformed loop after rfactor.
-    auto loops = te::NodeFinder<te::For>::find(loop.root_stmt());
-    TORCH_CHECK(loops.size() == 4);
-    auto mi = loops[2];
-    loop.vectorize(mi);
-  }
+  nest.prepareForCodegen();
+  nest.simplify();
+  te::LLVMCodeGen cg(nest.root_stmt(), {a, b});
 
-  loop.prepareForCodegen();
-  te::Stmt* s = loop.root_stmt();
-  s = te::IRSimplifier::simplify(s);
-  auto cg = CreateCodeGen("llvm_codegen", s, {AP, BT});
-
-  auto func = [&](at::Tensor& A, at::Tensor& B) {
-    cg->call({A.data_ptr<float>(), B.data_ptr<float>()});
-  };
-
-  ValidateFunc(func, "reduce1d_te_naive", A, B);
   for (auto _ : state) {
-    func(A, B);
+    cg.call({A.data_ptr<float>(), B.data_ptr<float>()});
   }
 }
+BENCHMARK_REGISTER_F(Reduce1D, Op)->Args({1 << 24});
 
-BENCHMARK_REGISTER_F(Reduce1D, TeRfactorV2)->Args({1 << 24});
+class Reduce2DCol : public benchmark::Fixture {
+ public:
+  void SetUp(const benchmark::State& state) override {
+    at::set_num_threads(1);
+    torch::manual_seed(0x12345678);
+    M = state.range(0);
+    N = state.range(1);
+    A = torch::randn({M, N});
+    ref = torch::sum(A, {0});
+    B = torch::zeros_like(ref);
+  }
+
+  void TearDown(benchmark::State& state) override {
+    TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-5));
+    state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
+                                                 benchmark::Counter::kIsRate);
+  }
+
+  int M;
+  int N;
+  at::Tensor A;
+  at::Tensor B;
+  at::Tensor ref;
+};
+
+BENCHMARK_DEFINE_F(Reduce2DCol, Torch)(benchmark::State& state) {
+  for (auto _ : state) {
+    B = torch::sum(A, {0});
+  }
+}
+BENCHMARK_REGISTER_F(Reduce2DCol, Torch)
+->Args({1 << 3, 1 << 21})
+->Args({1 << 6, 1 << 18})
+->Args({1 << 12, 1 << 12});
+
+BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
+  te::KernelScope ks;
+  constexpr int kCacheSize = 1 << 12;
+  te::Placeholder a("A", te::kFloat, {M, N});
+  te::Tensor* b = te::computeSum({a.handle(), te::IntList({0}), false}, at::kFloat);
+  te::LoopNest nest({b});
+
+  auto sch = state.range(2);
+  if (sch == 0) {
+  } else if (sch == 1) {
+    auto loops = nest.getLoopStmtsFor(b);
+    nest.reorderAxis(loops[0], loops[1]);
+  } else if (sch == 2) {
+    auto loops = nest.getLoopStmtsFor(b);
+    nest.splitWithTail(loops[0], kCacheSize);
+    loops = nest.getLoopStmtsFor(b);
+    nest.reorderAxis(loops[1], loops[2]);
+  } else if (sch == 3) {
+    auto loops = nest.getLoopStmtsFor(b);
+    nest.splitWithTail(loops[1], 8);
+    loops = nest.getLoopStmtsFor(b);
+    nest.reorderAxis(loops[0], loops[1]);
+  }
+
+  nest.prepareForCodegen();
+  nest.simplify();
+  te::LLVMCodeGen cg(nest.root_stmt(), {a, b});
+  for (auto _ : state) {
+    cg.call({A.data_ptr<float>(), B.data_ptr<float>()});
+  }
+}
+BENCHMARK_REGISTER_F(Reduce2DCol, OpSchedule)->Apply(//CustomArgs);
+    [](benchmark::internal::Benchmark* b) {
+      for (auto sch : {0, 1, 2, 3}) {
+        for (auto rows : {3, 6, 12}) {
+          auto cols = 24 - rows;
+          b->Args({1 << rows, 1 << cols, sch});
+        }
+      }
+    });
+
+class Reduce2DRow : public benchmark::Fixture {
+ public:
+  void SetUp(const benchmark::State& state) override {
+    at::set_num_threads(1);
+    torch::manual_seed(0x12345678);
+    M = state.range(0);
+    N = state.range(1);
+    A = torch::randn({M, N});
+    ref = torch::sum(A, {1});
+    B = torch::zeros_like(ref);
+  }
+
+  void TearDown(benchmark::State& state) override {
+    TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-4));
+    state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
+                                                 benchmark::Counter::kIsRate);
+  }
+
+  int M;
+  int N;
+  at::Tensor A;
+  at::Tensor B;
+  at::Tensor ref;
+};
+
+BENCHMARK_DEFINE_F(Reduce2DRow, Torch)(benchmark::State& state) {
+  for (auto _ : state) {
+    B = torch::sum(A, {1});
+  }
+}
+BENCHMARK_REGISTER_F(Reduce2DRow, Torch)
+->Args({1 << 3, 1 << 21})
+->Args({1 << 6, 1 << 18})
+->Args({1 << 12, 1 << 12})
+->Args({1 << 18, 1 << 6});
+
+BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
+  auto a = A.data_ptr<float>();
+  auto b = B.data_ptr<float>();
+  constexpr int Mb = 4;
+  constexpr int Nb = 4;
+  auto fn = [&] {
+    for (int m_outer = 0; m_outer < M; m_outer += Mb) {
+      float bregs[Mb][Nb] = {0.0f};
+      for (int n_outer = 0; n_outer < N; n_outer += Nb) {
+        for (int m_inner = 0; m_inner < Mb; m_inner++) {
+          for (int n_inner = 0; n_inner < Nb; n_inner++) {
+            bregs[m_inner][n_inner] += a[(m_outer + m_inner) * N + n_outer + n_inner];
+          }
+        }
+      }
+      for (int m_inner = 0; m_inner < Mb; m_inner++) {
+        b[m_outer + m_inner] = 0.f;
+        for (int n_inner = 0; n_inner < Nb; n_inner++) {
+          b[m_outer + m_inner] += bregs[m_inner][n_inner];
+        }
+      }
+    }
+  };
+  for (auto _ : state) {
+    fn();
+  }
+}
+BENCHMARK_REGISTER_F(Reduce2DRow, Hand)
+->Args({1 << 18, 1 << 6});
+
+BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
+  te::KernelScope ks;
+  constexpr int kChunkSize = 8;
+  te::Placeholder a("A", te::kFloat, {M, N});
+  te::Tensor* b = te::computeSum({a.handle(), te::IntList({1}), false}, at::kFloat);
+  te::LoopNest nest({b});
+
+  auto sch = state.range(2);
+  if (sch == 1) {
+    auto loops = nest.getLoopStmtsFor(b);
+    te::For *mi, *mo;
+    te::Buf *rf;
+    nest.splitWithMask(loops[1], kChunkSize, &mi);
+    loops = nest.reorder({loops[1], mi}, {1, 0});
+    TORCH_CHECK(nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf));
+    nest.reorderAxis(loops[0], loops[1]);
+    for (auto const& loop : nest.getAllInnermostLoopsWritingToBuf(rf)) {
+      nest.vectorize(loop);
+    }
+  } else if (sch == 2) {
+    auto loops = nest.getLoopStmtsFor(b);
+    nest.splitWithMask(loops[1], 8);
+    nest.splitWithMask(loops[0], 4);
+    loops = nest.getLoopStmtsFor(b);
+    nest.reorderAxis(loops[1], loops[2]);
+  } else if (sch == 3) {
+    auto loops = nest.getLoopStmtsFor(b);
+    te::For *mi, *mo;
+    te::Buf *rf;
+    nest.splitWithMask(loops[1], kChunkSize, &mi);
+    loops = nest.reorder({loops[1], mi}, {1, 0});
+    TORCH_CHECK(nest.rfactor(nest.getLoopBodyFor(b), loops[0], &rf));
+    nest.reorderAxis(loops[0], loops[1]);
+    te::LoopNest::compressBuffer(rf, nest.root_stmt());
+    for (auto const& loop : nest.getAllInnermostLoopsWritingToBuf(rf)) {
+      nest.vectorize(loop);
+    }
+  }
+
+  nest.prepareForCodegen();
+  nest.simplify();
+  te::LLVMCodeGen cg(nest.root_stmt(), {a, b});
+
+  for (auto _ : state) {
+    cg.call({A.data_ptr<float>(), B.data_ptr<float>()});
+  }
+}
+BENCHMARK_REGISTER_F(Reduce2DRow, OpSchedule)->Apply(//CustomArgs);
+    [](benchmark::internal::Benchmark* b) {
+      for (auto sch : {0, 1, 2, 3}) {
+        for (auto rows : {3, 6, 12, 18}) {
+          auto cols = 24 - rows;
+          b->Args({1 << rows, 1 << cols, sch});
+        }
+      }
+    });

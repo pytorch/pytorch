@@ -275,6 +275,36 @@ class TestViewOps(TestCase):
             self.assertTrue(self.is_view_of(a, a_split_dim1_tensor))
 
     @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_hsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_hsplit = torch.hsplit(t, 2)
+        for t_hsplit_tensor in t_hsplit:
+            self.assertTrue(self.is_view_of(t, t_hsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_hsplit[1][2, 0, 2], t[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_vsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_vsplit = torch.vsplit(t, 2)
+        for t_vsplit_tensor in t_vsplit:
+            self.assertTrue(self.is_view_of(t, t_vsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_vsplit[1][0, 2, 2], t[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_view_tensor_dsplit(self, device, dtype):
+        t = make_tensor((4, 4, 4), device, dtype, low=-9, high=9)
+        t_dsplit = torch.dsplit(t, 2)
+        for t_dsplit_tensor in t_dsplit:
+            self.assertTrue(self.is_view_of(t, t_dsplit_tensor))
+        t[2, 2, 2] = 7
+        self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
+
+    @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
     def test_real_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
@@ -315,6 +345,21 @@ class TestViewOps(TestCase):
         a = torch.randn(10, dtype=dtype)
         self.assertEqual(a[5:].real, a.real[5:])
         self.assertEqual(a[5:].imag, a.imag[5:])
+
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_complex_dtypes())
+    def test_conj_imag_view(self, device, dtype) -> None:
+        t = _make_tensor((4, 5,), dtype, device)
+        t_numpy_conj = torch.from_numpy(t.cpu().numpy().conj()).to(device=device)
+        v = t.conj()
+        self.assertTrue(self.is_view_of(t, v))
+        self.assertEqual(v, t_numpy_conj)
+
+        if (t.is_complex()):
+            v_imag = v.imag
+            self.assertTrue(self.is_view_of(t, v_imag))
+            self.assertEqual(v_imag, t_numpy_conj.imag)
+            self.assertTrue(v_imag.is_neg())
 
     @onlyOnCPUAndCUDA
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
@@ -411,11 +456,41 @@ class TestViewOps(TestCase):
             v[0, 1] = 0
             self.assertEqual(t[1, 0], v[0, 1])
 
+    def test_transpose_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapdims_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.swapaxes_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.transpose_(0, 1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
     def test_t_view(self, device):
         t = torch.ones((5, 5), device=device)
         v = t.t()
         self.assertTrue(self.is_view_of(t, v))
 
+        v[0, 1] = 0
+        self.assertEqual(t[1, 0], v[0, 1])
+
+    def test_t_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.t_()
+        self.assertTrue(self.is_view_of(t, v))
         v[0, 1] = 0
         self.assertEqual(t[1, 0], v[0, 1])
 
@@ -442,6 +517,14 @@ class TestViewOps(TestCase):
         v[0, 1] = 0
         self.assertEqual(t, v._base)
 
+    def test_squeeze_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.squeeze_()
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 1] = 0
+        self.assertEqual(t, v._base)
+
     def test_unsqueeze_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.unsqueeze(t, 1)
@@ -450,11 +533,27 @@ class TestViewOps(TestCase):
         v[0, 0, 1] = 0
         self.assertEqual(t[0, 1], v[0, 0, 1])
 
+    def test_unsqueeze_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.unsqueeze_(1)
+        self.assertTrue(self.is_view_of(t, v))
+        v[0, 0, 1] = 0
+        self.assertEqual(t[0, 1], v[0, 0, 1])
+
     def test_as_strided_view(self, device):
         t = torch.ones(5, 5, device=device)
         v = torch.as_strided(t, (25,), (1,))
         self.assertTrue(self.is_view_of(t, v))
 
+        v[6] = 0
+        self.assertEqual(t[1, 1], v[6])
+
+    def test_as_strided_inplace_view(self, device):
+        t = torch.ones(5, 5, device=device)
+        v = t.view_as(t)
+        v = v.as_strided_((25,), (1,))
+        self.assertTrue(self.is_view_of(t, v))
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
@@ -861,21 +960,21 @@ class TestOldViewOps(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))
-        self.assertEqual(x.narrow(0, 0, 2), torch.Tensor([[0, 1, 2], [3, 4, 5]]))
-        self.assertEqual(x.narrow(0, 1, 1), torch.Tensor([[3, 4, 5]]))
-        self.assertEqual(x.narrow(0, -1, 1), torch.Tensor([[6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -2, 2), torch.Tensor([[3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(0, -3, 3), torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
-        self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
-        self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, 0, 1), torch.tensor([[0, 1, 2]]))
+        self.assertEqual(x.narrow(0, 0, 2), torch.tensor([[0, 1, 2], [3, 4, 5]]))
+        self.assertEqual(x.narrow(0, 1, 1), torch.tensor([[3, 4, 5]]))
+        self.assertEqual(x.narrow(0, -1, 1), torch.tensor([[6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -2, 2), torch.tensor([[3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -3, 3), torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(-1, -1, 1), torch.tensor([[2], [5], [8]]))
+        self.assertEqual(x.narrow(-2, -1, 1), torch.tensor([[6, 7, 8]]))
 
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_narrow_tensor(self, device):
-        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
-        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.Tensor([[0, 1, 2]]))
+        x = torch.tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, torch.tensor(0), 1), torch.tensor([[0, 1, 2]]))
         with self.assertRaises(Exception):
             x.narrow(0, torch.tensor(0.), 1)
         with self.assertRaises(Exception):
@@ -1256,6 +1355,22 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
 
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_reshape_view_semantics(self, device, dtype):
+        tensor = make_tensor((15, 4), device, dtype)
+        target = (20, 3)
+
+        # Cases where the tensor can be returned as a view.
+        view_tensor = tensor.reshape(target)
+        self.assertEqual((view_tensor.size()), target)
+        self.assertEqual(tensor.storage().data_ptr(), view_tensor.storage().data_ptr())
+
+        # Cases where the tensor must be copied (transpose makes it non-contiguous forcing
+        # the copy).
+        copy_tensor = tensor.transpose(0, 1).reshape(target)
+        self.assertEqual(copy_tensor.size(), target)
+        self.assertNotEqual(tensor.storage().data_ptr(), copy_tensor.storage().data_ptr())
+
     def test_contiguous(self, device):
         x = torch.randn(1, 16, 5, 5, device=device)
         self.assertTrue(x.is_contiguous())
@@ -1394,6 +1509,14 @@ class TestOldViewOps(TestCase):
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             self.assertEqual(x.view(6).shape, [6])
 
+    @onlyCPU
+    def test_conj_neg_view_numpy_error(self, device):
+        self.assertRaisesRegex(RuntimeError, "has conjugate bit set", lambda: torch.tensor([1 + 2j]).conj().numpy())
+        self.assertRaisesRegex(RuntimeError, "has negative bit set", lambda: torch.tensor([1 + 2j]).conj().imag.numpy())
+        self.assertRaisesRegex(RuntimeError, "not supported for conjugate view tensors",
+                               lambda: torch.tensor([1 + 2j]).conj().view(torch.float64))
+        self.assertRaisesRegex(RuntimeError, "not supported for tensors with negative bit set",
+                               lambda: torch.tensor([1 + 2j]).conj().imag.view(torch.int32))
 
 instantiate_device_type_tests(TestViewOps, globals())
 instantiate_device_type_tests(TestOldViewOps, globals())

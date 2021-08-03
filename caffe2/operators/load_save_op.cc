@@ -56,6 +56,7 @@ SaveOpImpl::SaveOpImpl(
     : operator_(op),
       strip_prefix_(op->template GetSingleArgument<string>("strip_prefix", "")),
       db_type_(op->template GetSingleArgument<string>("db_type", "")),
+      db_options_(op->template GetSingleArgument<string>("db_options", "")),
       blob_names_(
           op->template GetRepeatedArgument<string>("blob_name_overrides")) {
   CAFFE_ENFORCE_GT(db_type_.size(), 0, "Must specify a db type.");
@@ -103,6 +104,7 @@ SaveOpImpl::SaveOpImpl(
   if (blob_names_.empty()) {
     std::set<std::string> input_names;
     blob_names_.resize(op->Inputs().size());
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 0; i < blob_names_.size(); ++i) {
       std::string name;
       if (strip_prefix_.empty()) {
@@ -165,14 +167,17 @@ bool SaveOpImpl::RunOnDevice() {
       " (while trying to open ",
       full_db_name_,
       ")");
+  if (!db_options_.empty()) {
+    out_db->SetOptions(db_options_);
+  }
 
   BlobSerializerBase::SerializationAcceptor acceptor =
-      [&](const std::string& blobName, const std::string& data) {
+      [&](const std::string& blobName, std::string&& data) {
         // transaction should take care of locking
         VLOG(2) << "Sending " << blobName << " blob's data of size "
                 << data.size() << " to db";
         auto transaction = out_db->NewTransaction();
-        transaction->Put(blobName, data);
+        transaction->Put(blobName, std::move(data));
         transaction->Commit();
       };
 
@@ -180,6 +185,7 @@ bool SaveOpImpl::RunOnDevice() {
   VLOG(0) << "Saving " << inputs.size() << " inputs to " << db_type_ << ": "
           << full_db_name_;
   BlobSerializationOptions default_options;
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (int i = 0; i < inputs.size(); ++i) {
     SerializeBlob(
         *inputs[i],
@@ -193,12 +199,60 @@ bool SaveOpImpl::RunOnDevice() {
 
 } // namespace internal
 
+namespace {
+class EstimateAllBlobSizesOp final : public Operator<CPUContext> {
+ public:
+  explicit EstimateAllBlobSizesOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        include_shared_(GetSingleArgument<int>("include_shared", true)),
+        ws_(ws) {
+    auto options_data = GetSingleArgument<string>("options", "");
+    if (!options_data.empty()) {
+      if (!options_.ParseFromString(options_data)) {
+        CAFFE_ENFORCE(false, "unable to parse serialization options");
+      }
+    }
+  }
+
+  bool RunOnDevice() override {
+    const auto& blob_names = include_shared_ ? ws_->Blobs() : ws_->LocalBlobs();
+    auto* names_out = Output(0, {static_cast<int64_t>(blob_names.size())}, at::dtype<std::string>());
+    auto* sizes_out = Output(1, {static_cast<int64_t>(blob_names.size())}, at::dtype<int64_t>());
+    BlobSerializationOptions default_options;
+    for (size_t idx = 0; idx < blob_names.size(); ++idx) {
+      const auto& name = blob_names[idx];
+      auto* blob = ws_->GetBlob(name);
+      if (!blob) {
+        LOG(ERROR) << "unable to find blob " << name
+                   << " when estimating serialization size";
+        continue;
+      }
+
+      names_out->template mutable_data<std::string>()[idx] = name;
+      const auto& blob_serialization_options =
+          internal::GetBlobOptions(name, options_, default_options);
+      sizes_out->template mutable_data<int64_t>()[idx] =
+          EstimateSerializedBlobSize(*blob, name, blob_serialization_options);
+    }
+    return true;
+  }
+
+ private:
+  bool include_shared_{true};
+  Workspace* ws_{nullptr};
+  SerializationOptions options_;
+};
+} // namespace
+
 REGISTER_CPU_OPERATOR(DBExists, DBExistsOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Load, LoadOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Save, SaveOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Checkpoint, CheckpointOp<CPUContext>);
 // CPU Operator old name: do NOT use, we may deprecate this later.
 REGISTER_CPU_OPERATOR(Snapshot, CheckpointOp<CPUContext>);
+REGISTER_CPU_OPERATOR(EstimateAllBlobSizes, EstimateAllBlobSizesOp);
 
 OPERATOR_SCHEMA(DBExists)
     .NumInputs(0)
@@ -439,10 +493,30 @@ counter). This is determined whether we need to do checkpointing.
 
 OPERATOR_SCHEMA(Snapshot);
 
+OPERATOR_SCHEMA(EstimateAllBlobSizes)
+    .NumInputs(0)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+Returns two outputs: a 1D tensor of strings containing the names
+of each blob in the active workspace, and a 1D tensor of integers containing the
+estimated serialized size of each blob (in bytes).
+)DOC")
+    .Arg(
+        "include_shared",
+        "(bool, default true) Whether to include blobs "
+        "inherited from parent workspaces.")
+    .Arg(
+        "options",
+        "(string, default empty) A BlobSerializationOptions message specifying "
+        "options for how specific blobs should be serialized.")
+    .Output(0, "blob_names", "1D tensor of strings containing blob names.")
+    .Output(1, "blob_sizes", "1D tensor of int64_t containing blob sizes.");
+
 NO_GRADIENT(Load);
 SHOULD_NOT_DO_GRADIENT(DBExists);
 SHOULD_NOT_DO_GRADIENT(Save);
 SHOULD_NOT_DO_GRADIENT(Checkpoint);
 SHOULD_NOT_DO_GRADIENT(Snapshot);
+SHOULD_NOT_DO_GRADIENT(EstimateAllBlobSizesOp);
 
 }  // namespace caffe2

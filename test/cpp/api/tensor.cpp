@@ -97,6 +97,7 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     ASSERT_TRUE(tensor.requires_grad());
 
     // Throws if requires_grad is set in TensorOptions
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
 
@@ -113,6 +114,7 @@ TEST(TensorTest, ToOptionsWithRequiresGrad) {
     ASSERT_FALSE(tensor.requires_grad());
 
     // Throws if requires_grad is set in TensorOptions
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_THROW(
         tensor.to(at::TensorOptions().requires_grad(true)), c10::Error);
 
@@ -424,7 +426,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   tensor = torch::tensor({1.5f, 2.25f, 3.125f});
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), default_dtype);
@@ -433,7 +434,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[2], 3.125f));
 
   tensor = torch::tensor(at::ArrayRef<float>({1.5f, 2.25f, 3.125f}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.dtype(), default_dtype);
   ASSERT_TRUE(almost_equal(tensor[0], 1.5));
@@ -441,7 +441,6 @@ void test_TorchTensorCtorSingleDimFloatingType_expected_dtype(c10::ScalarType de
   ASSERT_TRUE(almost_equal(tensor[2], 3.125));
 
   tensor = torch::tensor(std::vector<float>({1.5f, 2.25f, 3.125f}));
-  ASSERT_TRUE(tensor.is_variable());
   ASSERT_EQ(tensor.numel(), 3);
   ASSERT_EQ(tensor.sizes(), std::vector<int64_t>({3}));
   ASSERT_EQ(tensor.dtype(), default_dtype);
@@ -1071,4 +1070,28 @@ TEST(TensorTest, StdDimension) {
   ASSERT_EQ(std::get<0>(torch::var_mean(x, 0, /*unbiased=*/true)).numel(), 3);
   ASSERT_EQ(torch::std(x, 0, /*unbiased=*/true).numel(), 3);
   ASSERT_EQ(std::get<0>(torch::std_mean(x, 0, /*unbiased=*/true)).numel(), 3);
+}
+
+TEST(TensorTest, ReshapeAlias) {
+  // Tests the behavior of the _reshape_alias private operator so
+  // that it matches the behavior of as_strided and view.
+  auto x = torch::randn({3, 3});
+  ASSERT_TRUE(torch::equal(
+    torch::_reshape_alias(x, {2, 2}, {1, 2}),
+    torch::as_strided(x, {2, 2}, {1, 2})
+  ));
+  ASSERT_TRUE(torch::equal(
+    torch::_reshape_alias(x, {9}, {1}),
+    x.view({-1})
+  ));
+
+  // Test that the backward works fine.
+  auto y = torch::randn({3, 3}, torch::requires_grad(true));
+  auto z = torch::clone(y).detach().requires_grad_(true);
+  (y * y).view({-1}).mean().backward();
+  torch::_reshape_alias((z * z), {9}, {1}).mean().backward();
+  ASSERT_TRUE(torch::equal(
+    y.grad(),
+    z.grad()
+  ));
 }

@@ -11,9 +11,9 @@ namespace enumtype {
   // error: default initialization of an object of const type 'const enumtype::Enum1'
   // without a user-provided default constructor
   // ```
-  struct Enum1 { Enum1() {}; };
-  struct Enum2 { Enum2() {}; };
-  struct Enum3 { Enum3() {}; };
+  struct Enum1 { Enum1() = default; };
+  struct Enum2 { Enum2() = default; };
+  struct Enum3 { Enum3()  = default; };
 } // namespace enumtype
 
 struct enum_name {

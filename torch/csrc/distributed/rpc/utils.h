@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/Event.h>
+#include <c10/core/Stream.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/serialization/pickle.h>

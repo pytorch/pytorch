@@ -33,6 +33,7 @@ bool WeightedMultiSamplingOp<Context>::RunOnDevice() {
   const float* weight_data = weight.template data<float>();
 
   for (int i = 0; i < num_samples; ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float r;
     math::RandUniform<float, Context>(
         1, 0.0f, weight_data[data_size - 1], &r, &context_);

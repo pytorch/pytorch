@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -51,6 +52,7 @@ c10::IValue BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return readArchive("data", mcu, std::move(device));
 }
 
@@ -61,6 +63,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   std::stringstream picklename;
   picklename << archive_name << ".pkl";
   at::DataPtr pickle_ptr;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t pickle_size;
   std::tie(pickle_ptr, pickle_size) = reader_->getRecord(picklename.str());
 
@@ -125,7 +128,7 @@ c10::IValue BytecodeDeserializer::readArchive(
       size_t ndict = dict.size();
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
-      for (size_t i = 0; i < ndict; ++i) {
+      for (const auto i : c10::irange(ndict)) {
         std::stringstream name;
         name << it->key();
         cls->addOrCheckAttribute(name.str(), it->key().type());
@@ -147,81 +150,18 @@ c10::IValue BytecodeDeserializer::readArchive(
       std::move(type_resolver),
       std::move(obj_loader),
       std::move(read_record),
+      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(device));
   return unpickler.parse_ivalue();
 }
 
 } // namespace
 
-namespace mobile {
-
-mobile::Module _load_data(std::istream& in, c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _load_data(std::move(rai), std::move(device));
-}
-
-mobile::Module _load_data(
-    const std::string& filename,
-    c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _load_data(std::move(rai), std::move(device));
-}
-
-mobile::Module _load_data(
-    std::unique_ptr<ReadAdapterInterface> rai,
-    c10::optional<c10::Device> device) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  auto instance_key = std::rand();
-  if (observer) {
-    observer->onEnterLoadModel(instance_key);
-  }
-  try {
-    auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
-    BytecodeDeserializer deserializer(std::move(reader));
-    auto mcu = std::make_shared<mobile::CompilationUnit>();
-    mobile::Module result = mobile::Module(
-        deserializer.deserialize(std::move(device)).toObject(), mcu);
-    std::unordered_map<std::string, std::string> copied_metadata =
-        result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
-      copied_metadata["model_name"] = result.name();
-    }
-    if (observer) {
-      observer->onExitLoadModel(instance_key, copied_metadata);
-    }
-    return result;
-  } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailLoadModel(instance_key, error.what());
-    }
-    TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailLoadModel(instance_key, error.what());
-      }
-      TORCH_RETHROW(error);
-    }
-  }
-}
-
-} // namespace mobile
-
 std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     c10::optional<at::Device> device) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return _load_parameters(std::move(rai), std::move(device));
 }
 
@@ -229,6 +169,7 @@ std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     c10::optional<at::Device> device) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  // NOLINTNEXTLINE(performance-move-const-arg)
   return _load_parameters(std::move(rai), std::move(device));
 }
 
@@ -237,6 +178,7 @@ std::map<std::string, at::Tensor> _load_parameters(
     c10::optional<c10::Device> device) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
+  // NOLINTNEXTLINE(performance-move-const-arg)
   auto result = deserializer.deserialize(std::move(device)).toGenericDict();
   std::map<std::string, at::Tensor> map;
   for (const auto& e : result) {

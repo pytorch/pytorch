@@ -49,7 +49,7 @@ REGISTER_CPU_OPERATOR(WeightedSum, WeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(WeightedSumGradient, WeightedSumGradientOp<CPUContext>);
 REGISTER_CPU_OPERATOR(
     ScatterWeightedSum,
-    ScatterWeightedSumOp<float, CPUContext>);
+    ScatterWeightedSumOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ScatterAssign, ScatterAssignOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Scatter, ScatterOp<CPUContext>);
 
@@ -812,6 +812,7 @@ class GetWeightedSumGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     ArgumentHelper argsHelper(def_);
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     const bool grad_on_w = argsHelper.GetSingleArgument<bool>("grad_on_w", 0);
 
     auto inputs = vector<string>{GO(0)};
@@ -870,6 +871,7 @@ bool NanCheckOp<CPUContext>::RunOnDevice() {
       tensorPrinter_.Print<float>(Input(j));
       std::cerr << "NaN idxs:" << std::endl;
       const float* x = Input(j).data<float>();
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (size_t i = 0; i < Input(j).numel(); ++i) {
         if (std::isnan(x[i]) || std::isinf(x[i])) {
           std::cerr << i << " ";

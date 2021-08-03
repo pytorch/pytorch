@@ -3,8 +3,35 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
+
+namespace {
+void update_source_range_and_cs_ptr(
+    const std::set<const Node*>& input_nodes,
+    const Match& m,
+    std::unordered_map<Node*, Node*>& pattern_node_map) {
+  // pattern_node_map, maps nodes of the replacement graph
+  // to the nodes of the pattern graph.
+  // Now we iterate over each node of the replacement graph
+  // and find the corresponding pattern node in the match.
+  // The matched's node's source range and callstack is then
+  // used to update replacement node's source range and callstack
+  for (auto& it : pattern_node_map) {
+    Node* replacement_node = it.first;
+    Node* pattern_node = it.second;
+    if (!input_nodes.count(pattern_node)) {
+      Node* orig_node = m.nodes_map.at(pattern_node);
+      replacement_node->setSourceRange(orig_node->sourceRange());
+      if (orig_node->callstack()) {
+        replacement_node->setCallStack(orig_node->callstack().value());
+      }
+    }
+  }
+}
+} // namespace
 
 void SubgraphRewriter::RegisterDefaultPatterns() {
   // TODO: Add actual patterns (like Conv-Relu).
@@ -17,13 +44,17 @@ graph(%x, %w, %b):
       R"IR(
 graph(%x, %w, %b):
   %r = aten::convrelu(%x, %w, %b)
-  return (%r))IR");
+  return (%r))IR",
+      {{"r", "c"}});
 }
 
 void SubgraphRewriter::RegisterRewritePattern(
     const std::string& pattern,
-    const std::string& replacement) {
-  RewritePatternDescr d = {pattern, replacement};
+    const std::string& replacement,
+    const std::vector<std::pair<std::string, std::string>>& value_name_pairs) {
+  std::unordered_map<std::string, std::string> value_name_map(
+      value_name_pairs.begin(), value_name_pairs.end());
+  RewritePatternDescr d = {pattern, replacement, value_name_map};
   patterns_.push_back(d);
 }
 
@@ -56,7 +87,28 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
   parseIR(pattern.pattern, &pattern_graph, vmap);
 
   Graph replacement_graph;
-  parseIR(pattern.replacement, &replacement_graph);
+  std::unordered_map<std::string, Value*> vmap_replacement;
+  parseIR(pattern.replacement, &replacement_graph, vmap_replacement);
+
+  // First construct map of Node*-to-Node*
+  // This maps Nodes in replacement graph to nodes in pattern graph
+  // given the value_name_map, which maps value names from repalcement
+  // pattern to value name in pattern
+  std::unordered_map<Node*, Node*> pattern_node_map;
+  std::set<const Node*> pattern_input_nodes;
+  for (auto& it : vmap_replacement) {
+    const auto& replacement_value_name = it.first;
+    Node* replacement_value_node = it.second->node();
+    if (pattern.value_name_map.count(replacement_value_name)) {
+      const auto& pattern_value_name =
+          pattern.value_name_map.at(replacement_value_name);
+      TORCH_CHECK(
+          vmap.count(pattern_value_name),
+          "Value must be found in the replacement graph.");
+      Node* pattern_value_node = vmap.at(pattern_value_name)->node();
+      pattern_node_map.emplace(replacement_value_node, pattern_value_node);
+    }
+  }
 
   const auto& matches = findPatternMatches(pattern_graph, *graph);
   for (const Match& match : matches) {
@@ -105,6 +157,11 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
       continue;
     }
 
+    // Before rewriting the graph, update source range and callstack
+    // info of the replacement pattern graph so that the rewritten graph
+    // has the updated info
+    update_source_range_and_cs_ptr(
+        pattern_input_nodes, match, pattern_node_map);
     // Insert a clone of replacement subgraph.
     // `inputs` vector holds values that we would use as incoming values to the
     // new subgraph, and we will get `new_outputs` vector containing values
@@ -116,7 +173,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
-    for (size_t idx = 0; idx < outputs.size(); idx++) {
+    for (const auto idx : c10::irange(outputs.size())) {
       values_to_rewrite.push_back(outputs[idx]);
       rewrite_map[outputs[idx]] = new_outputs[idx];
     }

@@ -105,9 +105,9 @@ class _FunctionalAdam(object):
                    exp_avg_sqs,
                    max_exp_avg_sqs,
                    state_steps,
-                   self.amsgrad,
-                   self.defaults['beta1'],
-                   self.defaults['beta2'],
-                   self.defaults['lr'],
-                   self.defaults['weight_decay'],
-                   self.defaults['eps'])
+                   amsgrad=self.amsgrad,
+                   beta1=self.defaults['beta1'],
+                   beta2=self.defaults['beta2'],
+                   lr=self.defaults['lr'],
+                   weight_decay=self.defaults['weight_decay'],
+                   eps=self.defaults['eps'])

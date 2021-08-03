@@ -3,6 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/utils/ParamUtils.h>
+#include <c10/util/irange.h>
 #include <tuple>
 
 
@@ -194,6 +195,7 @@ static Tensor _mkldnn_pooling(
   if (stride.empty()) stride = kernel_size;
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto padding_vec_l = padding_vec;
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
@@ -284,6 +286,7 @@ static Tensor _mkldnn_pooling_backward(
   auto kernel_size_vec = expand_param_if_needed(kernel_size, "kernel_size", dims);
   auto stride_vec = expand_param_if_needed(stride, "stride", dims);
   auto padding_vec = expand_param_if_needed(padding, "padding", dims);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto padding_vec_l = padding_vec;
   auto padding_vec_r = padding_vec;
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
@@ -618,7 +621,7 @@ Tensor mkldnn_adaptive_avg_pool2d_backward(
 
   auto output_size_vec = grad_output.sizes();
   std::vector<int64_t> kernel_size(input.dim() - 2);
-  for (size_t i = 2; i < input.dim(); ++i) {
+  for (const auto i: c10::irange(2, input.dim())) {
     auto s1 = input.size(i);
     auto s2 = output_size_vec[i];
     TORCH_CHECK(s2 != 0, "output size can not be zero");

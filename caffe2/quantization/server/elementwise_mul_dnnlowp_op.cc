@@ -9,7 +9,7 @@ using namespace std;
 using namespace dnnlowp;
 
 using MulFp32Op =
-    BinaryElementwiseOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
+    BinaryElementwiseBroadcastOp<NumericTypes, CPUContext, MulFunctor<CPUContext>>;
 
 template <typename T>
 class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
@@ -68,14 +68,18 @@ class MulDNNLowPOp : public BinaryElementwiseDNNLowPOp<T, MulFp32Op> {
         C_quantized[i] = fbgemm::Requantize<T>(raw, requantization_params_);
       }
     } else {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       size_t pre, n, post;
       std::tie(pre, n, post) =
           elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
+      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       for (int i = 0; i < pre; ++i) {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int j = 0; j < n; ++j) {
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (int k = 0; k < post; ++k) {
             int32_t raw = (A_quantized[((i * n) + j) * post + k] -
                            in_qparams_[0].zero_point) *

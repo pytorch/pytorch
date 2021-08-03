@@ -57,6 +57,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   const float* input_ptr = input_contig.data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t K = input.size(input.dim() - 1);
   TORCH_CHECK(weight.dim() == 2);
@@ -68,7 +69,9 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   TORCH_CHECK(weight_zero_point.isIntegral(false));
 
   // Calculate statistics for quantization of the input Tensor
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float x_min;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float x_max;
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
@@ -223,7 +226,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   const Tensor weight_contig = weight.contiguous();
 
   // Calculate weight statistics
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float w_min;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   float w_max;
   fbgemm::FindMinMax(
       /*m=*/weight_contig.data_ptr<float>(),
@@ -320,9 +325,12 @@ float RawUint16ToFp16(unsigned short value) {
 
   const float sign = sign_bits ? -1 : 1;
   const float significand =
+      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float exponent = exponent_bits - 0xf;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   return sign * std::ldexp(significand, exponent);
 }
 
@@ -409,6 +417,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   TORCH_CHECK(input.dim() >= 2);
   TORCH_CHECK(bias.dim() == 1);
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
   std::vector<int64_t> output_size = input.sizes().vec();

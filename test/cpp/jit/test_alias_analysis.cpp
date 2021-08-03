@@ -55,6 +55,7 @@ class TopologicalMoveTest : public ::testing::Test {
       const std::vector<std::string>& blockInputNames = {}) {
     std::vector<Value*> inputs;
     for (const auto& name_ : inputNames) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       inputs.push_back(nodes.at(name_)->output());
     }
     auto node = graph->appendNode(graph->create(prim::AutogradZero, inputs));
@@ -65,6 +66,7 @@ class TopologicalMoveTest : public ::testing::Test {
       node->addBlock();
       std::vector<Value*> blockDeps;
       for (const auto& name_ : blockInputNames) {
+        // NOLINTNEXTLINE(performance-inefficient-vector-operation)
         blockDeps.push_back(nodes.at(name_)->output());
       }
 
@@ -147,8 +149,11 @@ class TopologicalMoveTest : public ::testing::Test {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unique_ptr<AliasDb> aliasDb;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<std::string, Node*> nodes;
 };
 
@@ -592,6 +597,41 @@ TEST(ContainerAliasingTest, MayContainAlias) {
 
   EXPECT_TRUE(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(str_output, graph->outputs()));
+}
+
+TEST(ContainerAliasingTest, MayContainAlias_cast) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+  graph(%input.1 : Tensor):
+    %2 : NoneType = prim::Constant()
+    %3 : bool = prim::Constant[value=0]()
+    %4 : int = prim::Constant[value=6]()
+    %5 : int = prim::Constant[value=1]()
+    %a.1 : Tensor = aten::add(%input.1, %input.1, %5)
+    %b.1 : Tensor = aten::to(%a.1, %4, %3, %3, %2)
+    %c.1 : Tensor = aten::mul(%b.1, %b.1)
+    return (%c.1)
+    )IR",
+      &*graph,
+      vmap);
+
+  auto a = vmap["a.1"];
+  auto b = vmap["b.1"];
+  auto c = vmap["c.1"];
+  AliasDb aliasDb(graph);
+
+  EXPECT_TRUE(graph->outputs().size() == 1);
+  for (auto out : graph->outputs()) {
+    EXPECT_TRUE(aliasDb.mayContainAlias(c, out));
+  }
+
+  EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
+  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->inputs()));
+
+  EXPECT_TRUE(aliasDb.mayContainAlias({c}, graph->outputs()));
+  EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
 }
 
 TEST(ContainerAliasingTest, PrimitveValuesDontAliasContainers) {

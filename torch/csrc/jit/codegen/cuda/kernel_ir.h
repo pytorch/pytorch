@@ -31,13 +31,14 @@ class IrBuilder;
 //!
 class Passkey {
   friend class IrBuilder;
-  Passkey() {}
+  Passkey() = default;
 };
 
 class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
   NamedScalar(Passkey, std::string name, DataType dtype)
-      : Val(ValType::KirNamedScalar, dtype, true, true), name_(name) {}
+      : Val(ValType::KirNamedScalar, dtype, true, true),
+        name_(std::move(name)) {}
 
   explicit NamedScalar(Passkey, const fuser::cuda::NamedScalar* node)
       : Val(node), name_(node->name()) {}
@@ -574,6 +575,7 @@ class TORCH_CUDA_CU_API Sync : public Expr {
 };
 
 // TODO(kir): promote to IR node
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Scope {
  public:
   Scope() = default;

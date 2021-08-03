@@ -10,6 +10,7 @@ import abc
 import functools
 import json
 import os
+import signal
 import socket
 import time
 import traceback
@@ -21,9 +22,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
+from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
-from torch.distributed.elastic.multiprocessing import ProcessFailure, Std
+from torch.distributed.elastic.multiprocessing import (
+    ProcessFailure,
+    Std,
+    SignalException,
+)
 from torch.distributed.elastic.utils.logging import get_logger
 
 
@@ -52,6 +58,8 @@ class WorkerSpec:
         monitor_interval: monitor status of workers every ``n`` seconds
         master_port: fixed port to run the c10d store on rank 0
                      if not specified then will chose a random free port
+        master_addr: fixed master_addr to run the c10d store on rank 0
+                     if not specified then will chose hostname on agent rank 0
         redirects: redirect std streams to a file,
                    selectively redirect for a particular
                    local rank by passing a map
@@ -71,6 +79,7 @@ class WorkerSpec:
     max_restarts: int = 3
     monitor_interval: float = 30.0
     master_port: Optional[int] = None
+    master_addr: Optional[str] = None
     redirects: Union[Std, Dict[int, Std]] = Std.NONE
     tee: Union[Std, Dict[int, Std]] = Std.NONE
 
@@ -95,6 +104,7 @@ class WorkerSpec:
         if isinstance(self.entrypoint, str):
             return os.path.basename(self.entrypoint)
         else:
+            assert self.entrypoint is not None
             return self.entrypoint.__qualname__
 
 
@@ -483,24 +493,32 @@ class SimpleElasticAgent(ElasticAgent):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def _shutdown(self) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         """
         Cleans up any resources that were allocated during the agent's work.
+
+        Args:
+            death_sig: Signal to send to the child process, SIGTERM is default
         """
         raise NotImplementedError()
 
     @staticmethod
-    def _set_master_addr_port(store, master_port):
+    def _set_master_addr_port(
+        store: Store, master_addr: Optional[str], master_port: Optional[int]
+    ):
         if master_port is None:
             sock = _get_socket_with_port()
             with closing(sock):
                 master_port = sock.getsockname()[1]
 
-        store.set("MASTER_ADDR", _get_fq_hostname().encode(encoding="UTF-8"))
+        if master_addr is None:
+            master_addr = _get_fq_hostname()
+
+        store.set("MASTER_ADDR", master_addr.encode(encoding="UTF-8"))
         store.set("MASTER_PORT", str(master_port).encode(encoding="UTF-8"))
 
     @staticmethod
-    def _get_master_addr_port(store) -> Tuple[str, int]:
+    def _get_master_addr_port(store: Store) -> Tuple[str, int]:
         master_addr = store.get("MASTER_ADDR").decode(encoding="UTF-8")
         master_port = int(store.get("MASTER_PORT").decode(encoding="UTF-8"))
         return (master_addr, master_port)
@@ -527,7 +545,7 @@ class SimpleElasticAgent(ElasticAgent):
         worker_group.group_world_size = group_world_size
 
         if group_rank == 0:
-            self._set_master_addr_port(store, spec.master_port)
+            self._set_master_addr_port(store, spec.master_addr, spec.master_port)
         master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
@@ -686,16 +704,23 @@ class SimpleElasticAgent(ElasticAgent):
     @prof
     def run(self, role: str = DEFAULT_ROLE) -> RunResult:
         start_time = time.monotonic()
+        shutdown_called: bool = False
         try:
             result = self._invoke_run(role)
             self._total_execution_time = int(time.monotonic() - start_time)
             self._record_metrics(result)
             self._record_worker_events(result)
             return result
+        except SignalException as e:
+            log.warning(f"Received {e.sigval} death signal, shutting down workers")
+            self._shutdown(e.sigval)
+            shutdown_called = True
+            raise
         finally:
+            if not shutdown_called:
+                self._shutdown()
             # record the execution time in case there were any exceptions during run.
             self._total_execution_time = int(time.monotonic() - start_time)
-            self._shutdown()
 
     def get_agent_status_event(self, state: WorkerState) -> Event:
         raw_error = traceback.format_exc() if state == WorkerState.FAILED else None
@@ -881,6 +906,9 @@ class SimpleElasticAgent(ElasticAgent):
             log.info(
                 f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
             )
+        except SignalException as e:
+            log.warn(f"Got termination signal: {e.sigval}")
+            raise
         except Exception:
             log.exception(
                 f"Error waiting on exit barrier. Elapsed: {time.time() - start} seconds"

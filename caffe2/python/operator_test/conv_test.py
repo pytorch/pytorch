@@ -164,7 +164,7 @@ class TestConvolution(serial.SerializedTestCase):
         use_bias=st.booleans(),
         **hu.gcs
     )
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_convolution_separate_stride_pad_layout(
         self,
         op_type,
@@ -761,7 +761,7 @@ class TestConvolution(serial.SerializedTestCase):
         engine=st.sampled_from(["CUDNN", ""]),
         **hu.gcs_no_hip
     )
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def test_convolution_sync(self, net_type, num_workers, engine, gc, dc):
         m = ModelHelper(name="test_model")
         n = 1

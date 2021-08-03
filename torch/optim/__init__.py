@@ -13,9 +13,11 @@ from .sparse_adam import SparseAdam
 from .adamax import Adamax
 from .asgd import ASGD
 from .sgd import SGD
+from .radam import RAdam
 from .rprop import Rprop
 from .rmsprop import RMSprop
 from .optimizer import Optimizer
+from .nadam import NAdam
 from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
@@ -28,7 +30,9 @@ del sparse_adam
 del adamax
 del asgd
 del sgd
+del radam
 del rprop
 del rmsprop
 del optimizer
+del nadam
 del lbfgs

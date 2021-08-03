@@ -48,11 +48,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     int64_t axis,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
-              "Scale must be Float, found ", scale.scalar_type());
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
-              "Zero-point must be Long, found ", zero_point.scalar_type());
+  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Int,
+              "Zero-point must be Int32, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
   TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
@@ -68,8 +65,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
         equal to `quant_max`.");
 
   TORCH_CHECK(
-      at::min(zero_point).item().toLong() >= quant_min &&
-          at::max(zero_point).item().toLong() <= quant_max,
+      at::min(zero_point).item().toInt() >= quant_min &&
+          at::max(zero_point).item().toInt() <= quant_max,
       "`zero_point` must be between `quant_min` and `quant_max`.");
 
   TORCH_CHECK(
@@ -86,8 +83,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_output(Y)
     .add_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -96,8 +93,8 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
     .check_all_same_dtype(false)
     .add_output(mask)
     .add_input(self)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .add_owned_input(native::_unsafe_view(scale, expected_shape))
+    .add_owned_input(native::_unsafe_view(zero_point, expected_shape))
     .build();
 
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
@@ -118,7 +115,6 @@ Returns:
 Tensor fake_quantize_per_channel_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
   TORCH_CHECK(mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",
@@ -147,7 +143,7 @@ Tensor _fake_quantize_learnable_per_channel_affine(
     int64_t quant_min,
     int64_t quant_max,
     double grad_factor) {
-  Tensor zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max).to(at::kLong);
+  Tensor zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max).to(at::kInt);
   return native::fake_quantize_per_channel_affine(
     self, scale, zero_point_rounded, axis, quant_min, quant_max);
 }
@@ -219,6 +215,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
   // into the same shapes as X along the channel axis.
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
   for (int i = 0; i < numDimensions; ++i) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
@@ -244,6 +241,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   // Create a collection of axes that include all but the channel axis for
   // reduction when summing over the dScale and dZeroPoint tensors.
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_for_reduction = (int64_t*) calloc(numElements, sizeof(int64_t));
   for (const auto i : c10::irange(axis)) {
     axis_for_reduction[i] = i;
@@ -255,7 +253,9 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
   auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
 
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(axis_mask);
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(axis_for_reduction);
   return std::make_tuple(dX, dScale, dZeroPoint);
 }

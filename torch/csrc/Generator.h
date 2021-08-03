@@ -5,6 +5,7 @@
 
 #include <torch/csrc/THP_export.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPGenerator {
   PyObject_HEAD
   at::Generator cdata;

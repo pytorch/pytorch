@@ -9,7 +9,7 @@ namespace native {
 
 namespace {
 
-std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
+C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     const Tensor& input,
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
@@ -58,14 +58,22 @@ std::tuple<Tensor, Tensor, Tensor, int64_t, int64_t> _prepare_layer_norm_inputs(
   const int64_t N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
 
-  const auto& X = input.is_contiguous() ? input : input.contiguous();
-  const auto& gamma = weight.is_contiguous() ? weight : weight.contiguous();
-  const auto& beta = bias.is_contiguous() ? bias : bias.contiguous();
-
-  return std::make_tuple(X, gamma, beta, M, N);
+  return std::make_pair(M, N);
 }
 
 } // namespace
+
+void layer_norm_cpu_out(
+    at::Tensor& out,
+    at::Tensor& mean,
+    at::Tensor& rstd,
+    const at::Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& gamma,
+    const Tensor& beta,
+    double eps,
+    int64_t M,
+    int64_t N);
 
 using forward_fn = void (*)(
     const Tensor& /* X */,

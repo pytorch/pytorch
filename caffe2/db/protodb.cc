@@ -11,6 +11,7 @@ class ProtoDBCursor : public Cursor {
  public:
   explicit ProtoDBCursor(const TensorProtos* proto)
     : proto_(proto), iter_(0) {}
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ProtoDBCursor() override {}
 
   void Seek(const string& /*str*/) override {
@@ -40,9 +41,10 @@ class ProtoDBTransaction : public Transaction {
     }
   }
   ~ProtoDBTransaction() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Commit();
   }
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     if (existing_names_.count(key)) {
       CAFFE_THROW("An item with key ", key, " already exists.");
     }
@@ -80,6 +82,7 @@ class ProtoDB : public DB {
     LOG(INFO) << "Opened protodb " << source;
   }
   ~ProtoDB() override {
+    // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
     Close();
   }
 

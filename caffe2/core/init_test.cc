@@ -28,6 +28,7 @@ REGISTER_CAFFE2_INIT_FUNCTION(
 
 int dummy_argc = 1;
 const char* dummy_name = "foo";
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-pro-type-const-cast)
 char** dummy_argv = const_cast<char**>(&dummy_name);
 } // namespace
 
@@ -60,7 +61,9 @@ void LateRegisterFailInitFunction() {
 TEST(InitTest, FailLateRegisterInitFunction) {
   caffe2::GlobalInit(&dummy_argc, &dummy_argv);
   LateRegisterInitFunction();
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(LateRegisterEarlyInitFunction(), ::c10::Error);
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(LateRegisterFailInitFunction(), ::c10::Error);
   EXPECT_TRUE(gTestInitFunctionHasBeenRun);
   EXPECT_TRUE(gTestFailInitFunctionHasBeenRun);

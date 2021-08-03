@@ -132,6 +132,7 @@ class LayerNormGradientOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     const auto& dY = Input(0);
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
     const auto& Y = Input(1);
     const auto& mean = Input(2);
     const auto& sigma = Input(3);

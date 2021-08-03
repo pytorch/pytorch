@@ -17,6 +17,7 @@ bool CubeGradientFunctor<CPUContext>::Forward(
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
+      // NOLINTNEXTLINE(modernize-use-transparent-functors)
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   EigenVectorMap<T>(dX, size) = ConstEigenVectorArrayMap<T>(dY, size) *
       ConstEigenVectorArrayMap<T>(X, size).square() * T(3);

@@ -6,8 +6,9 @@ class BatchNorm2d(torch.nn.BatchNorm2d):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm2d, self).__init__(num_features)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(BatchNorm2d, self).__init__(num_features, **factory_kwargs)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0
@@ -39,8 +40,9 @@ class BatchNorm3d(torch.nn.BatchNorm3d):
     r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
     """
 
-    def __init__(self, num_features, eps=1e-5, momentum=0.1):
-        super(BatchNorm3d, self).__init__(num_features)
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, device=None, dtype=None):
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(BatchNorm3d, self).__init__(num_features, **factory_kwargs)
         self.eps = eps
         self.scale = 1.0
         self.zero_point = 0

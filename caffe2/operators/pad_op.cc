@@ -43,6 +43,7 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
               int h = ph - pad_t();
               int w = pw - pad_l();
               Ydata[ph * padded_width + pw] =
+                  // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
                   (h < 0 || w < 0 || h >= height || w >= width)
                   ? value_
                   : Xdata[h * width + w];

@@ -20,6 +20,15 @@ Tensor quantize_per_tensor(
   return quantizer->quantize(self);
 }
 
+Tensor quantize_per_tensor_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    ScalarType dtype) {
+  auto quantizer = make_per_tensor_affine_quantizer(scale.item().toDouble(), zero_point.item().toLong(), dtype);
+  return quantizer->quantize(self);
+}
+
 std::vector<Tensor> quantize_per_tensor_list_cpu(
     TensorList tensors,
     const Tensor& scales,
@@ -36,7 +45,7 @@ std::vector<Tensor> quantize_per_tensor_list_cpu(
   return quantized_tensors;
 }
 
-Tensor quantize_per_channel_cpu(
+Tensor quantize_per_channel(
     const Tensor& self,
     const Tensor& scales,
     const Tensor& zero_points,
@@ -50,14 +59,14 @@ Tensor dequantize_cpu(const Tensor& self) {
   return self.to(at::kFloat);
 }
 
-Tensor dequantize_quantized_cpu(const Tensor& self) {
+Tensor dequantize_quantized(const Tensor& self) {
   return get_qtensorimpl(self)->quantizer()->dequantize(self);
 }
 
 std::vector<Tensor> dequantize_tensors_quantized_cpu(TensorList tensors) {
   std::vector<Tensor> dequantized_tensors;
-  for (const auto i : c10::irange(tensors.size())) {
-    dequantized_tensors.push_back(tensors[i].dequantize());
+  for (const auto & tensor : tensors) {
+    dequantized_tensors.push_back(tensor.dequantize());
   }
   return dequantized_tensors;
 }
@@ -242,9 +251,11 @@ float calculate_quant_loss(
     int bit_width) {
   xmin = static_cast<at::Half>(xmin);
   float data_range = xmax - xmin;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float qmax = (1 << bit_width) - 1;
   float scale = data_range == 0
       ? 1.0
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       : static_cast<float>(static_cast<at::Half>(data_range / qmax));
   float inverse_scale = scale == 0 ? 1.0f : 1.0f / scale;
 
@@ -283,8 +294,10 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   float xmax = *std::max_element(input_row, input_row + numel);
 
   float stepsize = (xmax - xmin) / n_bins;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   int min_bins = n_bins * (1.0 - (float) ratio);
-  const float* input = input_tensor.contiguous().data_ptr<float>();
+  Tensor input_tensor_contig = input_tensor.contiguous();
+  const float* input = input_tensor_contig.data_ptr<float>();
   std::vector<float> q_input(numel);
 
   float loss =
@@ -295,6 +308,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   float cur_max = xmax;
   float cur_loss = loss;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float thr = min_bins * stepsize;
   while (cur_min + thr < cur_max) {
     // move left

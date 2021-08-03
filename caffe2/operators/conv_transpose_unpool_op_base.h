@@ -120,6 +120,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
     }
 
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int dim = 0; dim < kernel_.size(); ++dim) {
       CAFFE_ENFORCE_GT(kernel_[dim], 0);
       CAFFE_ENFORCE_GT(stride_[dim], 0);

@@ -54,7 +54,7 @@ struct DeepAndWideFast : torch::nn::Module {
       auto wide_offset = at::add(wide, mu_);
       auto wide_normalized = at::mul(wide_offset, sigma_);
       // Placeholder for ReplaceNaN
-      auto wide_preproc = at::native::clamp(wide_normalized, -10.0, 10.0);
+      auto wide_preproc = at::cpu::clamp(wide_normalized, -10.0, 10.0);
 
       auto user_emb_t = at::native::transpose(user_emb, 1, 2);
       auto dp_unflatten = at::native::bmm_cpu(ad_emb_packed, user_emb_t);
@@ -66,7 +66,7 @@ struct DeepAndWideFast : torch::nn::Module {
       fc_w_t_ = torch::t(fc_w_);
       auto fc1 = torch::addmm(fc_b_, input, fc_w_t_);
 
-      auto pred = at::native::sigmoid(fc1);
+      auto pred = at::cpu::sigmoid(fc1);
 
       prealloc_tensors = {
           wide_offset,
@@ -87,7 +87,7 @@ struct DeepAndWideFast : torch::nn::Module {
       at::add_out(prealloc_tensors[0], wide, mu_);
       at::mul_out(prealloc_tensors[1], prealloc_tensors[0], sigma_);
 
-      at::native::clamp_out(
+      at::native::clip_out(
           prealloc_tensors[1], -10.0, 10.0, prealloc_tensors[2]);
 
       // Potential optimization: original tensor could be pre-transposed.
@@ -117,9 +117,9 @@ struct DeepAndWideFast : torch::nn::Module {
       // tensor views on the output that are passed to the _out ops above.
       at::native::_cat_out_cpu(
           {prealloc_tensors[5], prealloc_tensors[2]}, 1, prealloc_tensors[6]);
-      at::native::addmm_cpu_out(
-          fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1, prealloc_tensors[7]);
-      at::native::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
+      at::cpu::addmm_out(
+          prealloc_tensors[7], fc_b_, prealloc_tensors[6], fc_w_t_, 1, 1);
+      at::cpu::sigmoid_out(prealloc_tensors[7], prealloc_tensors[8]);
 
       return prealloc_tensors[8];
     }

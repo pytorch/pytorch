@@ -2108,7 +2108,7 @@ class TestMixTracingScripting(JitTestCase):
         class Param(nn.Module):
             def __init__(self):
                 super(Param, self).__init__()
-                self.register_parameter("bias", nn.Parameter(torch.Tensor(4, 4)))
+                self.register_parameter("bias", nn.Parameter(torch.empty(4, 4)))
 
             def forward(self, x):
                 return x

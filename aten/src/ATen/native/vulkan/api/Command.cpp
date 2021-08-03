@@ -482,7 +482,7 @@ void Command::Pool::submit(
       0u,
       nullptr,
       nullptr,
-      command_buffers.size(),
+      utils::safe_downcast<uint32_t>(command_buffers.size()),
       command_buffers.data(),
       0u,
       nullptr,

@@ -405,8 +405,7 @@ class vTensor final {
  #endif /* VULKAN_TENSOR_DEBUG */
 };
 
-const vTensor& convert(const Tensor& tensor);
-vTensor& convert(Tensor& tensor);
+vTensor& convert(const Tensor& tensor);
 Tensor convert(const vTensor& tensor);
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -588,18 +587,7 @@ inline void vTensor::View::State::set_dirty(
   dirty_ |= components;
 }
 
-inline const vTensor& convert(const Tensor& tensor) {
-  TORCH_INTERNAL_ASSERT(
-      tensor.is_vulkan(),
-      "Vulkan tensor expected!");
-
-  const vTensorImpl* const impl =
-      static_cast<const vTensorImpl*>(tensor.unsafeGetTensorImpl());
-
-  return impl->opaque_handle();
-}
-
-inline vTensor& convert(Tensor& tensor) {
+inline vTensor& convert(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_vulkan(),
       "Vulkan tensor expected!");

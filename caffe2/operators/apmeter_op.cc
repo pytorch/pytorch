@@ -80,6 +80,7 @@ bool APMeterOp<float, CPUContext>::RunOnDevice() {
       tp_sum += buffer[j].second;
       if (buffer[j].second == 1) {
         ntruth += 1;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         precision_sum += tp_sum / (j + 1);
       }
     }
