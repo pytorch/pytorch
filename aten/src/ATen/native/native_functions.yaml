@@ -1428,20 +1428,19 @@
   device_guard: False
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: cumprod.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cumprod
 
 - func: cumprod_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  structured_delegate: cumprod.out
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: cumprod_
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: cumprod_out
+    CPU, CUDA: cumprod_out
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7470,16 +7469,6 @@
   dispatch:
     CPU: _index_copy_impl_
     CUDA: _index_copy_impl_
-
-- func: _cumprod(Tensor self, int dim) -> Tensor
-  dispatch:
-    CPU: _cumprod_cpu
-    CUDA: _cumprod_cuda
-
-- func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cumprod_out_cpu
-    CUDA: _cumprod_out_cuda
 
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   variants: function

@@ -544,42 +544,20 @@ void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
       });
 }
 
-Tensor& _cumprod_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
-  TensorArg output_arg{result, "output", 1};
-  TensorArg input_arg{self, "input", 2};
-  checkAllSameGPU(__func__, {output_arg, input_arg});
-  checkSameType(__func__, output_arg, input_arg);
-
-  at::native::resize_output(result, self.sizes());
-  if (self.dim() == 0) {
-    result.fill_(self);
-    return result;
-  }
-  if (self.numel() == 0) {
-    result.zero_();
-    return result;
-  }
-  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
-
+void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       ScalarType::Half, ScalarType::BFloat16, self.scalar_type(), "cumprod_cuda", [&]() {
         scalar_t init = 1;
         scan_dim<scalar_t>(
             self,
             result,
-            wrap_dim,
+            dim,
             init,
             std::multiplies<scalar_t>());
       });
-
-  return result;
-}
-
-Tensor _cumprod_cuda(const Tensor& self, int64_t dim) {
-  Tensor result = at::empty_like(self, MemoryFormat::Contiguous);
-  return at::native::_cumprod_out_cuda(self, dim, result);
 }
 
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
 }} // namespace at::native

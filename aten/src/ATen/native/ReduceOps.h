@@ -37,7 +37,7 @@ DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 using structured_cum_fn = void (*)(const Tensor&, const Tensor&, int64_t);
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(structured_cum_fn, cumsum_stub);
-DECLARE_DISPATCH(cum_fn, cumprod_stub);
+DECLARE_DISPATCH(structured_cum_fn, cumprod_stub);
 DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
 
 // Used in cuda/Normalization.cu
