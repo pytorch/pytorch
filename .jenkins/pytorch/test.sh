@@ -289,41 +289,25 @@ test_vulkan() {
 
 test_distributed() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Testing distributed C++ tests with the install folder"
-      # Rename the build folder when running test to ensure it
-      # is not depended on the folder
-      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_TEST_DIR"
-    else
-      echo "Testing distributed C++ tests with the build folder"
-      TEST_BASE_DIR="$BUILD_BIN_DIR"
-    fi
     echo "Testing distributed C++ tests"
     # NB: the ending test_distributed must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-distributed/test_distributed
     mkdir -p $TEST_REPORTS_DIR
-    "$TEST_BASE_DIR"/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
-    "$TEST_BASE_DIR"/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
-    "$TEST_BASE_DIR"/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
+    build/bin/FileStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/FileStoreTest.xml
+    build/bin/HashStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/HashStoreTest.xml
+    build/bin/TCPStoreTest --gtest_output=xml:$TEST_REPORTS_DIR/TCPStoreTest.xml
 
     MPIEXEC=$(command -v mpiexec)
     # TODO: this is disabled on GitHub Actions until this issue is resolved
     # https://github.com/pytorch/pytorch/issues/60756
     if [[ -n "$MPIEXEC" ]] && [[ -z "$GITHUB_ACTIONS" ]]; then
-      MPICMD="${MPIEXEC} -np 2 $TEST_BASE_DIR/ProcessGroupMPITest"
+      MPICMD="${MPIEXEC} -np 2 build/bin/ProcessGroupMPITest"
       eval "$MPICMD"
     fi
-    "$TEST_BASE_DIR"/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
-    "$TEST_BASE_DIR"/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
-    "$TEST_BASE_DIR"/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      # Restore the build folder to avoid any impact on other tests
-      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
-    fi
-    exit 1
+    build/bin/ProcessGroupGlooTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
+    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
 }
 
