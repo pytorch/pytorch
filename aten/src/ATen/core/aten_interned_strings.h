@@ -59,7 +59,6 @@ _(aten, _cufft_clear_plan_cache) \
 _(aten, _cufft_get_plan_cache_max_size) \
 _(aten, _cufft_get_plan_cache_size) \
 _(aten, _cufft_set_plan_cache_max_size) \
-_(aten, _cumprod) \
 _(aten, _denseDims) \
 _(aten, _dimI) \
 _(aten, _dimV) \

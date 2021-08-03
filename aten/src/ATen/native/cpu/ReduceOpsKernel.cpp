@@ -86,7 +86,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void cumprod_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
