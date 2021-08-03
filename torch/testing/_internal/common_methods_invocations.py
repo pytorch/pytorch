@@ -2226,6 +2226,12 @@ def _generate_reduction_inputs(device, dtype, requires_grad):
     yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
     yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
 
+def _generate_nan_reduction_inputs(device, dtype, requires_grad):
+    yield torch.tensor(torch.nan, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield torch.tensor([torch.nan], device=device, dtype=dtype, requires_grad=requires_grad)
+    yield torch.tensor([2, torch.nan, -1], device=device, dtype=dtype, requires_grad=requires_grad)
+    yield torch.tensor([[torch.nan, 2], [0, 1]], device=device, dtype=dtype, requires_grad=requires_grad)
+
 # Generates a subset of possible dim and keepdim kwargs for a tensor
 # with ndim dims appropriate for testing. If supports_multiple_dims
 # is True (default) then dim kwarg can be a list of dims.
@@ -2260,6 +2266,23 @@ def sample_inputs_reduction_wrapper(supports_multiple_dims):
         inputs = []
 
         for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
+
+        return inputs
+
+    return fn
+
+def sample_inputs_nan_reduction(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def fn(op_info, device, dtype, requires_grad):
+        inputs = []
+
+        for t in _generate_nan_reduction_inputs(device, dtype, requires_grad):
             # Add case without dim and keepdim kwargs
             inputs.append(SampleInput(t))
             for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
@@ -6454,6 +6477,18 @@ op_db: List[OpInfo] = [
            # Need to skip out test because one of the overload for mean does not support it
            # TODO(@heitorschueroff) fix this when implementing ReductionInfo
            skips=(SkipInfo('TestCommon', 'test_out'),)),
+    OpInfo('nanmean',
+           ref=lambda x, dim=None, keepdim=False: np.nanmean(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim),
+           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           # Failing with: Jacobian mismatch for output 0 with respect to input 0,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_nan_reduction(supports_multiple_dims=True),
+           # Need to skip out test because one of the overload for mean does not support it
+           # TODO(@heitorschueroff) fix this when implementing ReductionInfo
+           skips=(
+               SkipInfo('TestCommon', 'test_out'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           )),
     OpInfo('quantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile),

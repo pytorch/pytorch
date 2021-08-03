@@ -1036,6 +1036,80 @@ Tensor& mean_out(const Tensor& self, DimnameList dim,
   return at::mean_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 
+// TODO (@heitorschueroff) implement custom kernels for nanmean
+Tensor nanmean_impl(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    ScalarType dtype) {
+  int64_t dim_prod = 1;
+  if (dim.size() == 0 || self.ndimension() == 0) {
+    dim_prod = self.numel();
+  } else {
+    for (auto d : dim) {
+      dim_prod *= self.size(d);
+    }
+  }
+  const auto factor = dim_prod - self.isnan().sum(dim, keepdim);
+  return self.nansum(dim, keepdim, dtype).div_(factor);
+}
+
+Tensor& nanmean_out(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  ScalarType scalarType =
+      opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      toString(scalarType),
+      " instead.");
+  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
+  result.set_(nanmean_impl(self, dim, keepdim, dtype));
+  return result;
+}
+
+Tensor& nanmean_out(
+    const Tensor& self,
+    DimnameList dim,
+    bool keepdim,
+    c10::optional<ScalarType> opt_dtype,
+    Tensor& result) {
+  return at::nanmean_out(
+      result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+Tensor nanmean(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    optional<ScalarType> opt_dtype) {
+  ScalarType scalarType =
+      opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      toString(scalarType),
+      " instead.");
+  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
+  return nanmean_impl(self, dim, keepdim, dtype);
+}
+
+Tensor nanmean(
+    const Tensor& self,
+    DimnameList dim,
+    bool keepdim,
+    optional<ScalarType> dtype) {
+  return at::nanmean(self, dimnames_to_positions(self, dim), keepdim, dtype);
+}
+
+Tensor nanmean(const Tensor& self, optional<ScalarType> dtype) {
+  return at::native::nanmean(self, IntArrayRef{}, false, dtype);
+}
+
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
   int ndims = self.sizes().size();
   auto dims_to_squeeze = at::dim_list_to_bitset(dims, ndims);
