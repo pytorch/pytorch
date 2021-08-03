@@ -13,7 +13,7 @@ namespace at {
 namespace meta {
 TORCH_META_FUNC(_softmax)
 (const Tensor& input, const int64_t dim, const bool half_to_float) {
-  int64_t dim_ = maybe_wrap_dim(dim_, input.dim());
+  int64_t dim_ = maybe_wrap_dim(dim, input.dim());
 
   auto output_options =
       input.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT);
