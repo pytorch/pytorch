@@ -388,15 +388,11 @@ endmacro()
 #   torch_compile_options(lib_name)
 function(torch_compile_options libname)
   set_property(TARGET ${libname} PROPERTY CXX_STANDARD 14)
+  set(private_compile_options "")
 
   # ---[ Check if warnings should be errors.
   if(WERROR)
-    target_compile_options(${libname} PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:-Werror>)
-    if(USE_CUDA)
-      target_compile_options(${libname} PRIVATE
-          $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler="-Werror">)
-    endif()
+    list(APPEND private_compile_options -Werror)
   endif()
 
   if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
@@ -429,7 +425,7 @@ function(torch_compile_options libname)
           /bigobj>
         )
     else()
-      target_compile_options(${libname} PRIVATE
+      list(APPEND private_compile_options
         -Wall
         -Wextra
         -Wno-unused-parameter
@@ -453,7 +449,7 @@ function(torch_compile_options libname)
         )
 
       if(NOT APPLE)
-        target_compile_options(${libname} PRIVATE
+        list(APPEND private_compile_options
           # Considered to be flaky.  See the discussion at
           # https://github.com/pytorch/pytorch/pull/9608
           -Wno-maybe-uninitialized)
@@ -463,9 +459,15 @@ function(torch_compile_options libname)
 
     if(MSVC)
     elseif(WERROR)
-      target_compile_options(${libname} PRIVATE -Wno-strict-overflow)
+      list(APPEND private_compile_options -Wno-strict-overflow)
     endif()
   endif()
+
+  target_compile_options(${libname} PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
+  string(REPLACE ";" "," private_compile_options "${private_compile_options}")
+  target_compile_options(${libname} PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=${private_compile_options}>)
 
   if(NOT WIN32 AND NOT USE_ASAN)
     # Enable hidden visibility by default to make it easier to debug issues with
