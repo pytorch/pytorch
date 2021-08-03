@@ -287,7 +287,6 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         return super().run_node(n)
 
     def placeholder(self, target, args, kwargs):
-        assert self.optimization_profiles
         self._input_names.append(target)
         shape, dtype, _, shape_ranges, has_batch_dim = self.input_specs[self.input_specs_iter]
         self.input_specs_iter += 1
@@ -297,6 +296,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
                 shape = shape[1:]
         else:
             for i, shape_range in enumerate(shape_ranges):
+                assert self.optimization_profiles
                 self.optimization_profiles[i].set_shape(target, *shape_range)
 
         return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))
