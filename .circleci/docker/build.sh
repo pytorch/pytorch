@@ -200,6 +200,16 @@ case "$image" in
     VISION=yes
     BREAKPAD=yes
     ;;
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.8-gcc9)
+    CUDA_VERSION=10.2
+    CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    BREAKPAD=yes
+    ;;
   pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
