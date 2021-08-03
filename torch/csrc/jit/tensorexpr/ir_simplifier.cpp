@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 
 namespace torch {
@@ -2755,8 +2757,11 @@ const Expr* SimplifierUnderContext::mutate(const Div* v) {
   const Expr* lhs = v->lhs();
   const Expr* rhs = v->rhs();
 
+  std::ostringstream oss;
   if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
+    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
+    GRAPH_DEBUG(oss.str());
     return ret->accept_mutator(this);
   }
 
@@ -2772,7 +2777,10 @@ const Expr* SimplifierUnderContext::mutate(const Mod* v) {
   const Expr* lhs = v->lhs();
   const Expr* rhs = v->rhs();
 
+  std::ostringstream oss;
   if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
+    oss << "SimplifierUnderContext: " << *v << " => " << *ret << "\n";
+    GRAPH_DEBUG(oss.str());
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
     return ret->accept_mutator(this);
   }
@@ -2792,6 +2800,8 @@ const Expr* SimplifierUnderContext::mutate(const Mod* v) {
           IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
       if (check_start->isConstant() && check_end->isConstant() &&
           immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        oss << "SimplifierUnderContext: " << *v << " => " << *lhsVar << "\n";
+        GRAPH_DEBUG(oss.str());
         return lhsVar;
       }
     }
