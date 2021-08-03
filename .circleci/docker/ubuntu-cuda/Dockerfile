@@ -90,7 +90,7 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
-ENV CUDA_PATH="$(dirname $(dirname `which nvcc`))"
+ENV CUDA_PATH /usr/local/cuda
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm

@@ -424,6 +424,9 @@ class TORCH_API SimplifierUnderContext : public IRMutator {
   // Add boundary info for index variables in for-loops
   Stmt* mutate(const For* v) override;
 
+  const Expr* mutate(const Div* v) override;
+  const Expr* mutate(const Mod* v) override;
+
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   HashProvider hasher_;
