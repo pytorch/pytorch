@@ -1045,8 +1045,10 @@ class TestCase(expecttest.TestCase):
     _ignore_not_implemented_error = False
 
     # When True, skip the check that will raise a RuntimeError if the test case
-    # prints anything to stdout or stderr
-    _ignore_error_on_print = False
+    # prints anything to stdout or stderr. As of August 2021 this is set to True
+    # since the PyTorch tests don't follow this closely so we can only enable it
+    # on a case-by-case basis. Eventually this should default to False.
+    _ignore_error_on_print = True
 
     # Test names (by self.id() on a TestCase instance, e.g. "TestClass.test_name")
     # to ignore when checking for output to stdout or stderr
