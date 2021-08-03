@@ -1861,9 +1861,10 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
                         args=(gather_variable((S, S // 2), 0, S, True, device=device),)),
             )
 
+
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
     # Ordered as (input shape, kwargs)
-    test_cases: Tuple[Tuple[int, ...], Dict[str, Any]] = (  # type: ignore[assignment]
+    test_cases = (  # type: ignore[assignment]
         ((S, S, S), {}),
         ((S, S, S), {'dim': 1}),
         ((S, S, S), {'dim': (1, 2,)}),
@@ -1883,8 +1884,10 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
 
 # TODO (@heitorschueroff) Once aminmax supports multiple dims this should
 # be combined with the above test.
+
+
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
-    test_cases: Tuple[Tuple[int, ...], Dict[str, Any]] = (  # type: ignore[assignment]
+    test_cases = (  # type: ignore[assignment]
         ((S, S, S), {}),
         ((S, S, S), {'dim': 1}),
         ((S, S, S), {'dim': 1, 'keepdim': True}),
