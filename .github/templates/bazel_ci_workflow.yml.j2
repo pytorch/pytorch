@@ -3,7 +3,7 @@
 {% block name -%}
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Bazel Linux CI (!{{ build_environment }})
+name: !{{ build_environment }}
 {%- endblock %}
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests

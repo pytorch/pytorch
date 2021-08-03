@@ -1536,7 +1536,9 @@ class DistributedDataParallelTest(
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist.GradBucket) -> torch._C.Future:
+        def allreduce_hook(
+            state: object, bucket: dist.GradBucket
+        ) -> torch.futures.Future[torch.Tensor]:
             tensors = [bucket.get_tensor() / self.world_size]
             return (
                 process_group.allreduce(tensors)
@@ -1761,7 +1763,7 @@ class DistributedDataParallelTest(
 
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future:
+        ) -> torch.futures.Future[torch.Tensor]:
             tensors = [bucket.get_tensor() / self.world_size]
             fut = process_group.allreduce(tensors).get_future()
 
