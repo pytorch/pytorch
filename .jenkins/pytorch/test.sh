@@ -277,12 +277,30 @@ test_libtorch() {
 
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      echo "Testing vulkan with the install folder"
+      # Rename the build folder when running test to ensure it
+      # is not depended on the folder
+      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
+      TEST_BASE_DIR="$TORCH_TEST_DIR"
+      ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+      ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+    else
+      echo "Testing vulkan with the build folder"
+      TEST_BASE_DIR="$BUILD_BIN_DIR"
+    fi
+
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$TEST_BASE_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+
+    if [[ -n "$IN_WHEEL_TEST" ]]; then
+      # Restore the build folder to avoid any impact on other tests
+      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
+    fi
   fi
 }
 
