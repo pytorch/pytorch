@@ -124,9 +124,17 @@ def hook_with_zero_step(
             overlap_info.bucket_index_to_bucket[bucket_index] = bucket
             overlap_info.bucket_index_to_future[bucket_index] = fut
 
-        # NOTE: The implementation from this point forward assumes that the
-        # buckets are indexed incrementally starting from 0 in the order of
-        # their autograd hooks firing
+        # Check that buckets are indexed incrementally starting from 0 in the
+        # order of their autograd hooks firing
+        if len(overlap_info.bucket_indices_seen) > 0:
+            assert overlap_info.bucket_indices_seen[-1] == bucket_index - 1, \
+                "Bucket indices are not in incremental order"
+        else:
+            assert bucket_index == 0, "Bucket indices do not start from 0"
+        overlap_info.bucket_indices_seen.append(bucket_index)
+
+        # Directly return the future without any optimizer computation if this
+        # is not the last bucket
         num_buckets = len(overlap_info.params_per_bucket)
         is_last_bucket = bucket_index == num_buckets - 1
         if not is_last_bucket:
@@ -178,6 +186,7 @@ def hook_with_zero_step(
         # Reset per-iteration information
         overlap_info.bucket_index_to_future.clear()
         overlap_info.bucket_index_to_bucket.clear()
+        overlap_info.bucket_indices_seen.clear()
 
         return fut
 
