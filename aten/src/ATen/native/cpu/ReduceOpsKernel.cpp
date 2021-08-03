@@ -20,7 +20,7 @@ namespace at { namespace native { namespace {
 using namespace vec;
 
 template <typename scalar_t, typename func_t>
-static inline void cpu_cum_base_kernel(Tensor& result,
+static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
     const func_t& f,
@@ -67,7 +67,7 @@ static inline void cpu_cum_base_kernel(Tensor& result,
   iter.for_each(loop);
 }
 
-static void cumsum_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
