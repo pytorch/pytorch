@@ -70,7 +70,7 @@ DONT_REQUIRE_DERIVATIVE = {
     'argmax', 'argmin', 'argsort', 'searchsorted',
     'bucketize',
     # Functions that return booleans are not differentiable
-    'isnan', 'isposinf', 'isneginf', 'isinf'
+    'isnan', 'isposinf', 'isneginf', 'isinf', 'signbit', 'isin',
     # Functions return none are not differentiable
     'record_stream',
 }
@@ -101,8 +101,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
     'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
-    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'conj_physical_', '_neg_view', '_reshape_alias',
-    '_det_lu_based_helper',
+    'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
