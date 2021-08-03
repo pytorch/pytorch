@@ -48,11 +48,33 @@ struct BasicUnaryBatchRuleHelper<F, Func, typelist<A, T...>> {
   }
 };
 
+template <typename A, A a, typename C>
+struct ScalarUnaryBatchRuleHelper;
+
+template <typename F, F Func, typename S, typename A, typename... T>
+struct ScalarUnaryBatchRuleHelper<F, Func, typelist<S, A, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Scalar& self,
+      const Tensor& tensor,
+      optional<int64_t> batch_dim,
+      T... extra_args) {
+    return std::make_tuple(Func(self, tensor, std::forward<T>(extra_args)...), batch_dim);
+  }
+};
+
+
+
 // USAGE: BASIC_UNARY_BATCH_RULE(at::sin)
 // INCORRECT USAGE: BASIC_UNARY_BATCH_RULE(&at::sin)
 // It is important that this macro is not passed a function pointer!!
 #define BASIC_UNARY_BATCH_RULE(fn) SINGLE_ARG(\
     BasicUnaryBatchRuleHelper<\
+      decltype(&fn),\
+      &fn,\
+      c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
+
+#define SCALAR_UNARY_BATCH_RULE(fn) SINGLE_ARG(\
+    ScalarUnaryBatchRuleHelper<\
       decltype(&fn),\
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
