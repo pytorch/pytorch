@@ -182,8 +182,8 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        if _manual_seed_callback:
-            _queued_calls.append(_manual_seed_callback)
+        if _manual_seed_all_lazy_cb:
+            _queued_calls.append(_manual_seed_all_lazy_cb)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
