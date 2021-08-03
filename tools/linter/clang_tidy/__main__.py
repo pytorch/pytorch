@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import re
+import sys
 from typing import List
 
 
@@ -77,9 +78,9 @@ DEFAULTS = {
     "paths": ["torch/csrc/"],
     "include-dir": ["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
     "clang-tidy-exe": INSTALLATION_PATH,
-    "parallel": True,
     "compile-commands-dir": "build",
     "config-file": ".clang-tidy",
+    "disable-progress-bar": False,
 }
 
 
@@ -132,23 +133,11 @@ def parse_args() -> argparse.Namespace:
         help="Only show the command to be executed, without running it",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Don't print output")
     parser.add_argument(
         "--config-file",
         default=DEFAULTS["config-file"],
         help="Path to a clang-tidy config file. Defaults to '.clang-tidy'.",
-    )
-    parser.add_argument(
-        "-k",
-        "--keep-going",
-        action="store_true",
-        help="Don't error on compiler errors (clang-diagnostic-error)",
-    )
-    parser.add_argument(
-        "-j",
-        "--parallel",
-        action="store_true",
-        default=DEFAULTS["parallel"],
-        help="Run clang tidy in parallel per-file (requires ninja to be installed).",
     )
     parser.add_argument(
         "--print-include-paths",
@@ -169,6 +158,12 @@ def parse_args() -> argparse.Namespace:
         help="Add NOLINT to suppress clang-tidy violations",
     )
     parser.add_argument(
+        "--disable-progress-bar",
+        action="store_true",
+        default=DEFAULTS["disable-progress-bar"],
+        help="Disable the progress bar",
+    )
+    parser.add_argument(
         "extra_args", nargs="*", help="Extra arguments to forward to clang-tidy"
     )
     return parser.parse_args()
@@ -185,15 +180,15 @@ def main() -> None:
 
     if not exists:
         msg = (
-            "Could not find '.clang-tidy-bin/clang-tidy'\n"
-            "You can install it by running:\n"
-            "   python3 tools/linter/install/clang_tidy.py"
+            f"Could not find '{options.clang_tidy_exe}'\n"
+            + "We provide a custom build of clang-tidy that has additional checks.\n"
+            + "You can install it by running:\n"
+            + "$ python3 tools/linter/install/clang_tidy.py"
         )
         raise RuntimeError(msg)
 
-    return_code = run(options)
-    if return_code != 0:
-        raise RuntimeError("Warnings found in clang-tidy output!")
+    result, _ = run(options)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":

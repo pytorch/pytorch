@@ -796,7 +796,7 @@ jobs:
     - run:
         command: 'set -eux
 
-          docker_image_commit=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          docker_image_commit=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
 
           docker_image_libtorch_android_x86_32=${docker_image_commit}-android-x86_32
@@ -944,7 +944,7 @@ jobs:
     - run:
         command: 'set -e
 
-          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32
+          docker_image_libtorch_android_x86_32=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}-android-x86_32
 
           echo "docker_image_libtorch_android_x86_32: "${docker_image_libtorch_android_x86_32}
 
@@ -1073,7 +1073,7 @@ jobs:
     - run:
         command: 'set -eux
 
-          docker_image_commit=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          docker_image_commit=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
 
           docker_image_libtorch_android_x86_32_gradle=${docker_image_commit}-android-x86_32-gradle
@@ -1126,7 +1126,7 @@ jobs:
     - run:
         command: 'set -ex
 
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
@@ -1208,7 +1208,7 @@ jobs:
     - run:
         command: 'set -ex
 
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
@@ -1369,7 +1369,7 @@ jobs:
           \ 2>&1'\n\necho ${COMMAND} > ./command.sh && unbuffer bash ./command.sh\
           \ | ts\n\n# Push intermediate Docker image for next phase to use\nif [ -z\
           \ \"${BUILD_ONLY}\" ]; then\n  # Augment our output image name with bazel\
-          \ to avoid collisions\n  output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-bazel-${CIRCLE_SHA1}\n\
+          \ to avoid collisions\n  output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-bazel-${CIRCLE_SHA1}\n\
           \  export COMMIT_DOCKER_IMAGE=$output_image\n  docker commit \"$id\" ${COMMIT_DOCKER_IMAGE}\n\
           \  time docker push ${COMMIT_DOCKER_IMAGE}\nfi\n"
         name: Bazel Build
@@ -1386,7 +1386,7 @@ jobs:
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
-        command: "set -e\noutput_image=${DOCKER_IMAGE}:${DOCKER_TAG}-bazel-${CIRCLE_SHA1}\n\
+        command: "set -e\noutput_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-bazel-${CIRCLE_SHA1}\n\
           export COMMIT_DOCKER_IMAGE=$output_image\necho \"DOCKER_IMAGE: \"${COMMIT_DOCKER_IMAGE}\n\
           \ntime docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null\n\nif [ -n \"${USE_CUDA_DOCKER_RUNTIME}\"\
           \ ]; then\n  export id=$(docker run --env-file \"${BASH_ENV}\" --cap-add=SYS_PTRACE\
@@ -1443,7 +1443,7 @@ jobs:
           \  # Note [Special build images]\n  # The xla build uses the same docker\
           \ image as\n  # pytorch_linux_bionic_py3_6_clang9_build. In the push step,\
           \ we have to\n  # distinguish between them so the test can pick up the correct\
-          \ image.\n  output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}\n\
+          \ image.\n  output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}\n\
           \  if [[ ${BUILD_ENVIRONMENT} == *\"xla\"* ]]; then\n    export COMMIT_DOCKER_IMAGE=$output_image-xla\n\
           \  elif [[ ${BUILD_ENVIRONMENT} == *\"libtorch\"* ]]; then\n    export COMMIT_DOCKER_IMAGE=$output_image-libtorch\n\
           \  elif [[ ${BUILD_ENVIRONMENT} == *\"paralleltbb\"* ]]; then\n    export\
@@ -1493,7 +1493,7 @@ jobs:
     - run:
         command: "set -e\nexport PYTHONUNBUFFERED=1\nif [[ \"${DOCKER_IMAGE}\" ==\
           \ *rocm3.9* ]]; then\n  export DOCKER_TAG=\"f3d89a32912f62815e4feaeed47e564e887dffd6\"\
-          \nfi\n# See Note [Special build images]\noutput_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}\n\
+          \nfi\n# See Note [Special build images]\noutput_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}\n\
           if [[ ${BUILD_ENVIRONMENT} == *\"xla\"* ]]; then\n  export COMMIT_DOCKER_IMAGE=$output_image-xla\n\
           elif [[ ${BUILD_ENVIRONMENT} == *\"libtorch\"* ]]; then\n  export COMMIT_DOCKER_IMAGE=$output_image-libtorch\n\
           elif [[ ${BUILD_ENVIRONMENT} == *\"paralleltbb\"* ]]; then\n  export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb\n\
@@ -1537,11 +1537,12 @@ jobs:
         command: "set -e\n\ncat >docker_commands.sh \\<<EOL\n# ===================\
           \ The following code will be executed inside Docker container ===================\n\
           set -ex\nexport SCRIBE_GRAPHQL_ACCESS_TOKEN=\"${SCRIBE_GRAPHQL_ACCESS_TOKEN}\"\
-          \nexport JOB_BASE_NAME=\"$CIRCLE_JOB\"\n${PARALLEL_FLAGS}\ncd workspace\n\
-          EOL\nif [[ ${BUILD_ENVIRONMENT} == *\"multigpu\"* ]]; then\n  echo \".jenkins/pytorch/multigpu-test.sh\"\
-          \ >> docker_commands.sh\nelif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then\n\
-          \  echo \"pip install click mock tabulate networkx==2.0\" >> docker_commands.sh\n\
-          \  echo \"pip -q install --user \\\"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\\\
+          \nexport JOB_BASE_NAME=\"$CIRCLE_JOB\"\nexport IN_WHEEL_TEST=1\n${PARALLEL_FLAGS}\n\
+          cd workspace\nEOL\nif [[ ${BUILD_ENVIRONMENT} == *\"multigpu\"* ]]; then\n\
+          \  echo \".jenkins/pytorch/multigpu-test.sh\" >> docker_commands.sh\nelif\
+          \ [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then\n  echo \"pip install click\
+          \ mock tabulate networkx==2.0\" >> docker_commands.sh\n  echo \"pip -q install\
+          \ --user \\\"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\\\
           \"\" >> docker_commands.sh\n  echo \".jenkins/caffe2/test.sh\" >> docker_commands.sh\n\
           else\n  echo \".jenkins/pytorch/test.sh\" >> docker_commands.sh\nfi\necho\
           \ \"(cat docker_commands.sh | docker exec -u jenkins -i \"$id\" bash) 2>&1\"\
@@ -1800,7 +1801,7 @@ jobs:
     - run:
         command: 'set -ex
 
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
 
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
