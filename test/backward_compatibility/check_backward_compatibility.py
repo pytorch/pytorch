@@ -112,17 +112,18 @@ ALLOW_LIST = [
     ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
 ]
 
-ALLOW_LIST_COMPILED = [(
-    re.compile(item[0]),
-    item[1],
-    re.compile(item[2]) if len(item) > 2 else None,
+ALLOW_LIST_COMPILED = [
+    (
+        re.compile(item[0]),
+        item[1],
+        re.compile(item[2]) if len(item) > 2 else None,
     ) for item in ALLOW_LIST if item[1] < datetime.date.today()
 ]
 
 def allow_listed(schema):
     for item in ALLOW_LIST_COMPILED:
         if item[0].search(str(schema)):
-            if len(item) > 2:
+            if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
                 return bool(item[2].search(str(schema)))
             return True
