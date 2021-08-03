@@ -48,7 +48,10 @@ from torch.testing._internal.common_utils import (
 )
 
 if TEST_WITH_TSAN:
-    print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
+    print(
+        "Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 
@@ -859,7 +862,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @sandcastle_skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/15963")
+    @sandcastle_skip(
+        "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
+    )
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
     def test_scatter_stress_cuda(self):
@@ -1929,7 +1934,9 @@ class DistributedDataParallelTest(
             ValueError, "bucket annotation should be dist.GradBucket."
         ):
 
-            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+            def comm_hook(
+                state: object, bucket: int
+            ) -> torch.futures.Future[torch.Tensor]:
                 return torch.futures.Future()
 
             model.register_comm_hook(state=None, hook=comm_hook)
@@ -1948,7 +1955,7 @@ class DistributedDataParallelTest(
             ModuleForDdpCommHook(), process_group=process_group
         )
 
-        expected_err = "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+        expected_err = "Communication hook: return annotation should be torch.futures.Future"
         with self.assertRaisesRegex(
             ValueError,
             expected_err,
@@ -1963,7 +1970,7 @@ class DistributedDataParallelTest(
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "callback must return a torch.futures.Future or torch._C.Future object, but got",
+            "callback must return a torch.futures.Future object, but got",
         ):
 
             def comm_hook(state: object, bucket: dist.GradBucket):
@@ -2023,7 +2030,7 @@ class DistributedDataParallelTest(
 
         def allreduce_hook_gloo(
             state: object, bucket: dist.GradBucket
-        ) -> torch.futures.Future:
+        ) -> torch.futures.Future[torch.Tensor]:
             def div_by_world_size(fut):
                 # Divide the result by 2 * world_size.
                 return fut.wait()[0] / self.world_size
@@ -2064,7 +2071,7 @@ class ReducerTest(TestCase):
         model = ReducerModule()
         parameters = list(model.parameters())
         buckets = [list(range(len(parameters)))]
-        dist.Reducer([parameters], buckets, [dist._DEFAULT_FIRST_BUCKET_BYTES], self.process_group)
+        dist.Reducer([parameters], buckets, self.process_group)
 
     def _create_mixed_precision_model(self):
         model = ReducerModule()
@@ -2081,12 +2088,7 @@ class ReducerTest(TestCase):
         with self.assertRaises(RuntimeError):
             parameters = [list(model.parameters())]
             buckets = [list(range(len(parameters[0])))]
-            dist.Reducer(
-                parameters,
-                buckets,
-                [dist._DEFAULT_FIRST_BUCKET_BYTES],
-                self.process_group
-            )
+            dist.Reducer(parameters, buckets, self.process_group)
 
     @requires_gloo()
     def test_multi_dtype_multi_bucket(self):
@@ -2096,12 +2098,7 @@ class ReducerTest(TestCase):
             range(len(parameters[0])), key=lambda i: parameters[0][i].dtype
         )
         buckets = [list(indices) for _, indices in group_by_dtype]
-        dist.Reducer(
-            parameters,
-            buckets,
-            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in buckets],
-            self.process_group
-        )
+        dist.Reducer(parameters, buckets, self.process_group)
 
     def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
@@ -2112,7 +2109,6 @@ class ReducerTest(TestCase):
         return dist.Reducer(
             parameters,
             buckets,
-            [dist._DEFAULT_FIRST_BUCKET_BYTES for _ in range(len(buckets))],
             self.process_group,
             find_unused_parameters=find_unused_parameters,
         )

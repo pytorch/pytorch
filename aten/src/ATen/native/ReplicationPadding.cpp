@@ -64,6 +64,7 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   {
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     nbatch = input.size(0);
+    (void)nbatch;
     dimw++;
     dimslices++;
   }
