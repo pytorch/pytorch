@@ -2777,6 +2777,26 @@ const Expr* SimplifierUnderContext::mutate(const Mod* v) {
     return ret->accept_mutator(this);
   }
 
+  // i % N -> i if the range of i's values is a subset of [0, N)
+  // where N is an integer constant
+  auto* lhsVar = dynamic_cast<const Var*>(lhs);
+  const Expr* rhsScalar = rhs->isConstant() ? rhs : nullptr;
+  if (lhsVar && rhsScalar && !rhsScalar->dtype().is_floating_point()) {
+    auto got = var_bound_info_.find(lhsVar);
+    if (got != var_bound_info_.end()) {
+      auto start = got->second.first;
+      auto end = got->second.second;
+      const Expr* check_start =
+          IRSimplifier::simplify(new CompareSelect(start, new IntImm(0), kGE));
+      const Expr* check_end =
+          IRSimplifier::simplify(new CompareSelect(end, rhsScalar, kLE));
+      if (check_start->isConstant() && check_end->isConstant() &&
+          immediateEquals(check_start, 1) && immediateEquals(check_end, 1)) {
+        return lhsVar;
+      }
+    }
+  }
+
   const Expr* lhs_new = lhs->accept_mutator(this);
   const Expr* rhs_new = rhs->accept_mutator(this);
   if (lhs == lhs_new && rhs == rhs_new) {
