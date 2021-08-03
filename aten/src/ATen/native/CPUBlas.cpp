@@ -236,17 +236,17 @@ void gemm(
       // alpha and beta and C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       float alpha_ = (float) alpha, beta_ = (float) beta;
       int c_size = n_ * ldc_;
-      float *c_float = (float *) malloc(c_size * sizeof(float));
-      for (int i=0; i<c_size; ++i) c_float[i] = (float) c[i];
+      std::vector<float> float_v(c, c + c_size);
       sbgemm_(&transa_, &transb_,
               &m_, &n_, &k_,
               &alpha_,
               a, &lda_,
               b, &ldb_,
               &beta_,
-              c_float, &ldc_);
-      for (int i=0; i<c_size; ++i) c[i] = (decltype(c10::impl::ScalarTypeToCPPType<at::kBFloat16>::t)) c_float[i];
-      free(c_float);
+              float_v.data(), &ldc_);
+      for (auto cv: float_v) {
+        *(c++) = static_cast<_bfloat16_t>(cv);
+      }
       return;
    }
 #endif
