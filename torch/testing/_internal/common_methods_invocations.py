@@ -1884,8 +1884,6 @@ def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
 
 # TODO (@heitorschueroff) Once aminmax supports multiple dims this should
 # be combined with the above test.
-
-
 def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (  # type: ignore[assignment]
         ((S, S, S), {}),
