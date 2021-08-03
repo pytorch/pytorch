@@ -79,7 +79,6 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -756,9 +755,9 @@ RegisterOperators reg(
      // This is an alternative to aten::cat op that takes variable number of
      // parameters as input.
      // Format:
-     //    prim::Concat(Tensors..., dim) -> Tensor
+     //    prim::VarConcat(Tensors..., dim) -> Tensor
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("prim::Concat(...) -> Tensor"),
+         TORCH_SELECTIVE_SCHEMA("prim::VarConcat(...) -> Tensor"),
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
            auto dim = pop(stack).toInt();
@@ -1492,7 +1491,6 @@ void dictConstructFromList(Stack* stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
@@ -2071,7 +2069,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
       });
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg1(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
@@ -2427,7 +2424,6 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     OperatorGenerator(

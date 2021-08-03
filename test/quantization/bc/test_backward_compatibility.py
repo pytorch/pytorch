@@ -2,7 +2,7 @@
 
 import sys
 import os
-
+import unittest
 # torch
 import torch
 import torch.nn as nn
@@ -11,8 +11,10 @@ import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
 # Testing utils
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, IS_AVX512_VNNI_SUPPORTED
 from torch.testing._internal.common_quantized import override_qengines, qengine_is_fbgemm
+
+from torch.quantization import MinMaxObserver, PerChannelMinMaxObserver
 
 def remove_prefix(text, prefix):
     if text.startswith(prefix):
@@ -121,6 +123,24 @@ class TestSerialization(TestCase):
         expected = torch.load(expected_file)
         self.assertEqual(qmodule_scripted(input_tensor), expected, atol=prec)
         self.assertEqual(qmodule_traced(input_tensor), expected, atol=prec)
+
+    def _test_obs(self, obs, input_size, subname=None, generate=False):
+        """
+        Test observer code can be loaded from state_dict.
+        """
+        input_file, state_dict_file, _, traced_module_file, expected_file = \
+            get_filenames(self, None)
+        if generate:
+            input_tensor = torch.rand(*input_size).float()
+            torch.save(input_tensor, input_file)
+            torch.save(obs(input_tensor), expected_file)
+            torch.save(obs.state_dict(), state_dict_file)
+
+        input_tensor = torch.load(input_file)
+        obs.load_state_dict(torch.load(state_dict_file))
+        expected = torch.load(expected_file)
+
+        self.assertEqual(obs(input_tensor), expected)
 
     @override_qengines
     def test_linear(self):
@@ -238,6 +258,7 @@ class TestSerialization(TestCase):
             # TODO: graph mode quantized conv3d module
 
     @override_qengines
+    @unittest.skipIf(IS_AVX512_VNNI_SUPPORTED, "This test fails on machines with AVX512_VNNI support. Ref: GH Issue 59098")
     def test_lstm(self):
         class LSTMModule(torch.nn.Module):
             def __init__(self):
@@ -250,3 +271,11 @@ class TestSerialization(TestCase):
         if qengine_is_fbgemm():
             mod = LSTMModule()
             self._test_op(mod, input_size=[4, 4, 3], input_quantized=False, generate=False, new_zipfile_serialization=True)
+
+    def test_per_channel_observer(self):
+        obs = PerChannelMinMaxObserver()
+        self._test_obs(obs, input_size=[5, 5], generate=False)
+
+    def test_per_tensor_observer(self):
+        obs = MinMaxObserver()
+        self._test_obs(obs, input_size=[5, 5], generate=False)
