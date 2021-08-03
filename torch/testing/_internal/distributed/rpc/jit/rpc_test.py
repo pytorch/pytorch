@@ -1135,7 +1135,6 @@ class JitRpcTest(
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function that calls rpc_async
         if self.rank == 0:
-            # with torch.autograd.profiler.profile() as prof:
             with _profile() as prof:
                 prof_key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
@@ -1162,7 +1161,6 @@ class JitRpcTest(
             dst_worker_name = worker_name(dst_rank)
             args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
             kwargs = {}
-            # with torch.autograd.profiler.profile() as prof:
             with _profile() as prof:
                 script_rpc_async_call(
                     dst_worker_name, args, kwargs
@@ -1207,7 +1205,6 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            # with torch.autograd.profiler.profile() as prof:
             with _profile() as prof:
                 # Runs 2 rpc_async calls within JIT under record_function.
                 record_function_on_caller_rpc_async(dst_worker_name, block_scope)
@@ -1248,7 +1245,6 @@ class JitRpcTest(
             dst_rank = (self.rank + 1) % self.world_size
             dst_worker_name = worker_name(dst_rank)
             block_scope = "foo"
-            # with torch.autograd.profiler.profile() as prof:
             with _profile() as prof:
                 call_rpc_torchscript_with_record_function(dst_worker_name, block_scope)
 
@@ -1278,7 +1274,6 @@ class JitRpcTest(
         # Ensures that we can call rf._call_end_callbacks_on_future on a jit
         # future in python eager mode with torch.jit.fork
         sleep_interval = 1
-        # with torch.autograd.profiler.profile() as prof:
         with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
                 fut = torch.jit._fork(sleep, sleep_interval)
@@ -1295,7 +1290,6 @@ class JitRpcTest(
     def test_call_fork_in_jit_with_profiling(self):
         # Ensures that we can call torch.ops.profiler._call_end_callbacks_on_jit_fut on a jit
         # future from within a script function with torch.jit.fork
-        # with torch.autograd.profiler.profile() as prof:
         with _profile() as prof:
             with torch.autograd.profiler.record_function("foo") as rf:
                 ret = call_fork_with_profiling(rf.handle)

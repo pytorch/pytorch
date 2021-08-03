@@ -406,9 +406,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   auto& rpcWithProfilingReq = static_cast<RpcWithProfilingReq&>(rpc);
   auto wrappedMsgType = rpcWithProfilingReq.wrappedMessageType();
   auto profilingConfig = rpcWithProfilingReq.getProfilingConfig();
-  // Only the legacy profiling mode is supported in remote RPC profiling;
-  // Note: remote RPC profiling is deprecated and will be removed in future
-  // releases of PyTorch
+
   if (profilingConfig.state == ProfilerState::KINETO ||
       profilingConfig.state == ProfilerState::KINETO_GPU_FALLBACK) {
     profilingConfig = ProfilerConfig(

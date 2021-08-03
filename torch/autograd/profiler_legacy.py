@@ -15,7 +15,7 @@ from warnings import warn
 
 
 class profile(object):
-    """DEPRECATED, TO BE REMOVED: use torch.profiler instead"""
+    """DEPRECATED: use torch.profiler instead"""
     def __init__(
             self,
             enabled=True,

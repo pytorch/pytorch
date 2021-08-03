@@ -150,7 +150,6 @@ class profile(object):
         if self.use_cuda:
             if (not use_kineto or ProfilerActivity.CUDA not in
                     _supported_activities()):
-                warn("Using legacy CUDA profiling")
                 assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
