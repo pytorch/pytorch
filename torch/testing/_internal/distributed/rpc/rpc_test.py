@@ -5,7 +5,6 @@ import os
 import sys
 import threading
 import time
-import unittest
 
 from collections import namedtuple
 from functools import partial
@@ -31,7 +30,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     captured_output,
 )
-from torch.testing._internal.common_utils import IS_MACOS, load_tests
+from torch.testing._internal.common_utils import IS_MACOS, load_tests, sandcastle_skip_if
 from torch.testing._internal.dist_utils import (
     dist_init,
     get_function_event,
@@ -40,7 +39,6 @@ from torch.testing._internal.dist_utils import (
     wait_until_pending_futures_and_users_flushed,
     wait_until_owners_and_forks_on_rank,
     worker_name,
-    single_threaded_process_group_agent,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -1481,7 +1479,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_remote_events_profiled(self):
         self._run_test_profiler_remote_events_profiled()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_remote_events_profiled_single_threaded(self):
         self._run_test_profiler_remote_events_profiled()
@@ -1549,7 +1546,6 @@ class RpcTest(RpcAgentTestFixture):
             dist.barrier()
             self._run_rpc_profiling_async_function(device="cuda:0")
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
@@ -1655,7 +1651,6 @@ class RpcTest(RpcAgentTestFixture):
 
             self.validate_profiling_workload(dst, prof)
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_autograd_context_single_threaded(self):
         self._run_test_profiler_with_autograd_context()
@@ -1730,7 +1725,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_sync_rpc_udf(self):
         self._run_test_profiler_with_sync_rpc_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_udf_single_threaded(self):
         self._run_test_profiler_with_sync_rpc_udf()
@@ -1748,7 +1742,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_sync_rpc_builtin(self):
         self._run_test_profiler_with_sync_rpc_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_sync_rpc_builtin_single_threaded(self):
         self._run_test_profiler_with_sync_rpc_builtin()
@@ -1762,7 +1755,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_async_rpc_udf(self):
         self._run_test_profiler_with_async_rpc_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_udf_single_threaded(self):
         self._run_test_profiler_with_async_rpc_udf()
@@ -1780,7 +1772,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_async_rpc_builtin(self):
         self._run_test_profiler_with_async_rpc_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_async_rpc_builtin_single_threaded(self):
         self._run_test_profiler_with_async_rpc_builtin()
@@ -1799,7 +1790,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_remote_udf(self):
         self._run_test_profiler_with_remote_udf()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_udf_single_threaded(self):
         self._run_test_profiler_with_remote_udf()
@@ -1824,7 +1814,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_remote_builtin(self):
         self._run_test_profiler_with_remote_builtin()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_remote_builtin_single_threaded(self):
         self._run_test_profiler_with_remote_builtin()
@@ -1844,7 +1833,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_async_rpc(self):
         self._run_test_profiler_with_script_async_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_async_rpc_single_threaded(self):
         self._run_test_profiler_with_script_async_rpc()
@@ -1864,7 +1852,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_sync_rpc(self):
         self._run_test_profiler_with_script_sync_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_sync_rpc_single_threaded(self):
         self._run_test_profiler_with_script_sync_rpc()
@@ -1888,7 +1875,6 @@ class RpcTest(RpcAgentTestFixture):
     def test_profiler_with_script_remote_rpc(self):
         self._run_test_profiler_with_script_remote_rpc()
 
-    @single_threaded_process_group_agent
     @dist_init
     def test_profiler_with_script_remote_rpc_single_threaded(self):
         self._run_test_profiler_with_script_remote_rpc()
@@ -2881,7 +2867,7 @@ class RpcTest(RpcAgentTestFixture):
             self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -3849,7 +3835,7 @@ class RpcTest(RpcAgentTestFixture):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -3880,7 +3866,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -3933,7 +3919,7 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
-    @unittest.skipIf(
+    @sandcastle_skip_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
     )

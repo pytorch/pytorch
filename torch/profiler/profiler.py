@@ -244,13 +244,19 @@ class profile(object):
         self.step_rec_fn: Optional[prof.record_function] = None
 
     def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+
+    def start(self):
         self._enter_actions()
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
-        return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def stop(self):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()

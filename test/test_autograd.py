@@ -7734,6 +7734,18 @@ class TestAutogradForwardMode(TestCase):
         del foo
         self.assertTrue(foo_weak.expired())
 
+    def test_out_variant(self):
+
+        with fwAD.dual_level():
+            foo = fwAD.make_dual(torch.rand(2), torch.rand(2))
+            bar = torch.rand(2)
+
+            with self.assertRaisesRegex(RuntimeError, "out= function"):
+                torch.add(bar, bar, out=foo)
+
+            with self.assertRaisesRegex(RuntimeError, "out= function"):
+                torch.add(foo, bar, out=bar)
+
 
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
@@ -8834,6 +8846,16 @@ class TestAutogradDeviceType(TestCase):
 
         self.assertNotWarn(do_test)
 
+    def test_non_differentiable_ops(self, device):
+        # Just make sure the op doesn't raise an error
+        # and resulting tensor has requires_grad=False.
+        x = torch.tensor([[1, 2], [3, 4.]], requires_grad=True, device=device)
+        out = torch.isin(x, torch.tensor([2, 3], device=device))
+        self.assertFalse(out.requires_grad)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = torch.signbit(x)
+        self.assertFalse(out.requires_grad)
 
 class TestAutogradInferenceMode(TestCase):
     def _is_inference_tensor(self, tensor):

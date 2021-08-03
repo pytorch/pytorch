@@ -186,8 +186,8 @@ class TestObserver(QuantizationTestCase):
             ]
             per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
 
-            self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
-            self.assertEqual(myobs.max_vals, ref_max_vals[ch_axis])
+            self.assertEqual(myobs.min_val, ref_min_vals[ch_axis])
+            self.assertEqual(myobs.max_val, ref_max_vals[ch_axis])
             if qscheme == torch.per_channel_symmetric:
                 ref_scales = per_channel_symmetric_ref_scales[ch_axis]
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
@@ -223,8 +223,8 @@ class TestObserver(QuantizationTestCase):
             loaded_obs = PerChannelMinMaxObserver(reduce_range=reduce_range, ch_axis=ch_axis, dtype=qdtype, qscheme=qscheme)
             loaded_obs.load_state_dict(loaded_dict)
             loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
-            self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
+            self.assertEqual(myobs.min_val, loaded_obs.min_val)
+            self.assertEqual(myobs.max_val, loaded_obs.max_val)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
@@ -314,9 +314,7 @@ class TestObserver(QuantizationTestCase):
         Tests that we can save and load state_dict for observers that are scripted
         in a quantized model.
         """
-        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
-                    PerChannelMinMaxObserver,
-                    MovingAveragePerChannelMinMaxObserver, HistogramObserver]
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver, HistogramObserver]
 
         for obs in obs_list:
             model = SingleLayerLinearModel().eval()
@@ -1036,6 +1034,67 @@ class TestFusedObsFakeQuantModule(TestCase):
                 mod_ref.activation_post_process.max_val,
                 mod.activation_post_process.max_val,
             )
+
+    def test_fused_mod_per_channel(self):
+        devices = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+        m = 5
+        n = 10
+        for device in devices:
+            running_min_op = torch.empty(m, device=device).fill_(float("inf"))
+            running_max_op = torch.empty(m, device=device).fill_(float("-inf"))
+            avg_const = 0.001
+            scale = torch.empty(m, device=device).fill_(0.1)
+            zero_point = torch.empty(m, dtype=torch.int, device=device).fill_(0)
+            obs = FusedMovingAvgObsFakeQuantize.with_args(
+                averaging_constant=avg_const,
+                observer=MovingAveragePerChannelMinMaxObserver,
+            )
+            mod = obs()
+            mod = torch.jit.script(mod)
+            mod.to(device)
+
+            for i in range(10):
+                x = torch.randn(m, n, device=device)
+                if i > 2:
+                    mod.observer_enabled[0] = 1
+                if i > 4:
+                    mod.fake_quant_enabled[0] = 1
+                # Run the forward on the Module
+                out = mod(x)
+
+                # Run the operator directly
+                pt_op = torch.fused_moving_avg_obs_fake_quant
+
+                out_ref = pt_op(
+                    x,
+                    mod.observer_enabled,
+                    mod.fake_quant_enabled,
+                    running_min_op,
+                    running_max_op,
+                    scale,
+                    zero_point,
+                    avg_const,
+                    0,
+                    255,
+                    0,
+                    True,
+                    False,
+                )
+                # Compare params with reference
+                torch.testing.assert_allclose(out, out_ref)
+                if mod.observer_enabled[0]:
+                    torch.testing.assert_allclose(
+                        running_min_op, mod.activation_post_process.min_val
+                    )
+                    torch.testing.assert_allclose(
+                        running_max_op, mod.activation_post_process.max_val
+                    )
+                if mod.fake_quant_enabled:
+                    torch.testing.assert_allclose(scale, mod.scale)
+                    torch.testing.assert_allclose(zero_point, mod.zero_point)
+
+            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
+            torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
