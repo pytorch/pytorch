@@ -45,9 +45,9 @@ def _compile_and_register_class(obj, rcb, qualified_name):
 
     return script_class
 
-def make_stub(func, name):
+def make_stub(func, name, parent_module=None):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
-    ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
+    ast = get_jit_def(func, name, self_name="RecursiveScriptModule", parent_module=parent_module)
     return ScriptMethodStub(rcb, ast, func)
 
 def make_stub_from_method(nn_module, method_name):
@@ -62,7 +62,7 @@ def make_stub_from_method(nn_module, method_name):
     #   forward = _forward
     # In this case, the actual function object will have the name `_forward`,
     # even though we requested a stub for `forward`.
-    return make_stub(func, method_name)
+    return make_stub(func, method_name, parent_module=nn_module)
 
 
 def make_stubs_from_exported_methods(mod):

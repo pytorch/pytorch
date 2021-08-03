@@ -251,7 +251,57 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     return aligned_prefix + aligned_suffix
 
 
-def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
+# not for land, just hacking for now
+
+class RewriteCall(ast.NodeTransformer):
+
+    def __init__(self, auto_quant_state):
+        super().__init__()
+        self.auto_quant_state = auto_quant_state
+        self.idx = 0
+
+    def visit_Call(self, node):
+        # replaces torch.add(x, y) with torch.ops.quantized.add(x, y, scale, zero_point)
+
+        # visit the children
+        self.generic_visit(node)
+
+        is_torch_add = (
+            isinstance(node.func, ast.Attribute) and
+            isinstance(node.func.value, ast.Name) and
+            node.func.value.id == 'torch' and
+            node.func.attr == 'add'
+        )
+        if is_torch_add:
+            name_torch = node.func.value
+            ctx = node.func.ctx
+            attr_torch_ops = ast.Attribute(name_torch, 'ops', ctx)
+            attr_torch_ops_quantized = \
+                ast.Attribute(attr_torch_ops, 'quantized', ctx)
+            attr_torch_ops_quantized_add = \
+                ast.Attribute(attr_torch_ops_quantized, 'add', ctx)
+            # TODO(future PR): look these up from the parent module
+            cur_state = self.auto_quant_state[self.idx]
+            self.idx += 1
+            assert cur_state[0] == 'add'
+            scale = ast.Constant(cur_state[1], kind=None)
+            zero_point = ast.Constant(cur_state[2], kind=None)
+            # TODO(future PR): insert quantize_per_tensor as necessary
+            args = node.args + [scale, zero_point]
+            call_torch_ops_quantized_add = ast.Call(
+                attr_torch_ops_quantized_add, args, node.keywords)
+            return call_torch_ops_quantized_add
+
+        return node
+
+
+def replace_add_with_quantized_add(root, parent_module):
+    root = ast.fix_missing_locations(
+        RewriteCall(parent_module._auto_quant_state).visit(root))
+    return root
+
+
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False, parent_module=None):
     """
     Build a JIT AST (TreeView) from the given function.
 
@@ -271,6 +321,9 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
+    # not for land, just hacking for now
+    if parent_module is not None and hasattr(parent_module, '_auto_quant_state'):
+        py_ast = replace_add_with_quantized_add(py_ast, parent_module)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])

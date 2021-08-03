@@ -334,6 +334,72 @@ class TestFuseFx(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
+
+    def test_torch_jit_script_ast_rewrite(self):
+        class M(torch.nn.Module):
+
+            def forward(self, x):
+                x = torch.add(x, x)
+                x = torch.add(x, x)
+                return x
+
+        m = M().eval()
+
+
+        # in this simple example, scale and zp are hardcoded
+        # in the real system, these would be created by the
+        # auto quantization logic
+        m._auto_quant_state = {
+            0: ('add', 0.1, 0),
+            1: ('add', 0.2, 3),
+        }
+
+        ms = torch.jit.script(m)
+        # graph is correct
+        print(ms.graph)
+
+        data = torch.quantize_per_tensor(
+            torch.randn(1, 1, 1, 1), 0.1, 0, torch.quint8)
+        output = ms(data)
+        print(output)
+
+    def test_naive_ast_rewrite(self):
+        class M(torch.nn.Module):
+
+            def forward(self, x):
+                x = torch.add(x, x)
+                return x
+
+        m = M().eval()
+        print(m)
+        m._auto_quant_state = {
+            0: ('add', 0.1, 0),
+        }
+
+        import inspect
+        import ast
+        import textwrap
+        # third-party library, not landable
+        import astpretty
+
+        def ast_rewrite(f):
+            source = inspect.getsource(f)
+            source = textwrap.dedent(source)
+            root = ast.parse(source)
+
+            astpretty.pprint(root.body[0])
+
+            root = ast.fix_missing_locations(
+                torch.jit.frontend.RewriteCall(m._auto_quant_state).visit(root))
+            # print(ast.dump(root))
+
+            astpretty.pprint(root.body[0])
+
+            return root
+
+        ast_rewrite(M.forward)
+
+
     def test_pattern_match(self):
         """ test MatchAllNode with
             conv - bn - add - relu pattern
