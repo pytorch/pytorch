@@ -55,7 +55,7 @@ class TORCH_API Interpreter {
   std::string library_name_;
   void* handle_;
   std::unique_ptr<InterpreterImpl> pImpl_;
-
+  bool custom_loader_ = false;
   InterpreterManager* manager_; // optional if managed by one
 
  public:
