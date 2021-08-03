@@ -103,27 +103,6 @@ case "$image" in
     VISION=yes
     BREAKPAD=yes
     ;;
-  pytorch-linux-xenial-cuda10-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.0
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    BREAKPAD=yes
-    ;;
-  pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7)
-    CUDA_VERSION=10.1
-    CUDNN_VERSION=7
-    ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    KATEX=yes
-    BREAKPAD=yes
-    ;;
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
