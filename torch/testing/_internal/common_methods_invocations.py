@@ -2534,6 +2534,34 @@ def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
             samples.append(SampleInput(y_tensor, kwargs=kwarg))
     return samples
 
+def sample_cumulative_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
+
+    y_shape_x_shape_and_kwargs = [
+        ((2, 3), (2, 3), {}),
+        ((2, 3), (2, 3), {'dim': 1}),
+        ((6,), (6,), {}),
+        ((6,), None, {}),
+        # When 'cumulative_trapezoid' is called with an empty input, it does not produce an output with requires_grad
+        # See Issue #{61619}
+        # ((6,0), (6,0), {}),
+        ((2, 3), (1, 3), {}),
+        ((3, 3), (3, 3), {}),
+        ((3, 3), (3, 3), {'dim': -2}),
+        ((5,), None, {'dx': 2.0}),
+        ((2, 2), None, {'dx': 3.0})
+    ]
+    samples = []
+    for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
+        y_tensor = make_tensor(y_shape, device, dtype, low=None, high=None,
+                               requires_grad=requires_grad)
+        if x_shape is not None:
+            x_tensor = make_tensor(x_shape, device, dtype, low=None, high=None,
+                                   requires_grad=requires_grad)
+            samples.append(SampleInput(y_tensor, args=(x_tensor,), kwargs=kwarg))
+        else:
+            samples.append(SampleInput(y_tensor, kwargs=kwarg))
+    return samples
+
 def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_axes = [
         ((3, 4, 5), 0),
@@ -3625,6 +3653,23 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
         yield SampleInput(zero, args=(0,), kwargs={'keepdim': True})
 
     return list(sample_generator())
+
+
+def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (S, S), False),
+        ((S, S), (S,), False),
+        ((S, ), (S, S), True)
+    )
+
+    def generator():
+        for shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape), args=(make_arg(other_shape),), broadcasts_input=broadcasts_input)
+
+    return list(generator())
+
 
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
@@ -6488,6 +6533,10 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
         ],
     ),
+    OpInfo('nextafter',
+           dtypes=floating_types_and(torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_nextafter),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
@@ -6527,6 +6576,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=True,
            supports_out=False,
@@ -7682,6 +7732,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_trapezoid),
+    OpInfo('cumulative_trapezoid',
+           dtypes=all_types_and_complex_and(),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
+           supports_out=False,
+           sample_inputs_func=sample_cumulative_trapezoid),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
