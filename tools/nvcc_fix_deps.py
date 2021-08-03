@@ -16,12 +16,13 @@ CMAKE_CUDA_COMPILER_LAUNCHER="python;tools/nvcc_fix_deps.py;ccache"
 import sys
 import subprocess
 from pathlib import Path
+from typing import List, TextIO, Optional
 
-def resolve_include(path, include_dirs):
+def resolve_include(path: Path, include_dirs: List[Path]) -> Path:
     for include_path in include_dirs:
         abs_path = include_path / path
         if abs_path.exists():
-           return abs_path
+            return abs_path
 
     paths = '\n    '.join(str(d / path) for d in include_dirs)
     raise RuntimeError(rf"""
@@ -32,7 +33,7 @@ Tried the following paths, but none existed:
 """)
 
 
-def repair_depfile(depfile, include_dirs):
+def repair_depfile(depfile: TextIO, include_dirs: List[Path]) -> None:
     changes_made = False
     out = ""
     for line in depfile.readlines():
@@ -66,8 +67,8 @@ PRE_INCLUDE_ARGS = ['-include', '--pre-include']
 POST_INCLUDE_ARGS = ['-I', '--include-path', '-isystem', '--system-include']
 
 
-def extract_include_arg(include_dirs, i, args):
-    def extract_one(name, i, args):
+def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> None:
+    def extract_one(name: str, i: int, args: List[str]) -> Optional[str]:
         arg = args[i]
         if arg == name:
             return args[i + 1]
@@ -112,6 +113,6 @@ if __name__ == '__main__':
 
     if depfile_path is not None and depfile_path.exists():
         with depfile_path.open('r+') as f:
-           repair_depfile(f, include_dirs)
+            repair_depfile(f, include_dirs)
 
     sys.exit(ret.returncode)
