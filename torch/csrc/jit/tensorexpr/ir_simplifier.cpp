@@ -2518,10 +2518,7 @@ Stmt* SimplifierUnderContext::mutate(For* v) {
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, x has to be not negative. d) j is not negative
-Expr* distributeDiv(
-    Expr* lhs,
-    Expr* rhs,
-    VarBoundInfo var_bound_info) {
+Expr* distributeDiv(Expr* lhs, Expr* rhs, VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
@@ -2638,10 +2635,7 @@ Expr* distributeDiv(
 //   returns -1. But currently, both Pytorch and NNC are performing an incorrect
 //   integer division: (-1)/6 = 0. With the current implementation of integer
 //   division, j has to be not negative. d) j is not negative
-Expr* distributeMod(
-    Expr* lhs,
-    Expr* rhs,
-    VarBoundInfo var_bound_info) {
+Expr* distributeMod(Expr* lhs, Expr* rhs, VarBoundInfo var_bound_info) {
   if (!lhs || !rhs) {
     return nullptr;
   }
