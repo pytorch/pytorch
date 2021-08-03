@@ -264,6 +264,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
   m.def("_clear_callbacks", []() {
     at::clearCallbacks();
   });
+  m.def("_register_default_hooks", [](py::function &pack_hook, py::function &unpack_hook) {
+    torch::autograd::PyDefaultSavedVariableHooks::set_hooks(pack_hook, unpack_hook);
+  });
+  m.def("_reset_default_hooks", []() {
+    torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
+  });
 
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
