@@ -508,8 +508,17 @@ class GraphTypeChecker:
         if n.op == 'placeholder':
             return n.type
 
+        elif n.op == 'get_attr':
+            t = self.traced.get_parameter(n.target)
+            if isinstance(t.data, torch.Tensor):
+                n.type = TensorType(t.data.shape)
+            return n.type
+
         elif n.op == 'call_function':
-            if n.target in _INFERENCE_RULES:
+            if n.target in _INFERENCE_RULES and n.target == getattr:
+                return _INFERENCE_RULES[n.target](n, self.traced)
+
+            elif n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n)
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
@@ -525,10 +534,6 @@ class GraphTypeChecker:
             def get_node_type(a):
                 return a.type
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
-            return n.type
-
-        # TODO
-        elif n.op == 'get_attr':
             return n.type
 
         else:
