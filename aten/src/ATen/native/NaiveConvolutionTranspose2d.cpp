@@ -1,42 +1,19 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/TensorUtils.h>
+
 #include <ATen/Parallel.h>
-#include <ATen/core/grad_mode.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 #include <ATen/native/ConvUtils.h>
 
+#include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 
 namespace at {
-namespace native {
-
 namespace {
-
-static inline void slow_conv_transpose2d_param_check(
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation) {
-  TORCH_CHECK(
-      kernel_size.size() == 2,
-      "Expect kernel_size size of 2, but got ", kernel_size.size());
-  TORCH_CHECK(
-      dilation.size() == 2,
-      "Expect dilation size of 2, but got ", dilation.size());
-  TORCH_CHECK(
-      padding.size() == 2,
-      "Expect padding size of 2, but got ", padding.size());
-  TORCH_CHECK(
-      stride.size() == 2,
-      "Expect stride size of 2, but got ", stride.size());
-  TORCH_CHECK(
-      output_padding.size() == 2,
-      "Expect stride size of 2, but got ", output_padding.size());
-}
-
 static inline void slow_conv_transpose2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
@@ -155,9 +132,98 @@ static inline void slow_conv_transpose2d_shape_check(
     check_dim_size(grad_output, ndim, dimw, output_width);
   }
 }
+} // namespace
+
+namespace meta {
+TORCH_META_FUNC(slow_conv_transpose2d)
+(const Tensor& input,
+ const Tensor& weight,
+ IntArrayRef kernel_size,
+ OptionalTensorRef bias_opt,
+ IntArrayRef stride,
+ IntArrayRef padding,
+ IntArrayRef output_padding,
+ IntArrayRef dilation) {
+  TORCH_CHECK(
+      kernel_size.size() == 2,
+      "It is expected kernel_size equals to 2, but got size ",
+      kernel_size.size());
+
+  TORCH_CHECK(
+      dilation.size() == 2,
+      "It is expected dilation equals to 2, but got size ",
+      dilation.size());
+
+  TORCH_CHECK(
+      padding.size() == 2,
+      "It is expected padding equals to 2, but got size ",
+      padding.size());
+
+  TORCH_CHECK(
+      stride.size() == 2,
+      "It is expected stride equals to 2, but got size ",
+      stride.size());
+
+  TORCH_CHECK(
+      output_padding.size() == 2,
+      "It is expected stride equals to 2, but got size ",
+      output_padding.size());
+
+  int64_t kernel_height = kernel_size[0];
+  int64_t kernel_width = kernel_size[1];
+  int64_t dilation_height = dilation[0];
+  int64_t dilation_width = dilation[1];
+  int64_t pad_height = padding[0];
+  int64_t pad_width = padding[1];
+  int64_t stride_height = stride[0];
+  int64_t stride_width = stride[1];
+  int64_t output_padding_height = output_padding[0];
+  int64_t output_padding_width = output_padding[1];
+
+  slow_conv_transpose2d_shape_check(
+      input,
+      Tensor(),
+      weight,
+      bias_opt.getTensorRef(),
+      kernel_height,
+      kernel_width,
+      stride_height,
+      stride_width,
+      pad_height,
+      pad_width,
+      output_padding_height,
+      output_padding_width,
+      dilation_height,
+      dilation_width,
+      false);
+
+  // Sizes
+  int64_t n_output_plane = weight.size(1);
+  int64_t input_height = input.size(-2);
+  int64_t input_width = input.size(-1);
+  int64_t output_height = (input_height - 1) * stride_height - 2 * pad_height +
+      (dilation_height * (kernel_height - 1) + 1) + output_padding_height;
+  int64_t output_width = (input_width - 1) * stride_width - 2 * pad_width +
+      (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
+
+  const auto memory_format = input.suggest_memory_format();
+
+  // Resize output
+  if (input.ndimension() == 3) {
+    set_output(0, {n_output_plane, output_height, output_width}, input.options());
+  } else {
+    int64_t batch_size = input.size(0);
+    set_output(0, {batch_size, n_output_plane, output_height, output_width}, input.options().memory_format(memory_format));
+  }
+}
+} // namespace meta
+
+namespace native {
+
+namespace {
 
 void slow_conv_transposed2d_channels_last(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias,
@@ -165,7 +231,7 @@ void slow_conv_transposed2d_channels_last(
     int64_t stride_height, int64_t stride_width,
     int64_t pad_height, int64_t pad_width,
     int64_t dilation_height, int64_t dilation_width,
-    Tensor& columns,
+    const Tensor& columns,
     bool skip_col2im) {
   int64_t batch_size = input.size(0);
   int64_t n_input_plane = weight.size(0);
@@ -232,7 +298,7 @@ void slow_conv_transposed2d_channels_last(
 }
 
 void slow_conv_transpose2d_out_cpu_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input_,
     const Tensor& weight_,
     IntArrayRef kernel_size,
@@ -241,17 +307,10 @@ void slow_conv_transpose2d_out_cpu_template(
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
-    Tensor& columns_) {
+    const Tensor& columns) {
   bool use_channels_last = input_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
       weight_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-
-  slow_conv_transpose2d_param_check(
-      kernel_size,
-      stride,
-      padding,
-      output_padding,
-      dilation);
 
   int64_t kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
@@ -264,31 +323,14 @@ void slow_conv_transpose2d_out_cpu_template(
   int64_t output_padding_height = output_padding[0];
   int64_t output_padding_width = output_padding[1];
 
-  slow_conv_transpose2d_shape_check(
-      input_,
-      Tensor(),
-      weight_,
-      bias_,
-      kernel_height,
-      kernel_width,
-      stride_height,
-      stride_width,
-      pad_height,
-      pad_width,
-      output_padding_height,
-      output_padding_width,
-      dilation_height,
-      dilation_width,
-      false);
-
   Tensor input = input_.contiguous(memory_format);
   Tensor weight = weight_.contiguous(memory_format);
+  Tensor bias = bias_.contiguous();
 
-  Tensor columns = columns_;
   TORCH_CHECK(columns.is_contiguous(), "columns needs to be contiguous");
 
   bool is_batch = false;
-  if (input.dim() == 3) {
+  if (input_.dim() == 3) {
     // Force batch
     is_batch = true;
     input.resize_({1, input.size(0), input.size(1), input.size(2)});
@@ -304,9 +346,6 @@ void slow_conv_transpose2d_out_cpu_template(
   int64_t output_width = output_sizes[3];
   int64_t n_input_plane = weight.size(0);
   int64_t n_output_plane = weight.size(1);
-
-  // Resize output
-  output.resize_(output_sizes, memory_format);
 
   bool skip_col2im = skip_transforming(kernel_size, stride, padding, output_padding, dilation);
 
@@ -332,7 +371,7 @@ void slow_conv_transpose2d_out_cpu_template(
   // Parallel for each elt in batch
   at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
     NoGradGuard no_grad;
-    AutoNonVariableTypeMode non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int elt = begin; elt < end; elt++) {
       Tensor input_n = input.select(0, elt);
       Tensor output_n = output.select(0, elt);
@@ -471,15 +510,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
     IntArrayRef output_padding,
     IntArrayRef dilation) {
   bool use_channels_last = input_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
-      weight_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+    weight_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-
-  slow_conv_transpose2d_param_check(
-      kernel_size,
-      stride,
-      padding,
-      output_padding,
-      dilation);
 
   int64_t kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
@@ -559,7 +591,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   // Parallel for each elt in batch
   at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
     NoGradGuard no_grad;
-    AutoNonVariableTypeMode non_variable_type_mode;
+    AutoDispatchBelowADInplaceOrView non_variable_type_mode;
     for (int64_t elt = begin; elt < end; elt++) {
       Tensor grad_input_n = grad_input.select(0, elt);
       Tensor grad_output_n = grad_output.select(0, elt);
@@ -696,13 +728,6 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
     IntArrayRef dilation) {
   bool use_channels_last = input_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
   auto memory_format = use_channels_last ? at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-
-  slow_conv_transpose2d_param_check(
-      kernel_size,
-      stride,
-      padding,
-      output_padding,
-      dilation);
 
   int64_t kernel_height = kernel_size[0];
   int64_t kernel_width = kernel_size[1];
@@ -841,18 +866,17 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
 } // namespace
 
-Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
+TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu) (
+    const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size,
+    OptionalTensorRef bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
     IntArrayRef dilation,
-    Tensor& output) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
+    const Tensor& output){
+  const Tensor& bias = bias_opt.getTensorRef();
   Tensor columns = at::empty({0}, input.options());
 
   slow_conv_transpose2d_out_cpu_template(
@@ -866,38 +890,6 @@ Tensor& slow_conv_transpose2d_out_cpu(const Tensor& input,
       output_padding,
       dilation,
       columns);
-
-  return output;
-}
-
-Tensor slow_conv_transpose2d_cpu(
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  Tensor output = at::empty({0}, input.options());
-  Tensor columns = at::empty({0}, input.options());
-
-  slow_conv_transpose2d_out_cpu_template(
-      output,
-      input,
-      weight,
-      kernel_size,
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      columns);
-
-  return output;
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
