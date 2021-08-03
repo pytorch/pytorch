@@ -42,6 +42,12 @@ const std::string shape_compute_functions =
           assert len(out) == 2
           return [out[0], out[1]]
 
+        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
         # TODO: maybe make it customary that extra arguments are unused ?
         # TODO: return self directly
         def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
@@ -71,6 +77,9 @@ const std::string shape_compute_functions =
               raise AssertionError("Shape function doesn't support -1 view dims yet")
             out.append(elem)
           return out
+
+        def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool=False):
+          return view(self, sizes)
 
         def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
           out: List[int] = []
@@ -109,16 +118,28 @@ const std::string shape_compute_functions =
           # TODO: return self
           return [self[0]]
 
-        # TODO: optional dim, then expose as a registered shape function
         def unsqueeze(li: List[int], dim: int):
           out: List[int] = []
+          ndim = len(li)
+          assert dim >= (-ndim -1)
+          assert dim < ndim + 1
+          if dim < 0:
+            dim = dim + ndim + 1
           for i in range(len(li)):
             if i == dim:
               out.append(1)
             out.append(li[i])
+          if dim == ndim:
+            out.append(1)
           return out
 
-        # TODO: optional dim, then expose as a registered shape function
+        def squeeze_nodim(li: List[int]):
+          out: List[int] = []
+          for i in range(len(li)):
+            if li[i] != 1:
+              out.append(li[i])
+          return out
+
         def squeeze(li: List[int], dim: int):
           out: List[int] = []
           for i in range(len(li)):
@@ -127,6 +148,58 @@ const std::string shape_compute_functions =
                 out.append(li[i])
             else:
               out.append(li[i])
+          return out
+
+        def max_int():
+          return 9223372036854775807
+
+        def slice(self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int):
+          ndim = len(self)
+          assert ndim != 0
+
+          dim = maybe_wrap_dim(dim, ndim)
+          start_val =  start if start is not None else 0
+          end_val = end if end is not None else max_int()
+
+          assert step > 0
+
+          if (start_val == max_int()):
+            start_val = 0
+          if start_val < 0:
+            start_val += self[dim]
+          if end_val < 0:
+            end_val += self[dim]
+          if start_val < 0:
+            start_val = 0
+          elif start_val >= self[dim]:
+            start_val = self[dim]
+          if end_val < start_val:
+            end_val = start_val
+          elif end_val >= self[dim]:
+            end_val = self[dim]
+
+          out: List[int] = []
+          len = end_val - start_val
+          # TODO: add support for index write
+          for i in range(ndim):
+            if i == dim:
+              out.append((len + step - 1) // step)
+            else:
+              out.append(self[i])
+          return out
+
+        def select(self: List[int], dim: int, index: int):
+          ndim = len(self)
+          assert ndim != 0
+          dim = maybe_wrap_dim(dim, ndim)
+          size = self[ndim]
+          assert not (index < -size or index >= size)
+          if index < 0:
+            index += size
+          out: List[int] = []
+          for i in range(ndim):
+            if i != dim:
+              out.append(self[i])
           return out
 
         def matmul(tensor1: List[int] , tensor2: List[int]):
@@ -181,6 +254,28 @@ const std::string shape_compute_functions =
             return [self[0]]
           else:
             return [self[1], self[0]]
+
+        def _copy(self: List[int]):
+          out: List[int] = []
+          for elem in self:
+            out.append(elem)
+          return out
+
+        def transpose(self: List[int], dim0: int, dim1: int):
+          ndims = len(self)
+          dim0 = maybe_wrap_dim(dim0, ndims)
+          dim1 = maybe_wrap_dim(dim1, ndims)
+          if (dim0 == dim1):
+            return _copy(self)
+          out: List[int] = []
+          for i in range(ndims):
+            if i == dim0:
+              out.append(self[dim1])
+            elif i == dim1:
+              out.append(self[dim0])
+            else:
+              out.append(self[i])
+          return out
 
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
@@ -262,6 +357,10 @@ const std::string shape_compute_functions =
             dim += dim_post_expr
           return dim
 
+        def zero_dim_tensor(input: Any):
+          out: List[int] = []
+          return out
+
         def multiply_integers(li: List[int]):
           out = 1
           for elem in li:
@@ -288,6 +387,41 @@ const std::string shape_compute_functions =
           for i in range(end_dim + 1, len(input)):
             shape.append(input[i])
           return shape
+
+        def permute(input: List[int], dims: List[int]):
+          assert len(input) == len(dims)
+          ndim = len(dims)
+          seen_dims: List[int] = []
+          newSizes: List[int] = []
+          for i in range(ndim):
+            dim = maybe_wrap_dim(dims[i], ndim)
+            seen_dims.append(dim)
+            newSizes.append(i)
+          for i in range(1, ndim):
+            for j in range(i):
+              assert seen_dims[i] != seen_dims[j]
+          return newSizes
+
+        def index_select(self: List[int], dim: int, index: List[int]):
+          dim = maybe_wrap_dim(dim, len(self))
+          numel = multiply_integers(index)
+          assert len(index) <= 1
+          assert dim == 0 or dim < len(self)
+          result_size: List[int] = []
+          for i in range(len(self)):
+            if dim == i:
+              result_size.append(numel)
+            else:
+              result_size.append(self[i])
+          return result_size
+
+        def embedding(weight: List[int], indices: List[int], padding_idx:int = -1, scale_grad_by_freq:bool=False, sparse: bool=False):
+          assert len(weight) == 2
+          if len(indices) == 1:
+            return index_select(weight, 0, indices)
+          size = _copy(indices)
+          size.append(weight[1])
+          return size
     )";
 
 // mapping function schema to shape compute graphs allows multiple functions to
@@ -306,22 +440,41 @@ const std::string shape_compute_functions =
 // initialized
 static const OperatorMap<std::string>& get_schema_to_function_graph() {
   // clang-format off
-  static const OperatorMap<std::string> schema_to_function_graph{
+  static const OperatorMap<std::string> schema_to_function_graph {
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
+      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
+      {"aten::rsub.Tensor(Tensor self, Scalar other, *, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
+      {"aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", "permute"},
+      {"aten::gelu(Tensor self) -> Tensor", "unary"},
+      {"aten::tanh(Tensor self) -> Tensor", "unary"},
+      {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
+      {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
+      {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
+      {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
+      {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
+      {"aten::slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)", "slice"},
+      {"aten::select.int(Tensor(a) self, int dim, int index) -> Tensor(a)", "select"},
+      {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
+       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
+      {"aten::embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor", "embedding"},
+      {"aten::index_select(Tensor self, int dim, Tensor index) -> Tensor", "index_select"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "linear"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
+      {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
@@ -329,6 +482,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::view(Tensor(a) self, int[] size) -> Tensor(a)", "view"},
       {"aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", "view"},
+      {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", "view_one_unused"},
       {"aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", "mean_dim"},
       {"aten::addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor", "addmm"},
   };
