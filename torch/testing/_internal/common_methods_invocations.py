@@ -4942,6 +4942,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True),
     OpInfo('attn',
            dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16),
            backward_dtypes=(torch.float64,),
            supports_out=False,
            sample_inputs_func=sample_attn),

@@ -3579,8 +3579,8 @@ Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Te
 
   Tensor grad_out = grad_out_;
   if (!grad_out.defined()) {
-    grad_out = at::zeros(output.sizes(), at::kDouble);
-  } 
+    return at::zeros({tanh_output.size(1), output.size(1)}, at::kDouble);
+  }
 
   Tensor grad_v = at::matmul(tanh_output.t(), grad_out);
   return grad_v;
@@ -3589,12 +3589,15 @@ Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Te
 std::tuple <Tensor, Tensor> attn_backward_qk(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& output,
                                              const Tensor& tanh_output, const Tensor& grad_out_, const Tensor& grad_tanh_out_) {
 
+  TORCH_CHECK(q.dim() == 2 && k.dim() == 2 && v.dim() == 2, "Inputs q, k, v must be 2-dimensional");
+  TORCH_CHECK(q.size(1) == k.size(1), "q and k must have the same number of columns.");
+  TORCH_CHECK(v.size(0) == k.size(0), "v and k must have the same number of rows.");
   Tensor grad_out = grad_out_;
   Tensor grad_tanh_out = grad_tanh_out_;
 
   if (!grad_out.defined()) {
     grad_out = at::zeros(output.sizes(), at::kDouble);
-  } 
+  }
   if (!grad_tanh_out.defined()) {
     grad_tanh_out = at::zeros(tanh_output.sizes(), at::kDouble);
   }

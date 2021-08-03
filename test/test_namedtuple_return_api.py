@@ -95,7 +95,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_fused_moving_avg_obs_fq_helper'],
                input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]),
                torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
-            op(operators=['attn'], input=(), names=('output', 'tanh_output'), hasout=False)
+            op(operators=['attn'], input=(a, a), names=('output', 'tanh_output'), hasout=False)
         ]
 
         def get_func(f):
