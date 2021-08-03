@@ -470,9 +470,9 @@ Use pinned memory buffers
 
 .. warning::
 
-    This is an advanced tip. You overuse of pinned memory can cause serious
-    problems if you'll be running low on RAM, and you should be aware that
-    pinning is often an expensive operation.
+    This is an advanced tip. If you overuse pinned memory, it can cause serious
+    problems when running low on RAM, and you should be aware that pinning is
+    often an expensive operation.
 
 Host to GPU copies are much faster when they originate from pinned (page-locked)
 memory. CPU tensors and storages expose a :meth:`~torch.Tensor.pin_memory`

@@ -16,7 +16,8 @@ class save_on_cpu(object):
     then copied back to the original device when needed for the backward pass.
     If the graph was already on CPU, no tensor copy is performed.
 
-    Use this context-manager to tradeoff speed for less GPU memory usage.
+    Use this context-manager to trade compute for GPU memory usage (e.g.
+    when your model doesn't fit in GPU memory during training).
 
     Args:
         pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
@@ -30,13 +31,20 @@ class save_on_cpu(object):
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")
-        >>> d = a * b # a and b are saved in the graph (on GPU)
-        >>> with torch.autograd.graph.save_on_cpu():
-        ...    e = d * c # d and c are saved on CPU
-        >>> f = a * e # a and e are saved on GPU
-        >>> del a, b, c, d, e
-        >>> # the content of a, b, e are still alive on GPU
-        >>> # the content of c and d only live on CPU
+        >>>
+        >>> def f(a, b, c):
+        ...     prod_1 = a * b           # a and b are saved on GPU
+        ...     with torch.autograd.graph.save_on_cpu():
+        ...         prod_2 = prod_1 * c  # prod_1 and c are saved on CPU
+        ...     y = prod_2 * a           # prod_2 and a are saved on GPU
+        ...     return y
+        >>>
+        >>> y = f(a, b, c)
+        >>> del a, b, c  # for illustration only
+        >>> # the content of a, b, and prod_2 are still alive on GPU
+        >>> # the content of prod_1 and c only live on CPU
+        >>> y.sum().backward()  # all CPU tensors are moved back to GPU
+
 
     """
     def __init__(self, pin_memory=False):
