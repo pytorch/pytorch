@@ -1,5 +1,4 @@
 #include <ATen/core/ivalue.h>
-#include <c10/util/irange.h>
 #include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
@@ -59,38 +58,42 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
 /********************** Bytecode **********************/
 
 // Forward declare
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<IValue>& bytecode_ivalues);
 
-int64_t _get_model_bytecode_version(std::istream& in) {
+uint64_t _get_model_bytecode_version(std::istream& in) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
   return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_model_bytecode_version(const std::string& filename) {
+uint64_t _get_model_bytecode_version(const std::string& filename) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   return _get_model_bytecode_version(std::move(rai));
 }
 
-int64_t _get_model_bytecode_version(std::shared_ptr<ReadAdapterInterface> rai) {
+uint64_t _get_model_bytecode_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
-    TORCH_WARN(
-        "The input model might not be generated from _save_for_mobile()");
-    return -1;
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
   }
   PyTorchStreamReader reader(std::move(rai));
   auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_bytecode_version(bytecode_values);
 }
 
-int64_t _get_model_bytecode_version(
+uint64_t _get_model_bytecode_version(
     const std::vector<IValue>& bytecode_ivalues) {
   if (!bytecode_ivalues.empty() && bytecode_ivalues[0].isInt()) {
     int64_t model_version = bytecode_ivalues[0].toInt();
-    return model_version;
+    TORCH_CHECK(
+        model_version > 0,
+        "Expected model bytecode version > 0 got ",
+        model_version);
+    return static_cast<uint64_t>(model_version);
   }
-  TORCH_WARN("Fail to get bytecode version.");
-  return -1;
+  TORCH_CHECK(false, "Failed to get bytecode version.");
 }
 
 /********************** Operators and Info **********************/
