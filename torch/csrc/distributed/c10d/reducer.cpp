@@ -109,6 +109,7 @@ C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 Reducer::Reducer(
     std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
@@ -174,7 +175,8 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(std::move(bucket_indices));
+    initialize_buckets(
+        std::move(bucket_indices), std::move(per_bucket_size_limits));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -939,7 +941,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices) {
+    std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_sizes) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -970,8 +973,10 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
+  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
+    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -1685,7 +1690,8 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(std::move(rebuilt_bucket_indices));
+  initialize_buckets(
+      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
   return true;
 }
 
@@ -1936,7 +1942,6 @@ compute_bucket_assignment_by_size(
       c10::hash<BucketKey>>
       bucket_size_limit_iterators;
 
-
   // Keep vector of indices and size accumulator by tensor type and device.
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
@@ -2005,11 +2010,14 @@ compute_bucket_assignment_by_size(
     std::sort(
         result.begin(),
         result.end(),
-        [](const std::tuple<std::vector<size_t>, size_t>& a, const std::tuple<std::vector<size_t>, size_t>& b) {
+        [](const std::tuple<std::vector<size_t>, size_t>& a,
+           const std::tuple<std::vector<size_t>, size_t>& b) {
           auto indices_a = std::get<0>(a);
           auto indices_b = std::get<0>(b);
-          const auto amin = std::min_element(indices_a.begin(), indices_a.end());
-          const auto bmin = std::min_element(indices_b.begin(), indices_b.end());
+          const auto amin =
+              std::min_element(indices_a.begin(), indices_a.end());
+          const auto bmin =
+              std::min_element(indices_b.begin(), indices_b.end());
           return *amin < *bmin;
         });
   }
