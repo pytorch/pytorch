@@ -54,7 +54,7 @@ def _perform_local_step(
 def _broadcast_bucket(
     bucket_index: int,
     zero: ZeroRedundancyOptimizer,
-    assigned_rank: int,
+    assigned_ranks: List[int],
 ):
     r"""
     Broadcasts a bucket's parameters.
@@ -64,20 +64,23 @@ def _broadcast_bucket(
             parameters to broadcast.
         zero (ZeroRedundancyOptimizer): the calling process's
             :class:`ZeroRedundancyOptimizer` instance.
-        assigned_rank (int): the rank assigned to the bucket; it has the
-            updated parameters and serves as the source for the broadcast.
+        assigned_ranks (int): the ranks assigned to the bucket; together, they
+            have the updated parameters and serve as the sources for the
+            broadcasts scheduled in this function.
     """
+    assert len(assigned_ranks) > 0, f"Bucket {bucket_index} should be " \
+        "assigned to at least one rank"
     overlap_info = zero._overlap_info
-    device = overlap_info.params_per_bucket[bucket_index][0].device
-    device_index = zero._device_to_device_index[device]
-    assert bucket_index in zero._buckets[device_index][assigned_rank]
-    overlap_info.broadcast_handles.append(
-        dist.broadcast(
-            zero._buckets[device_index][assigned_rank][bucket_index],
-            src=assigned_rank,
-            async_op=True
-        )
-    )
+    for assigned_rank in assigned_ranks:
+        bucket_assignments = zero._bucket_assignments_per_rank[assigned_rank]
+        if bucket_index in bucket_assignments:
+            overlap_info.broadcast_handles.append(
+                dist.broadcast(
+                    bucket_assignments[bucket_index].tensor,
+                    src=assigned_rank,
+                    async_op=True,
+                )
+            )
 
 def _collect_ddp_bucket_info(
     bucket: dist.GradBucket,
@@ -252,7 +255,7 @@ def hook_with_zero_step(
                 curr_bucket = overlap_info.bucket_index_to_bucket[bucket_index]
                 _perform_local_step(curr_bucket, zero, rank)
 
-            _broadcast_bucket(bucket_index, zero, assigned_rank)
+            _broadcast_bucket(bucket_index, zero, [assigned_rank])
 
         # Ensure that all parameter updates are finished before the
         # next forward pass
@@ -372,7 +375,7 @@ def hook_with_zero_step_interleaved(
             if assigned_rank == rank:
                 _perform_local_step(bucket, zero, rank)
 
-            _broadcast_bucket(bucket_index, zero, assigned_rank)
+            _broadcast_bucket(bucket_index, zero, [assigned_rank])
 
             num_buckets = len(overlap_info.params_per_bucket)
             if len(overlap_info.bucket_indices_seen) == num_buckets:

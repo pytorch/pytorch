@@ -9,7 +9,7 @@ import enum
 import io
 import logging
 from itertools import chain
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -121,17 +121,32 @@ class _ZeROJoinHook(JoinHook):
         self.zero.step()
 
 
-class _DDPBucket(NamedTuple):
+class _DDPBucketAssignment():
     r"""
-    This contains the model parameters corresponding to a
-    :class:`DistributedDataParallel` gradient bucket.
+    This represents a :class:`DistributedDataParallel` bucket assignment,
+    meaning a (possibly non-strict) subset of the parameters corresponding to
+    a DDP bucket assigned to a rank to update.
 
         bucket_index (int): index of the bucket determined by the DDP gradient
             bucket all-reduce order.
-        params (List[torch.Tensor]): model parameters in the bucket.
+        parameters (List[torch.Tensor]): model parameters in the bucket
+            assigned to this rank.
+        tensor (torch.Tensor): flattened tensor giving the data of the
+            parameter subset assigned to the rank.
     """
-    bucket_index: int
-    params: List[torch.Tensor]
+    def __init__(
+        self,
+        bucket_index: int,
+        parameters: List[torch.Tensor],
+    ):
+        self.bucket_index = bucket_index
+        self.parameters = parameters
+
+        if len(self.parameters) == 0:
+            raise ValueError("Empty bucket assignment")
+        # DDP guarantees all parameters in the bucket have the same device
+        self.device: torch.device = self.parameters[0].device
+        self.tensor: Optional[torch.Tensor] = None
 
 
 class _OverlapStatus(enum.IntEnum):
@@ -339,8 +354,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._partition_parameters_cache: List[List[Dict]] = []
         self._index_to_param_cache: List[torch.Tensor] = []
         self._device_to_params_per_rank_cache: Dict[torch.device, List[List[torch.Tensor]]] = {}
-        self._device_to_buckets_cache: Dict[torch.device, List[List[_DDPBucket]]] = {}
-        self._device_to_device_index: Dict[torch.device, int] = {}
+        self._bucket_assignments_per_rank_cache: List[Dict[int, _DDPBucketAssignment]] = []
         self._is_trainable_mask = self._get_is_trainable_mask()
 
         # Default device for collective communication and buckets
@@ -368,16 +382,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     "strategy will be used"
                 )
 
-        # `self._buckets` is used if `parameters_as_bucket_view=True` or
-        # `overlap_with_ddp=True`, in which case parameter data is flattened
-        # into buckets (i.e. contiguous tensors)
-        # If `overlap_with_ddp=True`, the bucketing requires an additional
-        # dimension to match the DDP gradient bucketing
+        # `self._buckets` is used if `parameters_as_bucket_view=True`, in
+        # which case parameter data is flattened into contiguous bucket tensors
         self.parameters_as_bucket_view = parameters_as_bucket_view
-        self._buckets: Union[
-            List[List[torch.Tensor]],
-            List[List[Dict[int, torch.Tensor]]]
-        ] = []  # type: ignore[assignment]
+        self._buckets: List[List[torch.Tensor]] = []
         self._build_param_buckets()
 
         # Optional consolidated optimizer state, only populated if this rank
@@ -395,7 +403,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._index_to_param_cache.clear()
         self._param_to_index_cache.clear()
         self._device_to_params_per_rank_cache.clear()
-        self._device_to_buckets_cache.clear()
+        self._bucket_assignments_per_rank_cache.clear()
 
     def add_param_group(self, param_group: dict) -> None:
         r"""
@@ -763,43 +771,32 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         return self._device_to_params_per_rank_cache
 
     @property
-    def _device_to_buckets(
+    def _bucket_assignments_per_rank(
         self
-    ) -> Dict[torch.device, List[List[_DDPBucket]]]:
+    ) -> List[Dict[int, _DDPBucketAssignment]]:
         r"""
-        :class:`dict` mapping each device to a :class:`list` of :class:`list`
-        of :class:`_DDPBucket` s.
-
-        ``_device_to_buckets[d][r][i]`` gives the ``i``th bucket
-        assigned to rank ``r`` stored on device ``d``, where each bucket
-        contains a list of the model parameters associated with the
-        corresponding logical :class:`DistributedDataParallel` gradient bucket.
-
-        This is used for constructing the parameter buckets if
-        ``overlap_with_ddp=True``.
+        :class:`list` of length world size consisting of :class:`dict` s
+        mapping bucket indices to :class:`_DDPBucketAssignment` s for each
+        rank.
         """
-        assert self._overlap_with_ddp, \
-            "`_device_to_buckets()` should only be used if " \
-            "`overlap_with_ddp=True`"
-        if len(self._device_to_buckets_cache) > 0:
-            return self._device_to_buckets_cache
+        assert self._overlap_with_ddp, "`_bucket_assignments_per_rank` " \
+            "only be used if `overlap_with_ddp=True`"
+        if len(self._bucket_assignments_per_rank_cache) > 0:
+            return self._bucket_assignments_per_rank_cache
 
         overlap_info = self._overlap_info
-        assert overlap_info.status == _OverlapStatus.INITIALIZED, \
-            "Accessing `_device_to_buckets` before the necessary " \
-            "information has been collected"
+        assert overlap_info.status == _OverlapStatus.INITIALIZED
 
+        self._bucket_assignments_per_rank_cache = [{} for _ in range(self.world_size)]
         params_per_bucket = overlap_info.params_per_bucket
-        for bucket_idx, bucket_params in enumerate(params_per_bucket):
+        for bucket_index, bucket_params in enumerate(params_per_bucket):
             assert len(bucket_params) > 0, "Empty bucket"
-            rank = self._ddp_bucket_index_to_rank(bucket_idx)
-            bucket = _DDPBucket(bucket_idx, bucket_params)
-            device = bucket_params[0].device  # assume same device per bucket
-            if device not in self._device_to_buckets_cache:
-                self._device_to_buckets_cache[device] = [[] for _ in range(self.world_size)]
-            self._device_to_buckets_cache[device][rank].append(bucket)
+            # Assign the entire DDP bucket to a single rank
+            assigned_rank = self._ddp_bucket_index_to_rank(bucket_index)
+            bucket_assignment = _DDPBucketAssignment(bucket_index, bucket_params)
+            self._bucket_assignments_per_rank_cache[assigned_rank][bucket_index] = bucket_assignment
 
-        return self._device_to_buckets_cache
+        return self._bucket_assignments_per_rank_cache
 
     def _local_step(
         self,
@@ -1109,57 +1106,38 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     def _build_ddp_param_buckets(self) -> None:
         r"""
-        Builds parameter buckets if ``overlap_with_ddp`` so that for each
-        device that stores this rank's parameters, there is a :class:`list` of
-        buckets (represented as tensors) containing the parameters on that
-        device that are assigned to the rank in the parameter update
-        partition and grouped following the :class:`DistributedDataParallel`
-        gradient buckets.
+        For each DDP bucket with parameters assigned to this rank, flattens the
+        data of those parameters into a single tensor and saves the tensor to
+        the ``tensor`` attribute in the corresponding
+        :class:`_DDPBucketAssignment` instance stored in
+        ``self._bucket_assignments_per_rank``.
 
-        This method should only be called during the delayed initialization
-        when ``overlap_with_ddp=True``.
-
-        .. warning::
-            The current implementation assumes that all of the parameters in a
-            bucket are of the same dense type when allocating the bucket's
-            tensor.
-
-        .. warning::
-            If the model parameters are stored across more than one device,
-            then the storage partitioning must be the same across all
-            processes in order for parameter synchronization to work.
+        :class:`DistributedDataParallel` guarantees that the parameters
+        corresponding to a gradient bucket have the same device and the same
+        dtype.
         """
-        assert self._overlap_with_ddp, \
-            "`_build_ddp_param_buckets()` should only be called when " \
-            "`overlap_with_ddp=True`"
+        for bucket_assignments in self._bucket_assignments_per_rank:
+            for bucket_assignment in bucket_assignments.values():
+                params = bucket_assignment.parameters
+                bucket_size = 0
+                dtype = None
+                for param in params:
+                    assert _is_trainable(param), "Model parameter " \
+                        "corresponding to a gradient in a DDP bucket should " \
+                        "require a gradient"
+                    bucket_size += param.numel()
+                    dtype = param.dtype  # assumes all same dtype
+                assert bucket_size > 0, "Empty bucket"
 
-        num_devices = len(self._device_to_buckets)
-        self._buckets = [[{} for _ in range(self.world_size)] for _ in range(num_devices)]  # type: ignore[assignment]
-
-        for dev_idx, (device, ddp_buckets_per_rank) in enumerate(self._device_to_buckets.items()):
-            self._device_to_device_index[device] = dev_idx
-            for rank, ddp_buckets in enumerate(ddp_buckets_per_rank):
-                for ddp_bucket in ddp_buckets:
-                    bucket_index = ddp_bucket.bucket_index  # type: ignore[attr-defined]
-                    params = ddp_bucket.params              # type: ignore[attr-defined]
-                    bucket_size = 0
-                    dtype = None
-                    for param in params:
-                        assert _is_trainable(param), \
-                            "Model parameter corresponding to a gradient in " \
-                            "a DDP bucket should require a gradient"
-                        bucket_size += param.numel()
-                        dtype = param.dtype  # assumes all same dtype
-                    assert bucket_size > 0
-                    bucket = torch.empty(bucket_size, dtype=dtype, device=device)
-                    offset = 0
-                    # Construct the bucket (assuming all dense and same dtype)
-                    for param in params:
-                        offset_next = offset + param.numel()
-                        bucket[offset:offset_next].copy_(param.data.flatten())
-                        param.data = bucket[offset:offset_next].view_as(param.data)
-                        offset = offset_next
-                    self._buckets[dev_idx][rank][bucket_index] = bucket
+                # Construct the bucket tensor (assuming all dense and same dtype)
+                tensor = torch.empty(bucket_size, dtype=dtype, device=bucket_assignment.device)
+                offset = 0
+                for param in params:
+                    offset_next = offset + param.numel()
+                    tensor[offset:offset_next].copy_(param.data.flatten())
+                    param.data = tensor[offset:offset_next].view_as(param.data)
+                    offset = offset_next
+                bucket_assignment.tensor = tensor
 
     def _verify_and_init_params(self, params: Any) -> None:
         r"""
@@ -1277,19 +1255,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _ddp_bucket_index_to_rank(self, bucket_index: int) -> int:
         r"""Assigns a rank to a given DDP gradient bucket index."""
         return bucket_index % self.world_size
-
-    def _get_assigned_ddp_bucket_indices(self) -> List[int]:
-        r"""
-        Returns a list of the DDP gradient bucket indices assigned to this rank
-        to update.
-        """
-        assert self._overlap_info.status == _OverlapStatus.INITIALIZED
-        num_buckets = len(self._overlap_info.params_per_bucket)
-        assigned_indices = [
-            bucket_index for bucket_index in range(num_buckets)
-            if self._ddp_bucket_index_to_rank(bucket_index) == self.global_rank
-        ]
-        return assigned_indices
 
     def _check_overlap_initialized(self):
         r"""
