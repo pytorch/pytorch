@@ -4,7 +4,6 @@
 name: linux-bionic-py3.8-gcc9-coverage
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
   push:
