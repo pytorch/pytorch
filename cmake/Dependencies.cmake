@@ -75,8 +75,8 @@ endif(MSVC)
 
 # ---[ Threads
 include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET Threads::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
+if(TARGET caffe2::Threads)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
@@ -1364,6 +1364,8 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      # gloo uses cuda_add_library
+      torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)
@@ -1410,6 +1412,8 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
     set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
