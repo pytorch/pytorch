@@ -1,3 +1,4 @@
+from numbers import Number
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
@@ -1632,8 +1633,8 @@ lu.__doc__ = _lu_impl.__doc__
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')
 
-def result_type(*arrays_and_dtypes: Union[Tensor, torch.dtype, bool, int, float, complex]) -> torch.dtype:
-    """result_type(*arrays_and_dtypes: Union[Tensor, dtype, bool, int, float, complex]) -> dtype
+def result_type(*arrays_and_dtypes):
+    """result_type(*arrays_and_dtypes: Union[Tensor, dtype, Number]) -> dtype
 
 Returns the :class:`torch.dtype` that would result from performing an arithmetic
 operation on the provided input tensors. See type promotion :ref:`documentation <type-promotion-doc>`
@@ -1650,30 +1651,35 @@ Example::
     torch.uint8
     >>> torch.result_type(torch.int32, torch.float32)
     torch.float32
+    >>> torch.result_type(torch.tensor([1, 2], dtype=torch.int8), 1.0, torch.float32)
+    torch.float32
 """
 
-    tensors = []
-    scalars: List[Union[bool, int, float, complex]] = []
-    dtypes = []
+    tensors: List[torch.Tensor] = []
+    scalars: List[Number] = []
+    dtypes: List[torch.dtype] = []
     for x in arrays_and_dtypes:
-        if isinstance(x, (bool, int, float, complex)):
+        if isinstance(x, Number):
             scalars.append(x)
         elif isinstance(x, torch.dtype):
             dtypes.append(x)
-        else:
+        elif isinstance(x, torch.Tensor):
             tensors.append(x)
-    if tensors:
-        dtypes.append(_VF.result_type(tensors))  # type: ignore[attr-defined]
+        else:
+            raise TypeError(f"result_type(): cannot interpret '{x}' as a data type")
+    if dtypes:
+        dtype = _VF._result_type_dtypes(dtypes)
+        tensors.append(torch.tensor([], dtype=dtype))
     if scalars:
         scalar_dtype = _VF._result_type_scalars(scalars)  # type: ignore[arg-type]
-        if dtypes:
-            tensor_dtype = _VF._result_type_dtypes(dtypes)
+        if tensors:
+            tensor_dtype = _VF.result_type(tensors)  # type: ignore[attr-defined]
             return _VF.result_type(_VF.tensor([], dtype=tensor_dtype),  # type: ignore[attr-defined]
                                    _VF.tensor(0, dtype=scalar_dtype).item())
         else:
             return scalar_dtype
     else:
-        if dtypes:
-            return _VF._result_type_dtypes(dtypes)
+        if tensors:
+            return _VF.result_type(tensors)  # type: ignore[attr-defined]
         else:
-            raise TypeError("at least one argument is required.")
+            raise TypeError("result_type(): must provide at least one argument")
