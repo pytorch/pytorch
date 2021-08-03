@@ -412,20 +412,21 @@ function(torch_compile_options libname)
       target_compile_options(${libname} PUBLIC
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
-        /EHsc
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
-        /bigobj
+        $<$<COMPILE_LANGUAGE:CXX>:
+          /EHsc
+          /DNOMINMAX
+          /wd4267
+          /wd4251
+          /wd4522
+          /wd4522
+          /wd4838
+          /wd4305
+          /wd4244
+          /wd4190
+          /wd4101
+          /wd4996
+          /wd4275
+          /bigobj>
         )
     else()
       target_compile_options(${libname} PRIVATE
