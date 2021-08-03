@@ -964,6 +964,40 @@ def set_warn_always_context(new_val: bool):
     finally:
         torch.set_warn_always(old_val)
 
+class ErrorOnPrintPolicy:
+    def __enter__(self):
+        def policy_enter(name, redirect_name):
+            out = io.StringIO()
+            manager = getattr(contextlib, redirect_name)(out)
+            setattr(self, redirect_name, manager)
+            setattr(self, name, out)
+            manager.__enter__()
+
+        policy_enter("stdout", "redirect_stdout")
+        policy_enter("stderr", "redirect_stderr")
+
+    def __exit__(self, *args):
+        def policy_exit(name, redirect_name):
+            getattr(self, redirect_name).__exit__(None, None, None)
+            return getattr(self, name).getvalue()
+
+        stdout = policy_exit("stdout", "redirect_stdout")
+        stderr = policy_exit("stderr", "redirect_stderr")
+
+        if len(stdout) > 0 or len(stderr) > 0:
+            msg = "Printing to stdout or stderr in tests is not allowed in CI!" \
+                " Remove your 'print()'s and make sure you capture and suppress" \
+                " all warnings if necessary. Enable this locally by setting" \
+                " the env variable PYTORCH_ERROR_ON_TEST_PRINT=1\n"
+
+            if len(stdout) > 0:
+                msg += f"stdout: \n{stdout}\n"
+
+            if len(stderr) > 0:
+                msg += f"stderr: \n{stderr}\n"
+
+            raise RuntimeError(msg)
+
 
 class TestCase(expecttest.TestCase):
     # NOTE: "precision" lets classes and generated tests set minimum
@@ -1010,6 +1044,14 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
+    # When True, skip the check that will raise a RuntimeError if the test case
+    # prints anything to stdout or stderr
+    _ignore_error_on_print = False
+
+    # Test names (by self.id() on a TestCase instance, e.g. "TestClass.test_name")
+    # to ignore when checking for output to stdout or stderr
+    _ignore_error_on_print_allowlist = set()
+
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
@@ -1029,6 +1071,12 @@ class TestCase(expecttest.TestCase):
 
             if self._ignore_not_implemented_error:
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
+
+            clean_id = self.id().replace("__main__.", "")
+            if not self._ignore_error_on_print and \
+               os.getenv("PYTORCH_ERROR_ON_TEST_PRINT", "") == "1" and \
+               clean_id not in self._ignore_error_on_print_allowlist:
+                self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy())
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name

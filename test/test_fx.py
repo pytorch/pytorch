@@ -120,6 +120,10 @@ class Foo(object):  # noqa: B209
         self.b = b
 
 class TestFX(JitTestCase):
+    _ignore_error_on_print_allowlist = {
+        "TestFX.test_partial_trace",
+    }
+
     def setUp(self):
         if TEST_WITH_ROCM or IS_FBCODE or IS_WINDOWS or IS_MACOS:
             return
@@ -2706,6 +2710,10 @@ def run_getitem_target():
 
 
 class TestOperatorSignatures(JitTestCase):
+    _ignore_error_on_print_allowlist = {
+        "TestOperatorSignaturesCPU.test_get_torch_func_signature_exhaustive_floor_divide_cpu_float32"
+    }
+
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
@@ -2771,6 +2779,12 @@ class TestOperatorSignatures(JitTestCase):
 
 
 class TestFunctionalTracing(JitTestCase):
+    _ignore_error_on_print_allowlist = {
+        "TestFunctionalTracing.test_nn_functional_upsample_nearest",
+        "TestFunctionalTracing.test_nn_functional_upsample_bilinear",
+        "TestFunctionalTracing.test_nn_functional_upsample",
+    }
+
     IGNORE_FUNCS = ("has_torch_function", "has_torch_function_unary",
                     "has_torch_function_variadic", "handle_torch_function",
                     "boolean_dispatch")
