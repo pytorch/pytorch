@@ -164,8 +164,8 @@ LINUX_WORKFLOWS = [
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     PyTorchLinuxWorkflow(
-        build_environment="pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        build_environment="pytorch-linux-focal-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-focal-cuda11.1-cudnn8-pypy7.3.5-gcc9",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         on_pull_request=True,
