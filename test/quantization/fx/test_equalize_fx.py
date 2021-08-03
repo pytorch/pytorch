@@ -341,6 +341,8 @@ class TestEqualizeFx(QuantizationTestCase):
         be inserted between the node being quantized and the node being
         quantized and equalized.
         """
+
+        # Test model with two connected nn.Linear layers
         m = TwoLayerLinearModel().eval()
         x = torch.rand((5, 5))
         equalization_qconfig_dict = {"module_name": [("fc2", default_equalization_qconfig)]}
@@ -368,8 +370,40 @@ class TestEqualizeFx(QuantizationTestCase):
         ]
         self.checkGraphModuleNodes(quantized, expected_node_list=linear2_node_list)
 
+        # Test model with connected F.linear_relu and F.linear layers
+        m = FunctionalLinearReluLinearModel().eval()
+        x = torch.rand((5, 5))
+        equalization_qconfig_dict = {"module_name": [("linear2", default_equalization_qconfig)]}
+
+        # Check if output of model that has been set up for equalization matches
+        # original output
+        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+        output = prepared(x)
+        convert_ref = _convert_equalization_ref(prepared)
+        convert_ref_output = convert_ref(x)
+        self.assertEqual(output, convert_ref_output)
+
+        # Check if node list of equalized model is correct
+        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+        prepared(x)
+        quantized = convert_fx(prepared)
+        linear2_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear_relu),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+        ]
+        self.checkGraphModuleNodes(quantized, expected_node_list=linear2_node_list)
+
     @skipIfNoFBGEMM
     def test_input_weight_equalization_reshape(self):
+        """ Tests that we will throw an error if there is a reshape that is not
+        supported. Should throw a ValueError.
+        """
+
         class LinearReshapeLinear(nn.Module):
             def __init__(self) -> None:
                 super().__init__()

@@ -729,9 +729,7 @@ def convert_eq_obs(
             # equalization nodes between two layers that need to be equalized.
             equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
             if (
-                equalization_qconfig_map.get(prev_node.name, None) is not None or
-                inp_quant_obs_node is None or
-                prev_node is None
+                equalization_qconfig_map.get(prev_node.name, None) is not None
             ):
                 remove_node(model, node, node.args[0])
                 continue
@@ -763,12 +761,12 @@ def convert_eq_obs(
 
             # Create a node multiplying the input with the equalization scale
             with model.graph.inserting_after(eq_scale_node):
-                inputs = (prev_node, eq_scale_node)
+                inputs = (inp_quant_obs_node.args[0], eq_scale_node)
                 mul_node = model.graph.create_node("call_function", torch.mul, inputs)
 
             # Set the mul nod to be the input_quant_obs_node's input instead of
             # the previous node
-            inp_quant_obs_node.replace_input_with(prev_node, mul_node)
+            inp_quant_obs_node.replace_input_with(inp_quant_obs_node.args[0], mul_node)
             remove_node(model, node, inp_quant_obs_node)
 
         elif weight_eq_obs_dict.get(node.name, None) is not None:

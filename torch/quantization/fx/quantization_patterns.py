@@ -91,7 +91,7 @@ class QuantizeHandler(ABC):
         if maybe_eq_node is not None:
             last_node = maybe_eq_node
 
-        for maybe_obs_node, _ in last_node.users.items():
+        for maybe_obs_node in last_node.users:
             if maybe_obs_node.op == 'call_module':
                 maybe_obs = modules[str(maybe_obs_node.target)]
                 if is_activation_post_process(maybe_obs):
