@@ -96,7 +96,7 @@ class AllReducer(Joinable):
             total += t.item()
         return total
 
-    def _join_hook(self, **kwargs) -> JoinHook:
+    def join_hook(self, **kwargs) -> JoinHook:
         r"""
         Returns a join hook that shadows some number of all-reduces; by default,
         this number is 1.
@@ -110,11 +110,11 @@ class AllReducer(Joinable):
         )
 
     @property
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         return self.device
 
     @property
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         return self.process_group
 
     def find_common_rank(self, rank, to_consider):

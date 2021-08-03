@@ -1154,7 +1154,7 @@ class DistributedDataParallel(Module, Joinable):
             divide_by_initial_world_size=divide_by_initial_world_size,
         )
 
-    def _join_hook(
+    def join_hook(
         self,
         **kwargs,
     ):
@@ -1187,11 +1187,11 @@ class DistributedDataParallel(Module, Joinable):
         )
 
     @property
-    def _join_device(self):
+    def join_device(self):
         return self.device
 
     @property
-    def _join_process_group(self):
+    def join_process_group(self):
         return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):

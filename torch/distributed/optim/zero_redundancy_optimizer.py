@@ -886,7 +886,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         return loss
 
-    def _join_hook(self, **kwargs):
+    def join_hook(self, **kwargs):
         r"""
         Returns the ZeRO join hook, which enables training on uneven inputs by
         shadowing the collective communications in the optimizer step.
@@ -905,11 +905,11 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         return _ZeROJoinHook(self)
 
     @property
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         return self._default_device
 
     @property
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         return self.process_group
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:

@@ -15,10 +15,8 @@ class JoinHook():
     have joined.
 
     To implement a join hook for the generic join context manager, define a
-    class that inherits from :class:`JoinHook`, override ``main_hook()`` and
-    ``post_hook()`` as appropriate, and override ``device()`` and
-    ``process_group()`` to provide the device and process group information,
-    respectively, which are needed for the join context manager implementation.
+    class that inherits from :class:`JoinHook` and override ``main_hook()`` and
+    ``post_hook()`` as appropriate.
     """
     def main_hook(self) -> None:
         r"""
@@ -44,10 +42,10 @@ class JoinHook():
 class Joinable(ABC):
     r"""
     This defines an abstract base class for joinable classes. A joinable class
-    (inheriting from :class:`Joinable`) should implement :meth:`_join_hook()`,
+    (inheriting from :class:`Joinable`) should implement :meth:`join_hook`,
     which returns a :class:`JoinHook` instance, in addition to
-    :meth:`_join_device()` and :meth:`_join_process_group()` that return device
-    and process group information, respectively.
+    :meth:`join_device` and :meth:`join_process_group` that return device and
+    process group information, respectively.
     """
     @abstractmethod
     def __init__(self):
@@ -55,7 +53,7 @@ class Joinable(ABC):
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
     @abstractmethod
-    def _join_hook(self, **kwargs) -> JoinHook:
+    def join_hook(self, **kwargs) -> JoinHook:
         r"""
         Returns a :class:`JoinHook` instance for the given :class:`Joinable`.
 
@@ -69,7 +67,7 @@ class Joinable(ABC):
 
     @property
     @abstractmethod
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         r"""
         Returns the device from which to perform collective communications
         needed by the join context manager implementation itself.
@@ -78,7 +76,7 @@ class Joinable(ABC):
 
     @property
     @abstractmethod
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         r"""
         Returns the process group for the collective communications needed by
         the join context manager itself.
@@ -179,7 +177,7 @@ class Join():
         if len(joinables) == 0:
             raise ValueError("The join context manager requires at least one joinable")
         self._joinables = joinables
-        self._join_hooks = [joinable._join_hook(**kwargs) for joinable in self._joinables]
+        self._join_hooks = [joinable.join_hook(**kwargs) for joinable in self._joinables]
         self._enable = enable
         self._throw_on_early_termination = throw_on_early_termination
         self._set_joinable_configs()
@@ -217,11 +215,11 @@ class Join():
         device = None
         for joinable in self._joinables:
             if process_group is None:
-                process_group = joinable._join_process_group
-            elif process_group != joinable._join_process_group:
+                process_group = joinable.join_process_group
+            elif process_group != joinable.join_process_group:
                 raise ValueError("Using join context manager with multiple process groups")
             if device is None:
-                device = joinable._join_device
+                device = joinable.join_device
         self._process_group = process_group
         self._rank = dist.get_rank(self._process_group)
         self._device = device
@@ -339,8 +337,8 @@ class Join():
         if not join_config.is_first_joinable or not join_config.enable:
             return None
 
-        device = joinable._join_device
-        process_group = joinable._join_process_group
+        device = joinable.join_device
+        process_group = joinable.join_process_group
 
         # Schedule an all-reduce to indicate that the caller has not yet joined
         ones = torch.ones(1, device=device)

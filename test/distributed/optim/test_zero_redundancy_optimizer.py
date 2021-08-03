@@ -750,7 +750,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             def __init__(self):
                 super().__init__()
 
-            def _join_hook(self, **kwargs):
+            def join_hook(self, **kwargs):
                 assert "zero_optim" in kwargs
                 assert "grads" in kwargs
                 zero_optim = kwargs["zero_optim"]
@@ -758,11 +758,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 return _SetGradsJoinHook(zero_optim, grads)
 
             @property
-            def _join_device(self):
+            def join_device(self):
                 return device
 
             @property
-            def _join_process_group(self):
+            def join_process_group(self):
                 return dist.group.WORLD
 
         num_grads_after_joining = NUM_EPOCHS * (world_size - rank - 1)
