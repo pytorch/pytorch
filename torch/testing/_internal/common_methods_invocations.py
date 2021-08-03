@@ -2184,21 +2184,20 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Order: input_shape, p (exponent), dim 
-    cases = (((2, 1, 4, 5), 1., 2),
-             ((2, 3, 4, 5), 2., 1),
-             ((1, 2, 4, 5), 0.5, 0),
-             ((1, 3, 4, 5), -1., 1),
-             ((1, 3, 4, 5), 0., -1),
-             ((), 1.2, 0))
+    cases = (((2, 1, 4, 5), {'p': 1., 'dim': 2}),
+             ((2, 3, 4, 5), {'p': 2., 'dim': 1}),
+             ((1, 2, 4, 5), {'p': 0.5, 'dim': 0}),
+             ((1, 3, 4, 5), {'p': -1., 'dim': 1}),
+             ((1, 3, 4, 5), {'p': 0., 'dim': -1}),
+             ((), {'p': 1.2, 'dim': 0}),
+             ((2, 3, 4, 5), {}),
+             ((2, 3, 4, 5), {'eps': 1e-4}))
 
     def generator():
-        for input_shape, p, dim in cases:
-            yield SampleInput(make_arg(input_shape), args=(p, dim))
-        # No args case
-        yield SampleInput(make_arg((2, 3, 4, 5)))
-        # Changed eps case
-        yield SampleInput(make_arg((2, 3, 4, 5)), kwargs={'eps':1e-4})
+        for input_shape, kwargs in cases:
+            yield SampleInput(make_arg(input_shape), kwargs=kwargs)
+        # Extra case to make sure the op works for kw-args passed as positional args 
+        yield SampleInput(make_arg((1, 2, 3, 4)), args=(1., -1))
 
     return list(generator())
 
