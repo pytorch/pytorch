@@ -12,6 +12,7 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::CPU,
         DispatchKey::CUDA,
         DispatchKey::XLA,
+        DispatchKey::Lazy,
         DispatchKey::XPU,
         DispatchKey::PrivateUse1,
         DispatchKey::PrivateUse2,
@@ -57,6 +58,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::CUDA);
     case DispatchKey::AutogradXLA:
       return DispatchKeySet(DispatchKey::XLA);
+    case DispatchKey::AutogradLazy:
+      return DispatchKeySet(DispatchKey::Lazy);
     case DispatchKey::AutogradMLC:
       return DispatchKeySet(DispatchKey::MLC);
     case DispatchKey::AutogradHPU:
@@ -83,6 +86,7 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
     case DispatchKey::CPU:
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
+    case DispatchKey::XLA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();
