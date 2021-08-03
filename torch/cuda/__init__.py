@@ -29,9 +29,31 @@ _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
 _queued_calls = []  # don't invoke these until initialization occurs
-_manual_seed_all_lazy_cb = None  # don't invoke this until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_cuda_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
+
+
+class _LazySeedTracker:
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order
+
+
+_lazy_seed_tracker = _LazySeedTracker()
 
 # Define dummy _CudaDeviceProperties type if PyTorch was compiled without CUDA
 if hasattr(torch._C, '_CudaDeviceProperties'):
@@ -119,12 +141,11 @@ def _lazy_call(callable, **kwargs):
         # TODO(torch_deploy): this accesses linecache, which attempts to read the
         # file system to get traceback info. Patch linecache or do something
         # else here if this ends up being important.
-
+        global _lazy_seed_tracker
         if kwargs.get("seed_all", False):
-            # Since seeding is memoryless, keep only the latest
-            # callback for setting seeds on all devices.
-            global _manual_seed_all_lazy_cb
-            _manual_seed_all_lazy_cb = (callable, traceback.format_stack())
+            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+        elif kwargs.get("seed", False):
+            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
         else:
             # Don't store the actual traceback to avoid memory cycle
             _queued_calls.append((callable, traceback.format_stack()))
@@ -182,8 +203,9 @@ def _lazy_init():
         # However, we must not let any *other* threads in!
         _tls.is_initializing = True
 
-        if _manual_seed_all_lazy_cb:
-            _queued_calls.append(_manual_seed_all_lazy_cb)
+        for calls in _lazy_seed_tracker.get_calls():
+            if calls:
+                _queued_calls.append(calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:

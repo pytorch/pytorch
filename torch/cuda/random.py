@@ -92,7 +92,7 @@ def manual_seed(seed: int) -> None:
         default_generator = torch.cuda.default_generators[idx]
         default_generator.manual_seed(seed)
 
-    _lazy_call(cb)
+    _lazy_call(cb, seed=True)
 
 
 def manual_seed_all(seed: int) -> None:
