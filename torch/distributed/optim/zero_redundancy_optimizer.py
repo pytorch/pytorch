@@ -191,11 +191,10 @@ class _OverlapInfo():
 
         # Modified per iteration
         self.broadcast_handles: List[Any] = []
+        self.bucket_indices_seen: List[int] = []
         # Used by `hook_with_zero_step()`
         self.bucket_index_to_future: Dict[int, torch.futures.Future] = {}
         self.bucket_index_to_bucket: Dict[int, dist.GradBucket] = {}
-        # Used by `hook_with_zero_step_interleaved()`
-        self.bucket_indices_seen: List[int] = []
 
 
 class ZeroRedundancyOptimizer(Optimizer, _Joinable):
