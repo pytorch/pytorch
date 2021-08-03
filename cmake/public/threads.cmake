@@ -1,4 +1,4 @@
-if (TARGET caffe2::Threads)
+if(TARGET caffe2::Threads)
   return()
 endif()
 
