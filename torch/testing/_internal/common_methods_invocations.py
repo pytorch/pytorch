@@ -5188,7 +5188,7 @@ op_db: List[OpInfo] = [
                    decorators=[
                        DecorateInfo(
                            toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-04)}),
-                           'TestUnaryUfuncs', 'test_reference_numerics', device_type='cuda'),
+                           'TestUnaryUfuncs', device_type='cuda'),
                        precisionOverride({torch.bfloat16: 1e-2}),
                    ],
                    skips=(
