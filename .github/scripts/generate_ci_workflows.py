@@ -158,8 +158,8 @@ class CIWorkflow:
             assert self.test_runner_type in LINUX_RUNNERS, err_message
         if self.arch == 'windows':
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
-    
-    def generate_workflow_name(self, workflow) -> str:
+
+    def generate_workflow_name(self, workflow: 'CIWorkflow') -> str:
         workflow_name = workflow.build_environment
         if not workflow.on_pull_request:
             workflow_name = "master-only-" + workflow_name

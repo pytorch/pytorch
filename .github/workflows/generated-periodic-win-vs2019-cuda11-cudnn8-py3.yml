@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: periodic-win-vs2019-cuda11-cudnn8-py3
+name: win-vs2019-cuda11-cudnn8-py3
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-win-vs2019-cuda11-cudnn8-py3
+  BUILD_ENVIRONMENT: win-vs2019-cuda11-cudnn8-py3
   BUILD_WHEEL: 1
   CUDA_VERSION: "11.3"
   IN_CI: 1

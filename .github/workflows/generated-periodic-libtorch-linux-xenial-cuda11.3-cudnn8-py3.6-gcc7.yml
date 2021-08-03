@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
+  BUILD_ENVIRONMENT: libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
