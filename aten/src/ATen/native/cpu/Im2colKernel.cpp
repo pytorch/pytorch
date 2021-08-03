@@ -91,7 +91,7 @@ void im2col(
 
 template <typename scalar_t>
 void col2im_channels_last(
-    Tensor& im,
+    const Tensor& im,
     const Tensor& col,
     int64_t nbatch,
     int64_t output_channels,
@@ -151,7 +151,7 @@ void col2im_channels_last(
 
 template <typename scalar_t>
 void im2col_channels_last(
-    Tensor& col,
+    const Tensor& col,
     const Tensor& im,
     int64_t nbatch,
     int64_t output_channels,
@@ -251,7 +251,7 @@ void im2col_kernel(
 }
 
 void col2im_channels_last_kernel(
-    Tensor& im,
+    const Tensor& im,
     const Tensor& col,
     int64_t nbatch,
     int64_t output_channels,
@@ -277,7 +277,7 @@ void col2im_channels_last_kernel(
 }
 
 void im2col_channels_last_kernel(
-    Tensor& col,
+    const Tensor& col,
     const Tensor& im,
     int64_t nbatch,
     int64_t output_channels,
