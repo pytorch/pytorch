@@ -227,6 +227,7 @@ _functorch_lagging_meta = {
     ('nn.functional.logsigmoid', ''),
     ('nn.functional.one_hot', ''),
     ('nn.functional.relu6', ''),
+    ('nn.functional.softplus', ''),
     ('norm', ''),
     ('norm', 'fro'),
     ('norm', 'inf'),
