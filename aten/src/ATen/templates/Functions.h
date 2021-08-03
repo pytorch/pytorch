@@ -226,4 +226,8 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
-}
+TORCH_API at::Tensor add(const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1);
+
+TORCH_API at::Tensor & add_out(at::Tensor & out, const at::Tensor & self, const at::Tensor & other, const at::Scalar & alpha=1);
+
+} //namespace at

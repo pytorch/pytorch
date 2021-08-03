@@ -375,33 +375,17 @@
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   device_check: NoCheck   # TensorIterator
-  structured_delegate: add.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA: add_sparse
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
-    MkldnnCPU: mkldnn_add
+  manual_cpp_binding: True
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
-  structured_delegate: add.out
-  dispatch:
-    SparseCPU, SparseCUDA: add_sparse_
-    SparseCsrCPU, SparseCsrCUDA: add_sparse_csr_
-    MkldnnCPU: mkldnn_add_
+  manual_cpp_binding: True
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
-  structured: True
-  structured_inherits: TensorIteratorBase
-  dispatch:
-    CPU, CUDA: add_out
-    SparseCPU: add_out_sparse_cpu
-    SparseCUDA: add_out_sparse_cuda
-    SparseCsrCPU: add_out_sparse_csr_cpu
-    SparseCsrCUDA: add_out_sparse_csr_cuda
-    MkldnnCPU: mkldnn_add_out
+  manual_cpp_binding: True
 
 - func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
