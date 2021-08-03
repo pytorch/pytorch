@@ -467,37 +467,28 @@ void IndexCompute::handle(Split* split) {
   const auto outer_ind = outer_it->second;
   const auto inner_ind = inner_it->second;
 
-  const bool outer_zero = outer_ind->isZeroInt();
-  const bool inner_zero = inner_ind->isZeroInt();
-
-  const bool outer_bcast = outer_id->isBroadcast();
-  const bool inner_bcast = inner_id->isBroadcast();
-
-  const bool outer_vect =
-      isParallelTypeVectorize(split->outer()->getParallelType());
-  const bool inner_vect =
-      isParallelTypeVectorize(split->inner()->getParallelType());
+  const bool outer_zero = isZero(outer_id);
+  const bool inner_zero = isZero(inner_id);
 
   // We want to mark as zero merged in if we're working with shared or local
   // memory, and the dimension we're working with is not part of the allocation,
-  // as we have special propagation rules for that scenario. If zero indexing is
-  // from a vectorized ID or broadcast do not propagate in zero merged manner,
-  // so don't mark. This logic is important for vector support on global memory.
+  // as we have special propagation rules for that scenario.
 
   // Maybe clear in_id as it could have been mapped over from another
   // IndexCompute. Uncertain if this is needed but seems to be safe.
-  bool zero_merged_in = hasZeroMerged(in_id);
-  zero_merged_in =
-      zero_merged_in || hasZeroMerged(inner_id) || hasZeroMerged(outer_id);
-  zero_merged_in =
-      zero_merged_in || (outer_zero && (!outer_bcast && !outer_vect));
-  zero_merged_in =
-      zero_merged_in || (inner_zero && (!inner_bcast && !inner_vect));
+  bool zero_merged_in = hasZeroMerged(in_id) || hasZeroMerged(inner_id) ||
+      hasZeroMerged(outer_id);
+
+  // If both are zero, the split input is also zero
+  if (inner_zero && outer_zero) {
+    zero_.emplace(in_id);
+  }
 
   if (zero_merged_in) {
     zero_merged_in_.emplace(in_id);
   }
-  if (zero_merged_in && outer_zero && inner_zero) {
+
+  if (isZero(in_id)) {
     index_map_[in_id] = ir_builder.create<kir::Int>(0);
     extent_map_[in_id] = ir_builder.create<kir::Int>(0);
   } else if (zero_merged_in && outer_zero) {
@@ -533,13 +524,15 @@ void IndexCompute::handle(Merge* merge) {
   }
   auto out_ind = out_it->second;
 
-  auto zero = ir_builder.create<kir::Int>(0);
+  auto zero = ir_builder.zeroVal();
 
-  if (out_ind->isZeroInt()) {
+  if (isZero(out_id)) {
     index_map_[outer_id] = zero;
     index_map_[inner_id] = zero;
     extent_map_[outer_id] = zero;
     extent_map_[inner_id] = zero;
+    zero_.emplace(outer_id);
+    zero_.emplace(inner_id);
     return;
   }
 
@@ -677,6 +670,22 @@ IndexCompute::IndexCompute(
       }
     }
   }
+
+  // Initialize the zero_ set with domains that do not contibute to
+  // the resulting index. Any domain that is mapped to Int(0), except
+  // for vectorized ones, is included in this set.
+  const auto gpu_lower = GpuLower::current();
+  for (auto dom : td_->domain()) {
+    auto kir_dom = gpu_lower->lowerValue(dom)->as<kir::IterDomain>();
+    auto it = index_map_.find(kir_dom);
+    if (it == index_map_.end()) {
+      continue;
+    }
+    auto idx = it->second;
+    if (idx->isZeroInt() && !isParallelTypeVectorize(dom->getParallelType())) {
+      zero_.emplace(kir_dom);
+    }
+  }
 }
 
 void IndexCompute::run() {
@@ -694,8 +703,12 @@ kir::Val* IndexCompute::getExtent(kir::IterDomain* id) {
   }
 }
 
-bool IndexCompute::hasZeroMerged(kir::IterDomain* id) {
-  return zero_merged_in_.find(id) != zero_merged_in_.end();
+bool IndexCompute::hasZeroMerged(kir::IterDomain* id) const {
+  return zero_merged_in_.find(id) != zero_merged_in_.end() || isZero(id);
+}
+
+bool IndexCompute::isZero(kir::IterDomain* id) const {
+  return zero_.find(id) != zero_.end();
 }
 
 IndexCompute IndexCompute::updateIndexCompute(

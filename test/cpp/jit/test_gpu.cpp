@@ -5522,6 +5522,65 @@ TEST(NVFuserTest, FusionAdvancedIndexing9_CUDA) {
       &fusion, cg_outputs, aten_inputs, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionAdvancedIndexing10_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(2);
+  TensorView* tv1 = makeContigTensor(2);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // Do math with it, it returns a `Val*` but can be static_casted back to
+  // TensorView
+  TensorView* tv2 = add(tv1, new Double(2.0));
+  TensorView* tv3 = add(tv0, tv2);
+
+  // Register your outputs
+  fusion.addOutput(tv3);
+
+  auto tv0_cache = tv0->cache_after();
+  auto tv1_cache = tv1->cache_after();
+
+  std::vector<TensorView*> tvs = {tv0_cache, tv1_cache, tv2, tv3};
+
+  for (auto tv : tvs) {
+    tv->split(1, 2, false);
+    tv->split(1, 1);
+    tv->split(-1, 4);
+    // [I0, 2, 1, I1/2/4, 4]
+    tv->reorder({{1, 2}, {2, 3}, {3, 1}});
+    tv->axis(0)->parallelize(ParallelType::BIDx);
+    tv->axis(1)->parallelize(ParallelType::TIDx);
+  }
+
+  // For all inputs, computeAt the output inline, temporaries should be squeezed
+  // between them
+  tv0->computeAt(tv3, 1);
+  tv1->computeAt(tv3, 1);
+
+  tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1_cache->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor input1 = at::randn({64, 128}, options);
+  at::Tensor input2 = at::rand_like(input1);
+  at::Tensor output = at::empty_like(input1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({input1, input2}, {output});
+
+  at::Tensor tv2_ref = input2 + 2.0;
+  at::Tensor output_ref = input1 + tv2_ref;
+
+  TORCH_CHECK(output_ref.equal(output));
+}
+
 // Intended to stress the lowering of our code generator
 TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
   Fusion fusion;

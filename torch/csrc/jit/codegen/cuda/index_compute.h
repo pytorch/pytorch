@@ -70,22 +70,28 @@ class IndexCompute : public BackwardVisitor {
   // return extent_map_[id] if exists, else return id->extent()
   kir::Val* getExtent(kir::IterDomain* id);
 
-  bool hasZeroMerged(kir::IterDomain* id);
+  //! True if a domain is not used to index
+  bool isZero(kir::IterDomain* id) const;
+  //! True if any dependent of a domain is not used to index
+  bool hasZeroMerged(kir::IterDomain* id) const;
 
   // Tensor domain we're mapping back to root
-  const TensorDomain* td_;
+  const TensorDomain* td_; // NOLINT
 
   // Map we update as we propagate backward, containing all IDs in the
   // propagation. Initial indices are mapped with this map at tv->domain()
   // and are back propagated to tv->rootDomain(). This index_map_ keeps the
   // indices at intermediate IterDomain's in that back propagation.
-  std::unordered_map<kir::IterDomain*, kir::Val*> index_map_;
+  std::unordered_map<kir::IterDomain*, kir::Val*> index_map_; // NOLINT
 
   // Map from IterDomain to their broadcasted extent. If a TV has I0*I1 but its
   // producer has B0*I1 this map will contain a mapping from the ID{B0*I1} to
   // the extent I0*I1. Also contains updated extents if we merge in a 0 index.
   // See zero_merged_in_.
-  std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_;
+  std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_; // NOLINT
+
+  // Keeps track of domains that do not contribute to indexing
+  std::unordered_set<kir::IterDomain*> zero_; // NOLINT
 
   // This set keeps track of IterDomain's that have had a zero index merged into
   // them. This happens if we do something like tv->axis(0)->split(4) then
