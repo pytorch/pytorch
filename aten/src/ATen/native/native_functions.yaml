@@ -2703,15 +2703,13 @@
 
 # DEPRECATED: Use torch.aminmax instead
 - func: _aminmax(Tensor self) -> (Tensor, Tensor)
-  variants: function
   dispatch:
-    CompositeImplicitAutograd: _aminmax_all
+    CPU, CUDA: _aminmax
 
 # DEPRECATED: Use torch.aminmax instead
 - func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  variants: function
   dispatch:
-    CompositeImplicitAutograd: _aminmax
+    CPU, CUDA: _aminmax_all
 
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
   device_check: NoCheck   # TensorIterator
