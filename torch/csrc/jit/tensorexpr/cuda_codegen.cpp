@@ -21,7 +21,7 @@ namespace tensorexpr {
 // TODO: move this to a more shared place.
 class ScopedVarName {
  public:
-  ScopedVarName(VarNameMap* mapping, const Var* var, const std::string& name)
+  ScopedVarName(VarNameMap* mapping, Var* var, const std::string& name)
       : mapping_(mapping), var_(var) {
     auto iter = mapping->find(var);
     if (iter != mapping->end()) {
@@ -30,10 +30,7 @@ class ScopedVarName {
     mapping->insert(std::make_pair(var, name));
   }
 
-  ScopedVarName(
-      UniqueNameManager* manager,
-      const Var* var,
-      const std::string& name)
+  ScopedVarName(UniqueNameManager* manager, Var* var, const std::string& name)
       : ScopedVarName(&manager->unique_name_mapping_, var, name) {}
 
   ScopedVarName(const ScopedVarName&) = delete;
@@ -45,11 +42,11 @@ class ScopedVarName {
 
  private:
   VarNameMap* mapping_ = nullptr;
-  const Var* var_ = nullptr;
+  Var* var_ = nullptr;
 };
 
-static int as_int(const Expr* expr) {
-  auto v = dynamic_cast<const IntImm*>(expr);
+static int as_int(Expr* expr) {
+  auto v = dynamic_cast<IntImm*>(expr);
   if (!v) {
     throw malformed_input(
         "cuda_codegen: non Int expr interpreted as int", expr);
@@ -58,7 +55,7 @@ static int as_int(const Expr* expr) {
   return v->value();
 }
 
-static bool is_zero(const Expr* expr) {
+static bool is_zero(Expr* expr) {
   return as_int(expr) == 0;
 }
 
@@ -123,17 +120,17 @@ std::string CudaPrinter::dtypeToCppString(const Dtype& dtype) {
   }
 }
 
-void CudaAnalysis::visit(const Free* v) {
+void CudaAnalysis::visit(Free* v) {
   if (thread_local_bufs_.count(v->buffer_var()) == 0 &&
       cross_block_bufs_.count(v->buffer_var()) == 0) {
     throw std::runtime_error("Global free not supported yet");
   }
 }
 
-void CudaAnalysis::visit(const Allocate* v) {
+void CudaAnalysis::visit(Allocate* v) {
   Stmt* p = v->get_parent();
   while (p) {
-    const For* for_v = dynamic_cast<const For*>(p);
+    For* for_v = dynamic_cast<For*>(p);
     if (for_v) {
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (for_v->loop_options().is_gpu_block_index()) {
@@ -151,7 +148,7 @@ void CudaAnalysis::visit(const Allocate* v) {
   throw std::runtime_error("Global alloc not supported yet");
 }
 
-void CudaAnalysis::visit(const For* v) {
+void CudaAnalysis::visit(For* v) {
   // Recurse first.
   v->body()->accept(this);
 
@@ -161,7 +158,7 @@ void CudaAnalysis::visit(const For* v) {
     if (gpu_block_index >= 3) {
       throw std::runtime_error("support only 3D gpu_block_index");
     }
-    const Expr* prev = nullptr;
+    Expr* prev = nullptr;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (gpu_block_extents_.size() <= gpu_block_index) {
@@ -191,7 +188,7 @@ void CudaAnalysis::visit(const For* v) {
     if (gpu_thread_index >= 3) {
       throw std::runtime_error("support only 3D gpu_thread_index");
     }
-    const Expr* prev = nullptr;
+    Expr* prev = nullptr;
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (gpu_thread_extents_.size() <= gpu_thread_index) {
@@ -219,13 +216,13 @@ void CudaAnalysis::visit(const For* v) {
   }
 }
 
-void CudaPrinter::print_flat_alloc(const Allocate* alloc) {
+void CudaPrinter::print_flat_alloc(Allocate* alloc) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Expr*> dims = alloc->dims();
+  std::vector<Expr*> dims = alloc->dims();
   // TODO: this should be merged with the storage flattener.
   int64_t flat_size = 1;
   for (auto dim : dims) {
-    const IntImm* dim_i = dynamic_cast<const IntImm*>(dim);
+    IntImm* dim_i = dynamic_cast<IntImm*>(dim);
     if (dim_i) {
       flat_size *= dim_i->value();
     } else {
@@ -236,7 +233,7 @@ void CudaPrinter::print_flat_alloc(const Allocate* alloc) {
        << "[" << flat_size << "];" << std::endl;
 }
 
-void CudaPrinter::visit(const Allocate* v) {
+void CudaPrinter::visit(Allocate* v) {
   // TODO: handle dynamic shapes here.
   if (cuda_analysis_->cross_block_bufs().count(v->buffer_var()) != 0) {
     emitIndent();
@@ -254,15 +251,15 @@ void CudaPrinter::visit(const Allocate* v) {
   throw std::runtime_error("Encountered Alloc not local to block or thread");
 }
 
-void CudaPrinter::visit(const Free* v) {
+void CudaPrinter::visit(Free* v) {
   // do nothing
 }
 
-void CudaPrinter::visit(const For* v) {
+void CudaPrinter::visit(For* v) {
   IRPrinter::visit(v);
 }
 
-void CudaPrinter::visit(const Cast* v) {
+void CudaPrinter::visit(Cast* v) {
   if (v->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(";
     v->src_value()->accept(this);
@@ -281,7 +278,7 @@ void CudaPrinter::visit(const Cast* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const Intrinsics* v) {
+void CudaPrinter::visit(Intrinsics* v) {
   if (v->op_type() == IntrinsicsOp::kRand) {
     os() << "Uint32ToFloat(" << *rand_func_ << "())";
     return;
@@ -308,7 +305,7 @@ void CudaPrinter::visit(const Intrinsics* v) {
   }
 
   os() << func_name << "(";
-  for (const auto i : c10::irange(v->nparams())) {
+  for (auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -317,11 +314,11 @@ void CudaPrinter::visit(const Intrinsics* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const ExternalCall* v) {
+void CudaPrinter::visit(ExternalCall* v) {
   throw unimplemented_lowering(v);
 }
 
-void CudaPrinter::visit(const Load* v) {
+void CudaPrinter::visit(Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   // Detects whether the load target is also a store target.
   // TODO: this is currently too wide. It detects whether a store-target
@@ -348,7 +345,7 @@ void CudaPrinter::visit(const Load* v) {
 // TODO: maybe this should be a more shared location?
 // TODO: investigate how "Expr*" can be implicitly converted to "ExprHandle" as
 // a bool.
-static bool CheckEqual(const Expr* lhs, const Expr* rhs) {
+static bool CheckEqual(Expr* lhs, Expr* rhs) {
   // The fast path. Checks if the pointers are the same.
   if (lhs == rhs) {
     return true;
@@ -362,12 +359,11 @@ class AtomicAddFuser : public IRMutator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AtomicAddFuser(
-      const std::unordered_set<const Var*>& thread_local_bufs,
+      const std::unordered_set<Var*>& thread_local_bufs,
       const GPUMetaVarRewriter& metavars)
       : thread_local_bufs_(thread_local_bufs) {
-    const std::vector<const Expr*>& block_extents =
-        metavars.gpu_block_extents();
-    const std::vector<const Var*>& block_vars = metavars.gpu_block_vars();
+    const std::vector<Expr*>& block_extents = metavars.gpu_block_extents();
+    const std::vector<Var*>& block_vars = metavars.gpu_block_vars();
     for (size_t i = 0; i < block_extents.size(); ++i) {
       MetaVarExtent extent{block_extents[i], false};
       if (extent.expr->isConstant() && immediateEquals(extent.expr, 1)) {
@@ -378,9 +374,8 @@ class AtomicAddFuser : public IRMutator {
       metavars_[block_vars[i]] = extent;
     }
 
-    const std::vector<const Expr*>& thread_extents =
-        metavars.gpu_thread_extents();
-    const std::vector<const Var*>& thread_vars = metavars.gpu_thread_vars();
+    const std::vector<Expr*>& thread_extents = metavars.gpu_thread_extents();
+    const std::vector<Var*>& thread_vars = metavars.gpu_thread_vars();
     for (size_t i = 0; i < thread_extents.size(); ++i) {
       MetaVarExtent extent{thread_extents[i], false};
       if (extent.expr->isConstant() && immediateEquals(extent.expr, 1)) {
@@ -392,8 +387,8 @@ class AtomicAddFuser : public IRMutator {
     }
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Buf* buf = v->buf();
+  Stmt* mutate(Store* v) override {
+    Buf* buf = v->buf();
     Store* orig = const_cast<Store*>(v); // NOLINT
 
     // Thread locals never need to be atomic.
@@ -405,11 +400,11 @@ class AtomicAddFuser : public IRMutator {
     if (dtype != ScalarType::Float && dtype != ScalarType::Double) {
       return orig;
     }
-    const Add* add_v = dynamic_cast<const Add*>(v->value());
+    Add* add_v = dynamic_cast<Add*>(v->value());
     if (!add_v) {
       return orig;
     }
-    const Load* load_v = dynamic_cast<const Load*>(add_v->lhs());
+    Load* load_v = dynamic_cast<Load*>(add_v->lhs());
     if (!load_v) {
       return orig;
     }
@@ -427,9 +422,9 @@ class AtomicAddFuser : public IRMutator {
     // TODO: this checks that the metavars occur directly as an index, but this
     // is pessimistic, blockIdx.x + 1 is fine too if there is no overlapping.
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unordered_set<const Var*> vars_to_find = nontrivial_metavars_;
-    for (const Expr* e : v->indices()) {
-      if (const Var* v = dynamic_cast<const Var*>(e)) {
+    std::unordered_set<Var*> vars_to_find = nontrivial_metavars_;
+    for (Expr* e : v->indices()) {
+      if (Var* v = dynamic_cast<Var*>(e)) {
         vars_to_find.erase(v);
       }
     }
@@ -443,16 +438,16 @@ class AtomicAddFuser : public IRMutator {
   }
 
  private:
-  const std::unordered_set<const Var*>& thread_local_bufs_;
+  const std::unordered_set<Var*>& thread_local_bufs_;
   struct MetaVarExtent {
-    const Expr* expr{nullptr};
+    Expr* expr{nullptr};
     bool trivial{false};
   };
-  std::unordered_map<const Var*, MetaVarExtent> metavars_;
-  std::unordered_set<const Var*> nontrivial_metavars_;
+  std::unordered_map<Var*, MetaVarExtent> metavars_;
+  std::unordered_set<Var*> nontrivial_metavars_;
 };
 
-void CudaPrinter::visit(const Store* v) {
+void CudaPrinter::visit(Store* v) {
   emitIndent();
   if (v->indices().empty()) {
     os() << *v->base_handle() << " = ";
@@ -463,7 +458,7 @@ void CudaPrinter::visit(const Store* v) {
   os() << std::endl;
 }
 
-void CudaPrinter::visit(const AtomicAdd* v) {
+void CudaPrinter::visit(AtomicAdd* v) {
   emitIndent();
   if (cuda_analysis_->thread_local_bufs().count(v->base_handle()) > 0) {
     // atomicAdd only works on global and shared memory
@@ -476,7 +471,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
   os() << std::endl;
 }
 
-void CudaPrinter::visit(const Max* v) {
+void CudaPrinter::visit(Max* v) {
   if (v->dtype().is_integral()) {
     os() << "max(";
   } else {
@@ -488,7 +483,7 @@ void CudaPrinter::visit(const Max* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const Min* v) {
+void CudaPrinter::visit(Min* v) {
   if (v->dtype().is_integral()) {
     os() << "min(";
   } else {
@@ -500,7 +495,7 @@ void CudaPrinter::visit(const Min* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const IfThenElse* v) {
+void CudaPrinter::visit(IfThenElse* v) {
   os() << "((";
   v->condition()->accept(this);
   os() << ") ? ";
@@ -510,7 +505,7 @@ void CudaPrinter::visit(const IfThenElse* v) {
   os() << ")";
 }
 
-void CudaPrinter::visit(const Block* v) {
+void CudaPrinter::visit(Block* v) {
   os() << "{" << std::endl;
   indent_++;
 
@@ -523,7 +518,7 @@ void CudaPrinter::visit(const Block* v) {
   os() << "}";
 }
 
-void CudaPrinter::visit(const Let* v) {
+void CudaPrinter::visit(Let* v) {
   emitIndent();
   os() << dtypeToCppString(v->dtype());
   os() << " " << *v->var() << " = ";
@@ -534,7 +529,7 @@ void CudaPrinter::visit(const Let* v) {
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class PrioritizeLoad : public IRMutator {
  public:
-  const Expr* mutate(const Load* v) override {
+  Expr* mutate(Load* v) override {
     // Look at the declaration of this variable for more details.
     if (nested_if_then_else_ > 0) {
       return IRMutator::mutate(v);
@@ -569,17 +564,17 @@ class PrioritizeLoad : public IRMutator {
     }
 
     MemLoadList& load_list = load_stack_.back();
-    const Var* load_new_var = new Var("v", v->dtype());
-    const Expr* new_value = IRMutator::mutate(v);
+    Var* load_new_var = new Var("v", v->dtype());
+    Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
 
     return load_new_var;
   }
 
-  const Expr* mutate(const Cast* v) override {
-    const Load* src_load = dynamic_cast<const Load*>(v->src_value());
-    const Expr* new_src = v->src_value()->accept_mutator(this);
-    const Var* new_var = dynamic_cast<const Var*>(new_src);
+  Expr* mutate(Cast* v) override {
+    Load* src_load = dynamic_cast<Load*>(v->src_value());
+    Expr* new_src = v->src_value()->accept_mutator(this);
+    Var* new_var = dynamic_cast<Var*>(new_src);
     if (!src_load || !new_var) {
       return new Cast(v->dtype(), new_src);
     }
@@ -593,27 +588,27 @@ class PrioritizeLoad : public IRMutator {
 
     new_var = new Var("v", v->dtype());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const Expr* new_value = new Cast(v->dtype(), pair.second);
+    Expr* new_value = new Cast(v->dtype(), pair.second);
     load_list.push_back(std::make_pair(new_var, new_value));
     return new_var;
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Store* last = nested_store_;
+  Stmt* mutate(Store* v) override {
+    Store* last = nested_store_;
     nested_store_ = v;
     Stmt* s = IRMutator::mutate(v);
     nested_store_ = last;
     return s;
   }
 
-  Stmt* mutate(const Let* v) override {
+  Stmt* mutate(Let* v) override {
     nested_let_ = true;
     Stmt* s = IRMutator::mutate(v);
     nested_let_ = false;
     return s;
   }
 
-  Stmt* mutate(const Block* v) override {
+  Stmt* mutate(Block* v) override {
     Block* v1 = const_cast<Block*>(v); // NOLINT
     assert(v1);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -633,15 +628,15 @@ class PrioritizeLoad : public IRMutator {
     return v1;
   }
 
-  const Expr* mutate(const IfThenElse* v) override {
+  Expr* mutate(IfThenElse* v) override {
     nested_if_then_else_++;
-    const Expr* new_v = IRMutator::mutate(v);
+    Expr* new_v = IRMutator::mutate(v);
     nested_if_then_else_--;
     return new_v;
   }
 
  private:
-  using MemLoadEntry = std::pair<const Var*, const Expr*>;
+  using MemLoadEntry = std::pair<Var*, Expr*>;
   using MemLoadList = std::vector<MemLoadEntry>;
   using MemoryLoadStack = std::vector<MemLoadList>;
 
@@ -659,7 +654,7 @@ class PrioritizeLoad : public IRMutator {
       return;
     }
 
-    for (const auto& pair : load_list) {
+    for (auto& pair : load_list) {
       Stmt* news = new Let(pair.first, pair.second);
       block->insert_stmt_before(news, last);
     }
@@ -678,9 +673,9 @@ class PrioritizeLoad : public IRMutator {
   // }
   // int v2 = v + 2;
   int nested_if_then_else_{0};
-  const Store* nested_store_{nullptr};
+  Store* nested_store_{nullptr};
   bool nested_let_{false};
-  std::unordered_set<const Var*> thread_local_bufs_;
+  std::unordered_set<Var*> thread_local_bufs_;
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
@@ -716,9 +711,9 @@ bool GPUMetaVarRewriter::isFullExtent() {
   return true;
 }
 
-Stmt* GPUMetaVarRewriter::mutate(const For* v) {
+Stmt* GPUMetaVarRewriter::mutate(For* v) {
   Stmt* body = v->body();
-  const Expr* old_reach = nullptr;
+  Expr* old_reach = nullptr;
   const LoopOptions& loop_options = v->loop_options();
   if (loop_options.is_gpu_block_index()) {
     int gpu_block_index = loop_options.gpu_block_index();
@@ -737,7 +732,7 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const Var* metaVar = gpu_block_vars_[gpu_block_index];
+    Var* metaVar = gpu_block_vars_[gpu_block_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   } else if (loop_options.is_gpu_thread_index()) {
     int gpu_thread_index = loop_options.gpu_thread_index();
@@ -756,7 +751,7 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const Var* metaVar = gpu_thread_vars_[gpu_thread_index];
+    Var* metaVar = gpu_thread_vars_[gpu_thread_index];
     body = Substitute(Stmt::clone(body), {{v->var(), metaVar}});
   }
 
@@ -776,7 +771,7 @@ Stmt* GPUMetaVarRewriter::mutate(const For* v) {
   return v->cloneWithNewBody(body);
 }
 
-Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
+Stmt* GPUMetaVarRewriter::mutate(Block* v) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<Segment> innerSegments;
   Segment current;
@@ -891,7 +886,7 @@ Stmt* GPUMetaVarRewriter::mutate(const Block* v) {
 
 static std::ostream& operator<<(
     std::ostream& out,
-    const std::vector<const Expr*>& exprs) {
+    const std::vector<Expr*>& exprs) {
   size_t i = 0;
   for (auto expr : exprs) {
     if (i++ > 0) {
@@ -983,7 +978,7 @@ void CudaCodeGen::Initialize() {
       os() << ", ";
     }
     const BufferArg& buffer_arg = buffer_args[i];
-    const Var* var = buffer_arg.var();
+    Var* var = buffer_arg.var();
     Dtype dtype = buffer_arg.dtype();
 
     os() << printer_->dtypeToCppString(dtype)
@@ -991,9 +986,9 @@ void CudaCodeGen::Initialize() {
          << name_manager()->get_unique_name(var);
   }
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const Var* rand_seed;
+  Var* rand_seed;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const Var* rand_offset;
+  Var* rand_offset;
   if (has_random_) {
     // TODO: switch to kUint64 when it is available.
     rand_seed = new Var("rand_seed", kInt);
@@ -1006,11 +1001,11 @@ void CudaCodeGen::Initialize() {
   os() << std::endl;
 
   if (has_random_) {
-    const Var* idx = new Var("idx", kInt);
+    Var* idx = new Var("idx", kInt);
     os() << "int " << *idx << " = blockIdx.x*blockDim.x + threadIdx.x;"
          << std::endl;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const Var* rand_func = printer_->rand_func();
+    Var* rand_func = printer_->rand_func();
     os() << "Philox " << *rand_func << "(" << *rand_seed << ", " << *idx << ", "
          << *rand_offset << ");" << std::endl;
     os() << std::endl;
@@ -1041,7 +1036,7 @@ void CudaCodeGen::Initialize() {
   os() << "}";
 
   // Check that all block extents had been set.
-  const std::vector<const Expr*>& gpu_block_extents =
+  const std::vector<Expr*>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
@@ -1067,9 +1062,9 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
   auto const& buffer_args = this->buffer_args();
 
   // TODO: move as much of this into the constructors.
-  const std::vector<const Expr*>& gpu_block_extents =
+  const std::vector<Expr*>& gpu_block_extents =
       metavar_rewriter_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents =
+  const std::vector<Expr*>& gpu_thread_extents =
       metavar_rewriter_->gpu_thread_extents();
   if (gpu_block_extents.size() > 3 || gpu_thread_extents.size() > 3) {
     throw malformed_input(
@@ -1148,7 +1143,7 @@ void CudaCodeGen::call_raw(const std::vector<void*>& raw_args) {
     ptr_to_args[buffer_args.size() + 1] = &rand_offset;
   }
 
-  const auto prior_device = at::cuda::current_device();
+  auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
   }
@@ -1207,7 +1202,7 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   // Note: hacked at::DeviceGuard since at::DeviceGuard was failing to work
   // properly in some scenarios
-  const auto prior_device = at::cuda::current_device();
+  auto prior_device = at::cuda::current_device();
   if (prior_device != this->device().index()) {
     at::cuda::set_device(this->device().index());
   }
@@ -1259,8 +1254,7 @@ void CudaCodeGen::CompileToNVRTC(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const auto result =
-      nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
+  auto result = nvrtc().nvrtcCompileProgram(program, args.size(), args.data());
   if (result != NVRTC_SUCCESS) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t logsize;
@@ -1284,15 +1278,14 @@ void CudaCodeGen::CompileToNVRTC(
 #if CUDA_VERSION >= 11010
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
-  const auto getSize = compile_to_sass
+  auto getSize = compile_to_sass
       ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
       : at::globalContext().getNVRTC().nvrtcGetPTXSize;
-  const auto getFunc = compile_to_sass
-      ? at::globalContext().getNVRTC().nvrtcGetCUBIN
-      : at::globalContext().getNVRTC().nvrtcGetPTX;
+  auto getFunc = compile_to_sass ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+                                 : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else
-  const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
-  const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+  auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
 #endif
   AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
   ptx.resize(ptx_size);

@@ -815,9 +815,9 @@ TEST(MemDependency, MemDependencyCheckerLoopBounds) {
   // much.
   auto history = analyzer.getHistory();
   ASSERT_EQ(history.size(), 10);
-  const Var* aVar = a.node()->base_handle();
-  const Var* bVar = b.node()->base_handle();
-  const Var* cVar = c.node()->base_handle();
+  Var* aVar = a.node()->base_handle();
+  Var* bVar = b.node()->base_handle();
+  Var* cVar = c.node()->base_handle();
 
   // The first access is the input A.
   ASSERT_EQ(history[0]->type(), AccessType::Input);
@@ -989,8 +989,8 @@ TEST(MemDependency, MemDependencyCheckerLoopBoundsIndexShift) {
   // Now let's look at the bounds of each access.
   auto history = analyzer.getHistory();
   ASSERT_EQ(history.size(), 12);
-  const Var* aVar = a.node()->base_handle();
-  const Var* bVar = b.node()->base_handle();
+  Var* aVar = a.node()->base_handle();
+  Var* bVar = b.node()->base_handle();
 
   // The first access is the input A.
   ASSERT_EQ(history[0]->type(), AccessType::Input);
@@ -3119,7 +3119,7 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
             history_before[i]->bounds(), history_after[i]->bounds()));
       } else {
         ASSERT_EQ(history_after[i]->bounds().size(), 1);
-        const Expr* flat_bounds = new IntImm(1);
+        Expr* flat_bounds = new IntImm(1);
 
         for (auto& b : history_before[i]->bounds()) {
           flat_bounds = new Mul(flat_bounds, new Add(b.end, new IntImm(1)));
@@ -3129,7 +3129,7 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
         }
 
         flat_bounds = IRSimplifier::simplify(flat_bounds);
-        const Expr* after_bounds = IRSimplifier::simplify(
+        Expr* after_bounds = IRSimplifier::simplify(
             new Add(history_after[i]->bounds()[0].end, new IntImm(1)));
         ASSERT_TRUE(exprEquals(flat_bounds, after_bounds));
       }
