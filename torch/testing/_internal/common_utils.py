@@ -965,6 +965,10 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 class ErrorOnPrintPolicy:
+    def __init__(self, filename, id):
+        self.filename = filename
+        self.id = id
+
     def __enter__(self):
         def policy_enter(name, redirect_name):
             out = io.StringIO()
@@ -996,7 +1000,8 @@ class ErrorOnPrintPolicy:
             if len(stderr) > 0:
                 msg += f"stderr: \n{stderr}\n"
 
-            raise RuntimeError(msg)
+            print(f"TESTPRINT\t{self.filename}\t{self.id}")
+            # raise RuntimeError(msg)
 
 
 class TestCase(expecttest.TestCase):
@@ -1078,8 +1083,10 @@ class TestCase(expecttest.TestCase):
             # if not self._ignore_error_on_print and \
             #    os.getenv("PYTORCH_ERROR_ON_TEST_PRINT", "") == "1" and \
             #    clean_id not in self._ignore_error_on_print_allowlist:
-            if True:
-                self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy())
+            # if True:
+            #     print("wrapping")
+            import inspect
+            self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy(inspect.getfile(self.__class__), self.id()))
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
