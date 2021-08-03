@@ -17,6 +17,9 @@ parameters:
   run_master_build:
     type: boolean
     default: false
+  run_slow_gradcheck_build:
+    type: boolean
+    default: false
 
 executors:
   windows-with-nvidia-gpu:

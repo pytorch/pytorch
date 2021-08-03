@@ -51,4 +51,4 @@ class RoutedDecoderIterDataPipe(IterDataPipe[Tuple[str, Any]]):
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
-        raise NotImplementedError
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

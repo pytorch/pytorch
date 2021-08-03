@@ -2,21 +2,18 @@ import pathlib
 import argparse
 import os
 import yaml
-from collections import namedtuple
+import re
+from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
 from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context
+from tools.codegen.utils import Target, concatMap, context, YamlLoader
+from tools.codegen.context import native_function_manager
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
-
-try:
-    # use faster C loader if available
-    from yaml import CSafeLoader as Loader
-except ImportError:
-    from yaml import SafeLoader as Loader  # type: ignore[misc]
+from tools.codegen.api.types import DispatcherSignature
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -35,7 +32,7 @@ def parse_backend_yaml(
     }
 
     with open(backend_yaml_path, 'r') as f:
-        yaml_values = yaml.load(f, Loader=Loader)
+        yaml_values = yaml.load(f, Loader=YamlLoader)
     assert isinstance(yaml_values, dict)
 
     valid_keys = ['backend', 'cpp_namespace', 'extra_headers', 'supported', 'autograd']
@@ -78,7 +75,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     backend_key: Optional[DispatchKey] = None
     if len(supported) > 0:
-        with context(f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
+        with context(lambda: f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
             backend_key = DispatchKey.parse(backend)
 
         backend_idx = create_backend_index(supported, backend_key)
@@ -87,7 +84,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     autograd_key: Optional[DispatchKey] = None
     if len(supported_autograd) > 0:
-        with context(f'The "autograd" key was specified, which indicates that you would like to override \
+        with context(lambda: f'The "autograd" key was specified, which indicates that you would like to override \
 the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
             autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
@@ -118,6 +115,49 @@ autograd key. They cannot be mix and matched. If this is something you need, fee
 
     return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
 
+def error_on_missing_kernels(
+        native_functions: Sequence[NativeFunction],
+        backend_indices: Dict[DispatchKey, BackendIndex],
+        backend_key: DispatchKey,
+        autograd_key: DispatchKey,
+        kernel_defn_file_path: str,
+) -> None:
+    try:
+        with open(kernel_defn_file_path, 'r') as f:
+            backend_defns = f.read()
+    except IOError:
+        raise AssertionError(f'Unable to read from the specified impl_path file: {kernel_defn_file_path}')
+
+    class_name: Optional[str] = backend_indices[backend_key].native_function_class_name()
+    assert class_name is not None
+
+    expected_backend_op_names: List[OperatorName] = \
+        list(backend_indices[backend_key].index.keys()) + list(backend_indices[autograd_key].index.keys())
+    expected_backend_native_funcs: List[NativeFunction] = [f for f in native_functions if f.func.name in expected_backend_op_names]
+    expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_f in expected_backend_native_funcs:
+        expected_backend_kernel_name_counts[dispatcher.name(native_f.func)].append(native_f)
+
+    kernel_defn_regex = rf'{class_name}::([\w\d]*)\([^\)]*\)\s*{{'
+    actual_backend_kernel_name_counts = Counter(re.findall(kernel_defn_regex, backend_defns))
+
+    missing_kernels_err_msg = ""
+    for expected_name, funcs in expected_backend_kernel_name_counts.items():
+        expected_overload_count = len(funcs)
+        actual_overload_count = actual_backend_kernel_name_counts[expected_name]
+        if expected_overload_count != actual_overload_count:
+            def create_decl(f: NativeFunction) -> str:
+                with native_function_manager(f):
+                    return DispatcherSignature.from_schema(f.func).decl()
+            expected_schemas_str = '\n'.join([create_decl(f) for f in funcs])
+            missing_kernels_err_msg += f"""
+{class_name} is missing a kernel definition for {expected_name}. We found {actual_overload_count} kernel(s) with that name,
+but expected {expected_overload_count} kernel(s). The expected function schemas for the missing operator are:
+{expected_schemas_str}
+
+"""
+    assert missing_kernels_err_msg == "", missing_kernels_err_msg
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate backend stub files')
     parser.add_argument(
@@ -128,11 +168,13 @@ def main() -> None:
         '-o', '--output_dir', help='output directory')
     parser.add_argument(
         '--dry_run', type=bool, default=False, help='output directory')
+    parser.add_argument(
+        '--impl_path', type=str, default=None, help='path to the source C++ file containing kernel definitions')
     options = parser.parse_args()
 
-    run(options.source_yaml, options.output_dir, options.dry_run)
+    run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path)
 
-def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
+def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str]) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -160,10 +202,17 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
     if backend_key is not None and autograd_key is not None:
         backend_dispatch_key: DispatchKey = backend_key
         autograd_dispatch_key: DispatchKey = autograd_key
+        class_name = backend_indices[backend_dispatch_key].native_function_class_name()
+
+        if impl_path is not None:
+            error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, impl_path)
+
+        assert class_name is not None
         generated_comment = 'Autogenerated file by gen_backend_stubs.py. Do not edit directly!'
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
             'generated_comment': generated_comment,
             'cpp_namespace': cpp_namespace,
+            'class_name': class_name,
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
             'dispatch_declarations': list(set(concatMap(
@@ -179,8 +228,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'legacy_th_headers': '',
-                'external_backend_headers': f'''#include "{output_dir}/{backend_key}NativeFunctions.h"
-#include <torch_xla/csrc/aten_xla_type_default.h>''',
+                'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+                'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_namespaced_definitions': list(concatMap(
@@ -189,7 +238,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                         Target.NAMESPACED_DEFINITION,
                         selector,
                         rocm=False,
-                        cpp_namespace=cpp_namespace),
+                        cpp_namespace=cpp_namespace,
+                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
                     grouped_native_functions
                 )),
                 'dispatch_anonymous_definitions': list(concatMap(
@@ -198,7 +248,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                         Target.ANONYMOUS_DEFINITION,
                         selector,
                         rocm=False,
-                        cpp_namespace=cpp_namespace),
+                        cpp_namespace=cpp_namespace,
+                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
                     grouped_native_functions
                 )),
                 'dispatch_registrations': list(concatMap(
@@ -207,34 +258,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool) -> None:
                         Target.REGISTRATION,
                         selector,
                         rocm=False,
-                        cpp_namespace=cpp_namespace),
+                        cpp_namespace=cpp_namespace,
+                        class_method_name=f'{backend_dispatch_key}NativeFunctions'),
                     grouped_native_functions
                 )),
             })
-
-        fm.write('aten_xla_type_default.h', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            'dispatch_aten_fallback_declarations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DECLARATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
-
-        fm.write('aten_xla_type_default.cpp', lambda: {
-            'generated_comment': generated_comment,
-            'cpp_namespace': cpp_namespace,
-            # TODO: after cpu fallbacks are moved to a boxed kernel,
-            # merge registrations / definitions into RegisterDispatchKey
-            'dispatch_aten_fallback_definitions': list(concatMap(
-                dest.GenExternalAtenFallback(Target.NAMESPACED_DEFINITION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-            'dispatch_registrations': list(concatMap(
-                dest.GenExternalAtenFallback(Target.REGISTRATION, backend_indices[backend_dispatch_key]),
-                grouped_native_functions
-            )),
-        })
 
 if __name__ == '__main__':
     main()

@@ -1,7 +1,7 @@
 
 #pragma once
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <c10/util/complex.h>
 
@@ -196,7 +196,7 @@ class Vectorized<ComplexFlt> {
           vec_vsx_ld(offset16, reinterpret_cast<const float*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {
@@ -209,7 +209,7 @@ class Vectorized<ComplexFlt> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<float*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<float*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, reinterpret_cast<float*>(tmp_values));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<float*>(tmp_values));
       std::memcpy(
@@ -220,8 +220,8 @@ class Vectorized<ComplexFlt> {
   const ComplexFlt& operator[](int idx) const = delete;
   ComplexFlt& operator[](int idx) = delete;
 
-  Vectorized<ComplexFlt> map(ComplexFlt (*f)(ComplexFlt)) const {
-    __at_align32__ ComplexFlt tmp[size()];
+  Vectorized<ComplexFlt> map(ComplexFlt (*const f)(ComplexFlt)) const {
+    __at_align__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -229,8 +229,8 @@ class Vectorized<ComplexFlt> {
     return loadu(tmp);
   }
 
-  Vectorized<ComplexFlt> map(ComplexFlt (*f)(const ComplexFlt&)) const {
-    __at_align32__ ComplexFlt tmp[size()];
+  Vectorized<ComplexFlt> map(ComplexFlt (*const f)(const ComplexFlt&)) const {
+    __at_align__ ComplexFlt tmp[size()];
     store(tmp);
     for (int i = 0; i < size(); i++) {
       tmp[i] = f(tmp[i]);
@@ -358,17 +358,16 @@ class Vectorized<ComplexFlt> {
     // angle = atan2(b/a)
     // auto b_a = _mm256_permute_ps(values, 0xB1); // b        a
     // return Sleef_atan2f8_u10(values, b_a); // 90-angle angle
-    auto ret = el_swapped();
-    for (int i = 0; i < 4; i++) {
-      ret._vec0[i] = std::atan2(_vec0[i], ret._vec0[i]);
-      ret._vec1[i] = std::atan2(_vec1[i], ret._vec0[i]);
+    Vectorized<ComplexFlt> ret;
+    for (int i = 0; i < 4; i += 2) {
+      ret._vec0[i] = std::atan2(_vec0[i + 1], _vec0[i]);
+      ret._vec1[i] = std::atan2(_vec1[i + 1], _vec1[i]);
     }
     return ret;
   }
 
   Vectorized<ComplexFlt> angle() const {
-    auto a = angle_().el_swapped();
-    return a & real_mask;
+    return angle_() & real_mask;
   }
 
   Vectorized<ComplexFlt> sin() const {
@@ -435,8 +434,8 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> pow(const Vectorized<ComplexFlt>& exp) const {
-    __at_align32__ ComplexFlt x_tmp[size()];
-    __at_align32__ ComplexFlt y_tmp[size()];
+    __at_align__ ComplexFlt x_tmp[size()];
+    __at_align__ ComplexFlt y_tmp[size()];
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {

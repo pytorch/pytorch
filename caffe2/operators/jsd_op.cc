@@ -67,13 +67,10 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   }
   return true;
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BernoulliJSD, BernoulliJSDOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     BernoulliJSDGradient,
     BernoulliJSDGradientOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSD)
     .NumInputs(2)
     .NumOutputs(1)
@@ -84,7 +81,6 @@ where each is parametrized by a single probability.
     .Input(0, "X", "array of probabilities for prediction")
     .Input(0, "T", "array of probabilities for target")
     .Output(0, "L", "array of JSD losses");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BernoulliJSDGradient).NumInputs(3).NumOutputs(1);
 
 class GetBernoulliJSDGradient : public GradientMakerBase {
@@ -97,7 +93,6 @@ class GetBernoulliJSDGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(BernoulliJSD, GetBernoulliJSDGradient);
 
 } // namespace caffe2

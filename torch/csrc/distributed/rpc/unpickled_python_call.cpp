@@ -25,7 +25,7 @@ UnpickledPythonCall::~UnpickledPythonCall() {
   pythonUdf_.ptr() = nullptr;
 }
 
-Message UnpickledPythonCall::toMessageImpl() && {
+c10::intrusive_ptr<Message> UnpickledPythonCall::toMessageImpl() && {
   TORCH_INTERNAL_ASSERT(
       false, "UnpickledPythonCall does not support toMessage().");
 }

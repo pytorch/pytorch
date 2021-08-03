@@ -139,9 +139,6 @@ endif()
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
-# Disable Asserts In Code (Can't use asserts on HIP stack.)
-add_definitions(-DNDEBUG)
-
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
@@ -176,7 +173,7 @@ if(HIP_FOUND)
   execute_process(COMMAND dpkg -l COMMAND grep hsakmt-roct COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep rocr-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep -w hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep hip_base COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep hip-base COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep hip_hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
 
   message("\n***** Library versions from cmake find_package *****\n")
@@ -218,6 +215,14 @@ if(HIP_FOUND)
   find_package_and_print_version(rocprim REQUIRED)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
+
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
+    message("ROCm version >= 4.1; enabling asserts")
+  else()
+    # Disable Asserts In Code (Can't use asserts on HIP stack.)
+    add_definitions(-DNDEBUG)
+    message("ROCm version < 4.1; disablng asserts")
+  endif()
 
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)

@@ -179,6 +179,13 @@ class MaybeOwned final {
     }
   }
 
+  // This is an implementation detail!  You should know what you're doing
+  // if you are testing this.  If you just want to guarantee ownership move
+  // this into a T
+  bool unsafeIsBorrowed() const {
+    return isBorrowed_;
+  }
+
   const T& operator*() const& {
     if (isBorrowed_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

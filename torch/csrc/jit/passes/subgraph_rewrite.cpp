@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 
+#include <c10/util/irange.h>
+
 namespace torch {
 namespace jit {
 
@@ -171,7 +173,7 @@ void SubgraphRewriter::rewriteSinglePatternOnGraph(
 
     // Record all planned rewritings
     AT_ASSERT(outputs.size() == new_outputs.size());
-    for (size_t idx = 0; idx < outputs.size(); idx++) {
+    for (const auto idx : c10::irange(outputs.size())) {
       values_to_rewrite.push_back(outputs[idx]);
       rewrite_map[outputs[idx]] = new_outputs[idx];
     }

@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/jit_log.h>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -312,7 +313,7 @@ class AttributePropagator {
 
     } else if (attr.isList()) {
       c10::List<IValue> elems = std::move(attr).toList();
-      for (size_t i = 0; i < elems.size(); i++) {
+      for (const auto i : c10::irange(elems.size())) {
         elems.set(i, overrideGradient(elems.extract(i)));
       }
       attr = std::move(elems);
@@ -644,7 +645,7 @@ class AttributePropagator {
     auto it2 = preservedScalarAttrs_.find(module._ivalue());
     SharedTypeSubModules_[type].insert(module._ivalue());
     attrsToKeep_[type].insert({});
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       auto name = type->getAttributeName(i);
       auto attr = module.attr(name);
       auto attrTy = attr.type();
@@ -691,7 +692,7 @@ class AttributePropagator {
       if (it.second.count(N)) {
         continue;
       }
-      for (size_t i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         if (it.second.count(i) == 0) {
           attrsToRemove.push_back(type->getAttributeName(i));
         }

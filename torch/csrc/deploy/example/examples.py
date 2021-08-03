@@ -11,6 +11,8 @@ class Simple(torch.nn.Module):
 
 import torch.nn as nn
 
+def load_library():
+    torch.ops.load_library("my_so.so")
 
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""

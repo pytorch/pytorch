@@ -690,26 +690,29 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       v = F::linear(value, _w, _b);
     }
   } else {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto q_proj_weight_non_opt = q_proj_weight;
-    auto sizes = q_proj_weight_non_opt.sizes();
-    auto len1 = sizes[0];
-    auto len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
+    const auto& q_proj_weight_non_opt = q_proj_weight;
+    {
+      const auto sizes = q_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == query.size(-1));
+    }
 
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto k_proj_weight_non_opt = k_proj_weight;
-    sizes = k_proj_weight_non_opt.sizes();
-    len1 = sizes[0];
-    len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
+    const auto& k_proj_weight_non_opt = k_proj_weight;
+    {
+      const auto sizes = k_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == key.size(-1));
+    }
 
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto v_proj_weight_non_opt = v_proj_weight;
-    sizes = v_proj_weight_non_opt.sizes();
-    len1 = sizes[0];
-    len2 = sizes[1];
-    TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
+    const auto& v_proj_weight_non_opt = v_proj_weight;
+    {
+      const auto sizes = v_proj_weight_non_opt.sizes();
+      const auto len1 = sizes[0];
+      const auto len2 = sizes[1];
+      TORCH_CHECK(len1 == embed_dim && len2 == value.size(-1));
+    }
 
     if (in_proj_bias.defined()) {
       q = F::linear(query, q_proj_weight_non_opt, in_proj_bias.slice(/*dim=*/0, 0, embed_dim));

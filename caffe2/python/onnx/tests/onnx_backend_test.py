@@ -144,6 +144,19 @@ backend_test.exclude('(test_if_.*'  # added support for sequence type inputs
                      '|test_MaxPool2d_stride_padding_dilation_.*'
                      ')')
 
+# Temporarily skip some ONNX backend tests due to updates in opset 14.
+backend_test.exclude('(test_add_uint8_.*'  # uint8 dtype added
+                     '|test_div_uint8_.*'  # uint8 dtype added
+                     '|test_hardswish_.*'  # new operator added
+                     '|test_mul_uint8_.*'  # uint8 dtype added
+                     '|test_sub_uint8_.*'  # uint8 dtype added
+                     '|test_tril_.*'  # new operator added
+                     '|test_triu_.*'  # new operator added
+                     '|test_identity_sequence_.*'  # new operator added
+                     '|test_reshape_allowzero_reordered_.*'
+                     '|test_conv_with_autopad_same_.*'
+                     ')')
+
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
     backend_test.exclude(r'(test_vgg19|test_vgg)')

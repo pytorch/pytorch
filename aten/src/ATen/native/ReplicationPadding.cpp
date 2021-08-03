@@ -64,13 +64,12 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   {
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     nbatch = input.size(0);
+    (void)nbatch;
     dimw++;
     dimslices++;
   }
 
   /* sizes */
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
-  int64_t nslices = input.size(dimslices);
   int64_t iwidth = input.size(dimw);
   int64_t owidth  = iwidth + pad_l + pad_r;
 

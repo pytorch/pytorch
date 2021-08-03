@@ -6,12 +6,28 @@ from pathlib import Path
 
 import torch
 from torch.package import PackageExporter
+from torch.fx import symbolic_trace
 
 try:
-    from .examples import Simple, resnet18, MultiReturn, multi_return_metadata
+    from .examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library
 except ImportError:
-    from examples import Simple, resnet18, MultiReturn, multi_return_metadata
+    from examples import Simple, resnet18, MultiReturn, multi_return_metadata, load_library
 
+try:
+    from .fx.examples import SimpleWithLeaf
+except ImportError:
+    from fx.examples import SimpleWithLeaf
+
+def generate_fx_example():
+    name = 'simple_leaf'
+    model = SimpleWithLeaf(5, 10)
+    graph_module : torch.fx.GraphModule = symbolic_trace(model)
+    with PackageExporter(str(p / (name + "_fx"))) as e:
+        e.intern("**")
+        e.save_pickle("model", "model.pkl", graph_module)
+
+    model_jit = torch.jit.script(model)
+    model_jit.save(str(p / (name + "_jit")))
 
 def save(name, model, model_jit, eg, featurestore_meta=None):
     with PackageExporter(str(p / name)) as e:
@@ -49,3 +65,10 @@ if __name__ == "__main__":
 
     multi_return = MultiReturn()
     save("multi_return", multi_return, torch.jit.script(multi_return), (torch.rand(10, 20),), multi_return_metadata)
+
+    with PackageExporter(str(p / "load_library")) as e:
+        e.mock("iopath.**")
+        e.intern("**")
+        e.save_pickle("fn", "fn.pkl", load_library)
+
+    generate_fx_example()

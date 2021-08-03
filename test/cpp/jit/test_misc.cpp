@@ -38,6 +38,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -91,7 +92,6 @@ std::ostream& operator<<(std::ostream& out, const std::vector<T>& list) {
   return out;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(prim::Param, Symbol::prim("Param"));
   ASSERT_EQ(prim::Return, Symbol::prim("Return"));
@@ -108,7 +108,6 @@ TEST(InternedStringsTest, Basic) {
   ASSERT_EQ(Symbol(symstart + 2).toUnqualString(), std::string("What2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FromQualStringTest, Basic) {
   ASSERT_EQ(Symbol::fromQualString("prim::Param"), Symbol::prim("Param"));
   ASSERT_EQ(Symbol::fromQualString("aten::mm"), Symbol::aten("mm"));
@@ -139,7 +138,6 @@ TEST(FromQualStringTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(THNNConvTest, Basic) {
   std::vector<int64_t> input_size = {4, 3, 15, 17}; // B x C x H x W
   std::vector<int64_t> kernel_size = {3, 5};
@@ -235,7 +233,6 @@ TEST(THNNConvTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ATenNativeBatchNormTest, Basic) {
   // aten::native_batch_norm(Tensor input, Tensor weight, Tensor bias, Tensor
   // running_mean, Tensor running_var, bool training, float momentum, float eps)
@@ -368,7 +365,6 @@ TEST(ATenNativeBatchNormTest, Basic) {
   assertAllClose(tensor_grads_out, expected_tensor_grads_out);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, Basic) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -407,7 +403,6 @@ TEST(CustomFusionTest, Basic) {
   AT_ASSERT(hits == 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CustomFusionTest, NestedBlocks) {
 #if defined(FBCODE_CAFFE2)
   return;
@@ -475,7 +470,6 @@ static const auto cf_examples = R"JIT(
     return a
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ControlFlowTest, Basic) {
   auto cu = compile(cf_examples);
 
@@ -499,14 +493,12 @@ TEST(ControlFlowTest, Basic) {
   ASSERT_EQ(256, run_binary("while_test", 2, 0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProtoTest, Basic) {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
 }
 
 // test a few features that are not directly used in schemas yet
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NestedArrays) {
   // nested arrays
   auto s = parseSchema("at::what(int[][4] foo) -> ()");
@@ -528,7 +520,6 @@ TEST(SchemaParserTest, NestedArrays) {
                                               .getElementType()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, NamedReturns) {
   // named returns
   parseSchema("at::what(Tensor! i_will_be_written_to) -> ()");
@@ -538,7 +529,6 @@ TEST(SchemaParserTest, NamedReturns) {
   ASSERT_TRUE(s3.returns().at(1).name() == "the_return2");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
@@ -546,13 +536,11 @@ TEST(SchemaParserTest, Futures) {
       s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, AnnotatedAliasSets) {
   // test tensor with annotated alias sets
   parseSchema("at::what(Tensor(a) foo) -> (Tensor(a))");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, BeforeAfterSets) {
   const auto s = parseSchema(
       "at::what(Tensor(b|c)[](a!) list, Tensor(c) element)"
@@ -577,7 +565,6 @@ TEST(SchemaParserTest, BeforeAfterSets) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaParserTest, BeforeAfterSets2) {
   const auto s = parseSchema(
       "at::what(Tensor(b -> b|c)[](a!) list, Tensor(c) element)"
@@ -607,7 +594,6 @@ TEST(SchemaParserTest, BeforeAfterSets2) {
   ASSERT_FALSE(containedAliasInfo.isWrite());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Basic) {
   Graph graph;
   auto node1 = graph.create(prim::AutogradZero);
@@ -659,7 +645,6 @@ TEST(TopologicalIndexTest, Basic) {
   ASSERT_TRUE(node2p->isBefore(node3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TopologicalIndexTest, Reindex) {
   // Induce reindexing to test that path
   Graph graph;
@@ -764,7 +749,6 @@ void checkTracedOutputs(const TracedTestValues& outputs) {
   TORCH_CHECK(found_mul);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool bad_scope = false;
 template <RecordScope scope, size_t* cnt>
 std::unique_ptr<at::ObserverContext> checkScopeCallback(
@@ -786,11 +770,8 @@ void pushScopedCallback() {
 
 // These cannot be function-local because that would prohibit them
 // from being used as template arguments prior to C++17.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t fun_cnt;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t ts_fun_cnt;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static size_t user_scope_cnt;
 
 void checkScopeCallbacks() {
@@ -843,13 +824,9 @@ void checkScopeCallbacks() {
   TORCH_CHECK(found_user_scope);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_inputs;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static TracedTestValues traced_outputs;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_set<std::string> ts_input_names;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_set<std::string> ts_output_names;
 
 std::unique_ptr<at::ObserverContext> tracedInputsCallback(
@@ -889,7 +866,6 @@ void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -936,7 +912,6 @@ TEST(RecordFunctionTest, TracedTestInputsOutputs) {
   at::clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
   if (std::string(fn.name().str()) == "test") {
@@ -945,7 +920,6 @@ std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
   return nullptr;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int non_sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
   if (std::string(fn.name().str()) == "test") {
@@ -954,7 +928,6 @@ std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
   return nullptr;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, SampledCallbacks) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1004,7 +977,6 @@ TEST(RecordFunctionTest, SampledCallbacks) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, RecordFunctionGuard) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1040,7 +1012,6 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<size_t> ids;
 
 template <size_t id>
@@ -1052,7 +1023,6 @@ auto add_remove_test_add_cb() {
       }));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, Callbacks) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1184,7 +1154,6 @@ TEST(RecordFunctionTest, Callbacks) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, ShouldRun) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1218,7 +1187,6 @@ TEST(RecordFunctionTest, ShouldRun) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, Basic) {
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
@@ -1268,7 +1236,6 @@ TEST(RecordFunctionTest, Basic) {
   clearCallbacks();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(RecordFunctionTest, OperatorNameOverload) {
   static std::set<std::string> operator_names;
   at::addGlobalCallback(at::RecordFunctionCallback(
@@ -1322,7 +1289,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
   TORCH_CHECK(test_debug_info->getModelId() == model_id);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ThreadLocalDebugInfoTest, Basic) {
   static std::atomic<bool> done{false};
 
@@ -1396,7 +1362,6 @@ TEST(ThreadLocalDebugInfoTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FallbackGraphsTest, Basic) {
   static const auto nestGraphIntoFallbackGraph =
       [](const std::shared_ptr<Graph>& graph) {
@@ -1502,7 +1467,6 @@ TEST(FallbackGraphsTest, Basic) {
 //   ASSERT_EQ((count, 200);
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NoneSchemaMatchTest, Basic) {
   RegisterOperators reg({
       Operator(
@@ -1538,17 +1502,14 @@ TEST(NoneSchemaMatchTest, Basic) {
   AT_ASSERT(std::distance(nodes.begin(), nodes.end()) == 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int testPassValue = 0;
 void fakePass(std::shared_ptr<Graph>& g) {
   testPassValue++;
   return;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterPass p(fakePass);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(PassManagementTest, Basic) {
   std::shared_ptr<Graph> graph = std::make_shared<Graph>();
   parseIR(
@@ -1614,7 +1575,6 @@ bool is_loop(Node* n) {
   return n->kind() == prim::Loop;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, NoInductionVariableUse) {
   // do not use an induction variable explicitly
   static const auto str_func_def = R"JIT(
@@ -1657,7 +1617,6 @@ TEST(LoopPeelerTest, NoInductionVariableUse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, YesInductionVariableUse) {
   // uses the induction variable
   static const auto str_func_def = R"JIT(
@@ -1700,7 +1659,6 @@ TEST(LoopPeelerTest, YesInductionVariableUse) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, LoopWithTerminationCondition) {
   // tests with explicit termination conditions
   static const auto str_func_def = R"JIT(
@@ -1749,7 +1707,6 @@ TEST(LoopPeelerTest, LoopWithTerminationCondition) {
 }
 
 // tests simple nested loops
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1788,7 +1745,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LoopPeelerTest, SimpleNestedLoops2) {
   static const auto str_func_def = R"JIT(
     def test_nested_loops():
@@ -1828,7 +1784,6 @@ TEST(LoopPeelerTest, SimpleNestedLoops2) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic(x, y):
@@ -1872,7 +1827,6 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   ASSERT_EQ(num_guards, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InsertBailOutsTest, Basic) {
   static const auto basic_example = R"JIT(
   def basic_loop(x, y):
@@ -1922,7 +1876,6 @@ TEST(InsertBailOutsTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerTest, Basic) {
   constexpr int batch_size = 4;
   constexpr int input_size = 256;
@@ -1973,7 +1926,6 @@ TEST(ProfilerTest, Basic) {
   checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CallStackTest, Basic) {
   const auto text = R"(
 def ham(x):
@@ -2050,7 +2002,6 @@ def foo(x):
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CallStackTest, Caching) {
   const auto text = R"(
 
@@ -2095,7 +2046,6 @@ def c(x):
   ASSERT_TRUE(callstack_objects.at("a1") == callstack_objects.at("a2"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlinedCallStackTest, BlockAnnotation) {
   Module a("A");
   a.define(R"(
@@ -2153,6 +2103,48 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
 }
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(InlinedCallStackTest, SelfCallMethods) {
+  Module a("A");
+  a.define(R"(
+    def my_new_method(self, x):
+      return x * 3
+    def forward_impl_(self, x, y):
+      return self.my_new_method(x) + y
+    def forward(self, x, y):
+      y = y + 2
+      return self.forward_impl_(x, y)
+  )");
+  Module b("B");
+  b.define(R"(
+    def forward(self, x):
+      return x + 2
+  )");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"(
+    def call_b(self, x):
+      return self.B0.forward(x)
+    def forward(self, x, y):
+      return self.A0.forward(x, y) + self.call_b(x)
+  )");
+
+  auto graph = c.get_method("forward").function().optimized_graph();
+  std::unordered_map<std::string, size_t> module_hierarchies;
+  for (Node* n : graph->nodes()) {
+    auto hierarchy = torch::jit::utils::getNodesModuleHierarchy(*n);
+    if (module_hierarchies.count(hierarchy) == 0) {
+      module_hierarchies[hierarchy] = 0;
+    }
+    module_hierarchies[hierarchy] += 1;
+  }
+  ASSERT_EQ(module_hierarchies["A0(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A).SELF(A)"], 2);
+  ASSERT_EQ(module_hierarchies["A0(A).SELF(A)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C)"], 1);
+  ASSERT_EQ(module_hierarchies["SELF(C).B0(B)"], 1);
+}
+
 TEST(AutogradSymbolsTest, Basic) {
   Symbol sym = Symbol::fromQualString("aten::test_symbol");
   Graph graph;
@@ -2172,7 +2164,6 @@ TEST(AutogradSymbolsTest, Basic) {
   TORCH_CHECK(!canRunWithAutograd(node));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DefaultArgTypeHintingTest, Basic) {
   const auto text_non_hinted = R"(
 
@@ -2200,7 +2191,6 @@ def a(x, y:int=1):
 }
 
 // Basic set case.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Basic) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
@@ -2221,7 +2211,6 @@ TEST(FuturesTest, Basic) {
 }
 
 // Basic error cases.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Error) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   int sat1 = 0;
@@ -2250,7 +2239,6 @@ TEST(FuturesTest, Error) {
 }
 
 // then
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, Then) {
   auto f1 = c10::make_intrusive<Future>(IntType::get());
   auto f2 = f1->then(
@@ -2270,7 +2258,6 @@ TEST(FuturesTest, Then) {
 }
 
 // collectAll()
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAll) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
   auto s2 = c10::make_intrusive<Future>(IntType::get());
@@ -2338,7 +2325,6 @@ TEST(FuturesTest, CollectAll) {
 }
 
 // collectAny()
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(FuturesTest, CollectAny) {
   auto s1 = c10::make_intrusive<Future>(IntType::get());
 
@@ -2378,7 +2364,6 @@ TEST(FuturesTest, CollectAny) {
   ASSERT_EQ(c4->value().toInt(), 7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TLSFutureCallbacksTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = [](Future& /* unused */) {
@@ -2418,7 +2403,6 @@ TEST(TLSFutureCallbacksTest, Basic) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ProfilerDisableInCallbackTest, Basic) {
   // cb that verifies the profiler is enabled
   auto profilerEnabledCb = []() {
@@ -2484,7 +2468,6 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
   torch::autograd::profiler::disableProfilerLegacy(std::move(opts));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(IValueKWargsTest, Basic) {
   const auto text = R"(
     def foo(a : int, b : int, c : int = 4):
@@ -2495,7 +2478,6 @@ TEST(IValueKWargsTest, Basic) {
   ASSERT_EQ(result.toInt(), 19);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ComputeFlopsTest, Basic) {
   uint64_t flops = 0;
 
@@ -2572,7 +2554,6 @@ TEST(ComputeFlopsTest, Basic) {
   ASSERT_EQ(flops, 360);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestMutation, Basic) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -2591,6 +2572,40 @@ graph(%x.1 : Tensor):
   testing::FileCheck().check("aten::add_")->run(*graph);
   RemoveTensorMutation(graph, [](Node*) { return true; });
   testing::FileCheck().check_not("aten::add_")->run(*graph);
+}
+
+TEST(TestInplaceToFunctionalActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu_(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  InplaceToFunctionalActivation(graph);
+  testing::FileCheck().check("aten::relu")->run(*graph);
+  testing::FileCheck().check_not("aten::relu_")->run(*graph);
+}
+
+TEST(TestFunctionalToInplaceActivation, Basic) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(
+      R"IR(
+graph(%x.1 : Tensor):
+  %2 : int = prim::Constant[value=1]()
+  %x.3 : Tensor = aten::add(%x.1, %2, %2)
+  %y : Tensor = aten::relu(%x.3)
+  return (%y))IR",
+      &*graph,
+      vmap);
+  FunctionalToInplaceActivation(graph);
+  testing::FileCheck().check("aten::relu_")->run(*graph);
+  testing::FileCheck().check_not("aten::relu(")->run(*graph);
 }
 
 } // namespace jit

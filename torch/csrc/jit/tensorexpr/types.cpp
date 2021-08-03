@@ -20,7 +20,6 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
 
 #undef DTYPE_DEFINE
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API Dtype kHandle(ScalarType::Undefined, 1);
 
 Dtype ToDtype(ScalarType type) {
@@ -72,8 +71,10 @@ std::string Dtype::ToCppString() const {
 #define TYPE_CASE(t, n) \
   case ScalarType::n:   \
     return #t;
-    AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES(TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::Bool:
+      return "bool";
     case ScalarType::Half:
       return "half";
     default:

@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 #include <cmath>
 #include <numeric>
@@ -598,7 +599,8 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
+  ASSERT_TRUE(LoopNest::vectorize(
+      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
 
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
@@ -622,7 +624,8 @@ TEST(LLVM, VectorizeBitCast) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
+  ASSERT_TRUE(LoopNest::vectorize(
+      dynamic_cast<For*>(dynamic_cast<Block*>(s)->front())));
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
@@ -1549,9 +1552,9 @@ TEST(LLVM, RFactorVectorizedReduction) {
   auto distributed_loops = loopnest.distributeLoop(all_loops[1][1]);
 
   // Vectorize initializer of rfac_buf
-  loopnest.vectorize(distributed_loops[0]);
+  ASSERT_TRUE(LoopNest::vectorize(distributed_loops[0]));
   // Vectorize producer of rfac_buf
-  loopnest.vectorize(distributed_loops[1]);
+  ASSERT_TRUE(LoopNest::vectorize(distributed_loops[1]));
   loopnest.simplify();
 
   loopnest.prepareForCodegen();
@@ -1581,7 +1584,6 @@ TEST(LLVM, SimpleParallel) {
   for (int test_cfg = 0; test_cfg < 4; test_cfg++) {
     // Compute a simple operation, and try all loop-axis combination to be
     // parallel or sequential.
-    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
     KernelScope kernel_scope;
     const int M = 4;
     const int N = 6;
@@ -1614,12 +1616,6 @@ TEST(LLVM, SimpleParallel) {
       }
     }
     ExpectAllNear(f_v, f_ref, 1e-5);
-    int count = counter.elapsed_value();
-    if (test_cfg == 0) {
-      ASSERT_EQ(count, 0);
-    } else {
-      ASSERT_GT(count, 0);
-    }
   }
 }
 
@@ -1629,7 +1625,6 @@ TEST(LLVM, CompositeParallel) {
   // Compute a composite operation, and try all loop-axis combination to be
   // parallel or sequential.
   for (int test_cfg = 0; test_cfg < test_count; test_cfg++) {
-    ExecutionCounter counter(llvm_codegen_parallel_dispatched);
     KernelScope kernel_scope;
     int M = 5;
     int N = 7;
@@ -1690,12 +1685,6 @@ TEST(LLVM, CompositeParallel) {
       }
     }
     ExpectAllNear(t4_v, t4_ref, 1e-5);
-    int count = counter.elapsed_value();
-    if (test_cfg == 0) {
-      ASSERT_EQ(count, 0);
-    } else {
-      ASSERT_GT(count, 0);
-    }
   }
 }
 
@@ -1754,8 +1743,8 @@ TEST(LLVM, VectorizedGEMM) {
   }
   {
     auto loops = NodeFinder<For>::find(loop.root_stmt());
-    loop.vectorize(loops[3]);
-    loop.vectorize(loops.back());
+    ASSERT_TRUE(LoopNest::vectorize(loops[3]));
+    ASSERT_TRUE(LoopNest::vectorize(loops.back()));
   }
 
   loop.prepareForCodegen();
@@ -1823,6 +1812,30 @@ TEST(LLVM, CallRaw) {
       ASSERT_EQ(cv[i * N_value + j], av[i * N_value + j] + bv[j]);
     }
   }
+}
+
+TEST(LLVM, CustomTarget) {
+  KernelScope kernel_scope;
+  constexpr int M = 16;
+  Placeholder a("a", kFloat, {M});
+  Placeholder b("b", kFloat, {M});
+  Placeholder c("c", kFloat, {M});
+  Tensor* d = Compute("d", {{M, "m"}}, [&](const VarHandle& m) {
+    return a.load(m) * b.load(m) + c.load(m);
+  });
+  LoopNest nest({d});
+  nest.prepareForCodegen();
+  auto cg = LLVMCodeGenBuilder(nest.root_stmt(), {a, b, c, d})
+                .triple("i686-elf")
+                .cpu("i386")
+                .build();
+  std::ostringstream ss;
+  ss << cg->getCodeText("asm");
+  torch::jit::testing::FileCheck()
+      .check("fadds")
+      ->check("fmuls")
+      ->check_not("vfmadd")
+      ->run(ss.str());
 }
 
 } // namespace jit

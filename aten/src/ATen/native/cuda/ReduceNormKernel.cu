@@ -45,41 +45,31 @@ void norm_kernel_cuda_impl(TensorIterator& iter, const Scalar& val) {
 
 }
 
-static void norm_kernel_cuda(TensorIterator& iter, const Scalar& p) {
-  if (iter.input_dtype() == kHalf) {
-    return norm_kernel_cuda_impl<at::Half, float>(iter, p);
-  } else if (iter.dtype(1) == kHalf && iter.input_dtype() == kFloat) {
+static void norm_dispatch(TensorIterator& iter, const Scalar& ord){
+  if (iter.dtype(0) == kHalf) {
+    return norm_kernel_cuda_impl<at::Half, float>(iter, ord);
+  } else if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
     // type promotion that does cast and reduction in a single kernel
-    return norm_kernel_cuda_impl<at::Half, float, float>(iter, p);
+    return norm_kernel_cuda_impl<at::Half, float, float>(iter, ord);
   }
-  else if(iter.input_dtype() == kBFloat16) {
-    return norm_kernel_cuda_impl<at::BFloat16, float>(iter, p);
-  } else if (iter.dtype(1) == kBFloat16 && iter.input_dtype() == kFloat) {
+  else if(iter.dtype(0) == kBFloat16) {
+    return norm_kernel_cuda_impl<at::BFloat16, float>(iter, ord);
+  } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
     // type promotion that does cast and reduction in a single kernel
-    return norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, p);
+    return norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, ord);
   }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "norm_cuda", [&] {
-    norm_kernel_cuda_impl<scalar_t>(iter, p);
+    norm_kernel_cuda_impl<scalar_t>(iter, ord);
   });
+}
+
+static void norm_kernel_cuda(TensorIterator& iter, const Scalar& ord) {
+  norm_dispatch(iter, ord);
 }
 
 static void linalg_vector_norm_kernel_cuda(TensorIterator& iter, Scalar ord) {
   TORCH_CHECK(ord.isFloatingPoint(), "linalg.vector_norm expects ord to be float");
-  if (iter.output().scalar_type() == kHalf) {
-    return norm_kernel_cuda_impl<at::Half, float>(iter, ord);
-  } else if (iter.input_dtype() == kHalf && iter.output().scalar_type() == kFloat) {
-    // type promotion that does cast and reduction in a single kernel
-    return norm_kernel_cuda_impl<at::Half, float, float>(iter, ord);
-  }
-  else if(iter.output().scalar_type() == kBFloat16) {
-    return norm_kernel_cuda_impl<at::BFloat16, float>(iter, ord);
-  } else if (iter.input_dtype() == kBFloat16 && iter.output().scalar_type() == kFloat) {
-    // type promotion that does cast and reduction in a single kernel
-    return norm_kernel_cuda_impl<at::BFloat16, float, float>(iter, ord);
-  }
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "linalg_vector_norm_cuda", [&] {
-    norm_kernel_cuda_impl<scalar_t>(iter, ord);
-  });
+  norm_dispatch(iter, ord);
 }
 
 

@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 #include <ATen/core/ivalue.h>
+#include <c10/util/irange.h>
+
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -25,7 +27,6 @@ namespace jit {
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {Operator(
          prim::profile,
@@ -69,7 +70,7 @@ RegisterOperators reg(
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
              // Check every input's shape against profiled (expected) shape.
-             for (size_t i = 0; i < num_inputs; i++) {
+             for (const auto i : c10::irange(num_inputs)) {
                auto& input = peek(stack, i, num_inputs);
                const auto& t = input.toTensor();
                if (rg_props[i] != t.requires_grad()) {
@@ -328,7 +329,6 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase())});
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators logging_operators(
     {Operator(
          "prim::AddStatValue(str key, int val) -> ()",
@@ -372,6 +372,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
+// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 void hashValue(Stack* stack) {
   auto value = pop(stack);
   push(stack, value.hash());
@@ -482,7 +483,6 @@ void sort_op(Stack* stack) {
 }
 
 // NB: this must be registered after the other aten::sort operators
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators regSort({
     Operator(
         "aten::sorted.any(t[](a) self) -> (t[])",
@@ -785,7 +785,6 @@ void upsample_bilinear_op(Stack* stack) {
 }
 
 // These ops are no longer generated, but remain here for BC
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg3({
     Operator(
         "aten::__interpolate.scale_list(Tensor input, int? size = None, float[]? scale_factor = None, str mode = 'nearest', bool? align_corners = None, bool? recompute_scale_factor = None) -> Tensor",
@@ -852,7 +851,6 @@ std::string get_first(const c10::List<c10::List<std::string>>& strings) {
   return strings.get(0).get(0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto reg4 =
     torch::RegisterOperators()
         .op("_test::leaky_relu(Tensor self, float v=0.01) -> Tensor",

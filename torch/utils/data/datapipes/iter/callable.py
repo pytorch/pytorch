@@ -37,6 +37,9 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         fn: Function called over each item
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
+        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0)
+        This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
+        argument < -1.
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -46,6 +49,7 @@ class MapIterDataPipe(IterDataPipe[T_co]):
                  fn: Callable = default_fn,
                  fn_args: Optional[Tuple] = None,
                  fn_kwargs: Optional[Dict] = None,
+                 nesting_level: int = 0,
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -56,26 +60,44 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         self.fn = fn  # type: ignore[assignment]
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
+        if nesting_level < -1:
+            raise ValueError("nesting_level must be -1 or >= 0")
+        self.nesting_level = nesting_level
+
+    def _apply(self, data, nesting_level):
+        if nesting_level == 0:
+            return self.fn(data, *self.args, **self.kwargs)
+        elif nesting_level > 0:
+            if not isinstance(data, list):
+                raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
+            result = [self._apply(i, nesting_level - 1) for i in data]
+            return result
+        else:
+            if isinstance(data, list):
+                result = [self._apply(i, nesting_level) for i in data]
+                return result
+            else:
+                return self.fn(data, *self.args, **self.kwargs)
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            yield self.fn(data, *self.args, **self.kwargs)
+            yield self._apply(data, self.nesting_level)
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
             return len(self.datapipe)
-        raise NotImplementedError
+        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
 
     def __getstate__(self):
         if DILL_AVAILABLE:
             dill_function = dill.dumps(self.fn)
         else:
             dill_function = self.fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        state = (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
@@ -120,6 +142,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         >>> print(list(collated_ds))
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  collate_fn: Callable = _utils.collate.default_collate,
@@ -129,7 +152,7 @@ class CollateIterDataPipe(MapIterDataPipe):
         super().__init__(datapipe, fn=collate_fn, fn_args=fn_args, fn_kwargs=fn_kwargs)
 
 
-@functional_datapipe('transforms')
+@functional_datapipe('legacy_transforms')
 class TransformsIterDataPipe(MapIterDataPipe):
     r""" :class:`TransformsIterDataPipe`.
 

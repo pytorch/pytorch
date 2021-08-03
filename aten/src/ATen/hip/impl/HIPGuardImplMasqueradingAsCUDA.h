@@ -187,7 +187,22 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hipEvent_t hip_event = static_cast<hipEvent_t>(event);
     const hipError_t err = hipEventQuery(hip_event);
     if (err != hipErrorNotReady) C10_HIP_CHECK(err);
+    else {
+      // ignore and clear the error if not ready
+      hipGetLastError();
+    }
     return (err == hipSuccess);
+  }
+
+  // Stream-related functions
+  bool queryStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    return hip_stream.query();
+  }
+
+  void synchronizeStream(const Stream& stream) const override {
+    HIPStreamMasqueradingAsCUDA hip_stream{stream};
+    hip_stream.synchronize();
   }
 
   void recordDataPtrOnStream(
