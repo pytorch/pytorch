@@ -14,7 +14,7 @@ RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     oss << "Invalid stmt codegen name: " << name << ". ";
     oss << "Existing codegen names: [";
     int index = 0;
-    for (const auto& entry : stmt_factory_methods_) {
+    for (auto& entry : stmt_factory_methods_) {
       if (index != 0) {
         oss << ", ";
       }
@@ -44,7 +44,7 @@ std::unique_ptr<CodeGen> CreateCodeGen(
   return method(stmt, params, device, kernel_func_name);
 }
 
-const Expr* GenericIntrinsicsExpander::mutate(const Intrinsics* v) {
+Expr* GenericIntrinsicsExpander::mutate(Intrinsics* v) {
   if (v->op_type() == kSigmoid) {
     auto x = v->param(0)->accept_mutator(this);
     auto one = expr_to_vec(
