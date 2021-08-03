@@ -44,13 +44,13 @@ class save_on_cpu(object):
             if not pin_memory:
                 return (tensor.device, tensor.cpu())
 
-            storage = torch.empty(
+            packed = torch.empty(
                 tensor.size(),
                 dtype=tensor.dtype,
                 layout=tensor.layout,
                 pin_memory=(torch.cuda.is_available() and not tensor.is_sparse))
-            storage.copy_(tensor)
-            return (tensor.device, storage)
+            packed.copy_(tensor)
+            return (tensor.device, packed)
 
         def unpack_from_cpu(packed):
             device, tensor = packed
