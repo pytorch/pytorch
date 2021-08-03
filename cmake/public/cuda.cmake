@@ -538,14 +538,9 @@ endforeach()
 string(REPLACE ";" "," SUPPRESS_WARNING_FLAGS "${SUPPRESS_WARNING_FLAGS}")
 list(APPEND CUDA_NVCC_FLAGS -Xcudafe ${SUPPRESS_WARNING_FLAGS})
 
-# Set C++14 support
-set(CUDA_PROPAGATE_HOST_FLAGS_BLOCKLIST "-Werror")
 if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--Werror" "cross-execution-space-call")
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
-else()
-  list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
 # OpenMP flags for NVCC with Clang-cl
@@ -585,7 +580,6 @@ list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
 # Set expt-extended-lambda to support lambda on device
 list(APPEND CUDA_NVCC_FLAGS "--expt-extended-lambda")
 
-string(PREPEND CMAKE_CUDA_FLAGS "--forward-unknown-to-host-compiler ")
 foreach(FLAG ${CUDA_NVCC_FLAGS})
   string(APPEND CMAKE_CUDA_FLAGS " ${FLAG}")
 endforeach()
