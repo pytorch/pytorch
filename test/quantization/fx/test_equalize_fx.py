@@ -856,3 +856,101 @@ class TestEqualizeFx(QuantizationTestCase):
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
             self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
+
+    @skipIfNoFBGEMM
+    def test_equalize_across_layers_flag(self):
+        """ Tests that if we set the equalize_across_layers flag to be False,
+        there will be dequant -> mul -> quantize_per_tensor operators inserted
+        between connected layers.
+        """
+
+        linear2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+        ]
+
+        functionalLinear2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize')
+        ]
+
+        functionalLinearAdd_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.add),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+        ]
+
+        linearReluLinear_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearReLU),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+        ]
+
+        conv2_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize'),
+        ]
+
+        functionalConvReluConv_node_list = [
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d_relu),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_method('dequantize'),
+        ]
+
+        tests = [
+            (TwoLayerLinearModel, 2, linear2_node_list),
+            (FunctionalLinearAddModel, 2, functionalLinearAdd_node_list),
+            (TwoLayerFunctionalLinearModel, 2, functionalLinear2_node_list),
+            (LinearReluLinearModel, 2, linearReluLinear_node_list),
+            (TwoLayerConvModel, 4, conv2_node_list),
+            (FunctionalConvReluConvModel, 4, functionalConvReluConv_node_list),
+        ]
+
+        for (M, ndim, node_list) in tests:
+            m = M().eval()
+
+            if ndim == 2:
+                x = torch.rand((5, 5))
+            elif ndim == 4:
+                x = torch.rand((16, 3, 224, 224))
+
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared(x)
+            equalized_quantized_model = convert_fx(prepared, equalize_across_layers=False)
+
+            # Check the order of nodes in the graph
+            self.checkGraphModuleNodes(equalized_quantized_model, expected_node_list=node_list)

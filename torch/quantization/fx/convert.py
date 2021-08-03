@@ -143,7 +143,8 @@ def restore_state(
 def convert(model: GraphModule, is_reference: bool = False,
             convert_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False,
-            _remove_qconfig_flag: bool = True) -> QuantizedGraphModule:
+            _remove_qconfig_flag: bool = True,
+            equalize_across_layers: bool = True) -> QuantizedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -189,7 +190,7 @@ def convert(model: GraphModule, is_reference: bool = False,
         # Calculate the equalization scale, update the observers with the scaled
         # inputs, and scale the weight
         weight_eq_obs_dict = update_obs_for_equalization(model, modules)
-        convert_eq_obs(model, modules, weight_eq_obs_dict)
+        convert_eq_obs(model, modules, weight_eq_obs_dict, equalize_across_layers)
 
     # always run weight observers in the top level forward method
     # for dynamic quant ops or weight only quant ops

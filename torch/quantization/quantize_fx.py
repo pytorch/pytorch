@@ -463,7 +463,8 @@ def _convert_fx(
         graph_module: GraphModule, is_reference: bool,
         convert_custom_config_dict: Dict[str, Any] = None,
         is_standalone_module: bool = False,
-        _remove_qconfig: bool = True) -> QuantizedGraphModule:
+        _remove_qconfig: bool = True,
+        equalize_across_layers: bool = True) -> QuantizedGraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
     if convert_custom_config_dict is None:
@@ -474,7 +475,8 @@ def _convert_fx(
 
     quantized = convert(
         graph_module, is_reference, convert_custom_config_dict,
-        is_standalone_module, _remove_qconfig_flag=_remove_qconfig)
+        is_standalone_module, _remove_qconfig_flag=_remove_qconfig,
+        equalize_across_layers=equalize_across_layers)
 
     preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
@@ -484,7 +486,8 @@ def _convert_fx(
 def convert_fx(
         graph_module: GraphModule, is_reference: bool = False,
         convert_custom_config_dict: Dict[str, Any] = None,
-        _remove_qconfig: bool = True) -> QuantizedGraphModule:
+        _remove_qconfig: bool = True,
+        equalize_across_layers: bool = True) -> QuantizedGraphModule:
     r""" Convert a calibrated or trained model to a quantized model
     Args:
         `graph_module`: A prepared and calibrated/trained model (GraphModule)
@@ -529,6 +532,7 @@ def convert_fx(
           "preserved_attributes": ["preserved_attr"],
         }
         `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
+        `equalize_across_layers`: Option to equalize across layers that are connected. Default is True.
 
     Return:
         A quantized model (GraphModule)
@@ -540,7 +544,13 @@ def convert_fx(
     ```
     """
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
-    return _convert_fx(graph_module, is_reference, convert_custom_config_dict, _remove_qconfig=_remove_qconfig)
+    return _convert_fx(
+        graph_module,
+        is_reference,
+        convert_custom_config_dict,
+        _remove_qconfig=_remove_qconfig,
+        equalize_across_layers=equalize_across_layers,
+    )
 
 def _convert_standalone_module_fx(
         graph_module: GraphModule, is_reference: bool = False,

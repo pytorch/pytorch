@@ -672,6 +672,7 @@ def convert_eq_obs(
     model: GraphModule,
     modules: Dict[str, nn.Module],
     weight_eq_obs_dict: Dict[str, _WeightEqualizationObserver],
+    equalize_across_layers: bool = True,
 ) -> None:
     """ Converts the equalization operations and updates the other nodes in the
     following way:
@@ -729,6 +730,7 @@ def convert_eq_obs(
             # equalization nodes between two layers that need to be equalized.
             equalization_qconfig_map: Dict[str, Any] = model._equalization_qconfig_map  # type: ignore[assignment]
             if (
+                equalize_across_layers and
                 equalization_qconfig_map.get(prev_node.name, None) is not None
             ):
                 remove_node(model, node, node.args[0])
@@ -773,7 +775,9 @@ def convert_eq_obs(
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
             equalization_scale = weight_eq_obs.equalization_scale
-            maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
+
+            maybe_next_equalization_scale = None if not equalize_across_layers \
+                else maybe_get_next_equalization_scale(node, modules)
 
             # Scale the weight nodes
             if node.op == 'call_module':
