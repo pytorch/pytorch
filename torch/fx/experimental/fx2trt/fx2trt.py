@@ -287,6 +287,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
         return super().run_node(n)
 
     def placeholder(self, target, args, kwargs):
+        assert self.optimization_profiles
         self._input_names.append(target)
         shape, dtype, _, shape_ranges, has_batch_dim = self.input_specs[self.input_specs_iter]
         self.input_specs_iter += 1
