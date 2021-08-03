@@ -114,7 +114,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
     call(args);
   }
 
-  void bindVar(const Var* v, const Expr* e);
+  void bindVar(Var* v, Expr* e);
   Value value() const;
 
  private:
@@ -145,8 +145,8 @@ class ExprEval {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Placeholder ret_buf("ret_val", dtype_, {1});
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<const Expr*> indices;
-    const Expr* zero = new IntImm(0);
+    std::vector<Expr*> indices;
+    Expr* zero = new IntImm(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
       indices.push_back(zero);
     }
@@ -154,8 +154,7 @@ class ExprEval {
     Stmt* store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         new Store(ret_buf.data(), indices, expr.node());
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    buffer_args_extended.push_back(ret_buf);
+    buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
 
@@ -168,7 +167,7 @@ class ExprEval {
     call(call_args);
   }
 
-  void bindVar(const Var* v, const Expr* e) {
+  void bindVar(Var* v, Expr* e) {
     codegen_->bindVar(v, e);
   }
 
@@ -198,8 +197,7 @@ class ExprEval {
       case ScalarType::Bool: {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         std::vector<unsigned char> ret_val_arg(1);
-        // NOLINTNEXTLINE(modernize-use-emplace)
-        call_args_extended.push_back(CallArg(ret_val_arg.data()));
+        call_args_extended.emplace_back(ret_val_arg.data());
         codegen_->call(call_args_extended);
         ret_value_ = Value((bool)ret_val_arg[0]);
       } break;
@@ -255,7 +253,7 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline const Expr* Substitute(const Expr* expr, const VarMapping& var_mapping) {
+inline Expr* Substitute(Expr* expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }

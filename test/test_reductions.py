@@ -1011,18 +1011,31 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double,
-                  torch.int8, torch.short, torch.int, torch.long)
-    @dtypes(torch.float, torch.double,
-            torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
-        x = (torch.randn(3, 3))
-        if dtype in [torch.half, torch.float, torch.double]:
-            x[x < 0.2] = float('nan')
-        # Randomly scale the values
-        x = (x * random.randint(10, 100)).tolist()
+        args = product(
+            (True, False),  # noncontiguous
+            (0, 1, None),   # dim
+        )
+        zero = torch.zeros((), device=device, dtype=dtype)
 
-        self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
+        for noncontiguous, dim in args:
+            # Randomly scale the values
+            scale = random.randint(10, 100)
+            x = make_tensor((17, 17), device=device, dtype=dtype,
+                            low=-scale, high=scale, noncontiguous=noncontiguous)
+
+            if dtype.is_floating_point:
+                nan_mask = x < 0.2 * scale
+                x_nonan = torch.where(nan_mask, zero, x)
+                x[nan_mask] = np.nan
+            else:
+                x_nonan = x
+
+            dim_kwargs = {} if dim is None else {"dim": dim}
+            expect = torch.sum(x_nonan, **dim_kwargs)
+            actual = torch.nansum(x, **dim_kwargs)
+            self.assertEqual(expect, actual)
 
     def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
                                             with_extremal=False, atol=None, rtol=None,

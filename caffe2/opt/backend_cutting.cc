@@ -419,6 +419,8 @@ CutResult OptimizeForBackend(
   }
 
   // Transform needed subgraphs one by one
+  CutResult cutResult;
+  cutResult.numberOfSubnets = 0;
   std::vector<caffe2::NetDef> opt_subnets;
   opt_subnets.reserve(subs.size());
   for (auto& g : subs) {
@@ -429,7 +431,9 @@ CutResult OptimizeForBackend(
     // Transform the subgraph protobuf def, note that we can have less external
     // inputs/outputs but not more
     opt_subnets.emplace_back(transform_func(subnet));
-
+    if (opt_subnets.back().op_size() > 0 && opt_subnets.back().op(0).type() == "Onnxifi") {
+      cutResult.numberOfSubnets++;
+    }
     ReplaceSubgraph(g, opt_subnets.back(), &dfg);
   }
 
@@ -441,8 +445,6 @@ CutResult OptimizeForBackend(
     DumpGraph(&dfg, "dump.dot");
   }
 
-  CutResult cutResult;
-  cutResult.numberOfSubnets = subs.size();
   auto new_net = convertToCaffe2Proto(nn);
   new_net.set_name(net.name() + "_opt");
   cutResult.net = std::move(new_net);
