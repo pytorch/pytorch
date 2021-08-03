@@ -1255,7 +1255,7 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& method_name,
              const py::tuple& input_tuple) {
             Stack stack;
-            for (auto& input : input_tuple) {
+            for (AUTO_REF input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
             return m.get_method(method_name)(stack);
@@ -1266,7 +1266,7 @@ void initJitScriptBindings(PyObject* module) {
           "forward",
           [](mobile::Module& m, const py::tuple& input_tuple) {
             Stack stack;
-            for (auto& input : input_tuple) {
+            for (AUTO_REF input : input_tuple) {
               stack.push_back(toTypeInferredIValue(input));
             }
             return m.get_method("forward")(stack);

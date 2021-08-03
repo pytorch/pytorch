@@ -28,6 +28,12 @@ std::vector<StackEntry> _pythonCallstack() {
   PyFrameObject* frame = PyEval_GetFrame();
   std::vector<StackEntry> entries;
 
+  #if defined(USING_PYPY)
+  auto range = std::make_shared<Source>("<unknown>", "<unknown>", 0);
+  entries.emplace_back(StackEntry{"<stacks not supported in PyPy", SourceRange(range, 0, 0)});
+  #endif
+
+  #if not defined(USING_PYPY)
   while (nullptr != frame) {
     size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
     std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
@@ -37,6 +43,7 @@ std::vector<StackEntry> _pythonCallstack() {
         StackEntry{funcname, SourceRange(source, 0, funcname.size())});
     frame = frame->f_back;
   }
+  #endif
   return entries;
 }
 

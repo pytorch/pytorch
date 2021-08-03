@@ -164,6 +164,12 @@ LINUX_WORKFLOWS = [
     #     test_runner_type=LINUX_CPU_TEST_RUNNER,
     # ),
     PyTorchLinuxWorkflow(
+        build_environment="pytorch/pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.1-cudnn8-pypy7.3.5-gcc9",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+    ),
+    PyTorchLinuxWorkflow(
         build_environment="pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,

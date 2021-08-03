@@ -471,7 +471,10 @@ for method_name, method in inspect.getmembers(PyRRef):
         owner, returns a reference to the local value.
     """
     docstring = getattr(method, "__doc__", None)
-    assert docstring is not None, "RRef user-facing methods should all have docstrings."
+    if docstring is None:
+        # TODO: Fix this hack
+        docstring = "None"
+    assert docstring is not None, f"RRef user-facing methods should all have docstrings but {method} did not"
 
     # Do surgery on pybind11 generated docstrings.
     docstring = docstring.replace("torch.distributed.rpc.PyRRef", "torch.distributed.rpc.RRef")
