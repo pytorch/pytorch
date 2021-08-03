@@ -264,6 +264,16 @@ bool EqualNode::operator()(const Node* lhs, const Node* rhs) const {
   if (!attributesEqualCSE(lhs, rhs))
     return false;
 
+  // Check if the blocks contained in a op are the same
+  if (lhs->blocks().size() != rhs->blocks().size()){
+    return false;
+  }
+  for (size_t i = 0; i < lhs->blocks().size(); ++i) {
+    if (lhs->blocks()[i] != rhs->blocks()[i]){
+      return false;
+    }
+  }
+
   return true;
 };
 
