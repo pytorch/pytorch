@@ -3557,6 +3557,8 @@
 - func: gelu_backward(Tensor grad, Tensor self) -> Tensor
   structured_delegate: gelu_backward.grad_input
   python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_gelu_backward
 
 - func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
   variants: function
