@@ -65,7 +65,7 @@ class Q8GEMM : public benchmark::Fixture {
   inline Q8GEMM(uint32_t mr, uint32_t nr, uint32_t np, uint32_t kr)
       : mr_(mr), nr_(nr), np_(np), kr_(kr), mc_(mr), nc_(nr), kc_(kr) {}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -109,7 +109,7 @@ class Q8GEMM : public benchmark::Fixture {
         requantization_scales.data(), 127, 1, 254);
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -205,7 +205,7 @@ class Q8GEMM_Op : public Q8GEMM {
  public:
   inline Q8GEMM_Op() : Q8GEMM(MR, NR, NP, KR) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
@@ -228,7 +228,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
         row_block_size_(rbs),
         col_block_size_(cbs){}
 
-  virtual void SetUp(const benchmark::State&) override {
+   void SetUp(const benchmark::State&) override {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
@@ -273,7 +273,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
     };
   }
 
-  virtual void TearDown(benchmark::State& state) override {
+   void TearDown(benchmark::State& state) override {
     state.SetItemsProcessed(
         uint64_t(state.iterations()) * 2 * mc() * nc() * kc());
     a_.clear();
@@ -370,7 +370,7 @@ class Q8GEMMSparse_Op : public Q8GEMMSparse {
  public:
   inline Q8GEMMSparse_Op() : Q8GEMMSparse(MR, NR, KR, RBS, CBS) {}
 
-  virtual void SetUp(const benchmark::State& state) override {
+   void SetUp(const benchmark::State& state) override {
     mc_ = state.range(0);
     nc_ = state.range(1);
     kc_ = state.range(2);
