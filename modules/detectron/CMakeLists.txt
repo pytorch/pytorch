@@ -10,7 +10,8 @@ if(BUILD_CAFFE2_OPS)
   # Note(ilijar): Since Detectron ops currently have no
   # CPU implementation, we only build GPU ops for now.
   if(USE_CUDA)
-    CUDA_ADD_LIBRARY(
+    enable_language(CUDA)
+    add_library(
         caffe2_detectron_ops_gpu SHARED
         ${Detectron_CPU_SRCS}
         ${Detectron_GPU_SRCS})
