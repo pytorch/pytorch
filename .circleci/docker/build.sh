@@ -146,6 +146,18 @@ case "$image" in
     KATEX=yes
     BREAKPAD=yes
     ;;
+  pytorch-linux-xenial-cuda11.1-cudnn8-pypy7.3.5-gcc9)
+    CUDA_VERSION=11.1
+    CUDNN_VERSION=8
+    USE_PYPY=1
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    BREAKPAD=yes
+    ;;
   pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7)
     CUDA_VERSION=11.3.0 # Deviating from major.minor to conform to nvidia's Docker image names
     CUDNN_VERSION=8
@@ -337,6 +349,7 @@ docker build \
        --build-arg "VISION=${VISION:-}" \
        --build-arg "EC2=${EC2:-}" \
        --build-arg "JENKINS=${JENKINS:-}" \
+       --build-arg "USE_PYPY=${USE_PYPY:-}" \
        --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
@@ -388,11 +401,13 @@ if [[ "$OS" == "ubuntu" ]]; then
   fi
 fi
 
-if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
-  if !(drun python --version 2>&1 | grep -qF "Python $ANACONDA_PYTHON_VERSION"); then
-    echo "ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION, but:"
-    drun python --version
-    exit 1
+if [ -z "$USE_PYPY" ]; then
+  if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
+    if !(drun python --version 2>&1 | grep -qF "Python $ANACONDA_PYTHON_VERSION"); then
+      echo "ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION, but:"
+      drun python --version
+      exit 1
+    fi
   fi
 fi
 
