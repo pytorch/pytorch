@@ -2181,6 +2181,27 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, p (exponent), dim 
+    cases = (((2, 1, 4, 5), 1., 2),
+             ((2, 3, 4, 5), 2., 1),
+             ((1, 2, 4, 5), 0.5, 0),
+             ((1, 3, 4, 5), -1., 1),
+             ((1, 3, 4, 5), 0., -1),
+             ((), 1.2, 0))
+
+    def generator():
+        for input_shape, p, dim in cases:
+            yield SampleInput(make_arg(input_shape), args=(p, dim))
+        # No args case
+        yield SampleInput(make_arg((2, 3, 4, 5)))
+        # Changed eps case
+        yield SampleInput(make_arg((2, 3, 4, 5)), kwargs={'eps':1e-4})
+
+    return list(generator())
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -6443,6 +6464,12 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
+    OpInfo('nn.functional.normalize',
+           aten_name='normalize',
+           sample_inputs_func=sample_inputs_normalize,
+           dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           supports_out=True),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
