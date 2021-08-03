@@ -273,7 +273,7 @@ This tensor can be further decomposed into a list of per-parameter tensors withi
 to apply layer-wise operations.
 )")
       .def(
-          "get_index",
+          "index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -294,7 +294,7 @@ Returns:
     which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
-          "get_per_parameter_tensors",
+          "gradients",
           &::c10d::GradBucket::getPerParameterTensors,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -302,7 +302,7 @@ Returns:
     A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
 )")
       .def(
-          "get_model_params_for_bucket",
+          "parameters",
           &::c10d::GradBucket::getModelParamsForBucket,
           py::call_guard<py::gil_scoped_release>(),
                     R"(
@@ -311,7 +311,7 @@ Returns:
     parameter.
 )")
       .def(
-          "is_the_last_bucket_to_allreduce",
+          "is_last",
           &::c10d::GradBucket::isTheLastBucketToAllreduce,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -403,6 +403,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_static_graph",
           &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+      "_ddp_graph_static",
+      &::c10d::Reducer::ddp_graph_static,
+      py::call_guard<py::gil_scoped_release>())
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
@@ -1490,7 +1494,7 @@ Example::
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch.futures.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
@@ -1507,10 +1511,7 @@ Example::
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
-                (no support for peer-to-peer operations like send/recv).
-                The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
-                features on top of ``torch.futures.Future``.
+                (no support for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
