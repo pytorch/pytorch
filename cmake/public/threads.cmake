@@ -11,8 +11,7 @@ if(THREADS_FOUND)
   if(THREADS_HAVE_PTHREAD_ARG)
     set_property(TARGET caffe2::Threads
                  PROPERTY INTERFACE_COMPILE_OPTIONS
-                   $<$<COMPILE_LANGUAGE:CXX>:-pthread>
-                   $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler -pthread>)
+                   $<$<COMPILE_LANGUAGE:CXX>:-pthread>)
   endif()
 
   if(CMAKE_THREAD_LIBS_INIT)
