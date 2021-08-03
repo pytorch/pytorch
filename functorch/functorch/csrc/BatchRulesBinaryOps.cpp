@@ -190,6 +190,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT(#op"."#overload, BASIC_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
 #define UNARY_POINTWISE(op) \
   VMAP_SUPPORT(#op, BASIC_UNARY_BATCH_RULE(ATEN_FN(op)));
+#define UNARY_SCALAR_POINTWISE2(op, overload) \
+  VMAP_SUPPORT(#op"."#overload, SCALAR_UNARY_BATCH_RULE(ATEN_FN2(op, overload)));
 
   BINARY_POINTWISE2(add, Tensor);
   UNARY_POINTWISE2(add, Scalar);
@@ -216,7 +218,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   // at::pow has three out-of-place overloads
   BINARY_POINTWISE2(pow, Tensor_Tensor);
   UNARY_POINTWISE2(pow, Tensor_Scalar);
-  VMAP_SUPPORT("pow.Scalar", pow_scalar_tensor_batch_rule);
+  UNARY_SCALAR_POINTWISE2(pow, Scalar);
 
   BINARY_POINTWISE2(sub, Tensor);
   UNARY_POINTWISE2(sub, Scalar)
@@ -240,6 +242,10 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(where, Scalar);
   OP_DECOMPOSE(where);
   VMAP_SUPPORT("_s_where", _s_where_batch_rule);
+
+  BINARY_POINTWISE2(xlogy, Tensor);
+  UNARY_POINTWISE2(xlogy, Scalar_Other);
+  UNARY_SCALAR_POINTWISE2(xlogy, Scalar_Self);
 
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
   using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
