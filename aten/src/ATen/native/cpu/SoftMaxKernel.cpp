@@ -463,7 +463,7 @@ static void log_softmax_lastdim_kernel_impl(
 }
 
 static void softmax_backward_lastdim_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES_AND(
