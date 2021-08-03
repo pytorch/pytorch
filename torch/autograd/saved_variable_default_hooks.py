@@ -43,7 +43,8 @@ class save_on_cpu(object):
         >>> del a, b, c  # for illustration only
         >>> # the content of a, b, and prod_2 are still alive on GPU
         >>> # the content of prod_1 and c only live on CPU
-        >>> y.sum().backward()  # all CPU tensors are moved back to GPU
+        >>> y.sum().backward()  # all CPU tensors are moved back to GPU, for backward
+        >>> # all intermediary tensors are released (deleted) after the call to backward
 
 
     """
