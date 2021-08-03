@@ -303,9 +303,9 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-echo "VERSION"
-echo $ANACONDA_PYTHON_VERSION
-exit 1
+# echo "VERSION"
+# echo $ANACONDA_PYTHON_VERSION
+# exit 1
 
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
