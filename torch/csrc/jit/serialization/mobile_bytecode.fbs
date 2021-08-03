@@ -1,0 +1,89 @@
+// Example IDL file for our monster's schema.
+
+// TODO(gmagogsfm): Update namespace.
+namespace torch.jit.mobile.serialization;
+
+struct Int {
+  int_val:int;
+}
+
+struct Bool {
+  bool_val:bool;
+}
+
+struct Double{
+  double_val:double;
+}
+
+struct None{
+  unused:byte;
+}
+
+table Tensor {
+  data:[byte];
+}
+
+table TensorMetadata {
+  // Save name
+}
+
+// Is it needed to represent other types?
+union IValue {
+  None,
+  Int,
+  Bool,
+  Double,
+  Tensor,
+  TensorMetadata
+}
+
+table Instruction {
+  // Should op be enum instead?
+  op:byte;
+  n:ushort;
+  x:int;
+}
+
+table Operator {
+  name:string;
+  overload_name:string;
+  num_args_serialized:int = -1;
+}
+
+table Code {
+  instructions:[Instruction];
+  operators:[Operator];
+  constants:[IValue];
+  types:[string];
+  register_size:int;
+}
+
+table Arg {
+  name:string;
+  // Why do we use string to represent types
+  // rather than index into Code.types?
+  type:string;
+  default_value:IValue;
+}
+
+table Schema {
+  arguments:[Arg];
+  returns:[Arg];
+}
+
+table DebugInfo {
+  debug_handle:[long];
+}
+
+table Function {
+  qn:string;
+  code:Code;
+  schema:Schema;
+  debug_info:DebugInfo;
+}
+
+table Module {
+  methods:[Function];
+}
+
+root_type Module;

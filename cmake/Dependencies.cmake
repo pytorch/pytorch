@@ -1949,3 +1949,7 @@ if(USE_KINETO)
     message(STATUS "Configured Kineto")
   endif()
 endif()
+
+
+# Include google/FlatBuffers
+include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)

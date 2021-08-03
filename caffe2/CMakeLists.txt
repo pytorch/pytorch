@@ -1544,6 +1544,18 @@ if(APPLE AND USE_PYTORCH_METAL)
   endif()
 endif()
 
+# TODO(gmagogsfm): Make sure generated files show up in build folder rather than in original source foldedr
+set(FLATBUFFERS_FLATC_EXECUTABLE ${CMAKE_BINARY_DIR}/bin/flatc)
+add_custom_command(OUTPUT mobile_bytecode_generated.h
+  COMMAND ${FLATBUFFERS_FLATC_EXECUTABLE} --cpp -o ${TORCH_SRC_DIR}/csrc/jit/serialization ${TORCH_SRC_DIR}/csrc/jit/serialization/mobile_bytecode.fbs
+  COMMENT "Generating mobile_bytecode_generated.h"
+)
+add_custom_target(mobile_bytecode_generated_h DEPENDS mobile_bytecode_generated.h)
+
+add_dependencies(torch_cpu flatbuffers)
+add_dependencies(torch_cpu mobile_bytecode_generated_h)
+target_link_libraries(torch_cpu PRIVATE flatbuffers)
+
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
 # and they assume that all of their symbols will be available in the global namespace.
@@ -2001,3 +2013,4 @@ if(BUILD_PYTHON)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
+
