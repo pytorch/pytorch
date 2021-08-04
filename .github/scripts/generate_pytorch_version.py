@@ -91,7 +91,7 @@ def main() -> None:
         "--no-build-suffix",
         action="store_true",
         help="Whether or not to add a build suffix typically (+cpu)",
-        default=strtobool(os.environ.get("NO_BUILD_SUFFIX", False))
+        default=strtobool(os.environ.get("NO_BUILD_SUFFIX", "False"))
     )
     parser.add_argument(
         "--gpu-arch-type",
