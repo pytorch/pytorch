@@ -149,7 +149,7 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2) + ExprHandle(4));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    Mul* root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const IntImm*>(root->lhs()), nullptr);
 
@@ -163,7 +163,7 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2.f) + ExprHandle(4.f));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    Mul* root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
@@ -296,7 +296,7 @@ TEST(Simplify, UnFoldableExpr) {
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
 
   ExprHandle newF = IRSimplifier::simplify(body);
-  const Add* root = newF.AsNode<Add>();
+  Add* root = newF.AsNode<Add>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
@@ -334,7 +334,7 @@ TEST(Simplify, HashEquivalence) {
   VarHandle y("y", kFloat);
   ExprHandle f = (x * y) + (x * y);
 
-  const Add* root = f.AsNode<Add>();
+  Add* root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -370,7 +370,7 @@ TEST(Simplify, HashEquivalenceRand) {
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
 
-  const Add* root = f.AsNode<Add>();
+  Add* root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -415,7 +415,7 @@ TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
   HashProvider hasher;
-  std::vector<const Expr*> immediates;
+  std::vector<Expr*> immediates;
 
   immediates.push_back(new DoubleImm(1));
   immediates.push_back(new FloatImm(1));
@@ -546,9 +546,9 @@ TEST(Simplify, SimplifyAdd) {
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Var* lhs = dynamic_cast<const Var*>(root->lhs());
+  Var* lhs = dynamic_cast<Var*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->name_hint(), "x");
   const IntImm* rhs = dynamic_cast<const IntImm*>(root->rhs());
@@ -563,12 +563,12 @@ TEST(Simplify, SimplifySub) {
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Sub* root = simplified.AsNode<Sub>();
+  Sub* root = simplified.AsNode<Sub>();
   ASSERT_NE(root, nullptr);
   const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), -2.f);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -594,12 +594,12 @@ TEST(Simplify, SimplifyMultiTerm) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  Mul* root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
   const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -612,12 +612,12 @@ TEST(Simplify, SimplifyCasts) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  Mul* root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
   const LongImm* lhs = dynamic_cast<const LongImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
@@ -629,7 +629,7 @@ TEST(Simplify, SimplifyEliminatesNoOps) {
   ExprHandle body = (x + ExprHandle(0)) * 1;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Var* root = simplified.AsNode<Var>();
+  Var* root = simplified.AsNode<Var>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->name_hint(), "x");
 }
@@ -643,16 +643,16 @@ TEST(Simplify, SimplifyMultiVar) {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Mul* lhs = dynamic_cast<const Mul*>(root->lhs());
+  Mul* lhs = dynamic_cast<Mul*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
-  const Var* varX = dynamic_cast<const Var*>(lhs->rhs());
+  Var* varX = dynamic_cast<Var*>(lhs->rhs());
   ASSERT_NE(varX, nullptr);
   ASSERT_EQ(varX->name_hint(), "y");
-  const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
+  Mul* rhs = dynamic_cast<Mul*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
-  const Var* varY = dynamic_cast<const Var*>(rhs->rhs());
+  Var* varY = dynamic_cast<Var*>(rhs->rhs());
   ASSERT_NE(varY, nullptr);
   ASSERT_EQ(varY->name_hint(), "x");
 }
@@ -665,7 +665,7 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
   ExprHandle body = x + 2 + y;
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   IS_NODE_WITH_NAME(Add, root->lhs(), rhs);

@@ -448,11 +448,12 @@ def convert(model: GraphModule, is_reference: bool = False,
                     quantized = 0 in out_quant_idxs
 
                 qconfig = qconfig_map[node.name]
+                equalization_enabled = model._equalization_qconfig_map is not None
                 # Note: load_arg can be overwritten in the convert method when used to
                 # create Node in graph
                 result = obj.convert(
                     node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
-                    convert_custom_config_dict=convert_custom_config_dict)
+                    convert_custom_config_dict=convert_custom_config_dict, equalization_enabled=equalization_enabled)
                 if not is_observed_standalone_module_node:
                     quantized = is_output_quantized(node, obj, qconfig, modules)
 

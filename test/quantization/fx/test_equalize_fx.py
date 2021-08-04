@@ -273,6 +273,58 @@ class TestEqualizeFx(QuantizationTestCase):
             prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
 
+    def test_input_weight_equalization_branching(self):
+        """ Tests that graphs containing branches are prepared correctly.
+        Specifically, equalization observers should not be inserted in front of
+        branches in which both initial layers in the branches plan to be
+        quantized.
+        """
+
+        # Tests that we do not add an equalization observer due to both initial
+        # nodes in the branch containing layers that need to be equalized.
+        # Note that this should print out 2 warning messages for not being able
+        # to equalize layers linear1 and linear1 because it is part of a branch
+        class TestBranchingWithoutEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+                self.linear2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = self.linear2(x)
+                return torch.add(y, z)
+
+        no_eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 0,
+            ns.call_module(MinMaxObserver): 3,
+        }
+
+        m = TestBranchingWithoutEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_eq_branching_node_occurrence)
+
+        # Tests that we will add an equalization observer because there is only
+        # one initial node in the branch that needs to be equalized
+        class TestBranchingWithEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = torch.add(x, 5)
+                return torch.add(y, z)
+
+        eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        m = TestBranchingWithEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=eq_branching_node_occurrence)
+
     @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
         """ Tests that the modified model for equalization (before quantization)
@@ -345,20 +397,7 @@ class TestEqualizeFx(QuantizationTestCase):
         # Test model with two connected nn.Linear layers
         m = TwoLayerLinearModel().eval()
         x = torch.rand((5, 5))
-        equalization_qconfig_dict = {"module_name": [("fc2", default_equalization_qconfig)]}
-
-        # Check if output of model that has been set up for equalization matches
-        # original output
-        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
-        output = prepared(x)
-        convert_ref = _convert_equalization_ref(prepared)
-        convert_ref_output = convert_ref(x)
-        self.assertEqual(output, convert_ref_output)
-
-        # Check if node list of equalized model is correct
-        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
-        prepared(x)
-        quantized = convert_fx(prepared)
+        linear2_equalization_qconfig_dict = {"module_name": [("fc2", default_equalization_qconfig)]}
         linear2_node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
@@ -368,26 +407,9 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_module(nnq.Linear),
             ns.call_method('dequantize'),
         ]
-        self.checkGraphModuleNodes(quantized, expected_node_list=linear2_node_list)
 
-        # Test model with connected F.linear_relu and F.linear layers
-        m = FunctionalLinearReluLinearModel().eval()
-        x = torch.rand((5, 5))
-        equalization_qconfig_dict = {"module_name": [("linear2", default_equalization_qconfig)]}
-
-        # Check if output of model that has been set up for equalization matches
-        # original output
-        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
-        output = prepared(x)
-        convert_ref = _convert_equalization_ref(prepared)
-        convert_ref_output = convert_ref(x)
-        self.assertEqual(output, convert_ref_output)
-
-        # Check if node list of equalized model is correct
-        prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
-        prepared(x)
-        quantized = convert_fx(prepared)
-        linear2_node_list = [
+        linearRelu_equalization_qconfig_dict = {"module_name": [("linear2", default_equalization_qconfig)]}
+        linearRelu_node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_function(torch.ops.quantized.linear_relu),
             ns.call_method('dequantize'),
@@ -396,7 +418,45 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_function(torch.ops.quantized.linear),
             ns.call_method('dequantize'),
         ]
-        self.checkGraphModuleNodes(quantized, expected_node_list=linear2_node_list)
+
+        convRelu_equalization_qconfig_dict = {"module_name": [("conv2", default_equalization_qconfig)]}
+        convRelu_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d_relu),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.conv2d),
+            ns.call_method('dequantize'),
+        ]
+
+        tests = [
+            (TwoLayerLinearModel, 2, linear2_equalization_qconfig_dict, linear2_node_list),
+            (FunctionalLinearReluLinearModel, 2, linearRelu_equalization_qconfig_dict, linearRelu_node_list),
+            (FunctionalConvReluConvModel, 4, convRelu_equalization_qconfig_dict, convRelu_node_list),
+        ]
+
+        for (M, ndim, equalization_qconfig_dict, node_list) in tests:
+            m = M().eval()
+
+            if ndim == 2:
+                x = torch.rand((5, 5))
+            elif ndim == 4:
+                x = torch.rand((16, 3, 224, 224))
+
+            prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            output = prepared(x)
+            convert_ref = _convert_equalization_ref(prepared)
+            convert_ref_output = convert_ref(x)
+            self.assertEqual(output, convert_ref_output)
+
+            # Check if node list of equalized model is correct
+            prepared = prepare_fx(copy.deepcopy(m), default_qconfig_dict, equalization_qconfig_dict=equalization_qconfig_dict)
+            prepared(x)
+            equalized_quantized_model = convert_fx(prepared)
+
+            # Check the order of nodes in the graph
+            self.checkGraphModuleNodes(equalized_quantized_model, expected_node_list=node_list)
 
     @skipIfNoFBGEMM
     def test_input_weight_equalization_reshape(self):

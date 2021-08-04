@@ -77,7 +77,8 @@ class QuantizeHandler(ABC):
 
     def _maybe_get_last_node_only_observer(
         self,
-        modules: Dict[str, torch.nn.Module]
+        modules: Dict[str, torch.nn.Module],
+        equalization_enabled: bool = False,
     ) -> Optional[torch.nn.Module]:
         """
         If the last node of the pattern is observed, return the observer
@@ -85,11 +86,17 @@ class QuantizeHandler(ABC):
         """
         last_node = self.last_node
 
-        # Handle the additional mul node that gets added during equalization if
-        # it exists
-        maybe_eq_node = maybe_get_next_module(last_node, modules, target_functional_type=torch.mul)
-        if maybe_eq_node is not None:
-            last_node = maybe_eq_node
+        if equalization_enabled:
+            # Handle the additional mul node that gets added during equalization if
+            # it exists.
+            maybe_eq_node = maybe_get_next_module(last_node, modules, target_functional_type=torch.mul)
+            if maybe_eq_node is not None:
+                # Check that the mul node contains an 'equalization_scale' as an
+                # argument to ensure that this mul node is used for equalization.
+                for arg in maybe_eq_node.args:
+                    if "equalization_scale" in arg.name:
+                        last_node = maybe_eq_node
+                        break
 
         for maybe_obs_node in last_node.users:
             if maybe_obs_node.op == 'call_module':
@@ -174,7 +181,8 @@ class QuantizeHandler(ABC):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         """ Convert the given node to a quantized node and insert
         it to the quantized graph
         """
@@ -325,7 +333,8 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
 
         if self.num_tensor_args == 0:
             # example: x + y, when x and y are scalars
@@ -453,7 +462,8 @@ class CatQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
         if is_reference:
@@ -536,7 +546,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         # Supported combinations are:
         # quant_type | activation (compute_type) | weight
         #  static       quint8                      qint8
@@ -571,7 +582,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
             output_activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
+                self._maybe_get_last_node_only_observer(modules, equalization_enabled)
             assert output_activation_post_process is not None
             if is_reference:
                 # produce dequant - float_op - quant pattern
@@ -662,7 +673,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.conv_node
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(modules)
+                        self._maybe_get_last_node_only_observer(modules, equalization_enabled)
                     assert activation_post_process is not None
                     return quantize_node(
                         op_out,
@@ -703,7 +714,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     conv_input = load_arg(quantized=torch.quint8)(self.conv_node.args[0])
 
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(modules)
+                        self._maybe_get_last_node_only_observer(modules, equalization_enabled)
                     assert activation_post_process is not None
 
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
@@ -757,7 +768,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         # Supported combinations are:
@@ -797,7 +809,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         if self.linear_node.op == 'call_module':
 
             output_activation_post_process = \
-                self._maybe_get_last_node_only_observer(modules)
+                self._maybe_get_last_node_only_observer(modules, equalization_enabled)
 
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
@@ -899,7 +911,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     act_post_process_node = self.relu_node if self.relu_node else self.linear_node
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(modules)
+                        self._maybe_get_last_node_only_observer(modules, equalization_enabled)
                     assert activation_post_process is not None
                     return quantize_node(
                         op_out,
@@ -945,7 +957,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                     linear_input = load_arg(quantized=torch.quint8)(self.linear_node.args[0])
                     activation_post_process = \
-                        self._maybe_get_last_node_only_observer(modules)
+                        self._maybe_get_last_node_only_observer(modules, equalization_enabled)
                     assert activation_post_process is not None
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     scale_node, zero_point_node = \
@@ -1015,7 +1027,8 @@ class BatchNormQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         if convert_custom_config_dict is None:
             convert_custom_config_dict = {}
         additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
@@ -1075,7 +1088,8 @@ class EmbeddingQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         # Supported combinations are:
         # quant_type  | activation | weight | activation_compute_type
         # weight_only |  float32   | quint8 | None
@@ -1130,7 +1144,8 @@ class RNNDynamicQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         # Supported combinations are:
         # quant_type  | activation | weight | activation_compute_type
         # dynamic |  float32   | qint8 | quint8
@@ -1212,7 +1227,8 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         if not self.all_node_args_are_tensors:
             return NotImplemented
         assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
@@ -1347,7 +1363,8 @@ class ELUQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         activation_post_process = \
             self._maybe_get_last_node_only_observer(modules)
         assert activation_post_process is not None
@@ -1418,7 +1435,8 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes == (torch.float16, torch.float16, None):
             op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
@@ -1484,7 +1502,8 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         if is_reference:
             activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
@@ -1517,7 +1536,8 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         """ Convert a float custom module to quantized custom module
         """
         assert node.op == 'call_module'
@@ -1602,7 +1622,8 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
@@ -1617,7 +1638,8 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
                 node_name_to_scope: Dict[str, Tuple[str, type]],
                 load_arg: Callable,
                 is_reference: bool = False,
-                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                convert_custom_config_dict: Dict[str, Any] = None,
+                equalization_enabled: bool = False) -> Node:
         assert node.op == 'call_module'
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore[attr-defined]
         # We know that observed standalone module is a GraphModule since
