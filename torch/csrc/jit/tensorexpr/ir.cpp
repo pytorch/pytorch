@@ -12,7 +12,7 @@ static Dtype ChooseDtype(const Dtype& buffer_dtype, const Dtype& index_dtype) {
   return Dtype(buffer_dtype, index_dtype.lanes());
 }
 
-static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
+static Dtype dtypeOfIndices(const std::vector<Expr*>& indices) {
   if (!indices.size()) {
     // Return something so we can handle scalar buffers.
     return kInt;
@@ -20,7 +20,7 @@ static Dtype dtypeOfIndices(const std::vector<const Expr*>& indices) {
   return indices.at(0)->dtype();
 }
 
-void castIndicesToInts(std::vector<const Expr*>& indices) {
+void castIndicesToInts(std::vector<Expr*>& indices) {
   // Cast all indices to either Int or Long
   auto index_dtype = ScalarType::Int;
   for (auto& index : indices) {
@@ -40,12 +40,12 @@ void castIndicesToInts(std::vector<const Expr*>& indices) {
   }
 }
 
-Load::Load(Dtype dtype, const Buf* buf, std::vector<const Expr*> indices)
+Load::Load(Dtype dtype, Buf* buf, std::vector<Expr*> indices)
     : ExprNodeBase(dtype), buf_(buf), indices_(std::move(indices)) {
   castIndicesToInts(indices_);
 }
 
-Load::Load(const Buf* buf, const std::vector<const Expr*>& indices)
+Load::Load(Buf* buf, const std::vector<Expr*>& indices)
     : Load(ChooseDtype(buf->dtype(), dtypeOfIndices(indices)), buf, indices) {}
 
 ExprHandle Load::make(
@@ -62,10 +62,7 @@ ExprHandle Load::make(
   return Load::make(buf.dtype(), buf, indices);
 }
 
-Store::Store(
-    const Buf* buf,
-    std::vector<const Expr*> indices,
-    const Expr* value)
+Store::Store(Buf* buf, std::vector<Expr*> indices, Expr* value)
     : buf_(buf), indices_(std::move(indices)), value_(value) {
   castIndicesToInts(indices_);
 }
@@ -78,9 +75,9 @@ Store* Store::make(
       buf.node(), ExprHandleVectorToExprVector(indices), value.node());
 }
 
-const Expr* flatten_index(
-    const std::vector<const Expr*>& dims,
-    const std::vector<const Expr*>& indices) {
+Expr* flatten_index(
+    const std::vector<Expr*>& dims,
+    const std::vector<Expr*>& indices) {
   // Handle already flattened indices first
   if (indices.size() == 1) {
     return indices[0];
@@ -93,7 +90,7 @@ const Expr* flatten_index(
   if (ndim == 0) {
     return new IntImm(0);
   }
-  std::vector<const Expr*> strides(ndim);
+  std::vector<Expr*> strides(ndim);
   // stride[i] = stride[i+1]*dims[i+1], i < ndim-1
   // stride[i] = 1,                     i = ndim-1
   strides[ndim - 1] = new IntImm(1);
@@ -101,8 +98,8 @@ const Expr* flatten_index(
     strides[ndim - 1 - i] = new Mul(strides[ndim - i], dims[ndim - i]);
   }
 
-  const Expr* total_index = new IntImm(0);
-  for (const auto i : c10::irange(ndim)) {
+  Expr* total_index = new IntImm(0);
+  for (auto i : c10::irange(ndim)) {
     total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
   return total_index;
@@ -123,7 +120,7 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
-    const std::vector<const Expr*>& params) {
+    const std::vector<Expr*>& params) {
   // TODO: check the op_type and make a real decision
   // Doesnt this fail with kRand?
   if (params.size() == 0) {
@@ -184,7 +181,7 @@ ExternalCall* ExternalCall::make(
     const std::string& func_name,
     const std::vector<BufHandle>& buf_args,
     const std::vector<ExprHandle>& args) {
-  std::vector<const Buf*> buf_arg_nodes;
+  std::vector<Buf*> buf_arg_nodes;
   buf_arg_nodes.reserve(buf_args.size());
   for (const BufHandle& buf_arg : buf_args) {
     buf_arg_nodes.push_back(buf_arg.node());
@@ -193,37 +190,35 @@ ExternalCall* ExternalCall::make(
       buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
 }
 
-std::vector<const Expr*> ExprHandleVectorToExprVector(
+std::vector<Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
-  std::vector<const Expr*> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  std::vector<Expr*> result(v.size());
+  for (auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
 }
 
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
-    const std::vector<const Expr*>& v) {
+    const std::vector<Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
 }
 
-std::vector<const Var*> VarHandleVectorToVarVector(
-    const std::vector<VarHandle>& v) {
-  std::vector<const Var*> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+std::vector<Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
+  std::vector<Var*> result(v.size());
+  for (auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
 }
 
-std::vector<VarHandle> VarVectorToVarHandleVector(
-    const std::vector<const Var*>& v) {
+std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<Var*>& v) {
   std::vector<VarHandle> result(v.size());
-  for (const auto i : c10::irange(v.size())) {
+  for (auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;

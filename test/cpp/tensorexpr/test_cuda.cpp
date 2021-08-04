@@ -705,7 +705,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   VarHandle n("n", kInt);
 
   std::vector<Stmt*> block;
-  std::vector<const Expr*> dims;
+  std::vector<Expr*> dims;
   dims.push_back(ExprHandle(N).node());
   BufHandle c{new Buf("c", dims, kFloat)};
   {

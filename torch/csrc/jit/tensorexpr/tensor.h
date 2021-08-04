@@ -15,25 +15,24 @@ namespace tensorexpr {
 class TORCH_API Tensor : KernelScopedObject {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Tensor(const Buf* buf, const std::vector<const Var*>& args, const Expr* body)
-      : buf_(buf) {
+  Tensor(Buf* buf, const std::vector<Var*>& args, Expr* body) : buf_(buf) {
     stmt_ = constructStmt(args, body, {}, {});
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Tensor(
-      const Buf* buf,
-      const std::vector<const Var*>& args,
-      const std::vector<const Expr*>& reduce_dims,
-      const std::vector<const Var*>& reduce_args,
-      const Expr* body)
+      Buf* buf,
+      const std::vector<Var*>& args,
+      const std::vector<Expr*>& reduce_dims,
+      const std::vector<Var*>& reduce_args,
+      Expr* body)
       : buf_(buf) {
     stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
 
-  Tensor(const Buf* buf, Stmt* stmt) : buf_(buf), stmt_(stmt) {}
+  Tensor(Buf* buf, Stmt* stmt) : buf_(buf), stmt_(stmt) {}
 
-  const Buf* buf() const {
+  Buf* buf() const {
     return buf_;
   }
 
@@ -48,12 +47,12 @@ class TORCH_API Tensor : KernelScopedObject {
 
  private:
   Stmt* constructStmt(
-      const std::vector<const Var*>& args,
-      const Expr* body,
-      const std::vector<const Expr*>& reduce_dims,
-      const std::vector<const Var*>& reduce_args) const;
+      const std::vector<Var*>& args,
+      Expr* body,
+      const std::vector<Expr*>& reduce_dims,
+      const std::vector<Var*>& reduce_args) const;
 
-  const Buf* buf_;
+  Buf* buf_;
   Stmt* stmt_;
 };
 
@@ -96,7 +95,7 @@ class Placeholder {
   explicit Placeholder(const std::vector<ExprHandle>& dims)
       : Placeholder(BufHandle("_", dims, kFloat)) {}
 
-  const Buf* data() const {
+  Buf* data() const {
     return data_;
   }
   BufHandle handle() const {
@@ -108,10 +107,10 @@ class Placeholder {
   int ndim() const {
     return data_->ndim();
   }
-  const Expr* dim(int index) const {
+  Expr* dim(int index) const {
     return data_->dim(index);
   }
-  std::vector<const Expr*> dims() const {
+  std::vector<Expr*> dims() const {
     return data_->dims();
   }
 
@@ -130,8 +129,8 @@ class Placeholder {
   }
 
  private:
-  const Buf* data_;
-  std::vector<const Expr*> strides_;
+  Buf* data_;
+  std::vector<Expr*> strides_;
 };
 
 TORCH_API Tensor* Compute(
@@ -164,12 +163,12 @@ TORCH_API Tensor* Compute(
 
 inline void unpack_dim_args(
     const std::vector<DimArg>& dim_args,
-    std::vector<const Expr*>* dims,
-    std::vector<const Var*>* vars) {
+    std::vector<Expr*>* dims,
+    std::vector<Var*>* vars) {
   dims->clear();
   vars->clear();
   for (const DimArg& dim_arg : dim_args) {
-    const Expr* expr = dim_arg.dim().node();
+    Expr* expr = dim_arg.dim().node();
     dims->push_back(expr);
     vars->push_back(new Var(
         dim_arg.name_hint(),
@@ -187,22 +186,22 @@ Tensor* Reduce(
     const BodyFunc& body_func,
     const std::vector<DimArg>& reduce_args) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Expr*> dims;
+  std::vector<Expr*> dims;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Var*> vars;
+  std::vector<Var*> vars;
   unpack_dim_args(dim_args, &dims, &vars);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Expr*> reduce_dims;
+  std::vector<Expr*> reduce_dims;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Var*> reduce_vars;
+  std::vector<Var*> reduce_vars;
   unpack_dim_args(reduce_args, &reduce_dims, &reduce_vars);
 
   // If reduce_vars is empty, then it's not a reduction, but rather a simple
   // copy
   if (reduce_vars.empty()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const Expr* body =
+    Expr* body =
         Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(vars))
             .node();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -211,22 +210,21 @@ Tensor* Reduce(
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Var*> all_vars;
+  std::vector<Var*> all_vars;
   all_vars.insert(all_vars.end(), vars.begin(), vars.end());
   all_vars.insert(all_vars.end(), reduce_vars.begin(), reduce_vars.end());
 
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<const Expr*> output_args(vars.begin(), vars.end());
+  std::vector<Expr*> output_args(vars.begin(), vars.end());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const Expr* init_expr = new Cast(
+  Expr* init_expr = new Cast(
       body.dtype(), init_func(VarVectorToVarHandleVector(vars)).node());
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const ReduceOp* reduce_op =
-      reducer(func_result, body, output_args, reduce_vars);
+  ReduceOp* reduce_op = reducer(func_result, body, output_args, reduce_vars);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Tensor* t =
       new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
