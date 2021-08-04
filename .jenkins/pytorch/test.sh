@@ -182,7 +182,7 @@ test_aten() {
   # The following test(s) of ATen have already been skipped by caffe2 in rocm environment:
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    echo "Running ATen tests with pytorch lib"
+    echo "Running ATen tests with pytorch lib 1"
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
       echo "Running test with the install folder"
