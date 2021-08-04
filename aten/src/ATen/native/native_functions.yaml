@@ -10226,7 +10226,7 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
 
-- func: linalg_matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
+- func: linalg_matrix_exp_backward(Tensor self, Tensor grad, bool backward_ad) -> Tensor
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
