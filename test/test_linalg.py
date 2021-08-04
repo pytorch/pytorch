@@ -6577,13 +6577,13 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_matrix_exp_boundary_cases(self, device, dtype):
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating or complex types"):
+        with self.assertRaisesRegex(RuntimeError, "Expected a floating point or complex tensor"):
             torch.randn(3, 3).type(torch.int).matrix_exp()
 
-        with self.assertRaisesRegex(RuntimeError, "with dim at least 2"):
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
             torch.randn(3).matrix_exp()
 
-        with self.assertRaisesRegex(RuntimeError, "expected a tensor of squared matrices"):
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.randn(3, 2, 1).matrix_exp()
 
         # check 1x1 matrices
