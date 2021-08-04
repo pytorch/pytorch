@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 
-#include <aten/src/ATen/core/jit_type_base.h>
+#include <ATen/core/jit_type_base.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 
 namespace torch {
