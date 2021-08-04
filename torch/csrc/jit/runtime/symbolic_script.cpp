@@ -629,7 +629,7 @@ const std::vector<std::string> functions = {
 
             return torch.index(self, indices), backward
 
-        def meshgrid(tensors: List[Tensor]):
+        def meshgrid(tensors: List[Tensor], *, indexing: str):
             size = len(tensors)
             sizes = [0] * size
             for i in range(size):
@@ -645,8 +645,8 @@ const std::vector<std::string> functions = {
                     else:
                         view_shape[i] = sizes[i]
                         grads_tensors.append((grad_outputs[i]._grad_sum_to_size(view_shape)).reshape([sizes[i]]))
-                return grads_tensors
-            return torch.meshgrid(tensors), backward
+                return grads_tensors, None
+            return torch.meshgrid(tensors, indexing=indexing), backward
 
         def mv(self, vec):
             def backward(grad_output):

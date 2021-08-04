@@ -2898,8 +2898,8 @@ def baddbmm(g, self, batch1, batch2, beta, alpha):
 
 
 @parse_args('v', 's')
-def meshgrid(g, tensor_list, indexing: Optional[str] = None):
-    if indexing is None:
+def meshgrid(g, tensor_list, indexing: str = 'ij'):
+    if indexing == '':
         indexing = 'ij'
     elif indexing not in {'ij', 'xy'}:
         raise ValueError(f'Unsupported indexing: {indexing}')

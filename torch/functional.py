@@ -1,6 +1,7 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+import warnings
 
 import torch
 import torch.nn.functional as F
@@ -431,18 +432,27 @@ else:
 
 
 def _meshgrid(*tensors, indexing: Optional[str]):
+    if indexing is None:
+        # The underlying native function requires the "indexing"
+        # argument, but torch.meshgrid() does not require it at the
+        # moment. We check for this case here.
+        #
+        # We do it this way because the end-state for the function
+        # will have `str indexing='xy'`, not `str? indexing=None` as
+        # the parameter and thus it makes sense for this intermediate
+        # state to take the same parameter type to avoid having to
+        # juggle a forward-compatibility breaking change in the
+        # future.
+        warnings.warn('torch.meshgrid: in an upcoming release, it will be '
+                      'required to pass the indexing argument.')
+        indexing = 'ij'
+
     if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
-
-    # Continue allowing call of old method that takes no indexing
-    # kwarg for forward compatibility reasons.
-    #
-    # Remove this two weeks after landing.
-    kwargs = {} if indexing is None else {'indexing': indexing}
-    return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
+    return _VF.meshgrid(tensors, indexing=indexing)  # type: ignore[attr-defined]
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
