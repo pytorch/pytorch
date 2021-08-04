@@ -17,9 +17,11 @@ class TORCH_API CodeGen {
   class CallArg;
 
   template <typename... Ts>
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(Stmt* stmt, Ts... ts)
       : stmt_(stmt), buffer_args_({BufferArg(ts)...}) {}
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CodeGen(
       Stmt* stmt,
       std::vector<BufferArg> buffer_args,
@@ -106,11 +108,11 @@ class CodeGen::BufferArg {
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
-  const Var* var() const {
+  Var* var() const {
     return isVar_ ? var_ : buf_->base_handle();
   }
 
-  const Buf* buf() const {
+  Buf* buf() const {
     return buf_;
   }
 
@@ -123,8 +125,8 @@ class CodeGen::BufferArg {
   }
 
  private:
-  const Var* var_ = nullptr;
-  const Buf* buf_ = nullptr;
+  Var* var_ = nullptr;
+  Buf* buf_ = nullptr;
   bool isVar_ = false;
 };
 
@@ -136,6 +138,7 @@ class CodeGen::CallArg {
   template <typename T>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-pro-type-const-cast)
   CallArg(const std::vector<T>& buffer)
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       : data_(const_cast<T*>(buffer.data())) {}
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -165,6 +168,7 @@ class CodeGen::CallArg {
   void* data_;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class RegisterCodeGenList {
  public:
   TORCH_API static RegisterCodeGenList& GetInstance() {
@@ -185,6 +189,7 @@ class RegisterCodeGenList {
  private:
   template <class CodeGenType>
   friend class RegisterCodeGen;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RegisterCodeGenList() = default;
   TORCH_API void AddStmtFactoryMethod(
       const std::string& name,
@@ -204,6 +209,7 @@ class RegisterCodeGen {
            const std::vector<CodeGen::BufferArg>& params,
            at::Device device,
            const std::string& kernel_func_name) {
+          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::unique_ptr<CodeGen> method(
               new CodeGenType(stmt, params, device, kernel_func_name));
           return method;
@@ -220,7 +226,7 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  const Expr* mutate(const Intrinsics* v) override;
+  Expr* mutate(Intrinsics* v) override;
 };
 
 } // namespace tensorexpr

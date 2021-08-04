@@ -823,9 +823,7 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Onnxifi, OnnxifiOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)

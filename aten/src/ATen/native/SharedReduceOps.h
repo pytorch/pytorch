@@ -80,8 +80,15 @@ struct WelfordData {
   scalar_t m2;
   index_t n;
   combine_t nf;
-  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0)  {}
-  C10_DEVICE WelfordData(scalar_t mean, scalar_t m2, index_t n, combine_t nf) : mean(mean), m2(m2), n(n), nf(nf) {}
+
+  C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0) {}
+
+  C10_HOST_DEVICE WelfordData(
+      scalar_t mean,
+      scalar_t m2,
+      index_t n,
+      combine_t nf)
+      : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
@@ -145,7 +152,7 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(index_t correction, bool take_sqrt)
+  C10_HOST_DEVICE WelfordOps(index_t correction, bool take_sqrt)
       : correction(correction), take_sqrt(take_sqrt) {}
 };
 

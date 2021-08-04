@@ -136,7 +136,7 @@ __global__ void gatherMedian(
   }
   __syncthreads();
   if (nan_count > 0) {
-    atomicAdd(&num_nan, nan_count);
+    gpuAtomicAddNoReturn(&num_nan, nan_count);
   }
   __syncthreads();
 
@@ -379,7 +379,10 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
 
   int64_t size = self.numel();
-  TORCH_CHECK(size > 0, "median() input tensor cannot be empty");
+  // Return nan for empty tensors
+  if (size <= 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
 
   // Sort input tensor to efficiently query for median element
   Tensor sorted = std::get<0>(self.flatten().sort());

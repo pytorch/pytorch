@@ -46,6 +46,10 @@ class TORCH_API ScriptTypeParser {
   std::vector<Argument> parseReturnFromDecl(const Decl& decl);
 
   ResolverPtr resolver_ = nullptr;
+
+  // Need to use `evaluateDefaults` in serialization
+  friend struct ConstantTableValue;
+  friend struct SourceImporterImpl;
 };
 } // namespace jit
 } // namespace torch

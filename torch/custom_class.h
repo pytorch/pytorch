@@ -223,12 +223,12 @@ class class_ : public ::torch::detail::class_base {
   /// Property registration API for properties with read-write access.
   template <typename T>
   class_& def_readwrite(const std::string& name, T CurClass::*field) {
-    auto getter_func =
-        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
-          return self.get()->*field;
-        };
+    auto getter_func = [field =
+                            field](const c10::intrusive_ptr<CurClass>& self) {
+      return self.get()->*field;
+    };
 
-    auto setter_func = [field = std::move(field)](
+    auto setter_func = [field = field](
                            const c10::intrusive_ptr<CurClass>& self, T value) {
       self.get()->*field = value;
     };

@@ -86,3 +86,7 @@ function checkout_install_torchvision() {
   time python setup.py install
   popd
 }
+
+function clone_pytorch_xla() {
+  git clone --recursive https://github.com/pytorch/xla.git
+}
