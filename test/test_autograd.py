@@ -5753,12 +5753,8 @@ for shape in [(1,), ()]:
             a = get_input()
             t = a * a
 
-            t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
-            y = t * 2
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "one of the variables needed for gradient computation has been modified by an inplace operation"):
-                y.sum().backward()
+            with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+                t.grad_fn._raw_saved_self.register_hooks(inplace_double, lambda x: x / 2)
 
         # leaf
         test(lambda: torch.randn(5, requires_grad=True), True)
@@ -5846,6 +5842,20 @@ for shape in [(1,), ()]:
             with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                 with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                     pass
+
+    def test_pack_hook_with_inplace_modification_should_fail(self):
+        a = torch.randn(5, requires_grad=True)
+
+        def inc(x):
+            x += 1
+            return x
+        with torch.autograd.graph.saved_tensors_hooks(inc, lambda x: x):
+            with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+                y = torch.exp(a)
+
+        y = torch.exp(a)
+        with self.assertRaisesRegex(RuntimeError, "A saved tensor pack hook is modifying its input in place."):
+            y.grad_fn._raw_saved_result.register_hooks(inc, lambda x: x)
 
     def test_saving_variable_to_disk(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

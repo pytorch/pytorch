@@ -214,7 +214,14 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
 void SavedVariable::set_hooks_and_pack_data(std::unique_ptr<SavedVariableHooks>&& hooks, const Variable& data) {
   hooks_ = std::move(hooks);
   at::NoGradGuard guard;
-  hooks_->call_pack_hook(saved_original_ ? data.tensor_data() : data);
+  const auto version = impl::version_counter(data).current_version();
+  hooks_->call_pack_hook(saved_original_ ? data.detach() : data);
+  TORCH_CHECK(version == impl::version_counter(data).current_version(),
+      "A saved tensor pack hook is modifying its input in place. "
+      "Tensors provided as input to pack hook can not be modified by "
+      "in-place operations as this can lead to unexpected side-effects. "
+      "Please open an issue if you need to perform in-place operations on "
+      "the input to a pack hook.");
 }
 
 void SavedVariable::register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks) {
