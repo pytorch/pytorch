@@ -15,9 +15,18 @@ namespace cuda {
 
 namespace {
 
-//! Scan through Kernel IR to insert Sync nodes to avoid
-//! Write-After-Read (WAR) race condition
+//! Scan through Kernel IR for-loops to insert Sync nodes to avoid
+//! Write-After-Read (WAR) race condition.
 //!
+//! Example:
+//!   for () {
+//!     smem_buf[threadIdx.x] = x;
+//!     __syncthreads();
+//!     buf[threadId.x] = smem_buf[threadIdx.x + 1];
+//!  }
+//!
+//! In this case, additional syncthreads is needed at the end of the
+//! loop body to avoid a hazard with smem_buf.
 class LocalSyncInserter {
   using TvSet = std::unordered_set<const kir::TensorView*>;
 
@@ -26,9 +35,39 @@ class LocalSyncInserter {
   //! Sync nodes are inserted directly into the for-loops.
   //! The expressions are modified in-place and exprs is const.
   static void insertSyncs(const std::vector<kir::Expr*>& exprs) {
-    LocalSyncInserter sync_inserter;
     for (auto expr : exprs) {
-      sync_inserter.handle(expr);
+      if (auto fl = dynamic_cast<kir::ForLoop*>(expr)) {
+        LocalSyncInserter sync_inserter(fl);
+      }
+    }
+  }
+
+ private:
+  //! Insert Sync nodes at the end of a given for-loop when a WAR
+  //! hazard may happen.
+  LocalSyncInserter(kir::ForLoop* fl) {
+    for (auto expr : fl->body().exprs()) {
+      handle(expr);
+    }
+
+    // No need to insert sync when the loop is not actually generated
+    if (fl->iter_domain()->isThread() || fl->iter_domain()->isBroadcast()) {
+      return;
+    }
+
+    // Determine if any smem TV is written to at beginning of the for-loop
+    // and whether that smem TV is read from at the end of the for-loop
+    // Insert new SyncThreads at end of for-loop to prevent WAR race condition
+    //
+    // TODO: replace __syncthreads with __threadfence for alias ops
+    //
+    if (detectIntersection(initial_, final_) &&
+        !fl->body().exprs().back()->isA<kir::Sync>() && !is_last_op_sync_) {
+      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
+      fl->body().push_back(ir_builder.create<kir::Sync>(true));
+      initial_sync_ = true;
+      is_last_op_sync_ = true;
+      final_.clear();
     }
   }
 
@@ -48,22 +87,34 @@ class LocalSyncInserter {
     return all_smem_outputs_;
   }
 
- private:
-  // TODO(kir): this is a place where a mutable IR visitor may be appropriate
   void handle(kir::Expr* expr) {
     if (ir_utils::isTVOp(expr)) {
+      is_last_op_sync_ = false;
+
       // For this SyncInserter
-      initial_sync_ ? addInputSmemTvs(expr, final_)
-                    : addOutputSmemTvs(expr, initial_);
+      if (initial_sync_) {
+        addInputSmemTvs(expr, final_);
+      } else {
+        addInputSmemTvs(expr, final_);
+        addOutputSmemTvs(expr, initial_);
+      }
 
       // For parent SyncInserter
       addOutputSmemTvs(expr, all_smem_outputs_);
       addInputSmemTvs(expr, all_smem_inputs_);
+    } else if (auto sync = dynamic_cast<kir::Sync*>(expr)) {
+      handle(sync);
     } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
       handle(ite);
     } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       handle(for_loop);
     }
+  }
+
+  void handle(kir::Sync* sync) {
+    is_last_op_sync_ = true;
+    initial_sync_ = true;
+    final_.clear();
   }
 
   void handle(kir::IfThenElse* ite) {
@@ -76,92 +127,54 @@ class LocalSyncInserter {
   }
 
   void handle(kir::ForLoop* fl) {
-    // Track if last op in body is sync in nested for-loop
-    bool is_last_op_sync_ = false;
-    for (auto expr : fl->body().exprs()) {
-      is_last_op_sync_ = false;
-      if (expr->isA<kir::Sync>()) {
-        initial_sync_ = true;
-        final_.clear();
-      } else if (expr->isA<kir::ForLoop>()) {
-        // Recursively handle nested for-loop
-        LocalSyncInserter child_sync_inserter;
-        child_sync_inserter.handle(expr);
-        const auto& child_inputs = child_sync_inserter.all_smem_inputs();
-        const auto& child_outputs = child_sync_inserter.all_smem_outputs();
+    LocalSyncInserter child_sync_inserter(fl);
 
-        // Default - Track all smem inputs / outputs
-        all_smem_inputs_.insert(child_inputs.begin(), child_inputs.end());
-        all_smem_outputs_.insert(child_outputs.begin(), child_outputs.end());
+    const auto& child_inputs = child_sync_inserter.all_smem_inputs();
+    const auto& child_outputs = child_sync_inserter.all_smem_outputs();
+    const bool maybe_skipped = !fl->start()->isZeroInt() &&
+        !isParallelTypeThread(fl->iter_domain()->parallelType());
 
-        if (!initial_sync_) {
-          // Parent - None
-          if (!child_sync_inserter.initial_sync_) {
-            // Child - None
-            // Append All Child Outputs to Parent Initial
-            initial_.insert(child_outputs.begin(), child_outputs.end());
-          } else if (child_sync_inserter.has_war_hazard_sync_) {
-            // Child - WAR race
-            // Parent first sync
-            // Inherit Child Initial / Clear Parent Final
-            initial_sync_ = true;
-            is_last_op_sync_ = true;
-            initial_.insert(
-                child_sync_inserter.initial().begin(),
-                child_sync_inserter.initial().end());
-            final_.clear();
-          } else {
-            // Child - 1+
-            // Parent first sync
-            // Inherit Child Initial + Final
-            initial_sync_ = true;
-            initial_.insert(
-                child_sync_inserter.initial().begin(),
-                child_sync_inserter.initial().end());
-            final_.insert(
-                child_sync_inserter.final().begin(),
-                child_sync_inserter.final().end());
-          }
-        } else {
-          // Parent - 1+
-          if (!child_sync_inserter.initial_sync_) {
-            // Child - None
-            // Append All Child to Parent Last
-            final_.insert(child_inputs.begin(), child_inputs.end());
-          } else if (child_sync_inserter.has_war_hazard_sync_) {
-            // Child - WAR race
-            // Clear Parent Last / Discard Child Initial
-            is_last_op_sync_ = true;
-            final_.clear();
-          } else {
-            // Child - 1+
-            // Inherit Child Final / Discard Child Initial
-            final_.insert(
-                child_sync_inserter.final().begin(),
-                child_sync_inserter.final().end());
-          }
-        }
-      } else {
-        handle(expr);
-      }
+    // Default - Track all smem inputs / outputs
+    all_smem_inputs_.insert(child_inputs.begin(), child_inputs.end());
+    all_smem_outputs_.insert(child_outputs.begin(), child_outputs.end());
+
+    // Propagate the last_op_sync flag from the child loop. If the
+    // child is deterministically executed at least once, just set the
+    // flag with the child flag. Otherwise, conservatively set the
+    // flag, i.e., if the current flag is true and the child flag is
+    // also true, we can say the last op is still sync.
+    if (!maybe_skipped) {
+      is_last_op_sync_ = child_sync_inserter.is_last_op_sync_;
+    } else {
+      is_last_op_sync_ =
+          is_last_op_sync_ && child_sync_inserter.is_last_op_sync_;
     }
 
-    // This level of the nested for-loop may not exist in the kernel.
-    // However, subsequent levels can exist, so we handle the body of the
-    // for-loop first.
-    if (!fl->iter_domain()->isThread() && !fl->iter_domain()->isBroadcast()) {
-      // Determine if any smem TV is written to at beginning of the for-loop
-      // and whether that smem TV is read from at the end of the for-loop
-      // Insert new SyncThreads at end of for-loop to prevent WAR race condition
-      //
-      // TODO: replace __syncthreads with __threadfence for alias ops
-      //
-      if (detectIntersection(initial_, final_) &&
-          !fl->body().exprs().back()->isA<kir::Sync>() && !is_last_op_sync_) {
-        has_war_hazard_sync_ = true;
-        kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-        fl->body().push_back(ir_builder.create<kir::Sync>(true));
+    // When the child is not guaranteed to have sync.
+    if (!child_sync_inserter.initial_sync_) {
+      // If no sync is yet found, add the child outputs to
+      // initial.
+      if (!initial_sync_) {
+        initial_.insert(child_outputs.begin(), child_outputs.end());
       }
+      // Add the child inputs to final even when inital_sync is false,
+      // which only means sync may not be found yet.
+      final_.insert(child_inputs.begin(), child_inputs.end());
+    } else {
+      // Similar to the above case, but here, the child is guaranteed
+      // to have sync, so we only need to look at initial and final.
+      if (!initial_sync_) {
+        initial_.insert(
+            child_sync_inserter.initial().begin(),
+            child_sync_inserter.initial().end());
+      }
+      if (!maybe_skipped) {
+        initial_sync_ = true;
+        final_.clear();
+      }
+      final_.insert(
+          child_sync_inserter.final().begin(),
+          child_sync_inserter.final().end());
     }
   }
 
@@ -209,11 +222,13 @@ class LocalSyncInserter {
   // Cleared after each SyncThreads
   TvSet final_;
 
-  // Track first sync found in for-loop
+  // Track first sync deterministically found in for-loop. Even when a
+  // child loop has a sync, if it may not be executed due to non-zero
+  // start value, this flag remains false.
   bool initial_sync_ = false;
 
-  // Track sync was inserted for war hazard
-  bool has_war_hazard_sync_ = false;
+  // Track if last op is sync
+  bool is_last_op_sync_ = false;
 };
 
 class ExprFlattener : private kir::IrVisitor {
