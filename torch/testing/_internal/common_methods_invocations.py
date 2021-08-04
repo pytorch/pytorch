@@ -3087,7 +3087,7 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
             # we try all possible combinations of requires_grad for each input
             for lu_requires_grad, b_requires_grad in product(requires_grad_options, requires_grad_options):
                 # when requires_grad == True, at least one input has to have requires_grad enabled
-                if requires_grad and lu_requires_grad == b_requires_grad == False:
+                if requires_grad and not lu_requires_grad and not b_requires_grad:
                     continue
                 # we run LU several times to guarantee that the produced SampleInputs are independent
                 # this is especially important when setting different requries_grad for same tensors!
