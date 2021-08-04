@@ -100,16 +100,12 @@ class Tensor(torch._C._TensorBase):
     def __reduce_ex__(self, proto):
         if type(self) is Tensor:
             return self._reduce_ex_internal(proto)
-        relevant_args = (self,)
-        from torch.overrides import has_torch_function, handle_torch_function
-        if type(self) is not Tensor and has_torch_function(relevant_args):
-            return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
+        if has_torch_function_unary(self):
+            return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
         return (_rebuild_from_type, (func, type(self), args, self.__dict__))
 
     def _reduce_ex_internal(self, proto):
-        if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         check_serializing_named_tensor(self)
         # See Note [Don't serialize hooks]
         torch.utils.hooks.warn_if_has_hooks(self)
