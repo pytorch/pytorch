@@ -909,6 +909,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_cuda_out) (
   int64_t dim,
   const Tensor& input,
   const Tensor& grad_input) {
+  bool half_to_float = grad.scalar_type() != input.scalar_type();
   host_softmax_backward<LogSoftMaxBackwardEpilogue,true>(grad, output, dim, half_to_float, grad_input);
 }
 
