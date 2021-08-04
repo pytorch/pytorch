@@ -2042,3 +2042,19 @@ Examples::
     >>> torch.dist(Q.transpose(-2, -1) @ Q, torch.eye(4))
     tensor(6.2158e-07)
 """)
+
+trace = _add_docstr(_linalg.linalg_trace, r"""
+trace(input, offset=0) -> Tensor
+
+Returns the sum of the elements of the diagonal.
+
+Example::
+
+    >>> x = torch.arange(1., 10.).view(3, 3)
+    >>> x
+    tensor([[ 1.,  2.,  3.],
+            [ 4.,  5.,  6.],
+            [ 7.,  8.,  9.]])
+    >>> torch.linalg.trace(x)
+    tensor(15.)
+""")

@@ -958,6 +958,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.tile: lambda input, dims: -1,
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,
         torch.trace: lambda input: -1,
+        torch.linalg.trace: lambda input, offset=0: -1,
         torch.transpose: lambda input, dim0, dim1: -1,
         torch.trapz: lambda y, x=None, dim=-1: -1,
         torch.trapezoid: lambda y, x=None, dim=-1: -1,

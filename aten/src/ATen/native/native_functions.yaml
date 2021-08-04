@@ -6230,6 +6230,18 @@
     CPU: trace_cpu
     CUDA: trace_cuda
 
+- func: linalg_trace(Tensor self, int offset=0) -> Tensor
+  python_module: linalg
+  variants: method, function
+  dispatch:
+    CPU, CUDA: linalg_trace
+    CompositeExplicitAutograd: linalg_trace
+
+- func: linalg_trace_backward(Tensor grad, int[] sizes, int offset) -> Tensor
+  variants: function
+  device_check: NoCheck
+  device_guard: False
+
 - func: trace_backward(Tensor grad, int[] sizes) -> Tensor
   variants: function
   device_check: NoCheck

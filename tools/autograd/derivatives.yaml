@@ -1412,6 +1412,9 @@
   self: trace_backward(grad, self.sizes())
   result: auto_linear
 
+- name: linalg_trace(Tensor self, int offset=0) -> Tensor
+  self: linalg_trace_backward(grad, self.sizes(), offset)
+
 - name: transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)
   self: grad.transpose(dim0, dim1)
   result: auto_linear
