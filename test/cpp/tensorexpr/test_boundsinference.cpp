@@ -40,7 +40,6 @@ static void verifyConstBounds(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _1) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -66,7 +65,6 @@ TEST(BoundsInference, _1) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _2) {
   // Verify that bounds inference works for the following example:
   // for i in 0..n:
@@ -92,7 +90,6 @@ TEST(BoundsInference, _2) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, -1}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _3) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -119,7 +116,6 @@ TEST(BoundsInference, _3) {
   verifyConstBounds(bounds_info.at(b->buf())[0], {{0, 99}});
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _4) {
   // Verify that bounds inference works for the following example:
   //
@@ -197,7 +193,6 @@ TEST(BoundsInference, _4) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _5) {
   // Verify that bounds inference works for the following example:
   // for i in 0..100:
@@ -253,7 +248,6 @@ TEST(BoundsInference, _5) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, _6) {
   // Verify that bounds inference works for the following example:
   //
@@ -333,7 +327,6 @@ TEST(BoundsInference, _6) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Adjacent) {
   KernelScope kernel_scope;
   ExprHandle H(6);
@@ -394,7 +387,6 @@ TEST(BoundsInference, Adjacent) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopLoad) {
   KernelScope kernel_scope;
   Placeholder a(BufHandle("a", {100}, kFloat));
@@ -451,7 +443,6 @@ TEST(BoundsInference, MultipleTopLoopLoad) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, MultipleTopLoopStore) {
   KernelScope kernel_scope;
   BufHandle a("a", {100}, kFloat);
@@ -512,7 +503,6 @@ TEST(BoundsInference, MultipleTopLoopStore) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, CacheReads) {
   KernelScope kernel_scope;
 
@@ -579,7 +569,6 @@ TEST(BoundsInference, CacheReads) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, Flattened) {
   KernelScope kernel_scope;
   Tensor* b = Compute(
@@ -607,7 +596,6 @@ TEST(BoundsInference, Flattened) {
   ASSERT_TRUE(exprEquals(TABI.stop[0], new IntImm(3 * 4 * 5 - 1)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazards) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
@@ -660,7 +648,6 @@ TEST(BoundsInference, GetPotentialHazards) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
   KernelScope kernel_scope;
 
@@ -689,7 +676,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopNoHazard) {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopCall) {
   KernelScope kernel_scope;
 
@@ -717,7 +703,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopCall) {
       getPotentialHazards(analyzer, loopRootA, loopRootB));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
   KernelScope kernel_scope;
 
@@ -745,7 +730,6 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
       HazardKind::WriteAfterWrite, getPotentialHazards(analyzer, outer, tail));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   KernelScope kernel_scope;
 
@@ -770,7 +754,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithPartialOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   KernelScope kernel_scope;
 
@@ -794,7 +777,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   KernelScope kernel_scope;
 
@@ -820,7 +802,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferWithFullOverlapRAW) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   KernelScope kernel_scope;
 
@@ -845,7 +826,6 @@ TEST(BoundsInference, HasConflictingOverlapSameBufferNotOverlapping) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   KernelScope kernel_scope;
 
@@ -887,7 +867,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithOverlap) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   KernelScope kernel_scope;
 
@@ -929,7 +908,6 @@ TEST(BoundsInference, HasConflictingOverlap2DBufferWithNoOverlap) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   KernelScope kernel_scope;
 
@@ -970,7 +948,6 @@ TEST(BoundsInference, HasConflictingOverlapDifferentBuffers) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, storeA1, forM));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   KernelScope kernel_scope;
 
@@ -1000,7 +977,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToRAWDependence) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   KernelScope kernel_scope;
 
@@ -1030,7 +1006,6 @@ TEST(BoundsInference, HasConflictingOverlapDueToWARDependence) {
   ASSERT_TRUE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   KernelScope kernel_scope;
 
@@ -1065,7 +1040,6 @@ TEST(BoundsInference, HasConflictingOverlapWithLoads) {
   ASSERT_FALSE(hasConflictingOverlap(analyzer, forK, forJ));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(BoundsInference, IsOverlapping) {
   KernelScope kernel_scope;
 

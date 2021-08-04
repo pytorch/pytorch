@@ -1,8 +1,0 @@
-{
-    "3": {
-        "trainer_count": 2,
-        "ps_count": 0,
-        "rpc_async_timeout": 15,
-        "batch_size": 5
-    }
-}

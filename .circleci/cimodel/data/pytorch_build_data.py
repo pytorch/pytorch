@@ -16,17 +16,13 @@ CONFIG_TREE_DATA = [
             ("7", [X("3.6")]),
         ]),
         ("clang", [
-            ("5", [
+            ("7", [
                 ("3.6", [
                     ("asan", [
                         (True, [
                             ("shard_test", [XImportant(True)]),
                         ]),
                     ]),
-                ]),
-            ]),
-            ("7", [
-                ("3.6", [
                     ("onnx", [XImportant(True)]),
                 ]),
             ]),
@@ -36,25 +32,30 @@ CONFIG_TREE_DATA = [
                 ("3.6", [
                     ("shard_test", [X(True)]),
                     ("slow_gradcheck", [
+                        # If you update this slow gradcheck, you should
+                        # also update docker_definitions.py to make sure
+                        # the docker image match the config used here
                         (True, [
                             ('shard_test', [XImportant(True)]),
                         ]),
                     ]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [X(True)]),
-                        ]),
-                    ]),
+                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
+                    # ("libtorch", [
+                    #     (True, [
+                    #         ('build_only', [X(True)]),
+                    #     ]),
+                    # ]),
                 ]),
             ]),
             ("11.1", [
                 ("3.8", [
                     ("shard_test", [XImportant(True)]),
-                    ("libtorch", [
-                        (True, [
-                            ('build_only', [X(True)]),
-                        ]),
-                    ]),
+                    # UNCOMMENT THE BELOW TO REENABLE LIBTORCH
+                    # ("libtorch", [
+                    #     (True, [
+                    #         ('build_only', [X(True)]),
+                    #     ]),
+                    # ]),
                 ]),
             ]),
         ]),
@@ -77,17 +78,6 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.9", [
                     ("shard_test", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        ("gcc", [
-            ("9", [
-                ("3.8", [
-                    ("coverage", [
-                        (True, [
-                            ("shard_test", [XImportant(True)]),
-                        ]),
-                    ]),
                 ]),
             ]),
         ]),

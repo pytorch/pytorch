@@ -9,6 +9,7 @@ namespace tensorexpr {
 class KernelScopedObject;
 
 // An arena that manages all the underlying kernel-scoped objects.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class KernelArena {
  public:
   static KernelArena* GetCurrentKernelArena();

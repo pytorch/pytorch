@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
 
@@ -116,15 +117,6 @@ C10_DEVICE scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t, unifor
     if (compat_log(u) < 0.5f * xx + d * (1.0f - v + compat_log(v)))
       return static_cast<scalar_t>(scale * d * v);
   }
-}
-
-template <typename scalar_t>
-C10_DEVICE static inline scalar_t polevl(const scalar_t x,  const scalar_t A[], size_t len) {
-  scalar_t result = 0;
-  for (size_t i = 0; i <= len; i++) {
-    result = result * x + A[i];
-  }
-  return result;
 }
 
 /* the functions stirling_approx_tail, binomial_inversion, and btrs are adapted
