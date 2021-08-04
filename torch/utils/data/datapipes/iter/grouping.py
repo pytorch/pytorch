@@ -4,7 +4,7 @@ import warnings
 
 from collections import defaultdict
 
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar, DefaultDict
 
 T_co = TypeVar('T_co', covariant=True)
@@ -65,17 +65,18 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
+        self.wrapper_class = DataChunk
 
     def __iter__(self) -> Iterator[List[T_co]]:
         batch: List[T_co] = []
         for x in self.datapipe:
             batch.append(x)
             if len(batch) == self.batch_size:
-                yield batch
+                yield self.wrapper_class(batch)
                 batch = []
         if len(batch) > 0:
             if not self.drop_last:
-                yield batch
+                yield self.wrapper_class(batch)
             batch = []
 
     def __len__(self) -> int:

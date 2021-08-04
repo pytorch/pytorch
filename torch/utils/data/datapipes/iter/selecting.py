@@ -1,4 +1,4 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
@@ -45,14 +45,14 @@ class FilterIterDataPipe(MapIterDataPipe):
         if nesting_level == 0:
             return self._returnIfTrue(data)
         elif nesting_level > 0:
-            if not isinstance(data, list):
+            if not isinstance(data, DataChunk):
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
-            return list(result)
+            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
+            return data.__class__(list(result))
         else:  # Handling nesting_level == -1
-            if isinstance(data, list):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
-                return list(result)
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
+                return data.__class__(list(result))
             else:
                 return self._returnIfTrue(data)
 

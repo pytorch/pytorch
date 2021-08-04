@@ -13,6 +13,7 @@ from torch.utils.data.dataset import (
     ConcatDataset,
     Dataset,
     Dataset as MapDataPipe,
+    DataChunk as DataChunk,
     IterableDataset,
     IterableDataset as IterDataPipe,
     Subset,
