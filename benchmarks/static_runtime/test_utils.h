@@ -24,8 +24,7 @@ void testStaticRuntime(
     const std::vector<c10::IValue>& args,
     const std::vector<c10::IValue>& args2 = {},
     const bool use_allclose = false,
-    const bool use_equalnan = false,
-    const bool expect_fallback = false);
+    const bool use_equalnan = false);
 
 } // namespace test
 } // namespace jit
