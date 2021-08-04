@@ -16635,7 +16635,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
 
-    @onlyOnCPUAndCUDA
+    @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double, torch.float16)
     def test_cudnn_convolution_relu(self, device, dtype):
@@ -16648,7 +16648,7 @@ class TestNNDeviceType(NNTestCase):
                     conv2d_mod = nn.Conv2d(groups, 8, kernel_size=kernel_size, groups=groups, dtype=dtype, device=device)
                     self.assertEqual(conv2d_mod(inp).relu(), cudnn_out)
 
-    @onlyOnCPUAndCUDA
+    @onlyCUDA
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double, torch.float16)
     def test_cudnn_convolution_add_relu(self, device, dtype):
