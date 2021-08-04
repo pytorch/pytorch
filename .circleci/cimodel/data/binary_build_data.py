@@ -1,7 +1,6 @@
 """
 This module models the tree of configuration variants
 for "smoketest" builds.
-
 Each subclass of ConfigNode represents a layer of the configuration hierarchy.
 These tree nodes encapsulate the logic for whether a branch of the hierarchy
 should be "pruned".
@@ -31,45 +30,43 @@ def get_processor_arch_name(gpu_version):
     )
 
 LINUX_PACKAGE_VARIANTS = OrderedDict(
-    manywheel=[
-        "3.6m",
-        "3.7m",
-        "3.8m",
-        "3.9m"
-    ],
+    # manywheel=[
+    #     "3.6m",
+    #     "3.7m",
+    #     "3.8m",
+    #     "3.9m"
+    # ],
     conda=dimensions.STANDARD_PYTHON_VERSIONS,
-    libtorch=[
-        "3.7m",
-    ],
+    # libtorch=[
+    #     "3.7m",
+    # ],
 )
 
 CONFIG_TREE_DATA = OrderedDict(
     linux=(dimensions.GPU_VERSIONS, LINUX_PACKAGE_VARIANTS),
     macos=([None], OrderedDict(
-        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+        # wheel=dimensions.STANDARD_PYTHON_VERSIONS,
         conda=dimensions.STANDARD_PYTHON_VERSIONS,
-        libtorch=[
-            "3.7",
-        ],
+        # libtorch=[
+        #     "3.7",
+        # ],
     )),
     macos_arm64=([None], OrderedDict(
-        wheel=[
-            "3.8",
-            "3.9",
-        ],
+        # wheel=[
+        #     "3.8",
+        # ],
         conda=[
             "3.8",
-            "3.9",
         ],
     )),
     windows=(
         [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS],
         OrderedDict(
-            wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+            # wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
-            libtorch=[
-                "3.7",
-            ],
+            # libtorch=[
+            #     "3.7",
+            # ],
         )
     ),
 )
