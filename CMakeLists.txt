@@ -504,9 +504,10 @@ endif(MSVC)
 
 if(CMAKE_HOST_SYSTEM_NAME MATCHES "Windows")
   # Windows cmd.exe has a 8191 character limit for commands
-  # This moves argments into a file to avoid going over the limit
-  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS 1)
-  set(CMAKE_CUDA_RESPONSE_FILE_LINK_FLAG "@")
+  # This moves argments into a file for CUDA only to avoid going over the limit
+  set(CMAKE_C_USE_RESPONSE_FILE_FOR_OBJECTS OFF)
+  set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS OFF)
+  set(CMAKE_CUDA_USE_RESPONSE_FILE_FOR_OBJECTS ON)
   set(CMAKE_NINJA_FORCE_RESPONSE_FILE 1 CACHE INTERNAL "")
 endif()
 
