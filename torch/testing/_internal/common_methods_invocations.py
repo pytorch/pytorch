@@ -7146,6 +7146,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
            dtypes=floating_types_and(torch.half),
+           dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
