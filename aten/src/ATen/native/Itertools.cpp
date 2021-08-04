@@ -11,7 +11,8 @@ Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, TensorOptions opt) {
   // get a mask that has value 1 whose indices satisfies i < j < k < ...
   // or i <= j <= k <= ... (depending on diagonal)
   Tensor range = at::arange(n, opt.dtype(kLong));
-  std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range));
+  std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range),
+                                                 /*indexing=*/"ij");
   Tensor mask = at::full(index_grids[0].sizes(), true, opt.dtype(kBool));
   if(diagonal) {
     for(int64_t i = 0; i < dims - 1; i++) {
@@ -37,7 +38,7 @@ Tensor cartesian_prod(TensorList tensors) {
   if (tensors.size() == 1) {
     return tensors[0];
   }
-  std::vector<Tensor> grids = at::meshgrid(tensors);
+  std::vector<Tensor> grids = at::meshgrid(tensors, /*indexing=*/"ij");
   for(Tensor &t : grids) {
     t = t.flatten();
   }
@@ -48,7 +49,8 @@ Tensor combinations(const Tensor& self, int64_t r, bool with_replacement) {
   TORCH_CHECK(self.dim() == 1, "Expect a 1D vector, but got shape ", self.sizes());
   TORCH_CHECK(r > 0, "Expect a positive number, but got ", r);
   int64_t num_elements = self.numel();
-  std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self));
+  std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self),
+                                           /*indexing=*/"ij");
   Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
   for(Tensor &t : grids) {
     t = t.masked_select(mask);

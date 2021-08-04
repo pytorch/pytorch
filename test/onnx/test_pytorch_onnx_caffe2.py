@@ -2373,7 +2373,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_meshgrid(self):
         class MeshgridModel(torch.nn.Module):
             def forward(self, x, y, z):
-                return torch.meshgrid(x, y, z)
+                return torch.meshgrid(x, y, z, indexing='ij')
 
         x = torch.ones(3, requires_grad=True)
         y = torch.zeros(4, requires_grad=True)
