@@ -5,8 +5,6 @@
 namespace at {
 namespace native {
 
-
-//::std::tuple<at::Tensor,at::Tensor> wrapper__attn(const at::Tensor & q, const at::Tensor & v, const at::Tensor & k)
 std::tuple <Tensor, Tensor> attn(const Tensor& q, const Tensor& k, const Tensor& v) {
     Tensor k_t = k.t();
     Tensor mm_output = at::native::matmul(q, k_t);

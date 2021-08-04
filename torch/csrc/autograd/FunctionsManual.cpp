@@ -3575,11 +3575,10 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
   return out_fw_grad;
 }
 
-Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Tensor& grad_out_) {
+Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Tensor& grad_out) {
 
-  Tensor grad_out = grad_out_;
   if (!grad_out.defined()) {
-    return at::zeros({tanh_output.size(1), output.size(1)}, at::kDouble);
+    return at::Tensor();
   }
 
   Tensor grad_v = at::matmul(tanh_output.t(), grad_out);
@@ -3587,35 +3586,48 @@ Tensor attn_backward_v(const Tensor& output, const Tensor& tanh_output, const Te
 }
 
 std::tuple <Tensor, Tensor> attn_backward_qk(const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& output,
-                                             const Tensor& tanh_output, const Tensor& grad_out_, const Tensor& grad_tanh_out_) {
+                                             const Tensor& tanh_output, const Tensor& grad_out, const Tensor& grad_tanh_out) {
 
   TORCH_CHECK(q.dim() == 2 && k.dim() == 2 && v.dim() == 2, "Inputs q, k, v must be 2-dimensional");
   TORCH_CHECK(q.size(1) == k.size(1), "q and k must have the same number of columns.");
   TORCH_CHECK(v.size(0) == k.size(0), "v and k must have the same number of rows.");
-  Tensor grad_out = grad_out_;
-  Tensor grad_tanh_out = grad_tanh_out_;
 
-  if (!grad_out.defined()) {
-    grad_out = at::zeros(output.sizes(), at::kDouble);
-  }
-  if (!grad_tanh_out.defined()) {
-    grad_tanh_out = at::zeros(tanh_output.sizes(), at::kDouble);
-  }
+  Tensor grad_q_1;
+  Tensor grad_q_2;
+  Tensor grad_k_1;
+  Tensor grad_k_2;
 
   Tensor mm_output = at::matmul(q, k.t());
   Tensor dtanh_out = 1.0 - at::tanh(mm_output).pow(2.0);
-  Tensor grad_tanh_out_1 = at::matmul(grad_out, v.t());
-  Tensor grad_mm_out_1 = grad_tanh_out_1 * dtanh_out;
-  Tensor grad_mm_out_2 = grad_tanh_out * dtanh_out;
 
-  Tensor grad_q_1 = at::matmul(grad_mm_out_1, k);
-  Tensor grad_q_2 = at::matmul(grad_mm_out_2, k);
-  Tensor grad_q = grad_q_1 + grad_q_2;
+  if (!grad_out.defined()) {
+    grad_q_1 = at::Tensor();
+    grad_k_1 = at::Tensor();
+  } else {
+    Tensor grad_tanh_out_1 = at::matmul(grad_out, v.t());
+    Tensor grad_mm_out_1 = grad_tanh_out_1 * dtanh_out;
+    grad_q_1 = at::matmul(grad_mm_out_1, k);
+    grad_k_1 = at::matmul(q.t(), grad_mm_out_1).t();
+  }
 
-  Tensor grad_k_1 = at::matmul(q.t(), grad_mm_out_1).t();
-  Tensor grad_k_2 = at::matmul(q.t(), grad_mm_out_2).t();
+  if (!grad_tanh_out.defined()) {
+    grad_q_2 = at::Tensor();
+    grad_k_2 = at::Tensor();
+  } else {
+    Tensor grad_mm_out_2 = grad_tanh_out * dtanh_out;
+    grad_q_2 = at::matmul(grad_mm_out_2, k);
+    grad_k_2 = at::matmul(q.t(), grad_mm_out_2).t();
+  }
+
+  if (!grad_out.defined()) {
+    return std::make_tuple(grad_q_2, grad_k_2);
+  }
+  if (!grad_tanh_out.defined()) {
+    return std::make_tuple(grad_q_1, grad_k_1);
+  }
+
+  Tensor grad_q = grad_q_1 + grad_q_2; // It throws an error in one of them is undefined?
   Tensor grad_k = grad_k_1 + grad_k_2;
-
   return std::make_tuple(grad_q, grad_k);
 }
 
