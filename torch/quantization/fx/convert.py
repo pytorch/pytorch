@@ -335,11 +335,11 @@ def convert(model: GraphModule, is_reference: bool = False,
         else:
             return False
 
-    def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module]) -> bool:
+    def is_output_quantized(node: Node, obj: QuantizeHandler, qconfig: QConfigAny, modules: Dict[str, torch.nn.Module], is_reference=False) -> bool:
         """ Check if output node is quantized or not """
         assert modules is not None
         # by default the output for a quantizable node is expected to be quantized
-        quantized = True
+        quantized = obj.is_output_quantized(qconfig, is_reference)
 
         # Need to get correct quantized/non-quantized state forn the output
         # of FixedQParamsQuantizeHandler
@@ -454,7 +454,7 @@ def convert(model: GraphModule, is_reference: bool = False,
                     node, qconfig, modules, quantized_graph, node_name_to_scope, load_arg, is_reference=is_reference,
                     convert_custom_config_dict=convert_custom_config_dict)
                 if not is_observed_standalone_module_node:
-                    quantized = is_output_quantized(node, obj, qconfig, modules)
+                    quantized = is_output_quantized(node, obj, qconfig, modules, is_reference)
 
             if quantized:
                 env[node.name][activation_dtype(qconfig)] = result
