@@ -9076,7 +9076,7 @@ class TestNN(NNTestCase):
         inp2 = inp1.contiguous(memory_format=torch.channels_last)
         out1 = model(inp1)
         out2 = model(inp2)
-        self.assertTrue(torch.equal(out1, out2)) 
+        self.assertTrue(torch.equal(out1, out2))
 
     def test_pairwise_distance(self):
         input1 = torch.randn(4, 4, requires_grad=True)
