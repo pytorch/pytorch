@@ -33,6 +33,50 @@ macro(enable_ubsan)
   endif()
 endmacro()
 
+# ---[ CUDA
+if(USE_CUDA)
+  # public/*.cmake uses CAFFE2_USE_*
+  set(CAFFE2_USE_CUDA ${USE_CUDA})
+  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
+  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
+  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
+  include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
+  if(CAFFE2_USE_CUDA)
+    # A helper variable recording the list of Caffe2 dependent libraries
+    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
+    # design reason (it adds CUDA_LIBRARIES itself).
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+      caffe2::cufft caffe2::curand caffe2::cublas)
+    if(CAFFE2_USE_NVRTC)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
+    else()
+      caffe2_update_option(USE_NVRTC OFF)
+    endif()
+    if(CAFFE2_USE_CUDNN)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
+    else()
+      caffe2_update_option(USE_CUDNN OFF)
+    endif()
+    if(CAFFE2_USE_TENSORRT)
+      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
+    else()
+      caffe2_update_option(USE_TENSORRT OFF)
+    endif()
+  else()
+    message(WARNING
+      "Not compiling with CUDA. Suppress this warning with "
+      "-DUSE_CUDA=OFF.")
+    caffe2_update_option(USE_CUDA OFF)
+    caffe2_update_option(USE_CUDNN OFF)
+    caffe2_update_option(USE_NVRTC OFF)
+    caffe2_update_option(USE_TENSORRT OFF)
+    set(CAFFE2_USE_CUDA OFF)
+    set(CAFFE2_USE_CUDNN OFF)
+    set(CAFFE2_USE_NVRTC OFF)
+    set(CAFFE2_USE_TENSORRT OFF)
+  endif()
+endif()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
   disable_ubsan()
@@ -657,7 +701,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
   # We need to replace googletest cmake scripts too.
   # Otherwise, it will sometimes break the build.
   # To make the git clean after the build, we make a backup first.
-  if(MSVC AND MSVC_Z7_OVERRIDE)
+  if((MSVC AND MSVC_Z7_OVERRIDE) OR USE_CUDA)
     execute_process(
       COMMAND ${CMAKE_COMMAND}
               "-DFILENAME=${CMAKE_CURRENT_LIST_DIR}/../third_party/googletest/googletest/cmake/internal_utils.cmake"
@@ -1176,50 +1220,6 @@ if(USE_LLVM)
     add_definitions(-DTORCH_ENABLE_LLVM)
   endif(LLVM_FOUND)
 endif(USE_LLVM)
-
-# ---[ CUDA
-if(USE_CUDA)
-  # public/*.cmake uses CAFFE2_USE_*
-  set(CAFFE2_USE_CUDA ${USE_CUDA})
-  set(CAFFE2_USE_CUDNN ${USE_CUDNN})
-  set(CAFFE2_USE_NVRTC ${USE_NVRTC})
-  set(CAFFE2_USE_TENSORRT ${USE_TENSORRT})
-  include(${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake)
-  if(CAFFE2_USE_CUDA)
-    # A helper variable recording the list of Caffe2 dependent libraries
-    # torch::cudart is dealt with separately, due to CUDA_ADD_LIBRARY
-    # design reason (it adds CUDA_LIBRARIES itself).
-    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
-      caffe2::cufft caffe2::curand caffe2::cublas)
-    if(CAFFE2_USE_NVRTC)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cuda caffe2::nvrtc)
-    else()
-      caffe2_update_option(USE_NVRTC OFF)
-    endif()
-    if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
-    else()
-      caffe2_update_option(USE_CUDNN OFF)
-    endif()
-    if(CAFFE2_USE_TENSORRT)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::tensorrt)
-    else()
-      caffe2_update_option(USE_TENSORRT OFF)
-    endif()
-  else()
-    message(WARNING
-      "Not compiling with CUDA. Suppress this warning with "
-      "-DUSE_CUDA=OFF.")
-    caffe2_update_option(USE_CUDA OFF)
-    caffe2_update_option(USE_CUDNN OFF)
-    caffe2_update_option(USE_NVRTC OFF)
-    caffe2_update_option(USE_TENSORRT OFF)
-    set(CAFFE2_USE_CUDA OFF)
-    set(CAFFE2_USE_CUDNN OFF)
-    set(CAFFE2_USE_NVRTC OFF)
-    set(CAFFE2_USE_TENSORRT OFF)
-  endif()
-endif()
 
 # ---[ cuDNN
 if(USE_CUDNN)
