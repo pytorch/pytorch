@@ -91,7 +91,7 @@ def run_in_worker(scoped: bool = True) -> typing.Callable[..., typing.Any]:
         # Note: The `@staticmethod` decorator must appear BELOW the
         #       `@run_in_worker` decorator.
         try:
-            f = f.__get__(object, None)  # type: ignore
+            f = f.__get__(object, None)  # type: ignore[attr-defined]
         except AttributeError:
             pass
 
