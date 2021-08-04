@@ -5043,6 +5043,11 @@ class DistributedTest:
             ddp_logging_data = model_DDP._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("device_ids"), str(rank))
             self.assertEqual(ddp_logging_data.get("output_device"), rank)
+            grad_ready_order = ddp_logging_data.get("prev_iteration_grad_ready_order_indices")
+            expected_order = list(reversed([str(x) for x in range(3)]))
+            self.assertEqual(grad_ready_order, ", ".join(expected_order))
+            bucket_indices = ddp_logging_data.get("per_bucket_variable_indices")
+            self.assertEqual(bucket_indices, " ".join(expected_order))
             # test runtime logging fields
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
