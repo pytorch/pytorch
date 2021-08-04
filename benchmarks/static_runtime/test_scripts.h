@@ -48,7 +48,7 @@ const auto list_unpack_script = R"JIT(
     c = [a, b]
     x, y = c
     z = x + y
-    return z
+    return z.clone()
 )JIT";
 
 const auto list_unpack_script_2 = R"JIT(
@@ -452,6 +452,23 @@ const auto clamp_script_2 = R"JIT(
   def forward(self, inp: Tensor, min: Tensor, max: Tensor):
       a = torch.clamp(inp, min, max).clone()
       return (a)
+)JIT";
+
+const auto full_script = R"JIT(
+  def forward(self,
+              size: List[int],
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool]):
+      a = torch.full(size,
+                     fill_value,
+                     dtype=dtype,
+                     layout=layout,
+                     device=device,
+                     pin_memory=pin_memory)
+      return (a.clone())
 )JIT";
 
 const auto full_like_script = R"JIT(
