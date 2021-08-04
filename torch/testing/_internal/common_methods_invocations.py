@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import List, Sequence, Tuple, Union
+from typing import Generator, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -40,6 +40,15 @@ from setuptools import distutils
 
 if TEST_SCIPY:
     import scipy.special
+
+
+# Reasonable testing sizes for dimensions
+L = 20
+M = 10
+S = 5
+
+# Unique value to distinguish default from anything else
+_NOTHING = object()
 
 
 class DecorateInfo(object):
@@ -79,6 +88,7 @@ class SkipInfo(DecorateInfo):
         super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
                          test_name=test_name, device_type=device_type, dtypes=dtypes,
                          active_if=active_if)
+
 
 class SampleInput(object):
     """Represents sample inputs to a function."""
@@ -173,6 +183,7 @@ class SampleInput(object):
         sample_np_input, np_args, np_kwargs = to_numpy(self.input), to_numpy(self.args), to_numpy(self.kwargs)
         return (sample_np_input, np_args, np_kwargs)
 
+
 class AliasInfo(object):
     """Class holds alias information. For example, torch.abs ->
     torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
@@ -186,9 +197,6 @@ class AliasInfo(object):
 
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs)
-
-
-_NOTHING = object()  # Unique value to distinguish default from anything else
 
 
 # Extension of getattr to support qualified names
@@ -750,9 +758,161 @@ class OpInfo(object):
                 else supported.intersection(self._default_test_dtypes))
 
 
-L = 20
-M = 10
-S = 5
+# Generates input tensors for testing reduction ops
+def _generate_reduction_inputs(device, dtype, requires_grad):
+    yield make_tensor((), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
+    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
+    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
+
+
+# Generates a subset of possible dim and keepdim kwargs for a tensor
+# with ndim dims appropriate for testing. If supports_multiple_dims
+# is True (default) then dim kwarg can be a list of dims.
+def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
+    for keepdim in [True, False]:
+        # Always test reducing inner and outer most dimensions
+        yield {'dim': 0, 'keepdim': keepdim}
+        yield {'dim': -1, 'keepdim': keepdim}
+
+        # Also reduce middle dimension
+        if ndim > 2:
+            yield {'dim': ndim // 2, 'keepdim': keepdim}
+
+        if supports_multiple_dims:
+            # Always test reducing all dims
+            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
+
+            # Test reducing both first and last dimensions
+            if ndim > 1:
+                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
+
+            # Test reducing every other dimension starting with the second
+            if ndim > 3:
+                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
+
+
+# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
+def sample_inputs_reduction_wrapper(supports_multiple_dims):
+    # Generates sample inputs for reduction ops that contain the input tensor
+    # and dim and keepdim kwargs. If a reduction op needs to test additional
+    # args/kwargs then create a separate sample_inputs function
+    def sample_inputs_func(op_info, device, dtype, requires_grad):
+        inputs = []
+
+        for t in _generate_reduction_inputs(device, dtype, requires_grad):
+            # Add case without dim and keepdim kwargs
+            inputs.append(SampleInput(t))
+            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
+                inputs.append(SampleInput(t, kwargs=kwargs))
+
+        return inputs
+
+    return sample_inputs_func
+
+
+# NOTE [Reductions]:
+#
+# For the purpose of testing, we relax the definition of a reduction operator
+# as defined in the docstring below. We do this to capture operators with
+# a similar API so they can be tested automatically. However...
+#
+# Strictly speaking a reduction operator is an operator that can reduce an
+# array to a single scalar value and that can be computed from the partial
+# result of reducing subarrays. This usually means that the reduction operation
+# should be commutative and associative. This definition is important when it
+# comes to implementation as it defines how a reduction can be parallelized.
+#
+# For example, many summary statistics such as median, mode and quantile cannot
+# be computed from partial results because these are sorting and counting based
+# algorithms and need information that would be lost in the reduced value.
+class ReductionOpInfo(OpInfo):
+    """Reduction operator information.
+
+    ReductionOpInfo tests that reduction operators provide a consistent API.
+    The optional keyword parameters represent parts of the API that are
+    optional for a reduction operator to implement, such as an identity value.
+
+    If a particular reduction operator does not yet implement parts of the API
+    that are required, this should be signaled by asserting that the relevant
+    tests fail so that it is clear that support should be added.
+
+    For ReductionOpInfo tests, a reduction operator is an operator that:
+        - accepts dim and keepdim parameters
+        - reduces one or more dimensions of a tensor to one or more values
+
+    NOTE: The API for reduction operators has not yet been finalized and some
+    requirements may change.
+
+    See tests in test/test_reductions.py
+    """
+
+    def __init__(
+        self, name, *,
+
+        # The identity value of the operator.
+        identity: Optional[float] = None,
+
+        # The result dtype for the operator. A single dtype value indicates
+        # that the operator always returns that dtype regardless of the input
+        # dtype. A dictionary maps input dtypes to output dtypes as follows:
+        # passing dtypes without precision as the key indicates any dtype of
+        # that category (e.g. torch.int indicates any integral dtype), whereas
+        # passing them as the value indicates the default value for that
+        # category. Dtypes with precision take precedence over dtypes without.
+        result_dtype: Optional[Union[torch.dtype, dict[torch.dtype, torch.dtype]]] = None,
+
+        # Whether the operator can reduce multiple dimensions.
+        supports_multiple_dims: bool = True,
+
+        # A generator function that takes the input tensor and optional dim
+        # and keepdim kwargs and generates tuples of args and kwargs to use
+        # when calling the operator and reference implementation with the given
+        # dim and keepdim kwargs. Note that some tests will only use the first
+        # generated args and kwargs.
+        args_kwargs_generator: Generator = lambda x, *, dim=None, keepdim=False: (yield tuple(), {}),
+
+        # Operators are expected to work with all dtypes unless documented
+        # otherwise. It is often easier and clearer to specify the dtypes
+        # an operator does not support.
+        unsupported_dtypes: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_cpu: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_cuda: _dispatch_dtypes = tuple(),
+        unsupported_dtypes_rocm: _dispatch_dtypes = tuple(),
+
+        # Options from the OpInfo base class
+        **kwargs,
+    ):
+        # ReductionOpInfo tests generate their own input tensors and the dim
+        # and keepdim parameters. Operators can specify `generate_kwargs` to
+        # augment the arguments to the operator and the reference implementation
+        # or specify `sample_inputs_func` to provide their own sample inputs
+        # for the OpInfo base class. However, the test_reductions.py file will
+        # still generate its own inputs.
+        def sample_inputs_func(*args, **kwargs):
+            result: list[SampleInput] = []
+            f = sample_inputs_reduction_wrapper(supports_multiple_dims)
+            for sample in f(*args, **kwargs):
+                for args, kwargs in args_kwargs_generator(sample.input, **sample.kwargs):
+                    kwargs.update(sample.kwargs)
+                    result.append(SampleInput(sample.input, args=args, kwargs=kwargs))
+            return result
+
+        all_types = set(all_types_and_complex_and(torch.bfloat16, torch.float16, torch.bool))
+        kwargs["dtypes"] = _dispatch_dtypes(all_types - set(unsupported_dtypes))
+        kwargs["dtypesIfCPU"] = _dispatch_dtypes(all_types - set(unsupported_dtypes_cpu))
+        kwargs["dtypesIfCUDA"] = _dispatch_dtypes(all_types - set(unsupported_dtypes_cuda))
+        kwargs["dtypesIfROCM"] = _dispatch_dtypes(all_types - set(unsupported_dtypes_rocm))
+
+        # Override OpInfo defaults and call base class __init__
+        kwargs.setdefault('inplace_variant', None)
+        kwargs.setdefault('sample_inputs_func', sample_inputs_func)
+        super(ReductionOpInfo, self).__init__(name, **kwargs)
+
+        self.identity = identity
+        self.result_dtype = result_dtype
+        self.supports_multiple_dims = supports_multiple_dims
+        self.args_kwargs_generator = args_kwargs_generator
 
 
 def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
@@ -2242,56 +2402,6 @@ def sample_inputs_max_min_reduction_no_dim(op_info, device, dtype, requires_grad
                                           low=None, high=None,
                                           requires_grad=requires_grad),))
     return inputs
-
-# Generates input tensors for testing reduction ops
-def _generate_reduction_inputs(device, dtype, requires_grad):
-    yield make_tensor((), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2,), device, dtype, requires_grad=requires_grad)
-    yield make_tensor((2, 3), device, dtype, requires_grad=requires_grad, noncontiguous=True)
-    yield make_tensor((3, 2, 1, 2, 2), device, dtype, requires_grad=requires_grad)
-
-# Generates a subset of possible dim and keepdim kwargs for a tensor
-# with ndim dims appropriate for testing. If supports_multiple_dims
-# is True (default) then dim kwarg can be a list of dims.
-def _generate_reduction_kwargs(ndim, supports_multiple_dims=True):
-    for keepdim in [True, False]:
-        # Always test reducing inner and outer most dimensions
-        yield {'dim': 0, 'keepdim': keepdim}
-        yield {'dim': -1, 'keepdim': keepdim}
-
-        # Also reduce middle dimension
-        if ndim > 2:
-            yield {'dim': ndim // 2, 'keepdim': keepdim}
-
-        if supports_multiple_dims:
-            # Always test reducing all dims
-            yield {'dim': tuple(range(ndim)), 'keepdim': keepdim}
-
-            # Test reducing both first and last dimensions
-            if ndim > 1:
-                yield {'dim': (0, ndim - 1), 'keepdim': keepdim}
-
-            # Test reducing every other dimension starting with the second
-            if ndim > 3:
-                yield {'dim': tuple(range(1, ndim, 2)), 'keepdim': keepdim}
-
-# Wraps sample_inputs_reduction function to provide the additional supports_multiple_dims args
-def sample_inputs_reduction_wrapper(supports_multiple_dims):
-    # Generates sample inputs for reduction ops that contain the input tensor
-    # and dim and keepdim kwargs. If a reduction op needs to test additional
-    # args/kwargs then create a separate sample_inputs function
-    def fn(op_info, device, dtype, requires_grad):
-        inputs = []
-
-        for t in _generate_reduction_inputs(device, dtype, requires_grad):
-            # Add case without dim and keepdim kwargs
-            inputs.append(SampleInput(t))
-            for kwargs in _generate_reduction_kwargs(t.ndim, supports_multiple_dims):
-                inputs.append(SampleInput(t, kwargs=kwargs))
-
-        return inputs
-
-    return fn
 
 def sample_inputs_reduction_quantile(op_info, device, dtype, requires_grad):
     test_quantiles = (0.5, make_tensor((2,), device, dtype, low=0, high=1))
@@ -6487,11 +6597,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
-    OpInfo('sum',
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('nansum',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
@@ -8223,6 +8328,20 @@ op_db: List[OpInfo] = [
         ),
     ),
 ]
+
+# Reduction operator database
+reduction_op_db: List[ReductionOpInfo] = [
+    ReductionOpInfo(
+        'sum',
+        identity=0,
+        result_dtype={torch.int: torch.int64},
+        supports_out=False,
+        supports_forward_ad=True,
+        ref=lambda x, dim=None, keepdim=False: np.sum(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim)
+    ),
+]
+
+op_db += reduction_op_db
 
 # Common operator groupings
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
