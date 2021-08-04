@@ -50,12 +50,13 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
+        # TODO: handle kwargs
+        assert not kwargs
+
         # no_dispatch is only needed if you use enable_factory_dispatch.
         # It prevents factory functions from going into infinite recursion.
         with no_dispatch():
-            args = tree_map(unwrap, args)
-            kwargs = tree_map(unwrap, kwargs)
-            rs = tree_map(wrap, func(*args, **kwargs))
+            rs = tree_map(wrap, func(*tree_map(unwrap, args)))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, rs)
         return rs
 
