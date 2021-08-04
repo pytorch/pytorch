@@ -2,6 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
@@ -392,7 +393,7 @@ void multinomial_with_replacement_kernel_impl(
       renormRows(normDist);
 
       // Prefix sum along rows
-      at::_cumsum_out(prefixSum, normDist, 1);
+      at::cuda::cumsum_out(prefixSum, normDist, 1);
 
       PhiloxCudaState rng_engine_inputs;
 
