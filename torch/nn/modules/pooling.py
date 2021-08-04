@@ -570,7 +570,8 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
+        divisor_override: if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
