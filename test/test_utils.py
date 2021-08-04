@@ -89,6 +89,7 @@ class TestCheckpoint(TestCase):
     # the number of times forward pass happens
     def test_checkpoint_trigger(self):
         print("BAD TEST")
+
         class Net(nn.Module):
 
             def __init__(self):

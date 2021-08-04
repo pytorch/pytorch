@@ -969,11 +969,9 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 class ErrorOnPrintPolicy:
-    skip_list: Set[str] = skip_list
-
     @staticmethod
     def should_skip(id: str) -> bool:
-        return id in ErrorOnPrintPolicy.skip_list
+        return id in skip_list
 
     def __init__(self, filename, id):
         self.filename = filename
