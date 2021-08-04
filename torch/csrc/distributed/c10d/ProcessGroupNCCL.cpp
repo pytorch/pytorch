@@ -131,7 +131,7 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
   std::vector<at::Device> res;
   res.reserve(tensors.size());
   for (auto& tensor : tensors) {
-    if (res.size() == 0 || tensor[0].device() != res[0]) {
+    if (res.size() == 0 || tensor.device() != res[0]) {
       res.push_back(tensor.device());
     }
   }
@@ -1100,7 +1100,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   }
 
   // Inputs must either all be on different devices,
-  // or all be on different devices.
+  // or all be on the same device.
   const auto devices = getDeviceList(inputs);
   const bool inputs_same_dev = (devices.size() == 1);
   const auto key = getKeyFromDevices(devices);
