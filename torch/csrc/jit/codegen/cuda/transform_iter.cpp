@@ -723,7 +723,7 @@ BestEffortReplay BestEffortReplay::replayPasC(
       consumer->domain()->domain().begin() + consumer_compute_at_axis);
 
   // Figure out all inputs required to generate the compute_at dimensions
-  std::unordered_set<Val*> consumer_CA_root_vals = IterVisitor::getInputsTo(
+  auto consumer_CA_root_vals = IterVisitor::getInputsTo(
       std::vector<Val*>(consumer_CA_ids.begin(), consumer_CA_ids.end()));
 
   std::unordered_set<IterDomain*> consumer_CA_root_ids;

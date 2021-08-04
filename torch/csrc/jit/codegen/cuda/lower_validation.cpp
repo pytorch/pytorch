@@ -465,7 +465,8 @@ bool derivedFromRootCAAxes(TensorView* tv, IterDomain* axis) {
 
   return std::any_of(
       root_vals.begin(), root_vals.end(), [&ca_root_vals](auto root) {
-        return ca_root_vals.count(root) > 0;
+        return std::find(ca_root_vals.begin(), ca_root_vals.end(), root) !=
+            ca_root_vals.end();
       });
 }
 

@@ -305,7 +305,9 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayPasC(
   // Any root domain that was not used to generate computeIDs we can also put in
   // the map to forward their transformations.
   for (auto producer_root_id : producer_root) {
-    if (processed_roots.find(producer_root_id) == processed_roots.end() &&
+    if (std::find(
+            processed_roots.begin(), processed_roots.end(), producer_root_id) ==
+            processed_roots.end() &&
         std::find(needed_dims.begin(), needed_dims.end(), producer_root_id) ==
             needed_dims.end()) {
       producer_self_replay_map[producer_root_id] = producer_root_id;
@@ -503,7 +505,9 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   // Any root domain that was not used to generate computeIDs we can also put in
   // the map to forward their transformations.
   for (auto consumer_root_id : consumer_root) {
-    if (processed_roots.find(consumer_root_id) == processed_roots.end() &&
+    if (std::find(
+            processed_roots.begin(), processed_roots.end(), consumer_root_id) ==
+            processed_roots.end() &&
         // Don't re-add roots that may have directly mapped in the replay
         std::find(needed_dims.begin(), needed_dims.end(), consumer_root_id) ==
             needed_dims.end()) {

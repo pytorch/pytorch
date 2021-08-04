@@ -509,10 +509,14 @@ class MisalignedVectorizationModifier {
       auto consumer_root_id = it->second;
 
       // Don't extend the vectorization domain beyond the CA position
-      if (consumer_root_right_of_ca_domains.find(consumer_root_id) ==
-              consumer_root_right_of_ca_domains.end() ||
-          producer_root_right_of_ca_domains.find(producer_root_id) ==
-              producer_root_right_of_ca_domains.end()) {
+      if (std::find(
+              consumer_root_right_of_ca_domains.begin(),
+              consumer_root_right_of_ca_domains.end(),
+              consumer_root_id) == consumer_root_right_of_ca_domains.end() ||
+          std::find(
+              producer_root_right_of_ca_domains.begin(),
+              producer_root_right_of_ca_domains.end(),
+              producer_root_id) == producer_root_right_of_ca_domains.end()) {
         break;
       }
 

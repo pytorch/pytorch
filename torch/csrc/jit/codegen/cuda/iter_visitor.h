@@ -105,7 +105,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // values more than once.
   void traverseAllPaths(Fusion* fusion);
 
-  static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);
+  static std::vector<Val*> getInputsTo(const std::vector<Val*>& vals);
 };
 
 /*

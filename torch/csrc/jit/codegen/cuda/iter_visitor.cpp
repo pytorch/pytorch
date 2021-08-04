@@ -180,29 +180,30 @@ namespace {
 // expressions.
 class Inputs : public IterVisitor {
  private:
-  std::unordered_set<Val*> inputs;
+  std::vector<Val*> inputs_;
 
   void handle(Val* val) override {
     if (val->definition() == nullptr) {
-      inputs.emplace(val);
+      if (std::find(inputs_.begin(), inputs_.end(), val) == inputs_.end()) {
+        inputs_.push_back(val);
+      }
     }
   }
 
  public:
-  static std::unordered_set<Val*> getInputs(const std::vector<Val*>& of) {
+  static std::vector<Val*> getInputs(const std::vector<Val*>& of) {
     if (of.empty()) {
-      return std::unordered_set<Val*>();
+      return {};
     }
     Inputs inps;
     inps.traverseFrom(of[0]->fusion(), of);
-    return inps.inputs;
+    return inps.inputs_;
   }
 };
 
 } // namespace
 
-std::unordered_set<Val*> IterVisitor::getInputsTo(
-    const std::vector<Val*>& vals) {
+std::vector<Val*> IterVisitor::getInputsTo(const std::vector<Val*>& vals) {
   return Inputs::getInputs(vals);
 }
 

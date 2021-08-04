@@ -557,7 +557,7 @@ WelfordResult TensorView::rFactor(
   TORCH_INTERNAL_ASSERT(
       n->sameAs(wop->outN()), "Welford rfactor not used correctly");
 
-  std::unordered_map<TensorView*, TensorView*> tv2rf{
+  std::vector<std::pair<TensorView*, TensorView*>> tv2rf{
       {avg, nullptr}, {var, nullptr}, {n, nullptr}};
 
   // Make sure this gets rfactored last so everybody gets
@@ -574,9 +574,9 @@ WelfordResult TensorView::rFactor(
     }
   }
 
-  TensorView* producer_avg = tv2rf.at(avg);
-  TensorView* producer_var = tv2rf.at(var);
-  TensorView* producer_n = tv2rf.at(n);
+  TensorView* producer_avg = tv2rf[0].second;
+  TensorView* producer_var = tv2rf[1].second;
+  TensorView* producer_n = tv2rf[2].second;
 
   // Setup dependency chain, inserting producer before this op.
   // Expr* producer_definition =

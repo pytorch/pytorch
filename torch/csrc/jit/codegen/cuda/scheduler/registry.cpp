@@ -321,7 +321,10 @@ class SchedulerTopologyChecker {
                 tv_inputs.end(),
                 [&reduction_inputs](Val* inp) {
                   return inp->isA<TensorView>() &&
-                      reduction_inputs.find(inp) == reduction_inputs.end();
+                      std::find(
+                          reduction_inputs.begin(),
+                          reduction_inputs.end(),
+                          inp) == reduction_inputs.end();
                 })) {
           return false;
         }
