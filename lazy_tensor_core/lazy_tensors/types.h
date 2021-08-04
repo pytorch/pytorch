@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <functional>
 
+#include <c10/util/Half.h>
+
 #include "lazy_tensors/computation_client/ltc_logging.h"
 #include "lazy_tensors/core/lib/bfloat16/bfloat16.h"
 
@@ -19,33 +21,5 @@ using uint32 = uint32_t;
 using uint64 = uint64_t;
 using complex64 = std::complex<float>;
 using complex128 = std::complex<double>;
-
-struct half {
-  half() { LTC_LOG(FATAL) << "Not implemented yet."; }
-
-  explicit half(const float v) { LTC_LOG(FATAL) << "Not implemented yet."; }
-
-  explicit operator float() const { LTC_LOG(FATAL) << "Not implemented yet."; }
-
-  explicit operator unsigned long() const {
-    LTC_LOG(FATAL) << "Not implemented yet.";
-  }
-};
-
-inline half operator-(half a, half b) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
-inline half operator/(half a, half b) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
-inline bool operator<(half a, half b) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
-inline bool operator>(half a, half b) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
-inline half& operator+=(half& a, half b) {
-  LTC_LOG(FATAL) << "Not implemented yet.";
-}
-
+using half = c10::Half;
 }  // namespace lazy_tensors
