@@ -1028,10 +1028,7 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
 
-    @dtypesIfCUDA(torch.half, torch.float, torch.double,
-                  torch.int8, torch.short, torch.int, torch.long)
-    @dtypes(torch.float, torch.double,
-            torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_nansum(self, device, dtype):
         args = product(
             (True, False),  # noncontiguous
