@@ -67,12 +67,10 @@ TORCH_META_FUNC(_softmax_backward_data)
 
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-    TORCH_CHECK(
-        (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
-        "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
-
-    grad_input_options = grad_input_options.dtype(ScalarType::Float);
+    if (grad.scalar_type() == ScalarType::Float &&
+         input.scalar_type() == ScalarType::Half) {
+      grad_input_options = grad_input_options.dtype(ScalarType::Half);
+    }
   }
 
   int64_t grad_dim = grad.dim() > 0 ? grad.dim() : 1;
@@ -94,12 +92,10 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
-    TORCH_CHECK(
-        (grad.scalar_type() == ScalarType::Float &&
-         input.scalar_type() == ScalarType::Half),
-        "expected input and grad types to match, or input to be at::Half and grad to be at::Float");
-
-    grad_input_options = grad_input_options.dtype(ScalarType::Float);
+    if (grad.scalar_type() == ScalarType::Float &&
+        input.scalar_type() == ScalarType::Half) {
+      grad_input_options = grad_input_options.dtype(ScalarType::Half);
+    }
   }
 
   int64_t grad_dim = grad.dim() > 0 ? grad.dim() : 1;
