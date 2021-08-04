@@ -3587,6 +3587,28 @@ new_module_tests = [
         fullname='log_softmax_scalar',
         pickle=False,
     ),
+    dict(
+        module_name='Softmax2d',
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='Softmax',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::SoftmaxOptions(-1)',
+        input_size=(4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='LogSoftmax',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::LogSoftmaxOptions(1)',
+        input_size=(4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
 
 
     dict(
@@ -3746,6 +3768,13 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::SoftminOptions(0)',
         input_size=(),
         desc='scalar',
+    ),
+    dict(
+        module_name='Softmin',
+        constructor_args=(-1,),
+        cpp_constructor_args='torch::nn::SoftminOptions(-1)',
+        input_size=(3, 4, 10),
+        desc='no_batch_dim',
     ),
     dict(
         module_name='Tanhshrink',
