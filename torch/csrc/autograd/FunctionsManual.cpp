@@ -3546,7 +3546,9 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
     ));
     if (nrhs >= n) {
       // Y stores L^{-1} P^T to be reused in the computation of self_grad
-      Y = X;
+      if (self.requires_grad()) {
+        Y = -X;
+      }
       X = X.matmul(self);
     }
     X = X.matmul(grad.transpose(-2, -1).conj());
@@ -3555,7 +3557,7 @@ std::tuple<Tensor, Tensor> lu_solve_backward(
     X = std::get<0>(at::triangular_solve(
       X.transpose(-2, -1),
       U,
-      /*upper=*/false,
+      /*upper=*/true,
       /*transpose=*/true,
       /*unitriangular=*/false
     )).transpose(-2, -1);
