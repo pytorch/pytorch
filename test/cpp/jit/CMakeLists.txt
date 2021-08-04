@@ -42,6 +42,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_custom_class_registrations.cpp
   ${JIT_TEST_ROOT}/test_custom_operators.cpp
   ${JIT_TEST_ROOT}/test_dce.cpp
+  ${JIT_TEST_ROOT}/test_eliminate_dict_construct_getitem.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
   ${JIT_TEST_ROOT}/test_graph_executor.cpp
   ${JIT_TEST_ROOT}/test_graph_iterator.cpp
