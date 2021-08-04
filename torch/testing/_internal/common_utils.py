@@ -428,14 +428,14 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
 # Enables tests disabled by existing issues (these tests are disabled by default)
 # This is usually used locally or during fix PRs. This will enable
-# ALL disabled tests, even if IGNORE_DISABLED_ISSUES is set to a smaller set.
+# ALL disabled tests, even if PYTORCH_IGNORE_DISABLED_ISSUES is set to a smaller set.
 # This does NOT interfere with other test disablement and only disables tests
 # marked by issues.
 RUN_DISABLED_TESTS = os.getenv('PYTORCH_RUN_DISABLED_TESTS', '0') == '1'
 
 # A list of issue numbers. This will re-enable any disabled tests associated with
 # the issues in this list.
-IGNORE_DISABLED_ISSUES: List[str] = os.getenv('IGNORE_DISABLED_ISSUES', '').split(',')
+IGNORE_DISABLED_ISSUES: List[str] = os.getenv('PYTORCH_IGNORE_DISABLED_ISSUES', '').split(',')
 
 # Disables noarch tests; all but one CI configuration disables these.  We don't
 # disable them for local runs because you still want to run them
