@@ -283,7 +283,7 @@ test_vulkan() {
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    "$BUILD_BIN_DIR"/vulkan_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
