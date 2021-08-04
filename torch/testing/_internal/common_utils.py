@@ -55,6 +55,8 @@ import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
 
+from torch.testing._internal.print_skip_list import skip_list
+
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
@@ -965,6 +967,12 @@ def set_warn_always_context(new_val: bool):
         torch.set_warn_always(old_val)
 
 class ErrorOnPrintPolicy:
+    skip_list: Set[str] = skip_list
+
+    @staticmethod
+    def should_skip(id: str) -> bool:
+        return id in ErrorOnPrintPolicy.skip_list
+
     def __init__(self, filename, id):
         self.filename = filename
         self.id = id
@@ -1000,8 +1008,8 @@ class ErrorOnPrintPolicy:
             if len(stderr) > 0:
                 msg += f"stderr: \n{stderr}\n"
 
-            print(f"TESTPRINT\t{self.filename}\t{self.id}")
-            # raise RuntimeError(msg)
+            # print(f"TESTPRINT\t{self.filename}\t{self.id}")
+            raise RuntimeError(msg)
 
 
 class TestCase(expecttest.TestCase):
@@ -1079,14 +1087,8 @@ class TestCase(expecttest.TestCase):
             if self._ignore_not_implemented_error:
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
 
-            clean_id = self.id().replace("__main__.", "")
-            # if not self._ignore_error_on_print and \
-            #    os.getenv("PYTORCH_ERROR_ON_TEST_PRINT", "") == "1" and \
-            #    clean_id not in self._ignore_error_on_print_allowlist:
-            # if True:
-            #     print("wrapping")
-            import inspect
-            self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy(inspect.getfile(self.__class__), self.id()))
+            if IS_IN_CI and not ErrorOnPrintPolicy.should_skip(self.id()):
+                self.wrap_with_policy(method_name, lambda: ErrorOnPrintPolicy(inspect.getfile(self.__class__), self.id()))
 
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
