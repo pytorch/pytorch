@@ -14,7 +14,7 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_ROOT_DIR}/include)
+include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -302,6 +302,11 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+
+if(USE_PRECOMPILED_HEADERS)
+  target_precompile_headers(torch_python PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+endif()
 
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories

@@ -61,8 +61,8 @@ class MaxPool1d(_MaxPoolNd):
                    ensures that every element in the input tensor is covered by a sliding window.
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
@@ -277,8 +277,8 @@ class MaxUnpool1d(_MaxUnpoolNd):
         - `output_size` (optional): the targeted output size
 
     Shape:
-        - Input: :math:`(N, C, H_{in})`
-        - Output: :math:`(N, C, H_{out})`, where
+        - Input: :math:`(N, C, H_{in})` or :math:`(C, H_{in})`.
+        - Output: :math:`(N, C, H_{out})` or :math:`(C, H_{out})`, where
 
           .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{kernel\_size}[0]
