@@ -4992,6 +4992,11 @@ class DistributedTest:
             self.assertEqual(
                 ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size)
             )
+            grad_ready_order = ddp_logging_data.get("prev_iteration_grad_ready_order_indices")
+            expected_order = list(reversed([str(x) for x in range(3)]))
+            self.assertEqual(grad_ready_order, ", ".join(expected_order))
+            bucket_indices = ddp_logging_data.get("per_bucket_variable_indices")
+            self.assertEqual(bucket_indices, " ".join(expected_order))
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.get("avg_forward_compute_time"), 1)
