@@ -34,6 +34,10 @@ _device_t = Union[_device, str, int, None]
 
 
 class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
     def __init__(self):
         self.manual_seed_all_cb = None
         self.manual_seed_cb = None
