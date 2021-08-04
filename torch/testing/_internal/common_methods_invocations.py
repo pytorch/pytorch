@@ -3031,16 +3031,18 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
     def generate_samples():
         for n, batch, rhs in product(ns, batches, nrhs):
             a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
-            lu, pivs = a.lu()
-            lu.requires_grad = requires_grad
-            b = torch.randn(*batch, n, rhs, dtype=dtype, device=device)
-            b.requires_grad = requires_grad
-            yield SampleInput(b, args=(lu, pivs))
-            if requires_grad:
-                b.requires_grad = False
-                yield SampleInput(b, args=(lu, pivs))
-                b.requires_grad = True
-                lu.requires_grad = False
+            requires_grad_options = (False,) if not requires_grad else (True, False)
+            # we try all possible combinations of requires_grad for each input
+            for lu_requires_grad, b_requires_grad in product(requires_grad_options, requires_grad_options):
+                # when requires_grad == True, at least one input has to have requires_grad enabled
+                if requires_grad and lu_requires_grad == b_requires_grad == False:
+                    continue
+                # we run LU several times to guarantee that the produced SampleInputs are independent
+                # this is especially important when setting different requries_grad for same tensors!
+                lu, pivs = a.lu()
+                lu.requires_grad = lu_requires_grad
+                b = torch.randn(*batch, n, rhs, dtype=dtype, device=device)
+                b.requires_grad = b_requires_grad
                 yield SampleInput(b, args=(lu, pivs))
 
     return list(generate_samples())
