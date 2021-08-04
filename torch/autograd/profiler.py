@@ -425,17 +425,19 @@ class record_function(ContextDecorator):
     """
     def __init__(self, name: str):
         self.name: str = name
-        # Whether or not we should run record function's end callbacks when exiting.
-        self.run_callbacks_on_exit: bool = True
-        self.rec = None
+
+        # NOTE: type hint it as Optional[...] will cause it infer to be None
+        # due to delayed initialization in __enter__.
+        self.rec: List["torch.classes.profiler.RecordFunction"] = []
 
     def __enter__(self):
-        self.rec = torch.ops.profiler._record_function_enter(self.name)
+        self.rec.append(torch.ops.profiler._record_function_enter(self.name))
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        if self.run_callbacks_on_exit:
-            torch.ops.profiler._record_function_exit(self.rec)
+        if len(self.rec) > 0:
+            torch.ops.profiler._record_function_exit(self.rec.pop())
+        assert len(self.rec) == 0
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -456,14 +458,18 @@ class record_function(ContextDecorator):
 
         """
         # Throw if we have already attached a callback onto the future.
-        if not self.run_callbacks_on_exit:
+        if len(self.rec) == 0:
             raise RuntimeError("_call_end_callbacks_on_future can only be called once.")
 
         # We are scheduling to run this RecordFunction's end callbacks when the
-        # passed in future completes, so don't run end callbacks on exit.
-        self.run_callbacks_on_exit = False
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.rec, fut)
+        # passed in future completes, so don't run end callbacks on exit. The
+        # future will capture the RecordFunction object and extend its lifetime.
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.rec.pop(), fut)
         return profiled_future
+
+    @property
+    def handle(self):
+        return self.rec[0]
 
 
 class emit_nvtx(object):
