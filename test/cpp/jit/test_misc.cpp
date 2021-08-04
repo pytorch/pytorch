@@ -2532,7 +2532,7 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
   flops = computeFlops(std::string("aten::mm"), extra_args);
-  ASSERT_EQ(flops, 43200);
+  ASSERT_EQ(flops, 36000);
 
   // Test mm out of range
   extra_args.clear();
