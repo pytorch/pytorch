@@ -18,7 +18,6 @@
 
 typedef void (*function_type)(const char*);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool cuda = false;
 
 constexpr auto latency_p = {
@@ -95,7 +94,6 @@ struct RunPython {
 
 static torch::IValue to_device(const torch::IValue& v, torch::Device to);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::vector<torch::IValue> to_device_vec(
     at::ArrayRef<torch::IValue> vs,
     torch::Device to) {
