@@ -9,7 +9,8 @@ namespace jit {
 
 void EvalPeepholeONNX(
     std::shared_ptr<Graph>& g,
-    std::map<std::string, IValue>& paramDict);
+    std::map<std::string, IValue>& paramDict,
+    bool isAllowedToAdjustGraphInputs);
 
 } // namespace jit
 
