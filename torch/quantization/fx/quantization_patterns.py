@@ -94,7 +94,7 @@ class QuantizeHandler(ABC):
                 # Check that the mul node contains an 'equalization_scale' as an
                 # argument to ensure that this mul node is used for equalization.
                 for arg in maybe_eq_node.args:
-                    if "equalization_scale" in arg.name:
+                    if isinstance(arg, Node) and "equalization_scale" in arg.name:
                         last_node = maybe_eq_node
                         break
 
