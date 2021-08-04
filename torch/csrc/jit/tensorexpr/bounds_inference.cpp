@@ -19,7 +19,7 @@ using namespace analysis;
 template <typename Container>
 BoundsInfo mergeTensorAccesses(
     const Container& accesses,
-    const std::unordered_map<const Var*, const Buf*>& varToBuf,
+    const std::unordered_map<Var*, Buf*>& varToBuf,
     bool distinctAccessKinds) {
   BoundsInfo ret;
   for (auto& access : accesses) {
@@ -30,7 +30,7 @@ BoundsInfo mergeTensorAccesses(
 
     auto vtbIt = varToBuf.find(access->var());
     TORCH_INTERNAL_ASSERT(vtbIt != varToBuf.end());
-    const Buf* buf = vtbIt->second;
+    Buf* buf = vtbIt->second;
     std::vector<TensorAccessBoundsInfo>& infos = ret[buf];
 
     bool added = false;
@@ -70,20 +70,20 @@ BoundsInfo mergeTensorAccesses(
   return ret;
 }
 
-std::unordered_map<const Var*, const Buf*> getAllBufs(Stmt* s) {
-  std::unordered_map<const Var*, const Buf*> varToBuf;
+std::unordered_map<Var*, Buf*> getAllBufs(Stmt* s) {
+  std::unordered_map<Var*, Buf*> varToBuf;
 
-  auto bufs = NodeFinder<const Buf>::find(s);
+  auto bufs = NodeFinder<Buf>::find(s);
   for (auto* b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
   return varToBuf;
 }
 
-std::unordered_map<const Var*, const Buf*> getAllBufs(Expr* e) {
-  std::unordered_map<const Var*, const Buf*> varToBuf;
+std::unordered_map<Var*, Buf*> getAllBufs(Expr* e) {
+  std::unordered_map<Var*, Buf*> varToBuf;
 
-  auto bufs = NodeFinder<const Buf>::find(e);
+  auto bufs = NodeFinder<Buf>::find(e);
   for (auto* b : bufs) {
     varToBuf[b->base_handle()] = b;
   }
@@ -121,7 +121,7 @@ void printBoundsInfo(const BoundsInfo& v) {
   for (auto& pair : v) {
     std::cerr << *pair.first << " in [";
     bool first = true;
-    for (const auto& b : pair.second) {
+    for (auto& b : pair.second) {
       if (!first) {
         std::cerr << ", ";
       }
@@ -130,7 +130,7 @@ void printBoundsInfo(const BoundsInfo& v) {
       if (b.start.empty()) {
         std::cerr << "0";
       }
-      for (const auto& s : b.start) {
+      for (auto& s : b.start) {
         if (i != 0) {
           std::cerr << ", ";
         }
@@ -142,7 +142,7 @@ void printBoundsInfo(const BoundsInfo& v) {
       if (b.stop.empty()) {
         std::cerr << "0";
       }
-      for (const auto& s : b.stop) {
+      for (auto& s : b.stop) {
         if (i != 0) {
           std::cerr << ", ";
         }
@@ -157,15 +157,15 @@ void printBoundsInfo(const BoundsInfo& v) {
   std::cerr << "}\n";
 }
 
-std::vector<const Expr*> getBoundExtents(
+std::vector<Expr*> getBoundExtents(
     const std::vector<TensorAccessBoundsInfo>& infos) {
-  std::vector<const Expr*> starts;
-  std::vector<const Expr*> stops;
+  std::vector<Expr*> starts;
+  std::vector<Expr*> stops;
 
   // Find the safe size of the temprorary buffer by determining the outer
   // extents of a union of all bounds.
   for (const TensorAccessBoundsInfo& p : infos) {
-    for (const auto i : c10::irange(p.start.size())) {
+    for (auto i : c10::irange(p.start.size())) {
       if (starts.size() <= i) {
         starts.push_back(p.start[i]);
       } else {
@@ -181,9 +181,9 @@ std::vector<const Expr*> getBoundExtents(
     }
   }
 
-  std::vector<const Expr*> extents;
+  std::vector<Expr*> extents;
   for (size_t i = 0; i < starts.size(); ++i) {
-    const Expr* dim = IRSimplifier::simplify(
+    Expr* dim = IRSimplifier::simplify(
         new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
 
     extents.push_back(dim);
@@ -210,7 +210,7 @@ BoundSet convertBounds(
 
 BoundSet convertBounds(
     BoundsInfo& bounds,
-    const Buf* buf,
+    Buf* buf,
     TensorAccessKind filter = kMutate) {
   auto it = bounds.find(buf);
   if (it == bounds.end()) {
@@ -231,7 +231,7 @@ HazardKind getPotentialHazards(
   BoundSet aReads;
 
   for (auto& pair : bBounds) {
-    const Buf* buf = pair.first;
+    Buf* buf = pair.first;
     if (aBounds.find(buf) == aBounds.end()) {
       continue;
     }
@@ -302,18 +302,17 @@ bool hasConflictingOverlap(
     const BoundsInfo& bBounds,
     TensorAccessKind aFilter = kMutate,
     TensorAccessKind bFilter = kMutate) {
-  using IndexBoundsInfo =
-      std::unordered_map<const Buf*, std::vector<IndexBounds>>;
+  using IndexBoundsInfo = std::unordered_map<Buf*, std::vector<IndexBounds>>;
   IndexBoundsInfo aIndexBoundsInfo;
-  for (const auto& aBound : aBounds) {
+  for (auto& aBound : aBounds) {
     aIndexBoundsInfo[aBound.first] = getIndexBounds(aBound.second, aFilter);
   }
   IndexBoundsInfo bIndexBoundsInfo;
-  for (const auto& bBound : bBounds) {
+  for (auto& bBound : bBounds) {
     bIndexBoundsInfo[bBound.first] = getIndexBounds(bBound.second, bFilter);
   }
 
-  for (const auto& aBound : aBounds) {
+  for (auto& aBound : aBounds) {
     auto bIt = bBounds.find(aBound.first);
     if (bIt == bBounds.end()) {
       continue;
