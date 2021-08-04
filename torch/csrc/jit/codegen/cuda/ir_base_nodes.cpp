@@ -67,6 +67,15 @@ Val::Val(const Val* src, IrCloner* ir_cloner)
       is_fusion_input_(src->is_fusion_input_),
       is_fusion_output_(src->is_fusion_output_) {}
 
+const std::vector<Expr*>& Val::uses() const {
+  if (vtype_ == ValType::TensorView) {
+    if (!fusion()->isTVUseInfoValid() && !fusion()->isUpdatingTVUseInfo()) {
+      fusion()->resetTvUses();
+    }
+  }
+  return uses_;
+}
+
 namespace {
 
 // Traverse definition of all values involved in constructing the provided val.

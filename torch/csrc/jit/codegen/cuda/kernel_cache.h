@@ -155,6 +155,10 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //!  TODO: unify the segmented and un-segmented code-path
   std::unique_ptr<Fusion> single_kernel_fusion_ = nullptr;
 
+  //! Graph traversal datacache for the single kernel fusion
+  //!  TODO: unify the segmented and un-segmented code-path
+  std::unique_ptr<HeuristicSummary> single_kernel_fusion_data_cache_ = nullptr;
+
   // States for profiling support
   bool profiling_ = false;
 

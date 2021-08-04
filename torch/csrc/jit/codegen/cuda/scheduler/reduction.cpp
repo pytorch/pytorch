@@ -18,11 +18,13 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+
 ReductionParams innerReductionHeuristic(
     const int64_t num_elems_in_reduction,
     const int64_t num_outputs_for_reduction,
-    const int64_t n_input_tensors,
-    const int64_t max_input_dtype_size) {
+    const int64_t n_tensor_inputs,
+    const int64_t max_input_dtype_size,
+    size_t vectorize_factor) {
   // Set some targets for parallelization
 
   const int64_t n_elems = num_elems_in_reduction * num_outputs_for_reduction;
@@ -37,10 +39,10 @@ ReductionParams innerReductionHeuristic(
 
   auto const max_unroll = ceilDiv(
       // Available unrolling based on size of data type
-      (int64_t)16 / max_input_dtype_size,
-      // Reduce unrolling if we have many inputs, start reduction at 2 inputs
+      (int64_t)16 / (int64_t)max_input_dtype_size,
+      // Reduce unrolling if we have many inputs, start reduction at 4 inputs
       std::max(
-          (scheduler_utils::lastPow2((int64_t)n_input_tensors) >> 1),
+          (scheduler_utils::lastPow2((int64_t)n_tensor_inputs) >> 2),
           (int64_t)1));
 
   // Conservative value, could be set to larger based on arch if necessary.
@@ -51,13 +53,13 @@ ReductionParams innerReductionHeuristic(
   // Check how many elements it would take per thread to start thrashing l1
   // set that to minimum number we want to reduce per thread.
   int64_t min_red_elems_per_thread = std::max(
-      l1_cache / (n_input_tensors * max_input_dtype_size * active_threads),
+      l1_cache / (n_tensor_inputs * max_input_dtype_size * active_threads),
       (int64_t)1);
 
   // if data fits in l2 and we need more parallelization in the reduction dim,
   // we can use a smaller warp size. While thread local data fits in l1, and
   // reduction dim is really small, we can use <32 threads per warp.
-  const bool fits_in_l2 = n_elems * max_input_dtype_size * n_input_tensors <
+  const bool fits_in_l2 = n_elems * max_input_dtype_size * n_tensor_inputs <
       at::cuda::getCurrentDeviceProperties()->l2CacheSize;
 
   // If it fits in l2, we just want to make sure each thread uses 32Bytes.
@@ -117,7 +119,6 @@ ReductionParams innerReductionHeuristic(
   // (1) x dim in multiple outputs
   // (2) y dim in multiple reductions
 
-  // TODO: Flip block y and x
   // Blocks for reductions
   int64_t grdim = 1;
   // Blocks for outputs
@@ -138,18 +139,18 @@ ReductionParams innerReductionHeuristic(
   bdimx = std::min(num_elems_in_reduction, (int64_t)warp_size);
   // Put everything else in bdimy for now
   bdimy = std::max(max_threads_in_block / bdimx, (int64_t)1);
-
   int64_t remainder_in_reduction = ceilDiv(num_elems_in_reduction, bdimx);
   int64_t remainder_in_output = ceilDiv(num_outputs_for_reduction, bdimy);
 
   // Adjust blocking and setup unrolling
   if (remainder_in_reduction == 1) {
-    // Small number of reduction elements, don't try to unroll the reduction dim
-    unroll_reduction = false;
-    // Try unrolling output dimension
+    // Small number of reduction elements, try unrolling output dimension
     unroll_factor = std::min(target_unroll, remainder_in_output);
-    remainder_in_output =
-        ceilDiv(num_outputs_for_reduction, unroll_factor * bdimy);
+    if (unroll_factor > 1) {
+      unroll_reduction = false;
+      remainder_in_output =
+          ceilDiv(num_outputs_for_reduction, unroll_factor * bdimy);
+    }
   } else {
     // If we have reduction elements left, re-adjust the block dims
     bdimx = std::min(
@@ -164,8 +165,10 @@ ReductionParams innerReductionHeuristic(
     unroll_factor = std::min(remainder_in_reduction, target_unroll);
     if (unroll_factor == 1) {
       // If we can't unroll reduction dim, unroll output dim
-      unroll_reduction = false;
       unroll_factor = std::min(remainder_in_output, target_unroll);
+      if (unroll_factor > 1) {
+        unroll_reduction = false;
+      }
       remainder_in_output =
           ceilDiv(num_outputs_for_reduction, bdimy * unroll_factor);
       remainder_in_reduction =
@@ -185,9 +188,29 @@ ReductionParams innerReductionHeuristic(
 
   // Cross grid reduction if we haven't hit our target blocks, and we have many
   // reduction elements.
-  if (godim < target_blocks && remainder_in_reduction > kEight &&
-      remainder_in_reduction < kThirtyTwo) {
-    grdim = ceilDiv(remainder_in_reduction, (int64_t)4);
+  if ((godim < target_blocks && remainder_in_reduction > kEight &&
+       remainder_in_reduction < kThirtyTwo) ||
+      (remainder_in_reduction >= kThirtyTwo)) {
+    // Grid reductions do not support unrolling iteration dimension, revert if
+    // set.
+    if (!unroll_reduction) {
+      unroll_reduction = true;
+      unroll_factor = 1;
+      remainder_in_output = ceilDiv(num_outputs_for_reduction, bdimy);
+      remainder_in_reduction =
+          ceilDiv(num_elems_in_reduction, bdimx * min_red_elems_per_thread);
+    }
+    if (remainder_in_reduction >= kThirtyTwo) {
+      // Do at least 2 iterations of unrolling per thread before we go cross
+      // grid. Limit cross grid to a multiple of the block size so cleanup on
+      // the last block doesn't take too long.
+      grdim = std::min(
+          ceilDiv(remainder_in_reduction, (int64_t)2), bdimx * bdimy * kEight);
+      // Clang tidy
+      // remainder_in_reduction = ceilDiv(remainder_in_reduction, grdim);
+    } else {
+      grdim = ceilDiv(remainder_in_reduction, (int64_t)4);
+    }
     // Clang tidy
     //
     // remainder_in_reduction = ceilDiv(
@@ -197,14 +220,6 @@ ReductionParams innerReductionHeuristic(
     //             unroll_reduction ? unroll_factor : 1,
     //             min_red_elems_per_thread) *
     //         grdim);
-  } else if (remainder_in_reduction >= kThirtyTwo) {
-    // Do at least 2 iterations of unrolling per thread before we go cross grid.
-    // Limit cross grid to a multiple of the block size so cleanup on the last
-    // block doesn't take too long.
-    grdim = std::min(
-        ceilDiv(remainder_in_reduction, (int64_t)2), bdimx * bdimy * kEight);
-    // Clang tidy
-    // remainder_in_reduction = ceilDiv(remainder_in_reduction, grdim);
   }
 
   // Try to do some cleanup of ragged waves on device
@@ -230,12 +245,21 @@ ReductionParams innerReductionHeuristic(
     }
   }
 
+  bool vectorize = false;
+
+  if (vectorize_factor > 1 && unroll_factor > 1 && unroll_reduction) {
+    vectorize = true;
+    unroll_factor = std::min(
+        scheduler_utils::lastPow2(unroll_factor), (int64_t)vectorize_factor);
+  }
+
   ReductionParams rparams;
   rparams.fastest_dim = true;
   rparams.cross_block = true;
   rparams.cross_grid = grdim > 1;
   rparams.multiple_reds_per_blk = bdimy > 1;
   rparams.loop_unroll = unroll_factor;
+  rparams.vectorize = vectorize;
   rparams.reduction_unroll = unroll_reduction;
 
   // If we have a cross grid case we want to have gdimy assigned to godim and
@@ -261,6 +285,13 @@ ReductionParams innerReductionHeuristic(
 
   const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
   if (debug_env && atoi(debug_env)) {
+    std::cerr << "\n===== Reduction Stats ========\n"
+              << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
+              << "num_outputs_for_reduction: " << num_outputs_for_reduction
+              << "\n"
+              << "n_tensor_inputs: " << n_tensor_inputs << "\n"
+              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
+              << "vectorize_factor: " << vectorize_factor << std::endl;
     std::cerr << rparams.toString() << std::endl;
   }
 
@@ -270,8 +301,9 @@ ReductionParams innerReductionHeuristic(
 ReductionParams OuterReductionHeuristic(
     const int64_t num_elems_in_reduction,
     const int64_t num_outputs_for_reduction,
-    const int64_t n_input_tensors,
-    const int64_t max_input_dtype_size) {
+    const int64_t n_tensor_inputs,
+    const int64_t max_input_dtype_size,
+    size_t vectorize_factor) {
   // Set some targets for parallelization
 
   const int64_t n_elems = num_elems_in_reduction * num_outputs_for_reduction;
@@ -279,7 +311,7 @@ ReductionParams OuterReductionHeuristic(
       at::cuda::getCurrentDeviceProperties()->l2CacheSize;
 
   const int64_t warp_size =
-      n_elems * max_input_dtype_size * n_input_tensors < l2_cache_size
+      n_elems * max_input_dtype_size * n_tensor_inputs < l2_cache_size
       ? (int64_t)32 / max_input_dtype_size
       : 32;
 
@@ -298,9 +330,9 @@ ReductionParams OuterReductionHeuristic(
   auto const max_unroll = ceilDiv(
       // Available unrolling based on size of data type
       (int64_t)16 / (int64_t)max_input_dtype_size,
-      // Reduce unrolling if we have many inputs, start reduction at 2 inputs
+      // Reduce unrolling if we have many inputs, start reduction at 4 inputs
       std::max(
-          (scheduler_utils::lastPow2((int64_t)n_input_tensors) >> 1),
+          (scheduler_utils::lastPow2((int64_t)n_tensor_inputs) >> 2),
           (int64_t)1));
 
   // If we have one warp per block, how many blocks would that be?
@@ -356,7 +388,7 @@ ReductionParams OuterReductionHeuristic(
   if (ceilDiv(num_outputs_for_reduction, warp_size) <
       device_multiprocessor_count) {
     // If we can't hit a full wave, leave bdimx as warp_size, and prioritize
-    // bdimy
+    // bdimy. TODO: Re-evaluate, should it be bdimx = warp_size?
     bdimx = std::min(num_outputs_for_reduction, warp_size);
   } else {
     bdimx = std::min(
@@ -467,6 +499,20 @@ ReductionParams OuterReductionHeuristic(
     }
   }
 
+  // Cannot unroll with cross grid reductions
+  if (gdimy > 1 && !unroll_reduction) {
+    unroll_reduction = true;
+    unroll_factor = 1;
+  }
+
+  bool vectorize = false;
+
+  if (vectorize_factor > 1 && unroll_factor > 1 && !unroll_reduction) {
+    vectorize = true;
+    unroll_factor = std::min(
+        scheduler_utils::lastPow2(unroll_factor), (int64_t)vectorize_factor);
+  }
+
   ReductionParams rparams;
   rparams.fastest_dim = false;
   // cross grid implies cross block
@@ -474,20 +520,8 @@ ReductionParams OuterReductionHeuristic(
   rparams.cross_grid = gdimy > 1;
   rparams.multiple_reds_per_blk = bdimx > 1;
   rparams.loop_unroll = unroll_factor;
+  rparams.vectorize = vectorize;
   rparams.reduction_unroll = unroll_reduction;
-
-  // WAR as it seems nvcc is doing some strange unrolling behavior in
-  // this scenario for fp16 small reduction dim large iter dim. Needs more
-  // investigation.
-  if (!rparams.cross_block && !rparams.cross_grid) {
-    rparams.loop_unroll = 1;
-    rparams.reduction_unroll = true;
-  }
-
-  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
-  if (debug_env && atoi(debug_env)) {
-    std::cerr << rparams.toString() << std::endl;
-  }
 
   rparams.lparams = LaunchParams(
       LaunchParams::UNINITIALIZED_VAL,
@@ -497,6 +531,17 @@ ReductionParams OuterReductionHeuristic(
       bdimy,
       LaunchParams::UNINITIALIZED_VAL);
 
+  const char* debug_env = getenv("PYTORCH_NVFUSER_RED_SCHED_DEBUG");
+  if (debug_env && atoi(debug_env)) {
+    std::cerr << "\n===== Reduction Stats ========\n"
+              << "num_elems_in_reduction: " << num_elems_in_reduction << "\n"
+              << "num_outputs_for_reduction: " << num_outputs_for_reduction
+              << "\n"
+              << "n_tensor_inputs: " << n_tensor_inputs << "\n"
+              << "max_input_dtype_size: " << max_input_dtype_size << "\n"
+              << "vectorize_factor: " << vectorize_factor << std::endl;
+    std::cerr << rparams.toString() << std::endl;
+  }
   return rparams;
 }
 
@@ -506,60 +551,71 @@ ReductionParams reductionHeuristic(
     int64_t num_elems_in_reduction,
     int64_t num_outputs_for_reduction,
     bool fastest_dim_reduction,
-    size_t n_input_tensors,
-    size_t max_input_dtype_size) {
+    size_t n_tensor_inputs,
+    size_t max_input_dtype_size,
+    size_t vectorize_factor) {
   if (fastest_dim_reduction) {
     return innerReductionHeuristic(
         num_elems_in_reduction,
         num_outputs_for_reduction,
-        n_input_tensors,
-        max_input_dtype_size);
+        n_tensor_inputs,
+        max_input_dtype_size,
+        vectorize_factor);
   } else {
     return OuterReductionHeuristic(
         num_elems_in_reduction,
         num_outputs_for_reduction,
-        n_input_tensors,
-        max_input_dtype_size);
+        n_tensor_inputs,
+        max_input_dtype_size,
+        vectorize_factor);
   }
 }
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& fusion_inputs) {
+    const at::ArrayRef<c10::IValue>& runtime_inputs,
+    HeuristicSummary* data_cache) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
-  SchedulerRuntimeInfo runtime_info(fusion, fusion_inputs, true);
+  SchedulerRuntimeInfo runtime_info(fusion, runtime_inputs, true);
 
-  return getReductionHeuristics(fusion, runtime_info);
+  return getReductionHeuristics(fusion, runtime_info, data_cache);
 }
 
 TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
     Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info) {
+    SchedulerRuntimeInfo& runtime_info,
+    HeuristicSummary* data_cache) {
   FUSER_PERF_SCOPE("getReductionHeuristics");
 
   FusionGuard fg(fusion);
-  auto tvs = ir_utils::allTvs(fusion);
-  TensorView* red_tv = nullptr;
-  for (auto tv : tvs) {
-    if (tv->hasReduction() && !fusion->hasInput(tv)) {
-      if (red_tv == nullptr) {
-        red_tv = tv;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            red_tv->definition() == tv->definition(),
-            "Found multiple reductions sent to reduction heuristics",
-            " (and reductions are not from a multi-output expr).");
-      }
+
+  HeuristicCacheAccessor<std::vector<TensorView*>> reduction_tv_data;
+  // TODO: move all these boilerplate code into the accessor class
+  // (follow up)
+  if (data_cache && !data_cache->isRecording()) {
+    reduction_tv_data.writeTemporary(data_cache->getReductionTVs());
+  } else {
+    reduction_tv_data.writeNew(scheduler_utils::getReductionTvs(fusion));
+    if (data_cache && data_cache->isRecording()) {
+      data_cache->setReductionTVs(reduction_tv_data.read());
     }
   }
 
-  TORCH_INTERNAL_ASSERT(red_tv != nullptr);
+  auto& reduction_tvs = reduction_tv_data.read();
 
-  auto red_root_dom = red_tv->getRootDomain();
+  TORCH_INTERNAL_ASSERT(
+      reduction_tvs.size() == 1, "Need reduction tensor views to schedule.");
+
+  auto reduction_tv = reduction_tvs[0];
+
+  TORCH_INTERNAL_ASSERT(reduction_tv != nullptr);
+
+  auto red_root_dom = reduction_tv->getRootDomain();
   bool fastest_dim_reduction = true;
   for (size_t i = red_root_dom.size(); i > 0; i--) {
-    if (red_root_dom[i - 1]->isBroadcast()) {
+    if (red_root_dom[i - 1]->isBroadcast() ||
+        red_root_dom[i - 1]->isTrivialReduction()) {
       continue;
     } else if (red_root_dom[i - 1]->isReduction()) {
       fastest_dim_reduction = true;
@@ -571,11 +627,11 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   }
 
   TORCH_INTERNAL_ASSERT(
-      red_tv != nullptr, "Reduction TensorView wasn't found.");
+      reduction_tv != nullptr, "Reduction TensorView wasn't found.");
 
   TORCH_INTERNAL_ASSERT(
-      red_tv->hasReduction(), "TensorView doesn't have a reduction.");
-  const auto red_expr = red_tv->definition();
+      reduction_tv->hasReduction(), "TensorView doesn't have a reduction.");
+  const auto red_expr = reduction_tv->definition();
 
   TORCH_INTERNAL_ASSERT(
       red_expr->getExprType() != c10::nullopt &&
@@ -586,7 +642,7 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   int64_t num_outputs_for_reduction = 1;
   int64_t red_elements = 1;
 
-  for (auto id : red_tv->getRootDomain()) {
+  for (auto id : reduction_tv->getRootDomain()) {
     auto inferred_val =
         runtime_info.expressionEvaluator().evaluate(id->extent());
     TORCH_INTERNAL_ASSERT(
@@ -599,25 +655,41 @@ TORCH_CUDA_CU_API c10::optional<ReductionParams> getReductionHeuristics(
   }
 
   size_t max_dtype_size = 1;
-  size_t n_input_tensors = 0;
+  size_t n_tensor_inputs = 0;
   for (auto inp : fusion->inputs()) {
     if (inp->isA<TensorView>()) {
       max_dtype_size =
           std::max(max_dtype_size, dataTypeSize(inp->getDataType().value()));
-      n_input_tensors++;
+      n_tensor_inputs++;
     }
   }
 
   TORCH_INTERNAL_ASSERT(
-      n_input_tensors > 0,
+      n_tensor_inputs > 0,
       "Tried to schedule a fusion with no tensor inputs, currently not supported.");
+
+  auto vectorizable_inputs_outputs =
+      scheduler_utils::getVectorizableInputsOutputs(reduction_tv);
+
+  // Vectorize as much as we can
+  size_t vectorize_factor = std::numeric_limits<size_t>::max();
+
+  for (auto tv : vectorizable_inputs_outputs) {
+    const auto tv_vectorize_factor = runtime_info.getVectorizableWidth(tv);
+    vectorize_factor = std::min(vectorize_factor, tv_vectorize_factor);
+  }
+
+  if (vectorize_factor == std::numeric_limits<size_t>::max()) {
+    vectorize_factor = 1;
+  }
 
   return reductionHeuristic(
       red_elements,
       num_outputs_for_reduction,
       fastest_dim_reduction,
-      n_input_tensors,
-      max_dtype_size);
+      n_tensor_inputs,
+      max_dtype_size,
+      vectorize_factor);
 }
 
 // fusion is the input IR that will be modified by this function
@@ -625,468 +697,59 @@ void scheduleReduction(Fusion* fusion, const ReductionParams& rparams) {
   FUSER_PERF_SCOPE("scheduleReduction");
   FusionGuard fg(fusion);
 
-  auto tvs = ir_utils::allTvs(fusion);
-  TensorView* red_tv = nullptr;
-  for (auto tv : tvs) {
-    if (tv->hasReduction() && !fusion->hasInput(tv)) {
-      if (red_tv == nullptr) {
-        red_tv = tv;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            red_tv->definition() == tv->definition(),
-            "Found multiple reductions sent to reduction heuristics",
-            " (and reductions are not from a multi-output expr).");
-      }
-    }
-  }
+  // Cache inputs if unrolled
+  auto cached_inputs =
+      scheduler_utils::cacheInputs(fusion, rparams.loop_unroll > 1);
+
+  // Cache and fork  outputs
+  std::vector<std::pair<TensorView*, TensorView*>> cached_outputs =
+      scheduler_utils::cacheAndForkOutputs(fusion, rparams.loop_unroll > 1);
 
   // Make sure we don't have global memory set on intermediate tensors from
   // fusion segmentation
-  for (auto tv : tvs) {
-    if (tv->isFusionInput() || tv->isFusionOutput()) {
-      tv->setMemoryType(MemoryType::Global);
-    } else {
-      tv->setMemoryType(MemoryType::Local);
-    }
-  }
+  scheduler_utils::clearMemorySpace(fusion);
 
-  TORCH_INTERNAL_ASSERT(red_tv != nullptr);
-
-  // If either of these are nullptr at the end of this function don't do
-  // anything. Otherwise Transform and parallize entire fusion based on
-  // reference_tv and compute at most inlined from reduction_tv to inputs and
-  // outputs.
-  TensorView* reference_tv = nullptr;
-  TensorView* reduction_tv = nullptr;
-
-  // We coalesce all reduction axes to the right;
-  scheduler_utils::mergeReduction(red_tv);
-
-  // Merge all iteration dimensions
-  if (red_tv->domain()->domain().size() > 1) {
-    scheduler_utils::mergeNonReduction(red_tv);
-  }
-
-  // Evaluate Dimensions of Reduction TensorView
-  auto red_ids = red_tv->domain()->domain();
+  auto reduction_tvs = scheduler_utils::getReductionTvs(fusion);
 
   TORCH_INTERNAL_ASSERT(
-      red_ids.size() == 1 || red_ids.size() == 2,
-      "Error coalesing dimensions.");
+      reduction_tvs.size() <= 1,
+      "Found multiple reductions sent to reduction heuristics",
+      " (and reductions are not from a multi-output expr).");
+  TORCH_INTERNAL_ASSERT(reduction_tvs.size());
 
-  if (red_ids.size() == 1) {
+  auto reduction_tv = reduction_tvs[0];
+
+  auto dim_analysis =
+      scheduler_utils::canonicalDimReduction(fusion, reduction_tv);
+  bool has_iter_axis = dim_analysis.first;
+  bool has_red_axis = dim_analysis.second;
+
+  TORCH_INTERNAL_ASSERT(
+      has_red_axis,
+      "Could not find reduction axis in tensor used for reduction scheduler.");
+
+  if (!has_iter_axis) {
     TORCH_INTERNAL_ASSERT(
         rparams.fastest_dim,
         "If all dims are reduction, should be sending it to fastest dim scheduler.");
   }
 
-  std::vector<TensorView*> cached_inputs;
-  // If we're going to unroll, make a cache of the inputs
-  if (rparams.loop_unroll > 1) {
-    auto in_tvs = ir_utils::filterByType<TensorView>(fusion->inputs());
-    for (auto tv : in_tvs) {
-      if (tv->uses().empty()) {
-        continue;
-      }
-      auto cached_tv = tv->cache_after();
-      cached_inputs.emplace_back(cached_tv);
-    }
-  }
-
-  // Scheduling the Reduction
-  if (rparams.fastest_dim) {
-    const bool has_iter_axis = red_ids.size() == 2;
-    const int iter_axis = 0;
-    const int reduce_axis = red_ids.size() == 2 ? 1 : 0;
-
-    // Do multiple reductions per block
-    if (rparams.multiple_reds_per_blk) {
-      if (rparams.reduction_unroll) {
-        // Fastest dim, multiple reductions per block
-        // Output Dimensions
-        // [x-BIDx, x-TIDy
-        //  0       1
-        //
-        //  Reduction Dimensions
-        //  rF-Remain, rf-Unswitch, rf-Unroll, X-TIDx]
-        //  2 (-4)     3 (-3)       4 (-2)     5 (-1)
-
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(reduce_axis, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        red_tv->split(reduce_axis, 1);
-
-        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-4, -3, -2});
-
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
-
-        if (has_iter_axis) {
-          red_tv_rf->split(
-              iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
-          red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::TIDy);
-          if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
-            red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
-          } else {
-            red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
-          }
-        }
-        reference_tv = red_tv_rf;
-        reduction_tv = red_tv;
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            has_iter_axis,
-            "This scheduler requires an outer dim to the reduction.");
-        // Fastest dim, Multiple reductions per block iter unroll
-        // Output Dimensions
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDy
-        //  0       1           2         3
-        //
-        //  Reduction Dimensions
-        //  rF-Remain, r-TIDx]
-        //  4 (-2)     5 (-1)
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-2});
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
-
-        if (has_iter_axis) {
-          red_tv_rf->split(
-              iter_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
-          red_tv_rf->split(iter_axis, rparams.loop_unroll);
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          red_tv_rf->split(iter_axis, 1);
-
-          red_tv_rf->axis(3)->parallelize(ParallelType::TIDy);
-          // TODO: Re-enable unswitch in this case:
-          // https://github.com/csarofeen/pytorch/issues/748
-          // red_tv_rf->axis(1)->parallelize(ParallelType::Unswitch);
-
-          // [BIDx, 1, 8, TIDy, rf-outer, r-TIDx]
-
-          if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
-            red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
-          } else {
-            red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
-          }
-
-          reference_tv = red_tv_rf;
-          reduction_tv = red_tv;
-        }
-      }
-    } else {
-      if (rparams.cross_grid) {
-        // Fastest dim, cross grid, cross block
-        //      [outputs,
-        // Idx:     0
-        //   | rf-Remain, r-BIDx, r-TIDy, r-Unswitch, rf-Unroll, r-TIDx]
-        //     1(-6)      2(-5)   3(-4)   4(-3)       5(-2)      6(-1)|
-        //                Reduction Dimensions
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(reduce_axis, rparams.loop_unroll);
-        red_tv->split(reduce_axis, 1);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDy));
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::BIDx));
-
-        // Clang tidy
-        constexpr int kNegFive = -5;
-        constexpr int kNegSix = -6;
-        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {kNegSix, -3, -2});
-
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
-        red_tv_rf->axis(-4)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(kNegFive)->parallelize(ParallelType::BIDx);
-
-        if (has_iter_axis) {
-          if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, scheduler_utils::y_grid_limit);
-            red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDy);
-          } else {
-            red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDy);
-          }
-        }
-
-        reference_tv = red_tv_rf;
-        reduction_tv = red_tv;
-
-      } else {
-        // Fastest dim, Reduction Splits
-        // Output Dimensions
-        // [BIDx
-        //  0
-        //
-        // Reduction Dimensions
-        // rF-Remain, rf-Unswitch, rf-Unroll, r-TIDx]
-        // 1(-4)      2(-3)        3(-2)      4(-1)
-        red_tv->split(
-            reduce_axis, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(reduce_axis, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        red_tv->split(reduce_axis, 1);
-
-        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-4, -3, -2});
-
-        red_tv_rf->axis(-1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::Unswitch);
-
-        if (has_iter_axis) {
-          if (rparams.split_grid_dim) {
-            red_tv_rf->split(iter_axis, scheduler_utils::x_grid_limit);
-            red_tv_rf->axis(iter_axis + 1)->parallelize(ParallelType::BIDx);
-          } else {
-            red_tv_rf->axis(iter_axis)->parallelize(ParallelType::BIDx);
-          }
-        }
-
-        reference_tv = red_tv_rf;
-        reduction_tv = red_tv;
-      }
-    }
-  } else {
-    if (rparams.cross_block) {
-      if (rparams.cross_grid) {
-        // Outer Dim, cross grid, cross block
-
-        // Unrolling in this case can only be applied to the reduction dimension
-        // since currently, grid reductions cannot be called multiple times
-        //
-        // Output Dimensions
-        // [x-BIDx, x-TIDx,
-        //  0         1
-        //
-        // Reduction Dimensions
-        // rF-Leftover, r-BIDy, r-TIDy, rf-Unswitch, rf-Unroll]
-        // 2(-5)        3(-4)   4(-3)   5(-2)        6(-1)
-        red_tv->split(1, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        red_tv->split(1, 1);
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-        red_tv->split(1, NamedScalar::getParallelDim(ParallelType::BIDy));
-
-        red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-        auto red_tv_rf = ir_utils::rfactorHelper(
-            red_tv,
-            {-5, -2, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-        red_tv_rf->axis(-2)->parallelize(ParallelType::Unswitch);
-        red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
-        red_tv_rf->axis(-4)->parallelize(ParallelType::BIDy);
-        red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-
-        reference_tv = red_tv_rf;
-        reduction_tv = red_tv;
-
-      } else {
-        if (rparams.reduction_unroll || rparams.loop_unroll == 1) {
-          // Outer Dim, cross block, unroll reduction dimension
-
-          // Reduction Splits
-          // Output Dimensions
-          // [x-BIDx, x-TIDx
-          //  0       1
-          //
-          // Reduction Dimensions
-          // rF-Leftover, r-TIDy, rf-Unswitch, rf-Unroll]
-          // 2(-4)        3(-3)   4(-2)       5(-1)
-          red_tv->split(1, rparams.loop_unroll);
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          red_tv->split(1, 1);
-          red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-          red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-          auto red_tv_rf = ir_utils::rfactorHelper(
-              red_tv,
-              {-4, -2, -1}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-          red_tv_rf->axis(-2)->parallelize(ParallelType::Unswitch);
-          red_tv_rf->axis(-3)->parallelize(ParallelType::TIDy);
-          red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
-          red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-
-          reference_tv = red_tv_rf;
-          reduction_tv = red_tv;
-
-        } else {
-          // Outer Dim, cross block, unroll iter dimension
-
-          // Output Dimensions
-          // [x-BIDx, x-Unswitch, x-Unroll, x-TIDx
-          //  0       1           2         3
-          //
-          // Reduction Dimensions
-          // rF-Leftover, r-TIDy]
-          // 4(-2)        5(-1)
-
-          red_tv->split(1, NamedScalar::getParallelDim(ParallelType::TIDy));
-          red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-          red_tv->split(0, rparams.loop_unroll);
-          // Unswitch axis which gives us finer control on allocations with
-          // unrolling
-          red_tv->split(0, 1);
-
-          auto red_tv_rf = ir_utils::rfactorHelper(
-              red_tv, {-2}); // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-
-          red_tv_rf->axis(-1)->parallelize(ParallelType::TIDy);
-          red_tv_rf->axis(3)->parallelize(ParallelType::TIDx);
-          red_tv_rf->axis(1)->parallelize(ParallelType::Unswitch);
-          red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-
-          red_tv_rf->reorder({{-2, 0}});
-
-          reference_tv = red_tv_rf;
-          reduction_tv = red_tv;
-        }
-      }
-    } else {
-      if (rparams.reduction_unroll) {
-        // Outer Dim, no parallelization on reduction, unroll reduction axis
-        // Output Dimensions
-        // [x-BIDx, x-TIDx
-        //  0       1
-        //
-        // Reduction Dimensions
-        // rf-Leftover, rf-Unswitch, r-Unroll]
-        // 2(-3)        3(-2)        4(-1)
-        red_tv->split(1, rparams.loop_unroll);
-        // Unswitch axis which gives us finer control on allocations with
-        // unrolling
-        red_tv->split(1, 1);
-        red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-
-        auto red_tv_rf = ir_utils::rfactorHelper(red_tv, {-3, -2});
-
-        red_tv_rf->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv_rf->axis(1)->parallelize(ParallelType::TIDx);
-        red_tv_rf->axis(-2)->parallelize(ParallelType::Unswitch);
-
-        reference_tv = red_tv_rf;
-        reduction_tv = red_tv;
-      } else {
-        // No parallelization on reduction, unroll iter axis
-        // Output Dimensions
-        // [x-BIDx, x-Unswitch, x-Unroll, x-TIDx
-        //  0       1           2         3
-        //
-        // Reduction Dimensions
-        // r-Leftover]
-        // 4(-1)
-        red_tv->split(0, NamedScalar::getParallelDim(ParallelType::TIDx));
-        red_tv->split(0, rparams.loop_unroll);
-        red_tv->split(0, 1);
-
-        red_tv->axis(0)->parallelize(ParallelType::BIDx);
-        red_tv->axis(1)->parallelize(ParallelType::Unswitch);
-        red_tv->axis(3)->parallelize(ParallelType::TIDx);
-        red_tv->reorder({{-1, 0}});
-
-        reference_tv = red_tv;
-        reduction_tv = red_tv;
-      }
-    }
-  }
+  TensorView* reference_tv = scheduler_utils::scheduleReductionTV(
+      rparams, reduction_tv, has_iter_axis);
 
   // Reduction tensor views and rfactor tensor views are setup. Let's finish off
   // the scheduling, particularly inlining and unrolling.
   TORCH_INTERNAL_ASSERT(
       reference_tv != nullptr && reduction_tv != nullptr,
       "Need these two tensor views to finish the scheduling.");
-
-  TransformPropagator::from(reference_tv);
-  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
-
-  if (rparams.loop_unroll > 1) {
-    // Schedule unrolling on inputs
-
-    // Inline rfactor into reduction
-    if (reference_tv != reduction_tv) {
-      reference_tv->computeWith(reduction_tv, -1, ComputeAtMode::BestEffort);
-    }
-
-    // Find unswitch position
-    int unswitch_axis = -1;
-    for (int i = 0; i < (int)reference_tv->nDims(); i++) {
-      if (reference_tv->axis(i)->getParallelType() == ParallelType::Unswitch) {
-        unswitch_axis = i;
-      }
-    }
-
-    unswitch_axis++;
-    // Input to cahced_input we want outside unswitched position
-    // Cached input to rfactor we want inlined
-    for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
-      for (auto consumer : consumers_of_input_cache) {
-        if (consumer != reference_tv) {
-          // consumer->computeAt(reference_tv, -1, ComputeAtMode::MostInlined);
-          scheduler_utils::computeWithOutputs(
-              consumer, -1, ComputeAtMode::MostInlined);
-        }
-        // TODO: Re-evaluate this based on SegmentReducePointwise, and other
-        // more complex reduction fusions
-        cached_input->computeAt(
-            consumer, unswitch_axis, ComputeAtMode::BestEffort);
-      }
-    }
-
-    scheduler_utils::computeWithOutputs(
-        reduction_tv, -1, ComputeAtMode::MostInlined);
-
-    // Nasty gotcha which we don't have a better mechanism to fix yet
-    if (
-        // Have an unswitch in the reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->getParallelType() == ParallelType::Unswitch;
-            }) &&
-        // Have a parallelized reduction
-        std::any_of(
-            reduction_tv->domain()->domain().begin(),
-            reduction_tv->domain()->domain().end(),
-            [](IterDomain* id) {
-              return id->isReduction() && id->isThread();
-            })) {
-      // If we leave unswitch on we could get a predicate around block/grid
-      // reduce which produces wrong result.
-      auto vals_post_reduction = DependencyCheck::getAllUseChains(red_tv);
-      for (const auto& chain : vals_post_reduction) {
-        auto tvs_post_reduction = ir_utils::filterByType<TensorView>(chain);
-        for (auto tv : tvs_post_reduction) {
-          for (auto id : tv->domain()->domain()) {
-            if (id->getParallelType() == ParallelType::Unswitch) {
-              id->parallelize(ParallelType::Serial);
-            }
-          }
-        }
-      }
-    }
-  } else {
-    // Want to inline, especially backwards based on reduction_tv, otherwise
-    // rfactor tv may not be inlined correctly
-    scheduler_utils::computeAtInputs(
-        reduction_tv, -1, ComputeAtMode::MostInlined);
-    scheduler_utils::computeWithOutputs(
-        reduction_tv, -1, ComputeAtMode::MostInlined);
-  }
+  scheduler_utils::multiReductionInliner(
+      fusion,
+      rparams,
+      reduction_tv,
+      reference_tv,
+      reduction_tvs,
+      cached_inputs,
+      cached_outputs);
 }
 
 } // namespace cuda

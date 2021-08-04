@@ -171,6 +171,16 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
   Val* out = newValLike(v1, v1->getDataType().value());
+  // TODO: We should add the following, but we need to go through shchedulers
+  // and make sure all calls to "fusion->inputs" includes the output of RandLike
+  //
+  //  If rand like, there isn't a real dependency on the input value, so map it
+  //  to a dummy scalar. if
+  //
+  // (type == UnaryOpType::RandLike) {
+  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
+  // }
+
   new UnaryOp(type, out, v1);
   return out;
 }

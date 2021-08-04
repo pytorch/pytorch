@@ -231,7 +231,7 @@ void Fusion::addInput(Val* input) {
   inputs_.push_back(input);
   input->setIsFusionInput(true);
 
-  resetTvUses();
+  all_tv_uses_valid_ = false;
 }
 
 void Fusion::addOutput(Val* output) {
@@ -243,7 +243,7 @@ void Fusion::addOutput(Val* output) {
   outputs_.push_back(output);
   output->setIsFusionOutput(true);
 
-  resetTvUses();
+  all_tv_uses_valid_ = false;
 }
 
 void Fusion::addOutput(WelfordResult& wr) {
@@ -261,7 +261,7 @@ void Fusion::removeInput(Val* input) {
     inputs_.erase(find_input);
   }
   input->setIsFusionInput(false);
-  resetTvUses();
+  all_tv_uses_valid_ = false;
 }
 
 void Fusion::removeOutput(Val* output) {
@@ -270,7 +270,7 @@ void Fusion::removeOutput(Val* output) {
     outputs_.erase(find_output);
   }
   output->setIsFusionOutput(false);
-  resetTvUses();
+  all_tv_uses_valid_ = false;
 }
 
 void Fusion::replaceOutput(Val* output, Val* replacement) {
@@ -463,6 +463,9 @@ StmtNameType Fusion::registerStatement(Statement* stmt) {
 }
 
 void Fusion::resetTvUses() {
+  FUSER_PERF_SCOPE("Fusion::resetTvUses");
+  is_during_update_uses_ = true;
+
   // getExprs only uses definition, so even if we've modified uses already to
   // remove dead exprs, this could reinsert them. getExprs is also boundeds by
   // inputs as registered inputs will return nullptr as their definition.
@@ -484,6 +487,9 @@ void Fusion::resetTvUses() {
       }
     }
   }
+
+  all_tv_uses_valid_ = true;
+  is_during_update_uses_ = false;
 }
 
 const std::unordered_set<Val*>& Fusion::vals() const noexcept {

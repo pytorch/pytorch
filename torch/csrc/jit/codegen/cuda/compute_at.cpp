@@ -53,12 +53,14 @@ bool validateDomain(TensorView* tv, TensorDomain* new_td) {
 //   Reduction dimensions in producer
 //   Block broadcast dimensions in producer
 //   Vectorized dimensions in producer or consumer
+//   Unrolled dimensions in producer or consumer
 //   Dimensions derived from root dimensions that exist in both but are
 //   unmappable
 unsigned int getReplayablePosPasC(
     TensorView* producer,
     TensorView* consumer,
-    const ComputeAtRootDomainMap& root_map_) {
+    const ComputeAtRootDomainMap& root_map_,
+    ComputeAtMode mode) {
   // Grab dimensions in producer and consumer that are mappable to eachother
   // based on the computeAtRootDomainMap. This will tell us which dimensions
   // can be inlined based on avoiding trying to inline reduction structures.
@@ -69,8 +71,11 @@ unsigned int getReplayablePosPasC(
   // not be inlined to vectorized dimensions in consumer.
   auto c_dom = consumer->domain()->domain();
   auto vector_dim_it =
-      std::find_if(c_dom.begin(), c_dom.end(), [](IterDomain* id) {
-        return isParallelTypeVectorize(id->getParallelType());
+      std::find_if(c_dom.begin(), c_dom.end(), [&mode](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType()) ||
+            ((mode == ComputeAtMode::BestEffort ||
+              mode == ComputeAtMode::MostInlined) &&
+             id->getParallelType() == ParallelType::Unroll);
       });
 
   // Limit max position based on vectorized dims in consumer.
@@ -93,9 +98,11 @@ unsigned int getReplayablePosPasC(
     if (map_it != c2p_replay_map.end()) {
       auto p_id = map_it->second;
       // If we find a consumer dim that maps to a producer dim that's
-      // vectorized, or to a producer dim that's a block broadcast, limit max
-      // compute at by it
-      if (isParallelTypeVectorize(p_id->getParallelType())) {
+      // vectorized or unrolled limit max compute at by it.
+      if (isParallelTypeVectorize(p_id->getParallelType()) ||
+          ((mode == ComputeAtMode::BestEffort ||
+            mode == ComputeAtMode::MostInlined) &&
+           p_id->getParallelType() == ParallelType::Unroll)) {
         max_consumer_pos = consumer_pos - 1;
       }
     }
@@ -133,12 +140,14 @@ unsigned int getReplayablePosPasC(
 // Cannot inline:
 //   Reduction dimensions in producer
 //   Vectorized dimensions in producer or consumer
+//   Unrolled dimensions in producer or consumer
 //   Dimensions derived from root dimensions that exist in both but are
 //   unmappable
 unsigned int getReplayablePosCasP(
     TensorView* consumer,
     TensorView* producer,
-    const ComputeAtRootDomainMap& root_map_) {
+    const ComputeAtRootDomainMap& root_map_,
+    ComputeAtMode mode) {
   // Grab dimensions in producer and consumer that are mappable to eachother
   // based on the computeAtRootDomainMap. This will tell us which dimensions
   // can be inlined based on avoiding trying to inline reduction structures.
@@ -152,8 +161,11 @@ unsigned int getReplayablePosCasP(
       });
 
   auto first_vectorized_axis =
-      std::find_if(p_dom.begin(), first_reduction, [](IterDomain* id) {
-        return isParallelTypeVectorize(id->getParallelType());
+      std::find_if(p_dom.begin(), first_reduction, [&mode](IterDomain* id) {
+        return isParallelTypeVectorize(id->getParallelType()) ||
+            ((mode == ComputeAtMode::BestEffort ||
+              mode == ComputeAtMode::MostInlined) &&
+             id->getParallelType() == ParallelType::Unroll);
       });
 
   auto max_producer_pos = std::distance(p_dom.begin(), first_vectorized_axis);
@@ -173,9 +185,12 @@ unsigned int getReplayablePosCasP(
     auto map_it = p2c_replay_map.find(producer->axis((int)producer_pos - 1));
     if (map_it != p2c_replay_map.end()) {
       auto c_id = map_it->second;
-      // If we find a producer dim that maps to a consumer vectorized dim, limit
-      // max compute at by it
-      if (isParallelTypeVectorize(c_id->getParallelType())) {
+      // If we find a producer dim that maps to a consumer vectorized or
+      // unrolled dim, limit max compute at by it
+      if (isParallelTypeVectorize(c_id->getParallelType()) ||
+          ((mode == ComputeAtMode::BestEffort ||
+            mode == ComputeAtMode::MostInlined) &&
+           c_id->getParallelType() == ParallelType::Unroll)) {
         max_producer_pos = producer_pos - 1;
       }
     }
@@ -204,6 +219,70 @@ unsigned int getReplayablePosCasP(
     return producer_pos;
   }
   return 0;
+}
+
+unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
+  unsigned int ret = tv->getComputeAtPosition();
+
+  // Still assuming we only have block broadcast for now.
+  //  This part may change
+  while (ret > 0 && tv->axis((int)ret - 1)->isBroadcast()) {
+    ret--;
+  }
+
+  return ret;
+}
+
+// Try to find the aligned position on consumer's domain corresponding to the
+//  compute at position of producer domain. Used in computeAt pass only. No
+//  checking on actual producer-consumer relationship.
+unsigned int getConsumerPosAlignedToProducerCA(
+    TensorView* consumer,
+    TensorView* producer) {
+  // Locate consumer's position that aligns with
+  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  need to replay PasC as CasP will not forward braodcast dims. For example
+  //  if we have:
+  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
+  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
+  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
+  // NVFuserTest.FusionComplexBCast1_CUDA
+
+  auto c2p_map =
+      BestEffortReplay::replayPasC(
+          producer,
+          consumer,
+          -1,
+          // Compute at root domain may not be valid here, as all
+          // producers don't have to be able to map into consumer at
+          // max producer position. Since computeAt should be valid
+          // and this mechanism is only intended to lower produce
+          // position of consumer, we can simply use the pairwise map.
+          PairwiseRootDomainMap(producer, consumer))
+          .getReplay();
+
+  // Find the innermost position of consumer that has
+  //  been mapped within the producer ca axis.
+  unsigned int consumer_pos = consumer->nDims();
+  while (consumer_pos > 0) {
+    auto consumer_id = consumer->axis((int)consumer_pos - 1);
+    auto p_dom = producer->domain()->domain();
+    if (std::any_of(
+            p_dom.begin(),
+            p_dom.begin() + producer->getComputeAtPosition(),
+            [&consumer_id, &c2p_map](IterDomain* p_id) {
+              auto c_id_it = c2p_map.find(consumer_id);
+              if (c_id_it != c2p_map.end()) {
+                return c_id_it->second == p_id;
+              }
+              return false;
+            })) {
+      break;
+    }
+    consumer_pos--;
+  }
+
+  return consumer_pos;
 }
 
 } // namespace
@@ -277,7 +356,7 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   FUSER_PERF_SCOPE("backwardComputeAt_impl");
 
   auto max_consumer_compute_at_pos =
-      getReplayablePosPasC(producer, consumer, root_map_);
+      getReplayablePosPasC(producer, consumer, root_map_, mode_);
   if (mode_ == ComputeAtMode::BestEffort) {
     consumer_compute_at_pos =
         std::min(consumer_compute_at_pos, max_consumer_compute_at_pos);
@@ -321,6 +400,13 @@ unsigned int ComputeAt::backwardComputeAt_impl(
     }
 
     consumer->setMaxProducer(consumer_compute_at_pos);
+    for (auto other_consumer : ir_utils::consumerTvsOf(producer)) {
+      if (other_consumer != consumer) {
+        auto max_consumer_pos =
+            getConsumerPosAlignedToProducerCA(other_consumer, producer);
+        other_consumer->setMaxProducer(max_consumer_pos);
+      }
+    }
     root_map_.setAlias(current_domain, new_domain);
   }
 
@@ -337,7 +423,7 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   FUSER_PERF_SCOPE("forwardComputeAt_impl");
 
   auto max_producer_compute_at_pos =
-      getReplayablePosCasP(consumer, producer, root_map_);
+      getReplayablePosCasP(consumer, producer, root_map_, mode_);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     producer_compute_at_pos =
@@ -380,6 +466,13 @@ unsigned int ComputeAt::forwardComputeAt_impl(
 
     consumer->setDomain(new_domain);
     consumer->setMaxProducer(replay_consumer_pair.second);
+    for (auto other_consumer : ir_utils::consumerTvsOf(producer)) {
+      if (other_consumer != consumer) {
+        auto max_consumer_pos =
+            getConsumerPosAlignedToProducerCA(other_consumer, producer);
+        other_consumer->setMaxProducer(max_consumer_pos);
+      }
+    }
     root_map_.setAlias(current_domain, new_domain);
   }
 
@@ -508,74 +601,6 @@ void ComputeAt::traverseForward() {
   }
 }
 
-namespace {
-
-unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
-  unsigned int ret = tv->getComputeAtPosition();
-
-  // Still assuming we only have block broadcast for now.
-  //  This part may change
-  while (ret > 0 && tv->axis(ret - 1)->isBroadcast()) {
-    ret--;
-  }
-
-  return ret;
-}
-
-// Try to find the aligned position on consumer's domain corresponding to the
-//  compute at position of producer domain. Used in computeAt pass only. No
-//  checking on actual producer-consumer relationship.
-unsigned int getConsumerPosAlignedToProducerCA(
-    TensorView* consumer,
-    TensorView* producer) {
-  // Locate consumer's position that aligns with
-  //  the producer's new compute at axis. We need broadcast axes forwarded so we
-  //  need to replay PasC as CasP will not forward braodcast dims. For example
-  //  if we have:
-  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
-  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
-  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
-  // NVFuserTest.FusionComplexBCast1_CUDA
-
-  auto c2p_map =
-      BestEffortReplay::replayPasC(
-          producer,
-          consumer,
-          consumer->getMaxProducerPosition(),
-          // Compute at root domain may not be valid here, as all
-          // producers don't have to be able to map into consumer at
-          // max producer position. Since computeAt should be valid
-          // and this mechanism is only intended to lower produce
-          // position of consumer, we can simply use the pairwise map.
-          PairwiseRootDomainMap(producer, consumer))
-          .getReplay();
-
-  // Find the innermost position of consumer that has
-  //  been mapped within the producer ca axis.
-  unsigned int consumer_pos = consumer->nDims();
-  while (consumer_pos > 0) {
-    auto consumer_id = consumer->axis(consumer_pos - 1);
-    auto p_dom = producer->domain()->domain();
-    if (std::any_of(
-            p_dom.begin(),
-            p_dom.begin() + producer->getComputeAtPosition(),
-            [&consumer_id, &c2p_map](IterDomain* p_id) {
-              auto c_id_it = c2p_map.find(consumer_id);
-              if (c_id_it != c2p_map.end()) {
-                return c_id_it->second == p_id;
-              }
-              return false;
-            })) {
-      break;
-    }
-    consumer_pos--;
-  }
-
-  return consumer_pos;
-}
-
-} // namespace
-
 void ComputeAt::hoistInnermostBroadcast() {
   auto fusion = producer_->fusion();
 
@@ -598,11 +623,8 @@ void ComputeAt::hoistInnermostBroadcast() {
       //  position update.
       // This is safe with segmented fusion. TV uses will reset
       //  when FusionSegmentGuard try to change the IO.
-      for (auto expr_consumer : fusion->unordered_uses(running_producer)) {
-        auto tv_consumers =
-            ir_utils::filterByType<TensorView>(expr_consumer->outputs());
-        consumers_to_update.insert(tv_consumers.begin(), tv_consumers.end());
-      }
+      auto tv_consumers = ir_utils::consumerTvsOf(running_producer);
+      consumers_to_update.insert(tv_consumers.begin(), tv_consumers.end());
     }
   }
 

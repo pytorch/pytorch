@@ -45,12 +45,12 @@ TORCH_CUDA_CU_API void parallelizeAllLike(
     TensorView* reference_tv,
     const std::vector<TensorView*>& all_tvs);
 
-void computeAtInputs(
+TORCH_CUDA_CU_API void computeAtInputs(
     TensorView* consumer,
     int pos,
     ComputeAtMode mode = ComputeAtMode::Standard);
 
-void computeWithOutputs(
+TORCH_CUDA_CU_API void computeWithOutputs(
     TensorView* producer,
     int pos,
     ComputeAtMode mode = ComputeAtMode::Standard);
@@ -95,7 +95,8 @@ void computeAtBetween(
     const std::vector<TensorView*>& producers,
     const std::vector<TensorView*>& consumers,
     int pos,
-    ComputeAtMode mode);
+    ComputeAtMode mode,
+    std::unordered_set<IterDomain*> mapped_to_trivial_reduction = {});
 
 // Compute the amount of register space would be needed to perform this kernel
 // persistently, only based on buffers that must be persistent, and based on the
@@ -103,7 +104,85 @@ void computeAtBetween(
 // hold persistent dimension.
 int64_t persistentBufferSize(
     Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info);
+    SchedulerRuntimeInfo& runtime_info,
+    PersistentBufferInfo& persistent_buffers,
+    HeuristicSummary* data_cache = nullptr);
+
+// Returns a set of all iteration domains (in roots of tensors) that map to a
+// trivial reduction
+std::unordered_set<IterDomain*> getTrivialReductionMap(Fusion* fusion);
+
+// Merges tensor view to the form:
+// [IterationDomain, ReductionDomain, TrivialReductionDim0,
+// TrivialReductionDim1, ...] Returns if <iteration dimensions, reduction
+// dimensions>
+std::pair<bool, bool> canonicalDimReduction(Fusion* fusion, TensorView* tv);
+
+// Return a list of tensor views that are outputs of reduction operations. If
+// multiple outputs of an expression are found, only include one in the list
+// (WelfordOp)
+std::vector<TensorView*> getReductionTvs(Fusion* fusion);
+
+// Consistent parallelization based on provided reduction parameters. Provided
+// tensor is expected to be reduced by canonicalDimReduction before sending
+// here. reduction_tv should be provided as the tensorview to reduce.
+// RFactor of reduction_tv will be returned if applicable otherwise reduction_tv
+// is returned
+TensorView* scheduleReductionTV(
+    const ReductionParams& rparams,
+    TensorView* reduction_tv,
+    bool has_iter_axis);
+
+// Reset inputs and outputs to global memory, everything else to local.
+void clearMemorySpace(Fusion* fusion);
+
+// Returns cached after tensors of the fusion inputs if unrolled. Otherwise
+// return empty vector.
+std::vector<TensorView*> cacheInputs(Fusion* fusion, bool unroll);
+
+// Returns the pairs of <cache of each fusion output, corresponding output> for
+// all outputs.
+std::vector<std::pair<TensorView*, TensorView*>> cacheAndForkOutputs(
+    Fusion* fusion,
+    bool unroll);
+
+// Inlining function intended for single or multi reduction fusions.
+void multiReductionInliner(
+    Fusion* fusion,
+    const ReductionParams& rparams,
+    TensorView* reduction_tv,
+    TensorView* reference_tv,
+    std::vector<TensorView*> reduction_tvs,
+    std::vector<TensorView*> cached_inputs,
+    std::vector<std::pair<TensorView*, TensorView*>> cached_outputs);
+
+// Uses a lot of logic from TransformPropagator in the implementation
+class FindAllMappedDims {
+ private:
+  FindAllMappedDims(TensorView* from, IterDomain* starting_id);
+
+ private:
+  std::unordered_map<TensorView*, IterDomain*> mapped_ids;
+  TensorView* starting_tv = nullptr;
+  IterDomain* starting_id = nullptr;
+
+ public:
+  // Looks through fusion and finds all dims that match to the one provided in
+  // the tensorview provided. Iter domain must be a root domain.
+  static std::unordered_set<IterDomain*> from(TensorView* tv, IterDomain* id);
+};
+
+// Checks if tensor view has an iteration domain in vector dims in its inner
+// most root position (excluding broadcast and reduction), and checks if it is a
+// contiguous dimension
+bool shouldVectorize(
+    TensorView* tv,
+    std::unordered_set<IterDomain*> vector_dims);
+
+// Returns all inputs and outputs that share the inner most dimension of the
+// provided reference. If reference is an input it ignores reduction axes, will
+// ignore all broadcast axes.
+std::vector<TensorView*> getVectorizableInputsOutputs(TensorView* reference_tv);
 
 } // namespace scheduler_utils
 } // namespace cuda

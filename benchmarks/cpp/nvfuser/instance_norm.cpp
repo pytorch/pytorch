@@ -155,6 +155,8 @@ static void Baseline_InstanceNorm(
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();
+    clearL2Cache();
+    cudaDeviceSynchronize();
   }
 
   const size_t kSize =

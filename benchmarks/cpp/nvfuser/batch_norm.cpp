@@ -26,13 +26,31 @@ static void setupBatchNorm(Fusion* fusion, DataType dtype) {
   const float kEps = 1e-5;
 
   // setup fusion
-  auto input = TensorViewBuilder().ndims(4).dtype(dtype).build();
-  auto weight = TensorViewBuilder().ndims(1).dtype(dtype).build();
-  auto bias = TensorViewBuilder().ndims(1).dtype(dtype).build();
-  auto running_mean =
-      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
-  auto running_var =
-      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto input = TensorViewBuilder()
+                   .ndims(4)
+                   .dtype(dtype)
+                   .contiguity(std::vector<bool>(4, true))
+                   .build();
+  auto weight = TensorViewBuilder()
+                    .ndims(1)
+                    .dtype(dtype)
+                    .contiguity(std::vector<bool>(1, true))
+                    .build();
+  auto bias = TensorViewBuilder()
+                  .ndims(1)
+                  .dtype(dtype)
+                  .contiguity(std::vector<bool>(1, true))
+                  .build();
+  auto running_mean = TensorViewBuilder()
+                          .ndims(1)
+                          .dtype(DataType::Float)
+                          .contiguity(std::vector<bool>(1, true))
+                          .build();
+  auto running_var = TensorViewBuilder()
+                         .ndims(1)
+                         .dtype(DataType::Float)
+                         .contiguity(std::vector<bool>(1, true))
+                         .build();
   fusion->addInput(input);
   fusion->addInput(weight);
   fusion->addInput(bias);
@@ -103,7 +121,7 @@ static void NvFuserScheduler_BatchNorm(
       (int64_t(benchmark_state.iterations()) *
        (2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
        int64_t(dataTypeSize(dtype))) +
-      ((at_run_mean.numel() + at_run_var.numel()) *
+      (2 * (at_run_mean.numel() + at_run_var.numel()) *
        int64_t(dataTypeSize(DataType::Float))));
 }
 
@@ -160,7 +178,7 @@ static void Baseline_BatchNorm(
       (int64_t(benchmark_state.iterations()) *
        (2 * (at_x.numel() + at_weight.numel() + at_bias.numel())) *
        int64_t(dataTypeSize(dtype))) +
-      ((at_running_mean.numel() + at_running_var.numel()) *
+      (2 * (at_running_mean.numel() + at_running_var.numel()) *
        int64_t(dataTypeSize(DataType::Float))));
 }
 

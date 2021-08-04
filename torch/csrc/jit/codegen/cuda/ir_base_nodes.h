@@ -215,9 +215,7 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return definition_;
   }
 
-  const auto& uses() const {
-    return uses_;
-  }
+  const std::vector<Expr*>& uses() const;
 
   bool isFusionInput() const {
     return is_fusion_input_;

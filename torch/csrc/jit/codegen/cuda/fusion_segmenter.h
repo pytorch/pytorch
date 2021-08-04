@@ -210,9 +210,10 @@ class TORCH_CUDA_CU_API FusionHeuristics {
   //!  for the fusion owning the given expression
   explicit FusionHeuristics(
       ScheduleHeuristic schedule_heuristic,
-      SchedulerRuntimeInfo& runtime_info) {
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
     heuristics_.emplace_back(SchedulerEntry::makeEntry(
-        schedule_heuristic, runtime_info.fusion(), runtime_info));
+        schedule_heuristic, runtime_info.fusion(), runtime_info, data_cache));
     is_segmented_ = false;
   }
 
@@ -290,7 +291,7 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   std::unique_ptr<Fusion> makeFusion(SegmentedGroup* sg);
 
   //! Make heuristics for all groups in this segmented fusion
-  std::unique_ptr<FusionHeuristics> makeHeuristics(
+  std::unique_ptr<FusionHeuristics> makeInitialHeuristics(
       const at::ArrayRef<IValue>& inputs);
 
   //! Inline Debug print for segmented fusion
@@ -321,7 +322,9 @@ class TORCH_CUDA_CU_API SegmentedFusion {
     return force_fp16_tv_set_;
   }
 
- protected:
+  HeuristicSummary* getCachedHeuristicDataFor(SegmentedGroup* group);
+
+ private:
   //! Unique name for segmented fusion
   int segmented_fusion_name_;
 
@@ -354,11 +357,15 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! A set of intermediate tensors that need to be cast to fp16
   std::unordered_set<TensorView*> force_fp16_tv_set_;
 
+  //! Static traversal information to be used for fast heuristics lookup
+  std::unordered_map<SegmentedGroup*, std::unique_ptr<HeuristicSummary>>
+      heuristic_summary_cache_;
+
   // TODO: this class needs cleanup
  protected:
   friend class SegmentCandidateFinder;
   //! Make a heuristics entry for a group and parameters
-  std::unique_ptr<SchedulerEntry> makeSchedulerEntry(
+  std::unique_ptr<SchedulerEntry> makeInitialSchedulerEntry(
       SegmentedGroup* sg,
       SchedulerRuntimeInfo& runtime_info);
 
@@ -369,6 +376,11 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! Collect all the intermediate tensors between segmented
   //!  groups that will cast to fp16
   void annotateFP16IntermediateTensors();
+
+  //! Keep heuristic checking intermediate data
+  void setCachedHeuristicDataFor(
+      SegmentedGroup* group,
+      std::unique_ptr<HeuristicSummary> data);
 
   //! Utility to give unique name for each segmented fusion
   static size_t segmentedFusionName() {

@@ -9,6 +9,8 @@
 
 #include <cuda_runtime.h>
 
+#include "utils.h"
+
 using namespace torch::jit::fuser::cuda;
 
 // TODO: add LSTM function to composite operations
@@ -214,6 +216,8 @@ static void LstmCell_RunFusion_GpuOnly(
   for (auto _ : benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
+    cudaDeviceSynchronize();
+    clearL2Cache();
     cudaDeviceSynchronize();
   }
 }

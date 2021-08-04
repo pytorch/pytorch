@@ -135,6 +135,7 @@ static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
     outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
     benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
     cudaDeviceSynchronize();
+    clearL2Cache();
   }
 
   const size_t size =
@@ -171,6 +172,8 @@ static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
     auto output = at::relu(bias);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
+    cudaDeviceSynchronize();
+    clearL2Cache();
     cudaDeviceSynchronize();
   }
 

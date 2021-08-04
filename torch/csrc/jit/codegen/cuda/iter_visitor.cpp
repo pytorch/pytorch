@@ -468,18 +468,19 @@ struct FindOutputs : public IterVisitor {
   void handle(Val* val) override {
     if (of_.find(val) != of_.end()) {
       Statement* out_stmt = stmt_stack.front().back();
-      if (out_stmt->isVal()) {
-        auto out_val = out_stmt->as<Val>();
-        if (of_.find(out_val) == of_.end()) {
-          outs_.emplace(out_val);
-        }
+      TORCH_INTERNAL_ASSERT(out_stmt->isVal());
+      auto out_val = out_stmt->as<Val>();
+      if (of_.find(out_val) == of_.end()) {
+        outs_.emplace(out_val);
       }
     }
   }
 
+  // TODO: Simply traverse through uses from of. Would be a lot faster than
+  // tracing all paths like this.
   FindOutputs(const std::unordered_set<Val*>& _of) : of_(_of) {
     auto fusion = (*of_.begin())->fusion();
-    traverse(fusion);
+    traverseFrom(fusion, fusion->outputs(), true);
   };
 
   static std::unordered_set<Val*> getAllOutputsOf(

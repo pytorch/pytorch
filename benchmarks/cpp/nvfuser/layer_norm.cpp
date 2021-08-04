@@ -106,6 +106,8 @@ static void Baseline_LayerNorm(
     auto output = at::layer_norm(input, norm_shape, weight, bias);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();
+    clearL2Cache();
+    cudaDeviceSynchronize();
   }
 }
 

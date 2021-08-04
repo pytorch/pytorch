@@ -229,6 +229,14 @@ class TORCH_CUDA_CU_API Fusion final {
   std::unordered_set<int> getOutputAliasIndices() const;
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 
+  bool isTVUseInfoValid() {
+    return all_tv_uses_valid_;
+  }
+
+  bool isUpdatingTVUseInfo() {
+    return is_during_update_uses_;
+  }
+
  protected:
   friend SegmentCandidateFinder;
   friend SegmentedFusion;
@@ -265,6 +273,11 @@ class TORCH_CUDA_CU_API Fusion final {
 
   // io alias pointing from output to input
   std::unordered_map<Val*, Val*> io_alias_;
+
+  // Records if the current use data in the IR nodes are valid
+  //  the states are either all valid or all invalid
+  bool all_tv_uses_valid_ = false;
+  bool is_during_update_uses_ = false;
 };
 
 } // namespace cuda

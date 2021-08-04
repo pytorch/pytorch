@@ -391,7 +391,7 @@ FusionKernelRuntime::FusionKernelRuntime(
     // Take ownership and segment transformed fusion
     segmented_fusion_ =
         SegmentCandidateFinder::segment(std::move(fusion_copy), inputs);
-    heuristics_ = segmented_fusion_->makeHeuristics(inputs);
+    heuristics_ = segmented_fusion_->makeInitialHeuristics(inputs);
     executors_ =
         std::vector<FusionExecutor>(segmented_fusion_->groups().size());
     if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
@@ -410,8 +410,15 @@ FusionKernelRuntime::FusionKernelRuntime(
     }
     // Take ownership of the transformed fusion
     single_kernel_fusion_ = std::move(fusion_copy);
+
+    single_kernel_fusion_data_cache_ = std::make_unique<HeuristicSummary>(
+        single_kernel_fusion_.get(), complete_fusion_heuristic, runtime_info);
+
     heuristics_ = std::make_unique<FusionHeuristics>(
-        complete_fusion_heuristic, runtime_info);
+        complete_fusion_heuristic,
+        runtime_info,
+        single_kernel_fusion_data_cache_.get());
+
     executors_ = std::vector<FusionExecutor>(1);
     // In the case that the fusion isn't segmented but user
     //  wants segmented fusion in the debug print. Will
@@ -674,12 +681,17 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   auto& complete_fusion_scheduler = schedulers()[0];
   auto complete_fusion_heuristic = complete_fusion_scheduler->heuristc();
   if (!SchedulerEntry::canSchedule(
-          complete_fusion_heuristic, complete_fusion, runtime_info)) {
+          complete_fusion_heuristic,
+          complete_fusion,
+          runtime_info,
+          single_kernel_fusion_data_cache_.get())) {
     return c10::nullopt;
   }
 
   ret = std::make_unique<FusionHeuristics>(
-      complete_fusion_heuristic, runtime_info);
+      complete_fusion_heuristic,
+      runtime_info,
+      single_kernel_fusion_data_cache_.get());
   if (!complete_fusion_scheduler->sameAs(
           ret.value()->heuristicsList()[0].get())) {
     return c10::nullopt;

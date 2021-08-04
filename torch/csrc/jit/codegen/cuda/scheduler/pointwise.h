@@ -10,16 +10,18 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class ExpressionEvaluator;
 class SchedulerRuntimeInfo;
+class HeuristicSummary;
 
 TORCH_CUDA_CU_API c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
-    const at::ArrayRef<c10::IValue>& runtime_inputs);
+    const at::ArrayRef<c10::IValue>& runtime_inputs,
+    HeuristicSummary* data_cache = nullptr);
 
 TORCH_CUDA_CU_API c10::optional<PointwiseParams> getPointwiseHeuristics(
     Fusion* fusion,
-    SchedulerRuntimeInfo& runtime_info);
+    SchedulerRuntimeInfo& runtime_info,
+    HeuristicSummary* data_cache = nullptr);
 
 TORCH_CUDA_CU_API void schedulePointwise(
     Fusion* fusion,

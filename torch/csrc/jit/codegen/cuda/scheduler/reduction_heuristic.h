@@ -27,9 +27,12 @@ class ReductionParams {
   int64_t loop_unroll = 1;
   // Should unrolling be done on reduction dimension
   bool reduction_unroll = true;
+  // vectorize instead of unroll
+  bool vectorize = false;
   // Number of batches for each block
   int64_t batches_per_block = 1;
   // Number of warps per block
+  // TODO: Remove or repurpose
   int64_t num_warps = 1;
   // Store input in shared memory or registers to reduce global memory reads
   bool persistent_kernel = false;
@@ -47,7 +50,7 @@ class ReductionParams {
     bool attr_equal = other.fastest_dim == fastest_dim &&
         other.cross_block == cross_block && other.cross_grid == cross_grid &&
         other.multiple_reds_per_blk == multiple_reds_per_blk &&
-        other.loop_unroll == loop_unroll &&
+        other.loop_unroll == loop_unroll && other.vectorize == vectorize &&
         other.batches_per_block == batches_per_block &&
         other.num_warps == num_warps &&
         other.persistent_kernel == persistent_kernel &&
@@ -64,12 +67,17 @@ class ReductionParams {
        << "Reduction Characteristics:\n"
        << (multiple_reds_per_blk ? "Multiple Reds Per Block\n" : "")
        << (cross_block ? "Cross block reduction\n" : "")
-       << (cross_grid ? "Cross grid reduction\n" : "")
-       << (persistent_kernel ? "Persistent Kernel\n" : "") << "Blocking:\n"
+       << (cross_grid ? "Cross grid reduction\n" : "");
+    if (persistent_kernel) {
+      ss << "Persistent Kernel\n"
+         << "Batches per block: " << batches_per_block << "\n";
+    }
+    ss << "Blocking:\n"
        << " GridY: " << lparams.gdimy() << " BlckY: " << lparams.bdimy()
        << " BlckX: " << lparams.bdimx() << "\n";
     if (loop_unroll > 1) {
-      ss << (reduction_unroll ? "Unroll reduction dim, " : "Unroll iter dim, ")
+      ss << (vectorize ? "Vectorize " : "Unroll ")
+         << (reduction_unroll ? " reduction dim, " : " iter dim, ")
          << "Factor: " << loop_unroll << "\n";
     }
     ss << "====================================\n";
@@ -82,15 +90,17 @@ class ReductionParamsHash {
  public:
   size_t operator()(const ReductionParams& rp) const {
     constexpr size_t bits = sizeof(std::size_t) * 8;
-    size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) |
-        static_cast<size_t>(rp.cross_block) << (bits - 2) |
-        static_cast<size_t>(rp.cross_grid) << (bits - 3) |
-        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 4) |
-        static_cast<size_t>(rp.batches_per_block) << (bits - 5) |
-        static_cast<size_t>(rp.num_warps) << (bits - 6) |
-        static_cast<size_t>(rp.persistent_kernel) << (bits - 7) |
-        static_cast<size_t>(rp.reduction_unroll) << (bits - 8) |
-        static_cast<size_t>(rp.split_grid_dim) << (bits - 9);
+    size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) ^
+        static_cast<size_t>(rp.cross_block) << (bits - 2) ^
+        static_cast<size_t>(rp.cross_grid) << (bits - 3) ^
+        static_cast<size_t>(rp.multiple_reds_per_blk) << (bits - 4) ^
+        static_cast<size_t>(rp.loop_unroll) ^
+        static_cast<size_t>(rp.reduction_unroll) << (bits - 5) ^
+        static_cast<size_t>(rp.vectorize) << (bits - 6) ^
+        static_cast<size_t>(rp.batches_per_block) ^
+        static_cast<size_t>(rp.num_warps) ^
+        static_cast<size_t>(rp.persistent_kernel) << (bits - 7) ^
+        static_cast<size_t>(rp.split_grid_dim) << (bits - 8);
     return attr_hash;
   }
 };

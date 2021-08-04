@@ -13,19 +13,29 @@ std::string toString(ReductionParams rparams) {
   } else {
     ss << "/Slow dim";
   }
+  if (rparams.cross_grid) {
+    ss << "/cross grid";
+  }
   if (rparams.cross_block) {
     ss << "/cross block";
   }
   if (rparams.multiple_reds_per_blk) {
     ss << "/multiple reductions per block ";
   }
-  if (rparams.cross_grid) {
-    ss << "/cross grid";
-  }
   if (rparams.loop_unroll > 1) {
-    ss << "/Unroll "
+    ss << (rparams.vectorize ? "/Vectorize " : "/Unroll ")
        << (rparams.reduction_unroll ? "reduction dim " : "iter dim ")
        << rparams.loop_unroll;
+  }
+  if (rparams.batches_per_block > 1) {
+    ss << "/batches per block " << rparams.batches_per_block << " ";
+  }
+  if (rparams.persistent_kernel) {
+    ss << "/persistent";
+  }
+
+  if (rparams.split_grid_dim) {
+    ss << "/split grid dim";
   }
   return ss.str();
 }
@@ -34,9 +44,10 @@ std::string toString(LaunchParams lparams) {
   std::stringstream ss;
   lparams.toString();
   ss << "/Launch_Parameters["
-     << "(" << lparams.bdimz() << "/" << lparams.bdimy() << "/"
-     << lparams.bdimx() << ")/(" << lparams.gdimz() << "/" << lparams.gdimy()
-     << "/" << lparams.gdimx() << ")/" << lparams.smem() << "]";
+     << "block(" << lparams.bdimz() << "/" << lparams.bdimy() << "/"
+     << lparams.bdimx() << ")/grid(" << lparams.gdimz() << "/"
+     << lparams.gdimy() << "/" << lparams.gdimx() << ")/" << lparams.smem()
+     << "]";
   return ss.str();
 }
 
