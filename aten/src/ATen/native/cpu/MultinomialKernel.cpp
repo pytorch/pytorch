@@ -111,7 +111,7 @@ static void multinomial_with_replacement_kernel_impl(
     const Tensor& self,
     const int64_t n_sample,
     c10::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "multinomial", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "multinomial", [&] {
     multinomial_with_replacement_apply<scalar_t>(result, self, n_sample, gen);
   });
 }
