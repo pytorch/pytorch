@@ -1142,6 +1142,8 @@ class TestCuda(TestCase):
             # real execution time by least 40%.
             self.assertGreater(parent_time + child_time, total_time * 1.4)
 
+    # This test is flaky for ROCm, see issue #62602
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_events_wait(self):
         d0 = torch.device('cuda:0')
@@ -1792,13 +1794,18 @@ except RuntimeError as e:
         stream = torch.cuda.Stream()
 
         for x_first_use_on_ambient in (True, False):
-            for out_of_place in (True, False):
+            # the out_of_place=False, iters=1 case stresses if proper syncs are inserted
+            # when grads are initially None and stolen by backward ops.
+            for out_of_place, iters in ((True, 1),
+                                        (False, 1),
+                                        (False, 5)):
                 with torch.cuda.stream(stream):
                     x = torch.randn(5, 5, device='cuda', requires_grad=True)
                     model = StreamModel().cuda()
                     x.register_hook(lambda grad: self.assertEqual(torch.cuda.current_stream(),
                                                                   stream if x_first_use_on_ambient else model.stream0))
-                    iters = 1 if out_of_place else 5
+                    for p in model.parameters():
+                        self.assertTrue(p.grad is None)
                     for i in range(iters):
                         loss = model(x, x_first_use_on_ambient).sum()
                         if out_of_place:
