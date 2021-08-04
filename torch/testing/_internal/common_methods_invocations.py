@@ -2605,6 +2605,21 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
+def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
+    shapes = ((1, 1, 5, 5), (0, 1, 5, 5))
+    kernel_sizes = ((3, 3), (2, 2))
+    dilations = (1, 2, (1, 2))
+    paddings = (0, 1, (1, 1))
+    strides = (1, 2, (1, 2))
+
+    def generator():
+        for shape, kernel_size, dilation, padding, stride in product(shapes, kernel_sizes, dilations, paddings, strides):
+            tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+            yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
+
+    return list(generator())
+
+
 def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_args = (
         ((S, 1, S, 1), ()),
@@ -6560,6 +6575,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
+    OpInfo('nn.functional.unfold',
+           aten_name='im2col',
+           dtypes=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_nn_unfold,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
            aten_name="leaky_relu",
