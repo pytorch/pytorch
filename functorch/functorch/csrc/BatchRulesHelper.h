@@ -22,6 +22,7 @@ Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
+int64_t numelWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val);
 int64_t getPhysicalDim(const Tensor& tensor, bool has_batch_dim, int64_t logical_dim);
 

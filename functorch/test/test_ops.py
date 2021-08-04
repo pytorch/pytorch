@@ -372,7 +372,6 @@ class TestOperators(TestCase):
             'nanmedian',
             'nn.functional.conv2d',
             'nn.functional.linear',
-            'nn.functional.mse_loss',
             'pinverse',
             'prod',
             'put',
