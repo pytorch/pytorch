@@ -110,7 +110,9 @@ def ref_vjp(f, *primals):
     return result, wrapped
 
 
-def normalize_op_for_vjp_vjp(f, sample):
+# Returns a new function g(*args, *cotangents) that computes vjps and
+# sample (*args, *cotangents)
+def get_vjpfull_variant(f, sample):
     fn, primals = normalize_op_for_vjp(f, sample)
     result = fn(*primals)
     cotangents = _as_tuple(
@@ -249,7 +251,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            fn, args = normalize_op_for_vjp_vjp(op, sample)
+            fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
 
@@ -290,7 +292,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            fn, args = normalize_op_for_vjp_vjp(op, sample)
+            fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
             cotangents = tree_map(lambda x: torch.randn_like(x), result)
             cotangents, _ = tree_flatten(cotangents)
@@ -333,6 +335,51 @@ class TestOperators(TestCase):
             'vstack',
             'resolve_conj',
             'resolve_neg',
+            'cholesky',
+            'cholesky_inverse',
+            'clamp',
+            'diag_embed',
+            'eig',
+            'fft.ihfft',
+            'fft.rfft',
+            'fft.rfftn',
+            'fmax',
+            'fmin',
+            'index_add',
+            'index_copy',
+            'index_fill',
+            'inverse',
+            'linalg.cholesky_ex',
+            'linalg.det',
+            'linalg.eig',
+            'linalg.eigh',
+            'linalg.eigvalsh',
+            'linalg.householder_product',
+            'linalg.inv_ex',
+            'linalg.pinv',
+            'linalg.pinv',
+            'linalg.slogdet',
+            'linalg.svdvals',
+            'linalg.qr',
+            'log_softmax',
+            'logdet',
+            'lu_unpack',
+            'masked_fill',
+            'masked_scatter',
+            'max',
+            'median',
+            'min',
+            'nanmedian',
+            'nn.functional.conv2d',
+            'nn.functional.linear',
+            'nn.functional.mse_loss',
+            'pinverse',
+            'prod',
+            'put',
+            'qr',
+            'symeig',
+            'take',
+            'view_as_complex',
         }
         op_skip = op_skip.union(vjp_fail)
         if opinfo_in_dict(op, op_skip):
@@ -350,7 +397,7 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            fn, args = normalize_op_for_vjp(op, sample)
+            fn, args = get_vjpfull_variant(op, sample)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
