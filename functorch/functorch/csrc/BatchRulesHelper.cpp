@@ -27,6 +27,13 @@ int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_
   return result;
 }
 
+int64_t numelWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim) {
+  if (!maybe_batch_dim) {
+    return tensor.numel();
+  }
+  return tensor.numel() / tensor.size(*maybe_batch_dim);
+}
+
 optional<int64_t> valIfNonempty(optional<int64_t> maybe_empty, int64_t new_val) {
   if (maybe_empty.has_value()) {
     return new_val;
