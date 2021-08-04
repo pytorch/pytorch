@@ -2216,8 +2216,11 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
         ((1, 8, 4, 3), (None, None)),
     )
 
-    return tuple(SampleInput(make_arg(input_shape), args=(output_size,))
-                 for input_shape, output_size in cases)
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
 
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
