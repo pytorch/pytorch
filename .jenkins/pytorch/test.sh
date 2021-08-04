@@ -185,7 +185,7 @@ test_aten() {
     echo "Running ATen tests with pytorch lib 1"
 
     if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Running test with the install folder"
+      echo "Running test with the install folder 2"
       # Rename the build folder when running test to ensure it
       # is not depended on the folder
       mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
