@@ -458,7 +458,7 @@ class OpInfo(object):
                  # modifying tests and a pointer to the op's sample inputs function
                  # this function lets the OpInfo generate valid inputs
                  skips=tuple(),  # information about which tests to skip
-                 decorators=None,  # decorators to apply to generated tests
+                 decorators=tuple(),  # decorators to apply to generated tests
                  sample_inputs_func=None,  # function to generate sample inputs
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
@@ -584,8 +584,7 @@ class OpInfo(object):
         self.supports_out = supports_out
         self.safe_casts_outputs = safe_casts_outputs
 
-        self.skips = skips
-        self.decorators = decorators
+        self.decorators = (*decorators, *skips)
         self.sample_inputs_func = sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
@@ -697,10 +696,16 @@ class OpInfo(object):
 
         return samples
 
-    # Returns True if the test should be skipped and False otherwise
-    def should_skip(self, cls_name, test_name, device_type, dtype):
-        return any(si.is_active(cls_name, test_name, device_type, dtype)
-                   for si in self.skips)
+    def get_decorators(self, test_class, test_name, device, dtype):
+        '''Returns the decorators targeting the given test.'''
+        result = []
+        for decorator in self.decorators:
+            if isinstance(decorator, DecorateInfo):
+                if decorator.is_active(test_class, test_name, device, dtype):
+                    result.extend(decorator.decorators)
+            else:
+                result.append(decorator)
+        return result
 
     def supported_dtypes(self, device_type):
         if device_type == 'cpu':
