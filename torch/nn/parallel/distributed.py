@@ -10,9 +10,9 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import (
-    _Join,
-    _Joinable,
-    _JoinHook,
+    Join,
+    Joinable,
+    JoinHook,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
@@ -141,7 +141,7 @@ class _DDPSink(Function):
         return (None, *grad_outputs)
 
 
-class _DDPJoinHook(_JoinHook):
+class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """
         Sets config variables for internal usage.
@@ -198,7 +198,7 @@ class _DDPJoinHook(_JoinHook):
         self.ddp._sync_final_model(is_last_joiner)
 
 
-class DistributedDataParallel(Module, _Joinable):
+class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
@@ -462,7 +462,7 @@ class DistributedDataParallel(Module, _Joinable):
     ):
 
         super(DistributedDataParallel, self).__init__()
-        _Joinable.__init__(self)
+        Joinable.__init__(self)
         self.logger = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -845,7 +845,7 @@ class DistributedDataParallel(Module, _Joinable):
 
             # Notify the join context that this process has not joined, if
             # needed
-            work = _Join.notify_join_context(self)
+            work = Join.notify_join_context(self)
             if work:
                 self.reducer._set_forward_pass_work_handle(
                     work, self._divide_by_initial_world_size
@@ -1148,14 +1148,14 @@ class DistributedDataParallel(Module, _Joinable):
             >>>     # blocking for rank 1's allreduce to complete.
             >>>     torch.cuda.synchronize(device=rank)
         """
-        return _Join(
+        return Join(
             [self],
             enable,
             throw_on_early_termination,
             divide_by_initial_world_size=divide_by_initial_world_size,
         )
 
-    def _join_hook(
+    def join_hook(
         self,
         **kwargs,
     ):
@@ -1167,7 +1167,7 @@ class DistributedDataParallel(Module, _Joinable):
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
                 to modify the behavior of the join hook at run time; all
-                :class:`_Joinable` instances sharing the same join context
+                :class:`Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
 
         The hook supports the following keyword arguments:
@@ -1188,11 +1188,11 @@ class DistributedDataParallel(Module, _Joinable):
         )
 
     @property
-    def _join_device(self):
+    def join_device(self):
         return self.device
 
     @property
-    def _join_process_group(self):
+    def join_process_group(self):
         return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):
