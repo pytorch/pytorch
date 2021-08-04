@@ -6969,7 +6969,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    # "tanh_backward_cpu" not implemented for 'BFloat16'
-                   backward_dtypesIfCPU=all_types_and_complex_and(torch.bool),
+                   backward_dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    assert_autodiffed=True,
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
