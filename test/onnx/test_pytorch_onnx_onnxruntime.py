@@ -3724,6 +3724,22 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LSTMModel(), (input, h0, c0))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_lstm_cell(self):
+        class LSTMCellModel(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.lstm_cell = torch.nn.LSTMCell(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, bias=bias)
+
+            def forward(self, x, h0, c0):
+                return self.lstm_cell(x, (h0, c0))
+
+        input = torch.randn(BATCH_SIZE, RNN_INPUT_SIZE)
+        h0 = torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE)
+        c0 = torch.randn(BATCH_SIZE, RNN_HIDDEN_SIZE)
+        for bias in [True, False]:
+            self.run_test(LSTMCellModel(bias), (input, h0, c0))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_default_init_state(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
