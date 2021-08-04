@@ -4652,12 +4652,14 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
     ]
 
     sample_inputs = []
-    for shapes, indexing in itertools.product(test_cases, {'xy', 'ij'}):
+    for shapes, indexing in itertools.product(test_cases, {None, 'xy', 'ij'}):
         input, args = make_inputs(
             [make_tensor(shape, device, dtype, requires_grad=requires_grad)
              for shape in shapes])
-        sample_inputs.append(SampleInput(input=input, args=args,
-                                         kwargs=dict(indexing=indexing)))
+        # Verify the default is the same if indexing is not
+        # specified.
+        kwargs = {'indexing': indexing} if indexing is not None else {}
+        sample_inputs.append(SampleInput(input=input, args=args, kwargs=kwargs))
     return sample_inputs
 
 
