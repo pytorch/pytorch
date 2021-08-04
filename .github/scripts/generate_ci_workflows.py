@@ -269,7 +269,7 @@ LINUX_WORKFLOWS = [
             enabled=True,
             trigger_action_only=True,
             labels=set(['ciflow/slow']),
-        )
+        ),
     ),
     CIWorkflow(
         arch="linux",
@@ -401,6 +401,12 @@ BAZEL_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels=set(['ciflow/default']),
+        ),
     ),
 ]
 
