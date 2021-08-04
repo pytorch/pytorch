@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/frontend/ir_emitter_utils.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/source_range.h>
