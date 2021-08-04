@@ -63,10 +63,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("reshape", torch::CppFunction::makeFallthrough());
   m.impl("alias", torch::CppFunction::makeFallthrough());
   m.impl("mm", torch::CppFunction::makeFallthrough());
-  // m.impl("mm.out", torch::CppFunction::makeFallthrough());
   m.impl("addmm", torch::CppFunction::makeFallthrough());
-  // m.impl("addmm_", torch::CppFunction::makeFallthrough());
-  // m.impl("addmm.out", torch::CppFunction::makeFallthrough());
   m.impl("mm.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
   m.impl("addmm_", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());
   m.impl("addmm.out", torch::CppFunction::makeFromBoxedFunction<&conjugateFallbackToHandleOnlyMutableInputs>());

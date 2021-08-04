@@ -44,9 +44,9 @@ def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
     kwargs = scatter(kwargs, target_gpus, dim) if kwargs else []
     if len(inputs) < len(kwargs):
-        inputs.extend([() for _ in range(len(kwargs) - len(inputs))])
+        inputs.extend(() for _ in range(len(kwargs) - len(inputs)))
     elif len(kwargs) < len(inputs):
-        kwargs.extend([{} for _ in range(len(inputs) - len(kwargs))])
+        kwargs.extend({} for _ in range(len(inputs) - len(kwargs)))
     inputs = tuple(inputs)
     kwargs = tuple(kwargs)
     return inputs, kwargs
@@ -64,10 +64,10 @@ def gather(outputs, target_device, dim=0):
         if out is None:
             return None
         if isinstance(out, dict):
-            if not all((len(out) == len(d) for d in outputs)):
+            if not all(len(out) == len(d) for d in outputs):
                 raise ValueError('All dicts must have the same number of keys')
-            return type(out)(((k, gather_map([d[k] for d in outputs]))
-                              for k in out))
+            return type(out)((k, gather_map([d[k] for d in outputs]))
+                             for k in out)
         if is_namedtuple(out):
             return type(out)._make(map(gather_map, zip(*outputs)))
         return type(out)(map(gather_map, zip(*outputs)))

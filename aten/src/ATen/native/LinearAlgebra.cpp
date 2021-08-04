@@ -1002,8 +1002,7 @@ static void addmm_impl_cpu_(
   } else {
     transpose_c = false;
     // make c FORTRAN contiguous
-    // conjugation is resolved in contiguous()
-    c = result.transpose(0, 1).contiguous().transpose_(0, 1);
+    c = result.resolve_conj().transpose(0, 1).contiguous().transpose_(0, 1);
   }
 
   const int64_t m = result_sizes[transpose_c ? 1 : 0];
@@ -1017,14 +1016,19 @@ static void addmm_impl_cpu_(
   if (m1_strides[transpose_c ? 1 : 0] == 1 &&
       m1_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, m)) {
     transpose_a = false;
-    a = m1;
+    a = m1.resolve_conj();
   } else if (m1_strides[transpose_c ? 0 : 1] == 1 &&
              m1_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, k)) {
     transpose_a = true;
     a = m1;
   } else {
     transpose_a = !transpose_c;
-    a = m1.clone(at::MemoryFormat::Contiguous);
+    if (m1.is_conj() && transpose_a) {
+      a = m1.conj().clone(at::MemoryFormat::Contiguous);
+      a._set_conj(true);
+    } else {
+      a = m1.clone(at::MemoryFormat::Contiguous);
+    }
   }
 
   // Cast m2 as matrix b
@@ -1034,28 +1038,25 @@ static void addmm_impl_cpu_(
   if (m2_strides[transpose_c ? 1 : 0] == 1 &&
       m2_strides[transpose_c ? 0 : 1] >= std::max(int64_t{1}, k)) {
     transpose_b = false;
-    b = m2;
+    b = m2.resolve_conj();
   } else if (m2_strides[transpose_c ? 0 : 1] == 1 &&
              m2_strides[transpose_c ? 1 : 0] >= std::max(int64_t{1}, n)) {
     transpose_b = true;
     b = m2;
   } else {
     transpose_b = !transpose_c;
-    b = m2.clone(at::MemoryFormat::Contiguous);
+    // TODO: restore conjugation here if transpose_b=True
+    if (m2.is_conj() && transpose_b) {
+      b = m2.conj().clone(at::MemoryFormat::Contiguous);
+      b._set_conj(true);
+    } else {
+      b = m2.clone(at::MemoryFormat::Contiguous);
+    }
   }
 
   const int64_t lda = a.strides()[(transpose_a == transpose_c) ? 1 : 0];
   const int64_t ldb = b.strides()[(transpose_b == transpose_c) ? 1 : 0];
   const int64_t ldc = c.strides()[transpose_c ? 0 : 1];
-
-  if (a.is_conj() && !transpose_a) {
-    // verify the tensor strides are not changed
-    a = a.resolve_conj();
-  }
-  if (b.is_conj() && !transpose_b) {
-    // verify the tensor strides are not changed
-    b = b.resolve_conj();
-  }
 
   // Always ensure the conjugation for c is resolved since there's no way to specify c's conjugation in the gemm call
   TORCH_CHECK(!c.is_conj());
