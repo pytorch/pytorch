@@ -20,6 +20,7 @@ from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
 from . import functional
 from . import forward_ad
+from . import saved_variable_default_hooks as graph
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -103,6 +104,13 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
+    .. note::
+
+        When ``inputs`` are provided and a given input is not a leaf,
+        the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
+        It is an implementation detail on which the user should not rely.
+        See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
+
     Args:
         tensors (Sequence[Tensor] or Tensor): Tensors of which the derivative will be
             computed.
@@ -121,8 +129,7 @@ def backward(
         inputs (Sequence[Tensor] or Tensor, optional): Inputs w.r.t. which the gradient
             be will accumulated into ``.grad``. All other Tensors will be ignored. If
             not provided, the gradient is accumulated into all the leaf Tensors that
-            were used to compute the attr::tensors. All the provided inputs must be leaf
-            Tensors.
+            were used to compute the attr::tensors.
     """
     if grad_variables is not None:
         warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
@@ -256,10 +263,10 @@ if not torch._C._autograd_init():
 from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
                                 _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
                                 _enable_record_function, _set_empty_test_observer, kineto_available,
-                                _supported_kineto_activities, _add_metadata_json)
+                                _supported_activities, _add_metadata_json, SavedTensor,
+                                _register_default_hooks, _reset_default_hooks)
 
-if kineto_available():
-    from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
-                                    _prepare_profiler, _enable_profiler, _disable_profiler)
+from torch._C._autograd import (_ProfilerResult, _KinetoEvent,
+                                _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler

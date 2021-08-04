@@ -69,7 +69,7 @@ __global__ void replication_pad_backward_kernel(
   int inputPointX = imin(imax(padL, outputPointX), gradInput.size(2) + padL - 1) - oStartX + iStartX;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointX], valueToCopy);
+  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
@@ -123,7 +123,7 @@ __global__ void replication_pad_backward_kernel(
   int inputPointY = imin(imax(padT, outputPointY), gradInput.size(2) + padT - 1) - oStartY + iStartY;
 
   scalar_t valueToCopy = gradOutput[batch][plane][outputPointY][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
+  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointY][inputPointX], valueToCopy);
 }
 
 template <typename scalar_t>
@@ -197,7 +197,7 @@ __global__ void replication_pad_backward_kernel(
 
   scalar_t valueToCopy =
     gradOutput[batch][plane][outputPointZ][outputPointY][outputPointX];
-  gpuAtomicAdd(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
+  gpuAtomicAddNoReturn(&gradInput[batch][plane][inputPointZ][inputPointY][inputPointX],
       valueToCopy);
 }
 
@@ -455,13 +455,8 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
   int64_t padR = paddingSize[1];
   constexpr int64_t planeDim = -2;
   constexpr int64_t dimw = -1;
-  int64_t numBatch = 1;
 
   int numInputDims = input.ndimension();
-
-  if (numInputDims == 3) {
-    numBatch = input.size(0);
-  }
 
   int64_t numPlanes = input.size(planeDim);
   int64_t inputW = input.size(dimw);
@@ -651,12 +646,10 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
   int dimd = 1;
   int dimh = 2;
   int dimw = 3;
-  int numBatch = 1;
 
   int numInputDims = input.dim();
 
   if (numInputDims == 5) {
-    numBatch = input.size(0);
     planeDim++;
     dimd++;
     dimh++;
@@ -680,8 +673,8 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
       at::Tensor input_ = input;
       at::Tensor output_ = output;
       if (numInputDims == 4) {
-        auto input_ = input.unsqueeze(0);
-        auto output_ = output.unsqueeze(0);
+        input_ = input.unsqueeze(0);
+        output_ = output.unsqueeze(0);
       }
 
       auto devInput = input_.packed_accessor64<scalar_t, 5>();

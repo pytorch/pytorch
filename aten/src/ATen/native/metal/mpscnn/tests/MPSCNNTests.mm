@@ -1,5 +1,5 @@
 #import <ATen/ATen.h>
-#import <ATen/native/metal/MetalUtils.h>
+#import <ATen/native/metal/MetalTensorUtils.h>
 #import <ATen/native/metal/mpscnn/MPSImage+Tensor.h>
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #import <ATen/native/metal/mpscnn/tests/MPSCNNTests.h>
@@ -86,13 +86,7 @@ void PRINT_TENSOR(std::string name, const at::Tensor& tensor) {
     }
     std::cout << str << std::endl;
   };
-  if (tensor.is_metal()) {
-    MPSImage* image = at::native::metal::imageFromTensor(tensor);
-    auto t = at::native::metal::staticImageToTensor(image);
-    print(t);
-  } else {
-    print(tensor);
-  }
+  print(tensor);
 }
 
 }
@@ -111,29 +105,6 @@ bool test_synchronization() {
   });
 }
 
-bool test_nchw_to_nc4_cpu() {
-  bool result = true;
-  for (int i = 0; i < ITER_COUNT; ++i) {
-    int64_t N = rand(1, 24);
-    int64_t C = rand(1, 48);
-    int64_t H = rand(1, 320);
-    int64_t W = rand(1, 320);
-    __block std::vector<int64_t> size{N, C, H, W};
-    bool b = TEST(size, __PRETTY_FUNCTION__, ^bool {
-      auto t = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-      const auto len = c10::multiply_integers(std::begin(size), std::end(size));
-      auto buf =
-          std::vector<float>{t.data_ptr<float>(), t.data_ptr<float>() + len};
-      auto c4 = NCHWToNC4((float*)t.data_ptr<float>(), t.sizes().vec());
-      auto n4 = NC4ToNCHW((float*)c4.data(), t.sizes().vec());
-      return n4 == buf;
-    });
-    if (!b) {
-      result = false;
-    }
-  }
-  return result;
-}
 
 bool test_copy_nchw_to_metal() {
   __block std::vector<int64_t> size{1, 3, 224, 224};
@@ -144,7 +115,7 @@ bool test_copy_nchw_to_metal() {
         createTemporaryImage(cb, t1.sizes().vec(), t1.data_ptr<float>());
     MPSImage* img2 = createStaticImage(img1, cb, true);
     auto t2 = at::zeros(size);
-    copyToHost(t2.data_ptr<float>(), img2);
+    copyImageToFloatBuffer(t2.data_ptr<float>(), img2);
     return almostEqual(t1, t2);
   });
 }
@@ -846,10 +817,8 @@ bool test_mean_dim3() {
     return TEST(size, __PRETTY_FUNCTION__, ^bool {
       auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
       auto Y1 = at::mean(X1, {0,1,2,3});
-      PRINT_TENSOR("Y1", Y1);
       auto X2 = X1.metal();
       auto Y2 = at::mean(X2, {0,1,2,3}).cpu();
-      PRINT_TENSOR("Y2", Y2);
       return almostEqual(Y1, Y2);
     });
 }

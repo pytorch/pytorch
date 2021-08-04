@@ -34,7 +34,6 @@ def test_batch_non_atomic():
 
     with pytest.raises(AttributeError):
         b.tensor
-    assert b.tensors == (x, y)
 
     assert list(b) == [x, y]
     assert len(b) == 2
@@ -49,8 +48,11 @@ def test_batch_call():
     def f(x):
         return x
 
+    def g(x, y):
+        return x, y
+
     assert a.call(f).atomic
-    assert not b.call(f).atomic
+    assert not b.call(g).atomic
 
 
 def test_batch_setitem_by_index():
@@ -85,17 +87,17 @@ def test_batch_setitem_by_slice():
 
 
 def test_check():
-    check(torch.tensor(42))
-    check((torch.tensor(4), torch.tensor(2)))
+    check(torch.device("cpu"), torch.tensor(42))
+    check(torch.device("cpu"), torch.tensor(4), torch.tensor(2))
 
     with pytest.raises(TypeError):
-        check(42)
+        check(torch.device("cpu"), 42)
 
     with pytest.raises(TypeError):
-        check("str")
+        check(torch.device("cpu"), "str")
 
     with pytest.raises(TypeError):
-        check((torch.tensor(4), 2))
+        check(torch.device("cpu"), (torch.tensor(4), 2))
 
 
 def test_gather_tensors():
@@ -127,12 +129,12 @@ def test_scatter_tensor():
     assert b.tensor.size() == (1, 1)
 
 
-def test_scatter_tuple():
+def test_scatter_multiple_tensors():
     ab = (torch.zeros(2, 1), torch.zeros(4, 2))
 
-    a, b = scatter(ab, chunks=2)
+    a, b = scatter(*ab, chunks=2)
 
-    assert a.tensors[0].size() == (1, 1)
-    assert b.tensors[0].size() == (1, 1)
-    assert a.tensors[1].size() == (2, 2)
-    assert b.tensors[1].size() == (2, 2)
+    assert list(a)[0].size() == (1, 1)
+    assert list(b)[0].size() == (1, 1)
+    assert list(a)[1].size() == (2, 2)
+    assert list(b)[1].size() == (2, 2)

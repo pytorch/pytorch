@@ -32,7 +32,7 @@ class Copy(torch.autograd.Function):
 
     @staticmethod
     # type: ignore[override]
-    def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input: Tensor,) -> Tensors:
+    def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input,) -> Tensors:
         ctx.prev_stream = prev_stream
         ctx.next_stream = next_stream
 
@@ -41,14 +41,17 @@ class Copy(torch.autograd.Function):
 
         with use_stream(prev_stream), use_stream(next_stream):
             for x in input:
-                y = x.to(get_device(next_stream), non_blocking=True)
-                output.append(y)
+                if torch.is_tensor(x):
+                    y = x.to(get_device(next_stream), non_blocking=True)
+                    output.append(y)
 
-                # 'prev_stream' is not where 'x' has been allocated.
-                record_stream(x, prev_stream)
-                # 'y' has been allocated on 'next_stream'.
-                # It might be used on the current stream captured as 'output_stream'.
-                record_stream(y, output_stream)
+                    # 'prev_stream' is not where 'x' has been allocated.
+                    record_stream(x, prev_stream)
+                    # 'y' has been allocated on 'next_stream'.
+                    # It might be used on the current stream captured as 'output_stream'.
+                    record_stream(y, output_stream)
+                else:
+                    output.append(x)
 
         return tuple(output)
 
@@ -85,13 +88,13 @@ class Wait(torch.autograd.Function):
 
     @staticmethod
     # type: ignore[override]
-    def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input: Tensor,) -> Tensors:
+    def forward(ctx: Context, prev_stream: AbstractStream, next_stream: AbstractStream, *input) -> Tensors:
         ctx.prev_stream = prev_stream
         ctx.next_stream = next_stream
 
         wait_stream(next_stream, prev_stream)
 
-        return tuple(x.detach() for x in input)
+        return tuple(x.detach() if torch.is_tensor(x) else x for x in input)
 
     @staticmethod
     def backward(ctx: Context, *grad_input: Tensor,) -> Tuple[Optional[Tensor], ...]:
