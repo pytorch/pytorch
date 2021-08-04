@@ -83,8 +83,7 @@ this way (and remember that you will need at least twice the size of the
 weights, since you also need to store the gradients.)
 
 **Consider checkpointing**
-You can trade-off memory for compute memory by using checkpoint ` <https://pytorch.org/docs/stable/checkpoint.html>`. 
-
+You can trade-off memory for compute by using checkpoint ` <https://pytorch.org/docs/stable/checkpoint.html>`. 
 
 My GPU memory isn't freed properly
 ----------------------------------
