@@ -199,8 +199,6 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             Used to determine the type and shape of the outputs without tracing the execution of
             the model. A single object is treated as equivalent to a tuple of one element.
         strip_doc_string (bool, default True): [Deprecated and ignored. Will be removed in next PyTorch release]
-            Do not include the field ``doc_string``` from the exported model. Otherwise the field will
-            mention the source code locations for ``model``.
         dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
 
             By default the exported model will have the shapes of all input and output tensors
