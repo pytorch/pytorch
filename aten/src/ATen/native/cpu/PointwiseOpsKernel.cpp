@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 namespace {
 
-static void addcmul_cpu_kernel(TensorIterator& iter, const Scalar& value) {
+static void addcmul_cpu_kernel(TensorIteratorBase& iter, const Scalar& value) {
   ScalarType dtype = iter.dtype(0);
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(dtype, "addcmul_cpu_out", [&] {
     scalar_t scalar_val = value.to<scalar_t>();
