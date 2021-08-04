@@ -1,39 +1,18 @@
 #include <gtest/gtest.h>
 
-#include <torch/csrc/jit/ir/irparser.h>
+#include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/passes/eliminate_dict_construct_getitem.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
 
 namespace {
 
-void compareTensors(const IValue& expected, const IValue& actual) {
-  EXPECT_TRUE(expected.isTensor());
-  EXPECT_TRUE(actual.isTensor());
-  EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
-}
-
-c10::IValue runGraph(
-    std::shared_ptr<Graph> graph,
-    const std::vector<c10::IValue>& args) {
-  auto graph_exec = GraphExecutor(graph, "");
-
-  Stack stack(args);
-  graph_exec.run(stack);
-
-  if (stack.size() == 1) {
-    return stack[0];
-  }
-  return c10::ivalue::Tuple::create(stack);
-}
-
-std::shared_ptr<Graph> makeGraph(const std::string& ir_src) {
-  auto graph = std::make_shared<Graph>();
-  parseIR(ir_src, graph.get());
-  return graph;
+void TestDictConstructGetItem(
+    const std::string& src,
+    const std::vector<IValue>& args,
+    const std::string& expected_string) {
+  testGraphPass(src, args, expected_string, EliminateDictConstructGetItem);
 }
 
 } // namespace
@@ -46,20 +25,9 @@ TEST(EliminateDictConstructGetItemTest, SingleKeyGet_SingleKeyDict) {
         %3 : Tensor = aten::__getitem__(%2, %1)
         return (%3)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  std::vector<c10::IValue> args{at::randn({2, 2})};
-
-  auto expected = runGraph(graph, args);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
-  auto actual = runGraph(graph, args);
-  compareTensors(expected, actual);
-
-  testing::FileCheck().check("return (%0)")->run(*graph);
+  const std::vector<c10::IValue> args{at::randn({2, 2})};
+  const std::string expected_string = "return (%0)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItemTest, SingleKeyGet_MultiKeyDict) {
@@ -71,20 +39,9 @@ TEST(EliminateDictConstructGetItemTest, SingleKeyGet_MultiKeyDict) {
         %5 : Tensor = aten::__getitem__(%4, %3)
         return (%5)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  std::vector<c10::IValue> args{at::randn({2, 2}), at::randn({2, 2})};
-
-  auto expected = runGraph(graph, args);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
-  auto actual = runGraph(graph, args);
-  compareTensors(expected, actual);
-
-  testing::FileCheck().check("return (%1)")->run(*graph);
+  const std::vector<c10::IValue> args{at::randn({2, 2}), at::randn({2, 2})};
+  const std::string& expected_string = "return (%1)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItemTest, SingleKeyGet_InputArgKey) {
@@ -94,20 +51,9 @@ TEST(EliminateDictConstructGetItemTest, SingleKeyGet_InputArgKey) {
         %3 : Tensor = aten::__getitem__(%2, %1)
         return (%3)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  std::vector<c10::IValue> args{at::randn({2, 2}), 1};
-
-  auto expected = runGraph(graph, args);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
-  auto actual = runGraph(graph, args);
-  compareTensors(expected, actual);
-
-  testing::FileCheck().check("return (%0)")->run(*graph);
+  const std::vector<c10::IValue> args{at::randn({2, 2}), 1};
+  const std::string expected_string = "return (%0)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItemTest, SingleKeyGet_ManyPureOps) {
@@ -125,20 +71,9 @@ TEST(EliminateDictConstructGetItemTest, SingleKeyGet_ManyPureOps) {
         %8 : bool = aten::__contains__(%2, %1)
         return (%3)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  std::vector<c10::IValue> args{at::randn({2, 2})};
-
-  auto expected = runGraph(graph, args);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
-  auto actual = runGraph(graph, args);
-  compareTensors(expected, actual);
-
-  testing::FileCheck().check("return (%0)")->run(*graph);
+  const std::vector<c10::IValue> args{at::randn({2, 2})};
+  const std::string expected_string = "return (%0)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItemTest, MultiKeyGet_MultiKeyDict) {
@@ -152,20 +87,9 @@ TEST(EliminateDictConstructGetItemTest, MultiKeyGet_MultiKeyDict) {
         %7 : Tensor = aten::matmul(%5, %6)
         return (%7)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  std::vector<c10::IValue> args{at::randn({2, 2}), at::randn({2, 2})};
-
-  auto expected = runGraph(graph, args);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
-  auto actual = runGraph(graph, args);
-  compareTensors(expected, actual);
-
-  testing::FileCheck().check("aten::matmul(%0, %1)")->run(*graph);
+  const std::vector<c10::IValue> args{at::randn({2, 2}), at::randn({2, 2})};
+  const std::string expected_string = "aten::matmul(%0, %1)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItemTest, NoOptimization_MissingKey) {
@@ -177,7 +101,8 @@ TEST(EliminateDictConstructGetItemTest, NoOptimization_MissingKey) {
         %4 : Tensor = aten::__getitem__(%3, %2)
         return (%4)
     )IR";
-
+  // Can't use TestDictConstructGetItem; the script will throw an error
+  // since the key is missing.
   auto graph = makeGraph(src);
 
   EliminateDictConstructGetItem(graph);
@@ -195,14 +120,10 @@ TEST(EliminateDictConstructGetItemTest, NoOptimization_InputArgKey) {
         %4 : Tensor = aten::__getitem__(%3, %1)
         return (%4)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
+  const std::vector<c10::IValue> args{at::randn({2, 2}), 1};
   // The return value should not change.
-  testing::FileCheck().check("return (%4)")->run(*graph);
+  const std::string expected_string = "return (%4)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 TEST(EliminateDictConstructGetItem, NoOptimization_DictModified) {
@@ -216,14 +137,10 @@ TEST(EliminateDictConstructGetItem, NoOptimization_DictModified) {
         %4 : Tensor = aten::__getitem__(%3, %2)
         return (%4)
     )IR";
-
-  auto graph = makeGraph(src);
-
-  EliminateDictConstructGetItem(graph);
-  graph->lint();
-
+  const std::vector<c10::IValue> args{at::randn({2, 2}), at::randn({2, 2})};
   // The return value should not change.
-  testing::FileCheck().check("return (%4)")->run(*graph);
+  const std::string expected_string = "return (%4)";
+  TestDictConstructGetItem(src, args, expected_string);
 }
 
 } // namespace jit

@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
+#include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
 namespace jit {
@@ -206,6 +209,29 @@ bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
   return (a - b).abs().max().item<float>() == 0.f;
 }
 
+bool exactlyEqual(const IValue& a, const IValue& b) {
+  if (a.isTensor() && b.isTensor()) {
+    return exactlyEqual(a.toTensor(), b.toTensor());
+
+  } else if (a.isTuple() && b.isTuple()) {
+    auto lhs = a.toTuple()->elements();
+    auto rhs = b.toTuple()->elements();
+    if (lhs.size() != rhs.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < lhs.size(); i++) {
+      if (!exactlyEqual(lhs[i], rhs[i])) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor input,
     at::Tensor hx,
@@ -247,6 +273,43 @@ RegisterOperators reg({
         aliasAnalysisFromSchema()),
 });
 } // namespace
+
+c10::IValue runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<c10::IValue>& args) {
+  auto graph_exec = GraphExecutor(graph, "");
+
+  Stack stack(args);
+  graph_exec.run(stack);
+
+  if (stack.size() == 1) {
+    return stack[0];
+  }
+  return c10::ivalue::Tuple::create(stack);
+}
+
+std::shared_ptr<Graph> makeGraph(const std::string& ir_src) {
+  auto graph = std::make_shared<Graph>();
+  parseIR(ir_src, graph.get());
+  return graph;
+}
+
+void testGraphPass(
+    const std::string& src,
+    const std::vector<c10::IValue>& args,
+    const std::string& expected_string,
+    std::function<void(std::shared_ptr<Graph>&)> op) {
+  auto graph = makeGraph(src);
+  auto expected = runGraph(graph, args);
+
+  op(graph);
+  graph->lint();
+
+  auto actual = runGraph(graph, args);
+  EXPECT_TRUE(exactlyEqual(expected, actual));
+
+  testing::FileCheck().check(expected_string)->run(*graph);
+}
 
 } // namespace jit
 } // namespace torch

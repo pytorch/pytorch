@@ -195,6 +195,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/eliminate_dict_construct_getitem.cpp",
+    "torch/csrc/jit/passes/eliminate_tuple_construct_unpack.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",

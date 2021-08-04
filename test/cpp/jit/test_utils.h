@@ -89,12 +89,27 @@ bool almostEqual(const at::Tensor& a, const at::Tensor& b);
 
 bool exactlyEqual(const at::Tensor& a, const at::Tensor& b);
 
+// Compare tensors or tuples of tensors
+bool exactlyEqual(const IValue& a, const IValue& b);
+
 std::pair<at::Tensor, at::Tensor> lstm(
     at::Tensor input,
     at::Tensor hx,
     at::Tensor cx,
     at::Tensor w_ih,
     at::Tensor w_hh);
+
+c10::IValue runGraph(
+    std::shared_ptr<Graph> graph,
+    const std::vector<c10::IValue>& args);
+
+std::shared_ptr<Graph> makeGraph(const std::string& ir_src);
+
+void testGraphPass(
+    const std::string& src,
+    const std::vector<c10::IValue>& args,
+    const std::string& expected_string,
+    std::function<void(std::shared_ptr<Graph>&)> o);
 
 } // namespace jit
 } // namespace torch
