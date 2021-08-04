@@ -119,9 +119,14 @@ class TRTModule(torch.nn.Module):
             idx = self.engine.get_binding_index(input_name)
             bindings[idx] = contiguous_inputs[i].data_ptr()
 
-        self.context.execute_async(
-            batch_size, bindings, torch.cuda.current_stream().cuda_stream
-        )
+        if self.engine.has_implicit_batch_dimension:
+            self.context.execute_async(
+                batch_size, bindings, torch.cuda.current_stream().cuda_stream
+            )
+        else:
+            self.context.execute_async_v2(
+                bindings, torch.cuda.current_stream().cuda_stream
+            )
 
         if len(outputs) == 1:
             return outputs[0]
@@ -288,4 +293,4 @@ class TRTInterpreter(BaseTRTInterpreter):
             module = copy.deepcopy(module)
         module = module.cpu().float()
         module = NormalizeArgs(module).transform()
-        super().__init__(module, input_specs, logger_level)
+        super().__init__(module, input_specs, logger_level=logger_level)
