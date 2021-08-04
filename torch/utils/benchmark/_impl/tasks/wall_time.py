@@ -31,6 +31,7 @@ class TimeitTask(task_base.TaskBase):
             self._maybe_timer_arg = ""
 
         elif self._timer in (None, timeit.default_timer):
+            self.worker.run("import timeit")
             self._maybe_timer_arg = "timer=timeit.default_timer,"
 
         else:
