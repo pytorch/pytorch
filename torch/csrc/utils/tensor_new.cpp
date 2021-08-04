@@ -277,6 +277,7 @@ Tensor internal_new_from_data(
     // what the extensibility mechanism for this function (internal_new_from_data)
     // looks like for mode-based dispatch keys and C++ tensor extensions.
     c10::impl::ExcludeDispatchKeyGuard functorch_guard(c10::DispatchKey::FuncTorchDynamicLayerBackMode);
+    c10::impl::ExcludeDispatchKeyGuard pythonmode_guard(c10::DispatchKey::PythonMode);
     tensor = at::empty(sizes, at::initialTensorOptions().dtype(inferred_scalar_type).pinned_memory(pin_memory));
     recursive_store(
         (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,

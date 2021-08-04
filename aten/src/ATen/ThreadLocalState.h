@@ -6,6 +6,7 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
+#include <ATen/PythonMode.h>
 
 namespace at {
 
@@ -34,6 +35,8 @@ class TORCH_API ThreadLocalState {
 
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;
+
+  optional<impl::TorchDispatchOverrideImpl> torch_dispatch_override_;
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;

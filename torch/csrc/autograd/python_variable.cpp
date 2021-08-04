@@ -82,7 +82,7 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj) {
 };
 
 c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack);
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack, const TorchDispatchOverride* dispatch_override);
 
 class PyInterpreterHolder {
  public:
@@ -1475,7 +1475,18 @@ bool isPythonTensor(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
 }
 
-void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+// NOTE [Why const TorchDispatchObject* in dispatch_fn]
+// universal_dispatch_override is an optional argument. Please pass nullptr
+// if there is no value, otherwise, please pass a pointer.
+// concrete_dispatch_fn does not take ownership of the pointer; please make sure
+// it stays alive throughout the call to concrete_dispatch_fn
+//
+// The into-the-weeds reason why it has to look like this is because
+// PyInterpreter is defined in TensorImpl, it cannot depend on Tensor
+// so we go through a virtual call on TorchDispatchObject to get a Tensor.
+// Because we need a virtual call, we can't use optional<TorchDispatchOverride>,
+// so we're using a const pointer to represent an optional argument.
+void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHandle& op, torch::jit::Stack* stack, const TorchDispatchOverride* dispatch_override) {
   const auto& schema = op.schema();
   const auto num_returns = schema.returns().size();
 
@@ -1530,25 +1541,31 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
 
   for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
     auto& ivalue = arguments[idx];
-    // Search for Tensors (as they may have the torch functions we need)
-    if (ivalue.isTensor()) {
-      const auto& tensor = ivalue.toTensor();
-      if (isPythonTensor(tensor)) {
-        overloaded_args.emplace_back(py::cast(tensor));
-      }
-    } else if (ivalue.isList()) {
-      const auto& list = ivalue.toListRef();
-      for (int64_t jdx = 0; jdx < list.size(); jdx++) {
-        const auto& nv = list[jdx];
-        if (nv.isTensor()) {
-          const auto& tensor = nv.toTensor();
-          if (isPythonTensor(tensor)) {
-            overloaded_args.emplace_back(py::cast(tensor));
+    if (dispatch_override == nullptr) {
+      // Search for Tensors (as they may have the torch functions we need)
+      if (ivalue.isTensor()) {
+        const auto& tensor = ivalue.toTensor();
+        if (isPythonTensor(tensor)) {
+          overloaded_args.emplace_back(py::cast(tensor));
+        }
+      } else if (ivalue.isList()) {
+        const auto& list = ivalue.toListRef();
+        for (int64_t jdx = 0; jdx < list.size(); jdx++) {
+          const auto& nv = list[jdx];
+          if (nv.isTensor()) {
+            const auto& tensor = nv.toTensor();
+            if (isPythonTensor(tensor)) {
+              overloaded_args.emplace_back(py::cast(tensor));
+            }
           }
         }
       }
     }
     PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(ivalue)).release().ptr());
+  }
+  if (dispatch_override) {
+    TORCH_INTERNAL_ASSERT(isPythonTensor(dispatch_override->tensor()));
+    overloaded_args.emplace_back(py::cast(dispatch_override->tensor()));
   }
 
   auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(

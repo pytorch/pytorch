@@ -522,6 +522,23 @@ C10_ALWAYS_INLINE
         else:
             assert_never(self.target)
 
+# Generates RegisterPythonMode.cpp, a series of kernels which provide
+# overrides of all factory functions for PythonMode. A factory function is defined
+# as an operator that returns a Tensor but accepts no Tensor arguments.
+@dataclass(frozen=True)
+class ComputePythonMode:
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> Optional[str]:
+        name = native.name(f.func)
+        native_sig = NativeSignature(f.func)
+        for arg in native_sig.arguments():
+            if 'Tensor' in arg.type:
+                return None
+        if native_sig.returns_type().cpp_type() != "at::Tensor":
+            return None
+        return f"""m.impl("aten::{f.func.name}", torch::CppFunction::makeFromBoxedFunction<&at::impl::dispatchFactoryToPython>());"""
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                       YAML CODE GENERATION
@@ -1095,6 +1112,11 @@ def main() -> None:
             list(mapMaybe(ComputeBackendSelect(Target.DEFINITION, selector), native_functions)),
         'backend_select_function_registrations':
             list(mapMaybe(ComputeBackendSelect(Target.REGISTRATION, selector), native_functions)),
+    })
+
+    cpu_fm.write('RegisterPythonMode.cpp', lambda: {
+        'python_mode_registrations':
+            list(mapMaybe(ComputePythonMode(), native_functions))
     })
 
     cpu_fm.write('NativeMetaFunctions.h', lambda: {

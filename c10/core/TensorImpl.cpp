@@ -40,7 +40,8 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 static void noop_dispatch_fn(
     const PyInterpreter*,
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    const TorchDispatchOverride* dispatch_override) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");

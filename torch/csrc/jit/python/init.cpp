@@ -96,6 +96,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
+#include <ATen/PythonMode.h>
 
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
@@ -152,6 +153,8 @@ void initJITBindings(PyObject* module) {
       m, "IODescriptor"); // NOLINT(bugprone-unused-raii)
 
   m.def("_jit_init", loadPythonClasses)
+      .def("_python_mode_set_torch_dispatch", at::impl::PythonMode::set_torch_dispatch_with_tensor)
+      .def("_python_mode_reset_torch_dispatch", at::impl::PythonMode::reset_torch_dispatch)
       .def(
           "_jit_debug_fuser_num_cached_kernel_specs",
           torch::jit::fuser::debugNumCachedKernelSpecs)

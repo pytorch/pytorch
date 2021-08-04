@@ -1,6 +1,7 @@
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_map
+from torch.utils._torch_dispatch import enable_factory_dispatch
 
 from typing import Iterator, List
 import logging
@@ -49,9 +50,12 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
-        # TODO: handle kwargs
-        assert not kwargs
-        rs = tree_map(wrap, func(*tree_map(unwrap, args)))
+        # no_dispatch is only needed if you use enable_factory_dispatch.
+        # It prevents factory functions from going into infinite recursion.
+        with no_dispatch():
+            args = tree_map(unwrap, args)
+            kwargs = tree_map(unwrap, kwargs)
+            rs = tree_map(wrap, func(*args, **kwargs))
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, rs)
         return rs
 
@@ -251,6 +255,28 @@ $3 = input('grad_output')
 $4 = torch._ops.aten.mul($3, tensor(2))
 $5 = torch._ops.aten.mul($4, $0)
 $6 = torch._ops.aten.add_($1, $5)''')
+
+    def test_enable_factory_dispatch_basic(self) -> None:
+        reference = LoggingTensor(torch.empty([]))
+        with enable_factory_dispatch(reference):
+            z = torch.empty([])
+            self.assertTrue(isinstance(z, LoggingTensor))
+
+    def test_enable_factory_dispatch_respects_no_dispatch(self) -> None:
+        reference = LoggingTensor(torch.empty([]))
+        with enable_factory_dispatch(reference):
+            z = torch.ones([2, 3])
+            self.assertTrue(isinstance(z, LoggingTensor))
+            with no_dispatch():
+                expected = torch.ones([2, 3])
+                self.assertEqual(z.elem, expected)
+
+    def test_nested_enable_factory_dispatch(self) -> None:
+        reference = LoggingTensor(torch.empty([]))
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            with enable_factory_dispatch(reference):
+                with enable_factory_dispatch(reference):
+                    pass
 
 
 if __name__ == '__main__':

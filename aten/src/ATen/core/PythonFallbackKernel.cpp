@@ -15,7 +15,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     if (ivalue.isTensor()) {
       auto* interpreter = ivalue.unsafeToTensorImpl()->pyobj_interpreter();
       if (interpreter) {
-        interpreter->dispatch(op, stack);
+        interpreter->dispatch(op, stack, nullptr);
         return;
       }
     } else if (ivalue.isTensorList()) {
@@ -24,7 +24,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
       for (const auto& nv : ivalue.toListRef()) {
         auto* interpreter = nv.unsafeToTensorImpl()->pyobj_interpreter();
         if (interpreter) {
-          interpreter->dispatch(op, stack);
+          interpreter->dispatch(op, stack, nullptr);
           return;
         }
       }
