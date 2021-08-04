@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (expectedFailure, onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -70,15 +70,24 @@ class DecorateInfo(object):
 
 
 class SkipInfo(DecorateInfo):
-    """Describes which test, or type of tests, should be skipped when testing
-       an operator. Any test that matches all provided arguments will be skipped.
-       The skip will only be checked if the active_if argument is True."""
+    """Information about which tests to skip."""
 
-    def __init__(self, cls_name=None, test_name=None, *,
-                 device_type=None, dtypes=None, active_if=True):
-        super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
-                         test_name=test_name, device_type=device_type, dtypes=dtypes,
-                         active_if=active_if)
+    def __init__(
+            self, cls_name=None, test_name=None, *, device_type=None, dtypes=None, active_if=True,
+            expected_failure=True):
+        """
+        Args:
+            cls_name: the name of the test class to skip
+            test_name: the name of the test within the test class to skip
+            device_type: the devices for which to skip the tests
+            dtypes: the dtypes for which to skip the tests
+            active_if: whether tests matching the above arguments should be skipped
+            expected_failure: whether to assert that skipped tests fail
+        """
+        decorator = expectedFailure(device_type) if expected_failure else skipIf(True, "Skipped!")
+        super().__init__(decorators=decorator, cls_name=cls_name, test_name=test_name,
+                         device_type=device_type, dtypes=dtypes, active_if=active_if)
+
 
 class SampleInput(object):
     """Represents sample inputs to a function."""
@@ -3973,9 +3982,9 @@ def skips_mvlgamma(skip_redundant=False):
     if skip_redundant:
         # Redundant tests
         skips = skips + (  # type: ignore[assignment]
-            SkipInfo('TestGradients'),
-            SkipInfo('TestJit'),
-            SkipInfo('TestCommon'),
+            SkipInfo('TestGradients', expected_failure=False),
+            SkipInfo('TestJit', expected_failure=False),
+            SkipInfo('TestCommon', expected_failure=False),
         )
     return skips
 
@@ -5104,7 +5113,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestGradients', 'test_method_grad',
                                 device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
-                                dtypes=[torch.cdouble]),
+                                dtypes=[torch.cdouble], device_type='cpu'),
                    )),
     OpInfo('add',
            # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
@@ -5188,6 +5197,8 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
                # https://github.com/pytorch/pytorch/issues/55907
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),
+               # FIXME: Failing with difference of 0.37783050537109375
+               SkipInfo('TestCommon', 'test_reference_testing', device_type='cuda'),
            ),
            sample_inputs_func=sample_inputs_addbmm),
     OpInfo('baddbmm',
@@ -5237,9 +5248,6 @@ op_db: List[OpInfo] = [
     OpInfo('mv',
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
-           skips=(
-               # bmm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),),
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
@@ -5249,11 +5257,6 @@ op_db: List[OpInfo] = [
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_inplace_autograd=False,
            supports_forward_ad=True,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/50747
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
-           ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('addcmul',
@@ -5338,10 +5341,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cuda', dtypes=[torch.cdouble],
                                 active_if=IS_WINDOWS),
-                       # Complex gradcheck tests asinh at points 0 + ix for x > 1 which are points
-                       # where asinh is not differentiable
                        SkipInfo('TestGradients', 'test_forward_mode_AD',
-                                dtypes=complex_types()),
+                                device_type='cuda', dtypes=[torch.cdouble]),
                    )),
     UnaryUfuncInfo('atan',
                    aliases=('arctan', ),
@@ -6162,10 +6163,7 @@ op_db: List[OpInfo] = [
            supports_out=True,
            sample_inputs_func=sample_inputs_linalg_lstsq,
            supports_autograd=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           )),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],),
     OpInfo('linalg.matrix_power',
            aliases=('matrix_power',),
            aten_name='linalg_matrix_power',
@@ -6228,11 +6226,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_vector_norm,
-           aten_name='linalg_vector_norm',
-           skips=(
-               # linalg.vector_norm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           aten_name='linalg_vector_norm',),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -6321,8 +6315,6 @@ op_db: List[OpInfo] = [
                        # torch.float32
                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
                                 dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
-                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                dtypes=all_types_and_complex_and(torch.half, torch.bfloat16)),
                    )),
     OpInfo('lt',
            aliases=('less',),
@@ -6353,12 +6345,7 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            supports_out=True,
            sample_inputs_func=sample_inputs_lu_unpack,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # cuda gradchecks are slow
-               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),
-           )),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -6389,8 +6376,6 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
-               # matmul does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestCommon', 'test_conj_view', device_type='cpu'),
            )),
     OpInfo('max',
@@ -6405,10 +6390,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
-           supports_forward_ad=True,
-           skips=(
-               # max does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           supports_forward_ad=True,),
     OpInfo('max',
            op=torch.max,
            variant_test_name='reduction_no_dim',
@@ -6445,7 +6427,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: review with var_mean tests in test_autograd.py
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -6464,7 +6446,7 @@ op_db: List[OpInfo] = [
                # TODO: FIXME: complex inputs requiring grad error in forward
                SkipInfo('TestCommon', 'test_dtypes'),
                # TODO: fix along with var_mean autograd tests
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                SkipInfo('TestGradients', 'test_fn_grad'),
                SkipInfo('TestGradients', 'test_fn_gradgrad'),
                SkipInfo('TestGradients', 'test_forward_mode_AD'))),
@@ -6480,11 +6462,7 @@ op_db: List[OpInfo] = [
            variant_test_name='reduction_with_dim',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_max_min_reduction_with_dim,
-           supports_forward_ad=True,
-           skips=(
-               # min does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           supports_forward_ad=True,),
     OpInfo('min',
            op=torch.min,
            variant_test_name='reduction_no_dim',
@@ -6550,11 +6528,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_aminmax,
-           skips=(
-               # FIXME: aminmax does not check for safe casting to output
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           sample_inputs_func=sample_inputs_aminmax,),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -6608,11 +6582,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-           sample_inputs_func=sample_inputs_topk,
-           skips=(
-               # Topk is not raising a warning when the out is resized
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           sample_inputs_func=sample_inputs_topk,),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
@@ -6668,11 +6638,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            assert_autodiffed=True,
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_mm,
-           skips=(
-               # mm does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
-           )),
+           sample_inputs_func=sample_inputs_mm,),
     OpInfo('mode',
            op=torch.mode,
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -6751,9 +6717,7 @@ op_db: List[OpInfo] = [
     OpInfo('float_power',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
-           supports_forward_ad=True,
-           skips=(
-               SkipInfo('TestMathBits', 'test_conj_view', device_type='cuda'),),),
+           supports_forward_ad=True,),
     OpInfo('prod',
            dtypes=all_types_and_complex_and(torch.bool),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
@@ -6990,8 +6954,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_rbinops,
            supports_out=False,
            supports_forward_ad=True,
-           skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit',),),
+           skips=(SkipInfo('TestJit', 'test_variant_consistency_jit',),),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::pow'],),
     OpInfo('__rsub__',
@@ -7007,12 +6970,6 @@ op_db: List[OpInfo] = [
            variant_test_name='rsub_tensor',
            supports_out=False,
            supports_inplace_autograd=False,
-           skips=(
-               # Reference: https://github.com/pytorch/pytorch/issues/53797
-               # JIT doesn't understand complex literals
-               SkipInfo('TestJit', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble]),
-           ),
            sample_inputs_func=partial(sample_inputs_rsub, variant='tensor'),),
     OpInfo('rsub',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
@@ -7023,8 +6980,8 @@ op_db: List[OpInfo] = [
            skips=(
                # Reference: https://github.com/pytorch/pytorch/issues/53797
                # JIT doesn't understand complex literals
-               SkipInfo('TestJit', 'test_variant_consistency_jit',
-                        dtypes=all_types_and_complex_and(torch.bfloat16, torch.half)),),
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
            assert_autodiffed=True,),
     OpInfo('select',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -7440,9 +7397,9 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradients', expected_failure=False),
+                       SkipInfo('TestJit', expected_failure=False),
+                       SkipInfo('TestCommon', expected_failure=False),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard'),
@@ -7461,9 +7418,9 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradients', expected_failure=False),
+                       SkipInfo('TestJit', expected_failure=False),
+                       SkipInfo('TestCommon', expected_failure=False),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -7483,9 +7440,9 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradients', expected_failure=False),
+                       SkipInfo('TestJit', expected_failure=False),
+                       SkipInfo('TestCommon', expected_failure=False),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -7506,9 +7463,9 @@ op_db: List[OpInfo] = [
                    sample_inputs_func=sample_inputs_polygamma,
                    skips=(
                        # Redundant tests
-                       SkipInfo('TestGradients'),
-                       SkipInfo('TestJit'),
-                       SkipInfo('TestCommon'),
+                       SkipInfo('TestGradients', expected_failure=False),
+                       SkipInfo('TestJit', expected_failure=False),
+                       SkipInfo('TestCommon', expected_failure=False),
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -7917,9 +7874,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_tensordot,
            skips=(
-               # Currently failing due to an INTERNAL_ASSERT_FAILED error.
-               # Reference: https://github.com/pytorch/pytorch/issues/56314
-               SkipInfo("TestJit", "test_variant_consistency_jit", dtypes=[torch.float32]),
                # Skip operator schema test because this is a functional and not an operator.
                # Reference: https://github.com/pytorch/pytorch/issues/54574
                SkipInfo('TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
@@ -7957,8 +7911,6 @@ op_db: List[OpInfo] = [
                                                   torch.complex64: 1e-1,
                                                   torch.bfloat16: 1e-2}),),
                    skips=(
-                       # TODO: FIXME: sigmoid fails on complex inputs that require grad
-                       SkipInfo('TestCommon', 'test_dtypes'),
                        # Reference: https://github.com/pytorch/pytorch/issues/56012
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cuda', dtypes=[torch.complex64]),
@@ -8118,13 +8070,7 @@ op_db: List[OpInfo] = [
     # for `norm` based on the code-paths and JIT support.
     OpInfo('norm',
            sample_inputs_func=sample_inputs_norm,
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           skips=(
-               # RuntimeError not raised :
-               # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
-               SkipInfo('TestCommon', 'test_out'),
-           )
-           ),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),),
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
