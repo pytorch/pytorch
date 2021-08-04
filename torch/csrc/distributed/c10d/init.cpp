@@ -500,8 +500,7 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#ifdef NCCL_HAS_AVG
       .value("AVG", ::c10d::ReduceOp::AVG)
 #endif
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)

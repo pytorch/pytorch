@@ -51,8 +51,7 @@ const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
     {ReduceOp::PRODUCT, ncclProd},
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#ifdef NCCL_HAS_AVG
     {ReduceOp::AVG, ncclAvg},
 #endif
 };
@@ -91,8 +90,7 @@ ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
         // represent a bool (see ncclDataType mapping).
         return ncclMax;
       }
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#ifdef NCCL_HAS_AVG
       if (reduceOp == ReduceOp::AVG) {
         TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
       }
