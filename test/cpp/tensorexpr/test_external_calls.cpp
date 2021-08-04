@@ -19,7 +19,6 @@ namespace torch {
 namespace jit {
 using namespace torch::jit::tensorexpr;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_float) {
   KernelScope kernel_scope;
 
@@ -83,7 +82,6 @@ TEST(ExternalCall, Conv2d_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_int) {
   // A similar test, but now using kInt tensors
   KernelScope kernel_scope;
@@ -148,7 +146,6 @@ TEST(ExternalCall, Conv2d_int) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Conv2d_nobias_noargs) {
   KernelScope kernel_scope;
 
@@ -196,7 +193,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Addmm_float) {
   KernelScope kernel_scope;
 
@@ -253,7 +249,6 @@ TEST(ExternalCall, Addmm_float) {
 
 #ifdef USE_XNNPACK
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Prepacked_Linear_float) {
   using namespace at::native::xnnpack;
 
@@ -319,7 +314,6 @@ TEST(ExternalCall, Prepacked_Linear_float) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Prepacked_Conv2d_float) {
   using namespace at::native::xnnpack;
 
@@ -409,7 +403,6 @@ TEST(ExternalCall, Prepacked_Conv2d_float) {
 
 #endif // USE_XNNPACK
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, BinaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor, at::Tensor)>;
@@ -485,7 +478,6 @@ TEST(ExternalCall, BinaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, UnaryFloat) {
   KernelScope kernel_scope;
   using TensorFunc = std::function<at::Tensor(at::Tensor)>;
@@ -566,7 +558,6 @@ TEST(ExternalCall, UnaryFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, ComputeInterop) {
   // This test verifies that Tensors using external calls can be used by and can
   // use Tensors built with Compute API.
@@ -660,7 +651,6 @@ TEST(ExternalCall, ComputeInterop) {
   ASSERT_TRUE(at::allclose(nnc_result, ref));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ExternalCall, Inlining) {
   // This test verifies that Tensors using external calls can be used by and
   // can use Tensors built with Compute API.

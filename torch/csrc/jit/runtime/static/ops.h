@@ -128,6 +128,7 @@ inline void fastResizeToZero(at::Tensor& t) {
 
 // check if an op has an out variant registered in Static Runtime
 bool opIsRegistered(const c10::Symbol& op_name);
+bool disableUnsafeMathOp(const char* op_name);
 // check if Static Runtime can run an op natively.
 // prim ops that are implemented directly in the jit interpreter are implemented
 // as native ops in Static Runtime
@@ -138,6 +139,8 @@ bool isOptimizableContainerType(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
+
+bool hasVarArgs(Node* n);
 
 inline std::string PrintNode(const Node* node) {
   std::ostringstream ss;
