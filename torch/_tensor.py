@@ -3,6 +3,7 @@ import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
 import warnings
+import copyreg
 
 import torch
 import torch._C as _C
@@ -140,9 +141,7 @@ class Tensor(torch._C._TensorBase):
         if getstate_fn:
             state = getstate_fn()
         else:
-            import copyreg
-            assert hasattr(copyreg, "_slotnames")  # For mypy
-            slots_to_save = copyreg._slotnames(self.__class__)
+            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
             if slots_to_save:
                 state = (self.__dict__, {name: getattr(self, name) for name in slots_to_save if hasattr(self, name)})
             else:
