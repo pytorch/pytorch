@@ -48,7 +48,7 @@ const auto list_unpack_script = R"JIT(
     c = [a, b]
     x, y = c
     z = x + y
-    return z
+    return z.clone()
 )JIT";
 
 const auto list_unpack_script_2 = R"JIT(
