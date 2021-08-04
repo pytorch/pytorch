@@ -256,6 +256,7 @@ class GroupByIterDataPipe(IterDataPipe):
             assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
+        self.wrapper_class = DataChunk
 
     def _remove_biggest_key(self, buffer_elements, buffer_size):
         biggest_key = None
@@ -284,14 +285,14 @@ class GroupByIterDataPipe(IterDataPipe):
             key = self.group_key_fn(x)
 
             if self.group_size is not None and self.group_size == len(buffer_elements[key]):
-                yield buffer_elements[key]
+                yield self.wrapper_class(buffer_elements[key])
                 buffer_size -= len(buffer_elements[key])
                 del buffer_elements[key]
 
             if buffer_size == self.buffer_size:
                 (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
                 if result_to_yield is not None:
-                    yield result_to_yield
+                    yield self.wrapper_class(result_to_yield)
 
             buffer_elements[key].append(x)
             buffer_size += 1
@@ -299,7 +300,7 @@ class GroupByIterDataPipe(IterDataPipe):
         while buffer_size:
             (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
             if result_to_yield is not None:
-                yield result_to_yield
+                yield self.wrapper_class(result_to_yield)
 
 
 @functional_datapipe('group_by_key')

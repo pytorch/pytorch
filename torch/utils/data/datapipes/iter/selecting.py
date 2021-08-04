@@ -45,14 +45,21 @@ class FilterIterDataPipe(MapIterDataPipe):
         if nesting_level == 0:
             return self._returnIfTrue(data)
         elif nesting_level > 0:
-            if not isinstance(data, DataChunk):
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
+                return data.__class__(list(result))
+            elif isinstance(data, list):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
+                return list(result)
+            else:
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
-            return data.__class__(list(result))
         else:  # Handling nesting_level == -1
             if isinstance(data, DataChunk):
                 result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
                 return data.__class__(list(result))
+            elif isinstance(data, list):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
+                return list(result)
             else:
                 return self._returnIfTrue(data)
 
