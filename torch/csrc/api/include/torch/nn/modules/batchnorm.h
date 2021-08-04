@@ -144,8 +144,7 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
@@ -174,8 +173,7 @@ TORCH_MODULE(BatchNorm1d);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
@@ -204,8 +202,7 @@ TORCH_MODULE(BatchNorm2d);
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual void _check_input_dim(const Tensor& input) override;
+   void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;

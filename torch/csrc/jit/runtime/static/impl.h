@@ -86,6 +86,7 @@ class TORCH_API StaticModule {
 
   explicit StaticModule(
       const torch::jit::Module& m,
+      bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
   typedef enum {
@@ -406,6 +407,10 @@ class TORCH_API ProcessedNode {
 
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
+  }
+
+  bool has_native_op() const {
+    return static_cast<bool>(native_fn_);
   }
 
   bool verify_outputs_not_overlapping_with_immutable_inputs() const;
