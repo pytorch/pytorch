@@ -191,7 +191,7 @@ test_aten() {
       mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
       TEST_BASE_DIR="$TORCH_TEST_DIR"
     else
-      echo "Running test with the build folder"
+      echo "Running test with the build folder 3"
       TEST_BASE_DIR="$BUILD_BIN_DIR"
     fi
 
