@@ -35,6 +35,11 @@ TEST(ExceptionTest, TORCH_INTERNAL_ASSERT_DEBUG_ONLY) {
 #endif
 }
 
+TEST(ExceptionTest, CUDA_KERNEL_ASSERT) {
+  // This function always throws even in NDEBUG mode
+  ASSERT_DEATH_IF_SUPPORTED({ CUDA_KERNEL_ASSERT(false); }, "Assert");
+}
+
 TEST(WarningTest, JustPrintWarning) {
   TORCH_WARN("I'm a warning");
 }
