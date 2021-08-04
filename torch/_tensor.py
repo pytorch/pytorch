@@ -30,12 +30,19 @@ def _wrap_type_error_to_not_implemented(f):
             return NotImplemented
     return wrapped
 
-def _rebuild_from_type(func, type, args, dict):
-    if type is Tensor:
+def _rebuild_from_type(func, new_type, args, state):
+    if new_type is Tensor:
         return func(*args)
 
-    ret = func(*args).as_subclass(type)
-    ret.__dict__ = dict
+    ret = func(*args).as_subclass(new_type)
+    # Tensor does define __setstate__ even though it doesn't define
+    # __getstate__. So only use __setstate__ if it is NOT the one defined
+    # on Tensor
+    if getattr(ret.__class__, "__setstate__", Tensor.__setstate__) is not Tensor.__setstate__:
+        ret.__setstate__(state)
+    else:
+        for k, v in state.items():
+            setattr(ret, k, v)
     return ret
 
 
@@ -103,7 +110,24 @@ class Tensor(torch._C._TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
-        return (_rebuild_from_type, (func, type(self), args, self.__dict__))
+        # Get the state of the python subclass
+        # This loosely mimicks the function on the object class but since Tensor do not inherit
+        # from it, we cannot call that function directly
+        # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
+        if hasattr(self, "__getstate__"):
+            state = self.__getstate__()
+        else:
+            # Contrary to the cpython function, we unify dict and slots into a single dictionary
+            # instead of a tuple of two dictionaries
+            if hasattr(self.__class__, "__slotnames__"):
+                attr_to_save = self.__class__.__slotnames__
+            else:
+                import copyreg
+                attr_to_save = copyreg._slotnames(self.__class__)
+            # Tensors always have a __dict__
+            attr_to_save += ["__dict__"]
+            state = {name: getattr(self, name) for name in attr_to_save if hasattr(self, name)}
+        return (_rebuild_from_type, (func, type(self), args, state))
 
     def _reduce_ex_internal(self, proto):
         check_serializing_named_tensor(self)
