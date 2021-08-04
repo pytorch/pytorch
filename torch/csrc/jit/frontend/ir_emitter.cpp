@@ -1974,7 +1974,7 @@ struct to_ir {
     // a module which returns a Tensor,
     // we do not push a new environment frame because if we did all intermediary
     // values would have to subtype the input type.
-    for (int64_t i = 0; i < len; ++i) {
+    for (const auto i : c10::irange(len)) {
       auto index =
           materializeConstant(i, *method.graph(), loc, integral_constants);
       auto sugared_value = iterable->getitem(loc, method, index);
@@ -3838,7 +3838,7 @@ struct to_ir {
         AT_ASSERT(key_trees.size() == value_trees.size());
         std::vector<Value*> keys, values;
 
-        for (size_t i = 0; i < key_trees.size(); ++i) {
+        for (const auto i : c10::irange(key_trees.size())) {
           keys.push_back(emitExpr(Expr(key_trees[i])));
           values.push_back(emitExpr(Expr(value_trees[i])));
         }
@@ -3859,7 +3859,7 @@ struct to_ir {
         }
         AT_ASSERT(key_type != nullptr && value_type != nullptr);
 
-        for (size_t i = 0; i < keys.size(); ++i) {
+        for (const auto i : c10::irange(keys.size())) {
           std::stringstream ss;
           if (!keys[i]->type()->isSubtypeOfExt(key_type, &ss)) {
             throw ErrorReport(key_trees[i])
@@ -3897,7 +3897,7 @@ struct to_ir {
           if (type_hint) {
             TypePtr value_type_hint =
                 type_hint->expect<DictType>()->getValueType();
-            for (size_t i = 0; i < types.size(); ++i) {
+            for (const auto i : c10::irange(types.size())) {
               TORCH_CHECK(
                   types[i]->isSubtypeOf(value_type_hint),
                   "Type "
@@ -4872,7 +4872,7 @@ bool meaningfulName(const std::string& name) {
     return false;
   if (name[0] != '_')
     return true;
-  for (size_t i = 1; i < name.size(); ++i) {
+  for (const auto i : c10::irange(1, name.size())) {
     if (!isdigit(name[i]))
       return true;
   }
