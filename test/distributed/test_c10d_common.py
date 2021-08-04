@@ -256,6 +256,7 @@ class AbstractDistributedDataParallelTest(object):
     ):
         model = Net()
         device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
+        dist._DEFAULT_FIRST_BUCKET_BYTES = 1
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,

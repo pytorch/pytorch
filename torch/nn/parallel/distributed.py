@@ -630,6 +630,7 @@ class DistributedDataParallel(Module, Joinable):
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
             param_to_name_mapping,
+            dist._DEFAULT_FIRST_BUCKET_BYTES
         )
 
         self.logger = dist.Logger(self.reducer)
