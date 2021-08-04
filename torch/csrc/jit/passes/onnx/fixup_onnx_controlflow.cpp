@@ -240,7 +240,6 @@ void FixupONNXLoopNodeInputs(Node* node) {
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
-  FixupONNXSubblockOutputs(node);
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
@@ -287,6 +286,8 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(
           TensorType::create(*(output_type->scalarType()), at::kCPU, {}, {}));
     }
+    const_node->insertBefore(block->return_node());
+    uninitialized_output->replaceAllUsesWith(const_node->output());
   } else if (auto output_type = other_output->type()->cast<ListType>()) {
     TypePtr elem = output_type->getElementType();
     const_node = graph->create(::c10::onnx::SequenceEmpty, 1);
@@ -296,14 +297,43 @@ void InferShapeTypeForUninitializedOutput(
       auto onnx_type = ATenTypeToOnnxType(scalar_type);
       const_node->i_(attr::dtype, onnx_type);
       const_node->output()->setType(other_output->type());
+    } else if (elem->cast<IntType>()) {
+      auto scalar_type = at::kLong;
+      auto onnx_type = ATenTypeToOnnxType(scalar_type);
+      const_node->i_(attr::dtype, onnx_type);
+      const_node->output()->setType(other_output->type());
     } else {
       std::cerr
-          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found."
+          << "Warning: UninitializedOutput - Invalid number of elem Type of ListTensor found"
           << std::endl;
       const_node->output()->setType(other_output->type());
     }
-  }
+    const_node->insertBefore(block->return_node());
+    uninitialized_output->replaceAllUsesWith(const_node->output());
+  } else if (auto output_type = other_output->type()->cast<NoneType>()) {
+    const TypePtr& t = TensorType::createContiguous(
+        at::kLong,
+        at::kCPU,
+        {
+            0,
+        });
 
+    const_node = graph->create(::c10::onnx::Optional, 1);
+    const_node->ty_(Symbol::attr("type"), t);
+    const_node->output()->setType(OptionalType::create(t));
+    const_node->insertBefore(block->return_node());
+    uninitialized_output->replaceAllUsesWith(const_node->output());
+
+    const_node = graph->create(::c10::onnx::Optional, 1);
+    const_node->ty_(Symbol::attr("type"), t);
+    const_node->output()->setType(OptionalType::create(t));
+    const_node->insertBefore(other_output->node());
+    other_output->replaceAllUsesWith(const_node->output());
+  } else {
+    std::cerr << "Warning: Handling Uninitialized node of type "
+              << other_output->type()->repr_str() << " not supported."
+              << std::endl;
+  }
   const ParamMap empty_params_dict = {};
   ONNXShapeTypeInference(const_node, empty_params_dict, opset_version);
   const_node->insertBefore(block->return_node());
@@ -474,6 +504,25 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
   }
 }
 
+// Resolve Optional type outputs. IF output of either of blocks is Optional<Type
+// T>, and the others is <T>, set the node output type to Optional<Type T>.
+void FixupONNXIfNodeTypes(Node* node, int i) {
+  auto then_block = node->blocks().at(0);
+  auto else_block = node->blocks().at(1);
+
+  node->outputs().at(i)->setType(node->blocks().at(0)->outputs().at(i)->type());
+  if (then_block->outputs().at(i)->type() &&
+      then_block->outputs().at(i)->type()->cast<OptionalType>()) {
+    auto opt_type = then_block->outputs().at(i)->type()->cast<OptionalType>();
+    node->outputs().at(i)->setType(then_block->outputs().at(i)->type());
+  }
+  if (else_block->outputs().at(i)->type() &&
+      else_block->outputs().at(i)->type()->cast<OptionalType>()) {
+    auto opt_type = else_block->outputs().at(i)->type()->cast<OptionalType>();
+    node->outputs().at(i)->setType(opt_type);
+  }
+}
+
 std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   if (node->kind() != ::c10::onnx::If) {
     return node->outputs().vec();
@@ -482,6 +531,9 @@ std::vector<Value*> FixupONNXIfNode(Node* node, int opset_version) {
   FixupONNXSubblockOutputs(node);
   ONNXFixupUninitializedOutput(node, opset_version);
   // Copy type of block output to node output.
+  for (size_t i = 0; i < node->outputs().size(); ++i) {
+    FixupONNXIfNodeTypes(node, i);
+  }
   ONNXMergeIfBlockOutputShapes(node);
 
   GRAPH_DUMP("Graph after fixing controlflow: ", node->owningGraph());
