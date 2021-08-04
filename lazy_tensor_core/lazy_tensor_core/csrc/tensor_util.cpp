@@ -147,13 +147,6 @@ struct Caster<lazy_tensors::bfloat16> {
   }
 };
 template <>
-struct Caster<at::Half> {
-  template <typename D>
-  D cast(const at::Half& value) const {
-    return static_cast<D>(static_cast<float>(value));
-  }
-};
-template <>
 struct Caster<lazy_tensors::half> {
   template <typename D>
   D cast(const lazy_tensors::half& value) const {
@@ -270,10 +263,6 @@ struct NeedCast<at::BFloat16> {
 };
 template <>
 struct NeedCast<lazy_tensors::half> {
-  static constexpr bool value = true;
-};
-template <>
-struct NeedCast<at::Half> {
   static constexpr bool value = true;
 };
 template <>

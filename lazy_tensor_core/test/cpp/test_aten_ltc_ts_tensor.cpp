@@ -179,6 +179,30 @@ TEST_F(AtenLtcTsTensorTest, TestAdd) {
   });
 }
 
+TEST_F(AtenLtcTsTensorTest, TestAddHalf) {
+  torch::Tensor a = torch::rand({2, 2}, torch::TensorOptions(torch::kHalf));
+  torch::Tensor b = torch::rand({2, 2}, torch::TensorOptions(torch::kHalf));
+  torch::Tensor c = torch::add(a, b);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_a = CopyToDevice(a, device);
+    torch::Tensor xla_b = CopyToDevice(b, device);
+    torch::Tensor xla_c = torch::add(xla_a, xla_b);
+    AllClose(c, xla_c);
+  });
+}
+
+TEST_F(AtenLtcTsTensorTest, TestAddMixedPrecision) {
+  torch::Tensor a = torch::rand({2, 2}, torch::TensorOptions(torch::kFloat));
+  torch::Tensor b = torch::rand({2, 2}, torch::TensorOptions(torch::kHalf));
+  torch::Tensor c = torch::add(a, b);
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_a = CopyToDevice(a, device);
+    torch::Tensor xla_b = CopyToDevice(b, device);
+    torch::Tensor xla_c = torch::add(xla_a, xla_b);
+    AllClose(c, xla_c);
+  });
+}
+
 TEST_F(AtenLtcTsTensorTest, TestAddInPlace) {
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor a = torch::rand({2, 2}, torch::TensorOptions(torch::kFloat));
