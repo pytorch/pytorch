@@ -213,7 +213,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::Concat) {
+  if (n->kind() == prim::VarConcat) {
     return true;
   }
   return false;
@@ -1267,7 +1267,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
         : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::sub(in0_t, in1_t);
+      p_node->Output(0) = at::cpu::sub(in0_t, in1_t, alpha);
     } else {
       auto& out_t = p_node->Output(0).toTensor();
       fastResizeToZero(out_t);
@@ -1484,6 +1484,29 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
   };
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+  return [](ProcessedNode* p_node) {
+    const auto& size = p_node->Input(0).toIntVector();
+    const auto fill_value = p_node->Input(1).toScalar();
+    if (p_node->Output(0).isNone()) {
+      const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
+      const auto layout = p_node->Input(3).toOptional<c10::Layout>();
+      const auto device = p_node->Input(4).toOptional<c10::Device>();
+      const auto pin_memory = p_node->Input(5).toOptional<bool>();
+      p_node->Output(0) =
+          at::native::full(size, fill_value, dtype, layout, device, pin_memory);
+    } else {
+      p_node->Output(0) =
+          at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
+    }
+  };
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"))) {
@@ -1547,24 +1570,28 @@ void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
 
 } // namespace
 
-REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    const size_t num_inputs = p_node->inputs().size();
-    std::vector<at::Tensor> inputs(num_inputs - 1);
-    for (const auto i : c10::irange(num_inputs - 1)) {
-      inputs[i] = p_node->Input(i).toTensor();
-    }
-    auto dim = p_node->Input(num_inputs - 1).toInt();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cat(inputs, dim);
-    } else {
-      check_cat_no_zero_dim(inputs);
-      dim = legacy_cat_wrap_dim(dim, inputs);
-      auto& out_t = p_node->Output(0).toTensor();
-      at::native::_cat_out_cpu(inputs, dim, out_t);
-    }
-  };
-});
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarConcat,
+    prim_VarConcat,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (const auto i : c10::irange(num_inputs - 1)) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+        auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::cat(inputs, dim);
+        } else {
+          check_cat_no_zero_dim(inputs);
+          dim = legacy_cat_wrap_dim(dim, inputs);
+          auto& out_t = p_node->Output(0).toTensor();
+          at::native::_cat_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
 
 } // namespace jit
 } // namespace torch
