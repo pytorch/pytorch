@@ -159,7 +159,20 @@ async def main() -> None:
     if "linter" in options:
         linters = [options.linter]
 
-    tasks = []
+    result = CommandResult(0, "", "")
+
+    # We run the linters sequentially because the logging infrastructure for
+    # linters hasn't been fully developed yet. If we run it concurrently, users
+    # will see print statements from different linters interleaved.
+    #
+    # The semantics we need are:
+    #   - If the linters are running concurrently, buffer all requests to print
+    #     to console and flush at the end of the lint (to prevent interleaved
+    #     outputs)
+    #   - If a single linter is run, process the request to print on demand
+    #
+    # We can achieve these semantics if we have a logging infrastructure (like
+    # for example using the Python logging module)
     for linter in linters:
         # We merge user-provided options into linter options
         # This allows the user to override linter-specified defaults
@@ -175,15 +188,7 @@ async def main() -> None:
         else:
             line_filters = []
 
-        async def helper(linter, files, line_filters, linter_options):
-            result = await linter.run(files, line_filters, linter_options)
-            return linter, result
-
-        tasks.append(helper(linter, files, line_filters, linter_options))
-
-    result = CommandResult(0, "", "")
-    for task in asyncio.as_completed(tasks):
-        linter, intermediate_result = await task
+        intermediate_result = await linter.run(files, line_filters, linter_options)
         if intermediate_result.failed():
             print(color(f"fail: {linter.name}", Color.red))
             print(indent(repr(intermediate_result), 4))

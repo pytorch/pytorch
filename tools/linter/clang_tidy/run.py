@@ -205,10 +205,6 @@ def map_filenames(build_folder: str, fnames: Iterable[str]) -> List[str]:
     return [map_filename(build_folder, fname) for fname in fnames]
 
 
-def filter_default(paths: List[str]) -> Tuple[List[str], List[Dict[Any, Any]]]:
-    return paths, []
-
-
 async def run(
     files: List[str], line_filters: List[str], options: Any
 ) -> Tuple[CommandResult, List[ClangTidyWarning]]:
@@ -241,12 +237,16 @@ async def run(
     if options.dry_run:
         log(result)
     elif result.failed():
-        # If you change this message, update the error checking logic in
-        # .github/workflows/lint.yml
         msg = "Warnings detected!"
-        log(msg)
-        log("Summary:")
+        result.stdout += (
+            f"\n{msg}"
+            "\nSummary:"
+        )
         for w in warnings:
-            log(str(w))
+            result.stdout += f"\n{str(w)}"
+
+    # Reset stderr because clang-tidy outputs logs with very little signal to
+    # noise like warning suppressions
+    result.stderr = ""
 
     return result, warnings

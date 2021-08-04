@@ -84,7 +84,7 @@ class ClangTidy(Linter):
         compile_commands_dir="build",
         dry_run=None,
         quiet=False,
-        config_file=".clang-tidy-oss",
+        config_file=".clang-tidy",
         print_include_paths=False,
         include_dir=["/usr/lib/llvm-11/include/openmp"] + clang_search_dirs(),
         suppress_diagnostics=False,
@@ -146,9 +146,8 @@ class ClangTidy(Linter):
         )
         parser.add_argument(
             "--disable-progress-bar",
-            action="store_true",
             default=self.options.disable_progress_bar,
-            help="Disable the progress bar",
+            help="Disable progress bar (only works on linters that support this feature)",
         )
         parser.add_argument(
             "--extra_args",
@@ -160,7 +159,10 @@ class ClangTidy(Linter):
 
     async def run(self, files, line_filters=None, options=options) -> CommandResult:
         if not pathlib.Path("build").exists():
-            generate_build_files()
+            print("Generating build files")
+            result = await generate_build_files()
+            if result.failed():
+                return result
 
         result, _ = await run(files, line_filters, options)
 

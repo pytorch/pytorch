@@ -103,4 +103,12 @@ class ClangFormat(Linter):
 
             result = sum(results, result)
 
+        if result.failed():
+            result.stdout += (
+                "\nclang-format failures found! Run:\n"
+                "   $ tools/linter/lint.py clang-format\n"
+                "to fix this error.\n"
+                "For more info, see: https://github.com/pytorch/pytorch/wiki/clang-format"
+            )
+
         return result

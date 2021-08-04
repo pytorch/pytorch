@@ -51,7 +51,7 @@ class ProgressMeter:
         self._move_to_next_line = "\n"
 
         if self.disable_progress_bar:
-            log(start_msg)
+            print(start_msg)
         else:
             self._write(
                 start_msg
