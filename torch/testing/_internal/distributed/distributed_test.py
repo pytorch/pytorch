@@ -5012,6 +5012,17 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_comm_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"),
             )
+            # Test host-side times are roughly in the order that we expect
+            fwd_host_side_time = ddp_logging_data.get("forward_compute_time_start")
+            bwd_comp_start_host_side_time = ddp_logging_data.get("backward_compute_time_start")
+            bwd_comp_end_host_side_time = ddp_logging_data.get("backward_compute_time_end")
+            bwd_comm_start_host_side_time = ddp_logging_data.get("backward_comm_time_start")
+            bwd_comm_end_host_side_time = ddp_logging_data.get("backward_comm_time_end")
+            self.assertGreaterEqual(bwd_comm_end_host_side_time, bwd_comm_start_host_side_time)
+            self.assertGreaterEqual(bwd_comm_start_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_end_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
+
             # test larger net with mixed data types, verify multiple bucket sizes
             model = LargeNet()
             model.float()
@@ -5063,6 +5074,17 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_comm_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"),
             )
+            # Test host-side times are roughly in the order that we expect
+            fwd_host_side_time = ddp_logging_data.get("forward_compute_time_start")
+            bwd_comp_start_host_side_time = ddp_logging_data.get("backward_compute_time_start")
+            bwd_comp_end_host_side_time = ddp_logging_data.get("backward_compute_time_end")
+            bwd_comm_start_host_side_time = ddp_logging_data.get("backward_comm_time_start")
+            bwd_comm_end_host_side_time = ddp_logging_data.get("backward_comm_time_end")
+            self.assertGreaterEqual(bwd_comm_end_host_side_time, bwd_comm_start_host_side_time)
+            self.assertGreaterEqual(bwd_comm_start_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_end_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
+
 
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):

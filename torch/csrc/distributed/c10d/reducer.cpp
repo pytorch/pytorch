@@ -23,9 +23,6 @@
 namespace c10d {
 namespace {
 
-inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
-}
 
 constexpr int kUnsetDivFactor = -1;
 
@@ -50,41 +47,8 @@ C10_DEFINE_TYPED_REGISTRY( // NOLINT
 namespace {
 
 class CpuTimer : public Timer {
- private:
-  // The timestamp of forward call start time in each iteration.
-  int64_t forward_start_time = -1;
-  // The timestamp of backward computation start and end time in each
-  // iteration.
-  int64_t backward_compute_start_time = -1;
-  int64_t backward_compute_end_time = -1;
-  // The timestamp of first communication call start time in each iteration.
-  int64_t backward_comm_start_time = -1;
-  // The timestamp of last communication call end time in each iteration.
-  int64_t backward_comm_end_time = -1;
-
-  int64_t& getTime(Event event) {
-    switch (event) {
-      case Event::kForwardStart:
-        return forward_start_time;
-      case Event::kBackwardComputeStart:
-        return backward_compute_start_time;
-      case Event::kBackwardComputeEnd:
-        return backward_compute_end_time;
-      case Event::kBackwardCommStart:
-        return backward_comm_start_time;
-      case Event::kBackwardCommEnd:
-        return backward_comm_end_time;
-      default:
-        TORCH_INTERNAL_ASSERT(false);
-    }
-  }
-
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
-
-  void record(Event event) override {
-    getTime(event) = current_time_in_nanos();
-  }
 
   c10::optional<int64_t> measureDifference(Event start, Event end) override {
     int64_t start_time = getTime(start);
