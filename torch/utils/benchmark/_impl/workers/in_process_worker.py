@@ -38,4 +38,12 @@ class InProcessWorker(base.WorkerBase):
         self._globals[name] = value
 
     def load(self, name: str) -> typing.Any:
-        return marshal.loads(marshal.dumps(self._globals[name]))
+        try:
+            result = self._globals[name]
+
+        except KeyError:
+            # Our use of a globals dict is an implementation detail, but
+            # NameError is the canonical error when a variable does not exist.
+            raise NameError(f"name '{name}' is not defined")
+
+        return marshal.loads(marshal.dumps(result))
