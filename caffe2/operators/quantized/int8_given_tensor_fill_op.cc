@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8GivenTensorFill)
     .NumInputs(0)
     .NumOutputs(1)
@@ -16,7 +15,6 @@ OPERATOR_SCHEMA(Int8GivenTensorFill)
     .Output(0, "Tensor", "An Int8TensorCPU with scale and zero point info")
     .TensorInferenceFunction(FillerTensorInference<>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8GivenIntTensorFill)
     .NumInputs(0)
     .NumOutputs(1)
@@ -30,9 +28,7 @@ OPERATOR_SCHEMA(Int8GivenIntTensorFill)
     .Output(0, "Tensor", "An Int8TensorCPU with scale and zero point info")
     .TensorInferenceFunction(FillerTensorInference<>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8GivenTensorFill, int8::Int8GivenTensorFillOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8GivenIntTensorFill, int8::Int8GivenIntTensorFillOp);
 
 } // namespace caffe2
