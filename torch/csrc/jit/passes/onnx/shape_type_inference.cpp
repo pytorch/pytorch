@@ -404,8 +404,10 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
 // When the Reshape node's two inputs are constant, compute the output shape.
 // The reshape value 0 and -1 are converted to the real value explicitly.
 std::vector<int64_t> ComputeShapeFromReshape(
+    Node* n,
     const std::vector<int64_t>& input_shape,
-    const std::vector<int64_t>& reshape) {
+    const std::vector<int64_t>& reshape,
+    int opset_version) {
   TORCH_INTERNAL_ASSERT(
       input_shape.size() > 0 || reshape.size() > 0,
       "Reshape node should have at least one input size > 0 when constant folding.");
@@ -427,6 +429,17 @@ std::vector<int64_t> ComputeShapeFromReshape(
   auto reshape_size = static_cast<int>(reshape.size());
   auto it_0 = std::find(reshape.begin(), reshape.end(), 0);
   auto reshape_has_zero = it_0 != reshape.end();
+
+  // Allowzero is set to 0 by default
+  // When opset version > 14, assign appropriate allowzero value
+  int allowzero = 0;
+  if (opset_version >= 14 && n->hasAttributeS("allowzero")) {
+    allowzero = n->i(attr::allowzero);
+    if (allowzero == 1 && reshape_has_zero) {
+      return reshape;
+    }
+  }
+
   auto input_shape_size = static_cast<int>(input_shape.size());
   auto it_minus_one = std::find(reshape.begin(), reshape.end(), -1);
   int minus_one_pos = it_minus_one == reshape.end()
@@ -594,7 +607,7 @@ c10::optional<std::vector<int64_t>> GetValueFromListConstructNode(
       : c10::nullopt;
 }
 
-void ProcessReshapeNode(Node* n) {
+void ProcessReshapeNode(Node* n, int opset_version) {
   if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
     auto shape_temp =
         ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
@@ -602,8 +615,8 @@ void ProcessReshapeNode(Node* n) {
         ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
             n->input(0)->debugName());
     if (shape_vector_0.has_value()) {
-      auto final_shape =
-          ComputeShapeFromReshape(shape_vector_0.value(), shape_temp);
+      auto final_shape = ComputeShapeFromReshape(
+          n, shape_vector_0.value(), shape_temp, opset_version);
       UpdateShapeFromVector(n->output(), final_shape);
       return;
     }
@@ -865,7 +878,7 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Reshape: {
-      ProcessReshapeNode(n);
+      ProcessReshapeNode(n, opset_version);
       break;
     }
     case ::c10::onnx::Gather: {

@@ -179,7 +179,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
     rank = sym_help._get_tensor_rank(values)
     if rank is not None and rank == 0:
         values = expand(g, values, values_shape, None)
-    values = g.op("Reshape", values, values_shape)
+    values = sym_help._reshape_helper(g, values, values_shape)
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
@@ -266,12 +266,12 @@ def masked_select(g, self, mask):
 
 
 def masked_scatter(g, self, mask, source):
-    from torch.onnx.symbolic_opset9 import nonzero, expand_as, view, size
+    from torch.onnx.symbolic_opset9 import nonzero, expand_as, size
     index = nonzero(g, expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.
     # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
-    source = view(g, source, torch.LongTensor([-1]))
+    source = sym_help._reshape_helper(g, source, torch.LongTensor([-1]))
     source = sym_help._slice_helper(g, source,
                                     axes=torch.LongTensor([0]),
                                     starts=torch.LongTensor([0]),
@@ -453,9 +453,9 @@ def _prepare_onnx_paddings(g, dim, pad):
     # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
     #               [..., 0, dim_n-1_end, dim_n_end]]
     # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
-    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
+    paddings = sym_help._reshape_helper(g, paddings, g.op("Constant", value_t=torch.tensor([-1, 2])))
     paddings = g.op("Transpose", torch.onnx.symbolic_opset10.flip(g, paddings, [0]), perm_i=[1, 0])
-    paddings = g.op("Reshape", paddings, g.op("Constant", value_t=torch.tensor([-1])))
+    paddings = sym_help._reshape_helper(g, paddings, g.op("Constant", value_t=torch.tensor([-1])))
     padding_c = g.op("Cast", paddings, to_i=sym_help.cast_pytorch_to_onnx["Long"])
     return padding_c
 
@@ -695,7 +695,7 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
     blocks_d_indices = sym_help._unsqueeze_helper(g, blocks_d_indices, [0])  # Reshape to [1, -1]
-    kernel_mask = g.op("Reshape", kernel_grid, g.op("Constant", value_t=torch.tensor([-1, 1])))
+    kernel_mask = sym_help._reshape_helper(g, kernel_grid, g.op("Constant", value_t=torch.tensor([-1, 1])))
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
 
     return block_mask
@@ -766,7 +766,7 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
     output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
     output = g.op("Gather", output, blocks_col_indices, axis_i=4)
     output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
-    return g.op("Reshape", output, output_shape)
+    return sym_help._reshape_helper(g, output, output_shape)
 
 
 def narrow(g, input, dim, start, length):
@@ -895,13 +895,12 @@ def chunk(g, self, chunks, dim):
     return split(g, self, chunk_vec, dim)
 
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
-    from torch.onnx.symbolic_opset9 import reshape
     input = self
     final_dim = dim
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if sym_help._is_none(dim):
-        input = reshape(g, self, g.op("Constant", value_t=torch.tensor([-1])))
+        input = sym_help._reshape_helper(g, self, g.op("Constant", value_t=torch.tensor([-1])))
         dim = 0
     else:
         dim = sym_help._maybe_get_scalar(dim)
@@ -983,7 +982,8 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
                 loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1:]))]
     r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
     i_split = expand(loop_block, i_split, r_concat, None)
-    i_split = reshape(loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+    i_split = sym_help._reshape_helper(loop_block, i_split,
+                                       g.op("Constant", value_t=torch.LongTensor(output_sizes)))
 
     # Loop outputs
     cond_out = loop_block.op("Cast", loop_condition, to_i=9)
@@ -995,7 +995,8 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     # the zero'th dimension (by default). In order to avoid this and concatenate
     # along the dimension provided, some post-processing is required
     loop_out = g.op("Transpose", loop_out, perm_i=perm_i)
-    return reshape(g, loop_out, g.op("Constant", value_t=torch.LongTensor(output_sizes)))
+    return sym_help._reshape_helper(g, loop_out,
+                                    g.op("Constant", value_t=torch.LongTensor(output_sizes)))
 
 
 def normal(g, loc, scale, seed):

@@ -17,7 +17,7 @@ from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequenc
                                                        RnnModelWithPackedSequenceWithoutState)
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
                                  skipIfNoLapack, disableScriptTest, skipIfONNXShapeInference,
-                                 skipIfUnsupportedMaxOpsetVersion)
+                                 skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
@@ -2489,6 +2489,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    # Enable test when fix for allowzero is in ORT
+    @skipForAllOpsetVersions()
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_reshape_allowzero(self):
+        class ReshapeModel(torch.nn.Module):
+            def forward(self, x):
+                x = x.reshape(3, 4, 0)
+                return x
+
+        x = torch.randn(0, 3, 4)
+        self.run_test(ReshapeModel(), x)
+
     def test_reshape_different_rank(self):
         class ReshapeModel(torch.nn.Module):
             def forward(self, x):
@@ -3283,6 +3295,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_batchnorm1d_norunningstats(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, track_running_stats=False)
@@ -3301,6 +3314,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.nn.BatchNorm2d(3, affine=False)
         self.run_test(model, x)
 
+    @skipIfUnsupportedOpsetVersion([14])
     def test_batchnorm2d_norunningstats(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, track_running_stats=False)
@@ -5709,6 +5723,52 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(SiLUModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_tril(self):
+        class trilModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModel(), (x))
+
+        class trilModelwithDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithDiagonal(), (x))
+
+        class trilModelwithNegDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithNegDiagonal(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_triu(self):
+        class triuModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModel(), (x))
+
+        class triuModelwithDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.triu(x, diagonal=1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(triuModelwithDiagonal(), (x))
+
+        class trilModelwithNegDiagonal(torch.nn.Module):
+            def forward(self, x):
+                return torch.tril(x, diagonal=-1)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(trilModelwithNegDiagonal(), (x))
+
     def test_mish(self):
         class MishModel(torch.nn.Module):
             def __init__(self):
@@ -7586,6 +7646,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
+    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
+    @skipForAllOpsetVersions()
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7709,6 +7771,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
+    @skipForAllOpsetVersions()
     def test_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7745,6 +7809,8 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    # Tests skipped temporarliy as latest onnxruntime release does not include training ops
+    @skipForAllOpsetVersions()
     def test_multiple_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9547,6 +9613,13 @@ TestONNXRuntime_opset12_IRv4 = type(str("TestONNXRuntime_opset12_IRv4"),
 TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                (unittest.TestCase,),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
+                                    keep_initializers_as_inputs=False,
+                                    onnx_shape_inference=True))
+
+# opset 14 tests
+TestONNXRuntime_opset14 = type(str("TestONNXRuntime_opset14"),
+                               (unittest.TestCase,),
+                               dict(TestONNXRuntime.__dict__, opset_version=14,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
