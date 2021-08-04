@@ -1,7 +1,7 @@
 #pragma once
 
-#include <aten/src/ATen/core/jit_type.h>
-#include <aten/src/ATen/core/jit_type_base.h>
+#include <ATen/core/jit_type.h>
+#include <ATen/core/jit_type_base.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 
