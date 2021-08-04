@@ -825,6 +825,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
     "aten/src/ATen/native/mkldnn/Copy.cpp",
+    "aten/src/ATen/native/mkldnn/Gelu.cpp",
     "aten/src/ATen/native/mkldnn/IDeepRegistration.cpp",
     "aten/src/ATen/native/mkldnn/Linear.cpp",
     "aten/src/ATen/native/mkldnn/MKLDNNCommon.cpp",
