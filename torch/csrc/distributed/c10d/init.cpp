@@ -338,6 +338,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init<
               std::vector<std::vector<at::Tensor>>,
               std::vector<std::vector<size_t>>,
+              std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
@@ -346,6 +347,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
+          py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
