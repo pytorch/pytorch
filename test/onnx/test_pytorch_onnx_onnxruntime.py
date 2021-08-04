@@ -1,7 +1,6 @@
 import unittest
 import onnxruntime
 import torch
-import torch.utils.cpp_extension
 import torchvision
 
 import numpy as np
@@ -9502,7 +9501,7 @@ class TestONNXRuntime(unittest.TestCase):
         finally:
             unregister_custom_op_symbolic("::add", 1)
 
-        self.assertTrue(f.getvalue(), "ONNX graph was not generated")
+        self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
         loaded_model = onnx.load_from_string(f.getvalue())
 
 
