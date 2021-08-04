@@ -5,6 +5,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <torch/custom_class.h>
 
 #include <array>
 #include <atomic>
@@ -93,7 +94,7 @@ typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
 typedef std::vector<std::unique_ptr<ObserverContext>> ObserverContextList;
 typedef uint64_t RecordFunctionHandle;
 
-struct TORCH_API RecordFunction {
+struct TORCH_API RecordFunction : torch::CustomClassHolder {
   // Default constructor is used with before function called afterwards:
   //  scope - record scope that this function tracks
   //  pre_sampled - whether this RecordFunction was already pre-sampled with

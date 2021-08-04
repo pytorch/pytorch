@@ -427,17 +427,15 @@ class record_function(ContextDecorator):
         self.name: str = name
         # Whether or not we should run record function's end callbacks when exiting.
         self.run_callbacks_on_exit: bool = True
-        # Stores underlying RecordFunction as a tensor. TODO: move to custom
-        # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: torch.Tensor = torch.zeros(1)
+        self.rec = None
 
     def __enter__(self):
-        self.handle = torch.ops.profiler._record_function_enter(self.name)
+        self.rec = torch.ops.profiler._record_function_enter(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            torch.ops.profiler._record_function_exit(self.handle)
+            torch.ops.profiler._record_function_exit(self.rec)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -464,7 +462,7 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.rec, fut)
         return profiled_future
 
 
