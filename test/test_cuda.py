@@ -1142,6 +1142,8 @@ class TestCuda(TestCase):
             # real execution time by least 40%.
             self.assertGreater(parent_time + child_time, total_time * 1.4)
 
+    # This test is flaky for ROCm, see issue #62602
+    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_events_wait(self):
         d0 = torch.device('cuda:0')
