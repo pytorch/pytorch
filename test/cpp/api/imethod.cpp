@@ -13,12 +13,10 @@ const char* simpleJit = "torch/csrc/deploy/example/generated/simple_jit";
 
 // TODO(jwtan): Try unifying cmake and buck for getting the path.
 const char* path(const char* envname, const char* path) {
-  const char* e = getenv(envname);
-  return e ? e : path;
+  const char* env = getenv(envname);
+  return env ? env : path;
 }
 
-// TODO(jwtan): Considering moving the following tests to somewhere else as linking deploy (sub-classes)
-// doesn't seem appropriate for torch API tests, and removing the corresponding cmake/buck configurations too.
 TEST(IMethodTest, CallMethod) {
   auto scriptModel = torch::jit::load(path("SIMPLE_JIT", simpleJit));
   auto scriptMethod = scriptModel.get_method("forward");
