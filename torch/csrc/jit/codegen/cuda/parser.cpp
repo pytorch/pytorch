@@ -29,7 +29,7 @@ constexpr auto kNumLayernormFwd = 2;
 constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
-constexpr auto kNumAutocastOps = 2;
+// constexpr auto kNumAutocastOps = 2;
 
 namespace {
 
@@ -1253,7 +1253,6 @@ class IrParser {
                 "aten::mean cannot be fused with dynamic keepdim");
             auto o_sum = sum(self, dims, keepdim.value());
             Val* num_features = new Double(1);
-            const size_t kNumberOfDims = self->nDims();
             for (const auto axis : dims) {
               num_features =
                   mul(num_features, self->domain()->domain()[axis]->extent());

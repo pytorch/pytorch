@@ -829,7 +829,7 @@ bool canReducePA(ExprGroup* group) {
     // If this consumer_tv doesn't map to the last producer domain of this group
     // it can't decide if it can be reduced
     bool has_matching_pa = false;
-    for (int i = 0; i < consumer_tv->getMaxProducerPosition(); i++) {
+    for (size_t i = 0; i < consumer_tv->getMaxProducerPosition(); i++) {
       if (GpuLower::current()->caLoopMap().areMapped(
               consumer_tv->axis(i), group_pa_last_id)) {
         has_matching_pa = true;

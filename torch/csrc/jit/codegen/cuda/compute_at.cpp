@@ -528,7 +528,6 @@ unsigned int getInnermostNonBroadcastIdFrom(TensorView* tv) {
 unsigned int getConsumerPosAlignedToProducerCA(
     TensorView* consumer,
     TensorView* producer) {
-  unsigned int producer_ca_pos = producer->getComputeAtPosition();
   // Locate consumer's position that aligns with
   //  the producer's new compute at axis. We need broadcast axes forwarded so we
   //  need to replay PasC as CasP will not forward braodcast dims. For example
@@ -656,7 +655,7 @@ void ComputeAt::updateSiblings() {
             "Error replaying multiple output expressions in computeAt.");
 
         // Propagate any root parallelization as fullSelfReplay expects it.
-        for (int i = 0; i < sibling_tv->getRootDomain().size(); i++) {
+        for (size_t i = 0; i < sibling_tv->getRootDomain().size(); i++) {
           auto id = tv->getRootDomain()[i];
           auto sibling_id = sibling_tv->getRootDomain()[i];
           if (id->getParallelType() != ParallelType::Serial &&

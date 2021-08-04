@@ -752,7 +752,7 @@ NvrtcFunction nvrtcCompile(
         args.push_back(jit_opt_level.c_str());
       } else {
         options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
-        option_vals.push_back((void*)val);
+        option_vals.push_back((void*)(intptr_t)val);
       }
     } else {
       TORCH_WARN_ONCE(
@@ -793,7 +793,7 @@ NvrtcFunction nvrtcCompile(
       args.push_back(max_register_usage.c_str());
     } else {
       options.push_back(CU_JIT_MAX_REGISTERS);
-      option_vals.push_back((void*)max_register);
+      option_vals.push_back((void*)(intptr_t)max_register);
     }
   }
 

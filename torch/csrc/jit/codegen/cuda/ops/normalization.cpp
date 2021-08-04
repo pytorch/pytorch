@@ -240,7 +240,7 @@ ForwardNormResult batch_norm(
   // M = outer = channels
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
-  const size_t kChannelsDim = 1;
+  // const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
       TensorDomain::noReductions(x->getRootDomain()).size();
 
