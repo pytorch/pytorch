@@ -343,8 +343,8 @@ TEST(StaticRuntime, IndividualOps_Mul) {
   std::vector<IValue> scalar_args1{a, 42};
   std::vector<IValue> scalar_args2{c, 42};
 
-  testStaticRuntime(mul_scalar, scalar_args1, /*args2=*/{}, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
-  testStaticRuntime(mul_scalar, scalar_args1, scalar_args2, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
+  testStaticRuntime(mul_scalar, scalar_args1);
+  testStaticRuntime(mul_scalar, scalar_args1, scalar_args2);
 }
 
 TEST(StaticRuntime, IndividualOps_Log) {
@@ -455,8 +455,8 @@ TEST(StaticRuntime, IndividualOps_Norm) {
   auto dtype = at::ScalarType::Float;
 
   std::vector<IValue> args2{a, 2};
-  testStaticRuntime(norm_2arg, args2, /*args2=*/{}, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
-  testStaticRuntime(norm_2arg, args2, {b, 2}, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
+  testStaticRuntime(norm_2arg, args2);
+  testStaticRuntime(norm_2arg, args2, {b, 2});
 
   std::vector<IValue> args3{a, 2, dtype};
   testStaticRuntime(norm_3arg, args3);
@@ -485,8 +485,7 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args);
   testStaticRuntime(reshape_script_4, args);
   testStaticRuntime(reshape_script_5, args);
-  // tensor.sigmoid_ is delegated to the interpreter.
-  testStaticRuntime(reshape_inplace_script, args, /*args2=*/{}, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
+  testStaticRuntime(reshape_inplace_script, args);
   testStaticRuntime(reshape_incontiguous_script, args);
 
   testStaticRuntime(reshape_script_1, args, args1);
@@ -494,8 +493,7 @@ TEST(StaticRuntime, IndividualOps_Reshape) {
   testStaticRuntime(reshape_script_3, args, args1);
   testStaticRuntime(reshape_script_4, args, args1);
   testStaticRuntime(reshape_script_5, args, args1);
-  // tensor.sigmoid_ is delegated to the interpreter.
-  testStaticRuntime(reshape_inplace_script, args, args1, /*use_allclose=*/false, /*use_equalnan=*/false, /*expect_fallback=*/true);
+  testStaticRuntime(reshape_inplace_script, args, args1);
   testStaticRuntime(reshape_incontiguous_script, args, args1);
 }
 
