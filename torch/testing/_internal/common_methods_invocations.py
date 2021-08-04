@@ -2619,7 +2619,8 @@ def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
 
         # With default args
-        yield SampleInput(make_tensor((1, 1, 5 ,5), device, dtype, requires_grad=requires_grad), args=((3, 3),))
+        yield SampleInput(make_tensor((1, 1, 5, 5), device, dtype, requires_grad=requires_grad),
+                          args=((3, 3),))
 
     return list(generator())
 
