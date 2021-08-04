@@ -43,6 +43,30 @@ mse_loss_batch_rule(const at::Tensor& self, optional<int64_t> self_bdim, const a
   TORCH_INTERNAL_ASSERT(false);
 };
 
+std::tuple<at::Tensor,optional<int64_t>>
+mse_loss_backward_batch_rule(
+    const at::Tensor& grad_output, optional<int64_t> grad_output_bdim,
+    const at::Tensor& self, optional<int64_t> self_bdim,
+    const at::Tensor& target, optional<int64_t> target_bdim,
+    int64_t reduction) {
+  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto target_ = moveBatchDimToFront(target, target_bdim);
+  if (reduction != Reduction::None && grad_output_bdim.has_value()) {
+    // grad_output_ is of shape [N]. Input is of shape [N?, ...].
+    // We need to view grad_output_ as shape [N, ...].
+    auto self_rank_without_bdim = rankWithoutBatchDim(self, self_bdim);
+    DimVector view_shape(self_rank_without_bdim + 1, 1);
+    view_shape[0] = grad_output_.size(0);
+    grad_output_ = grad_output_.view(view_shape);
+  }
+  auto result = at::mse_loss_backward(grad_output_, self_, target_, Reduction::None);
+  if (reduction == Reduction::Mean) {
+    return std::make_tuple(result / numelWithoutBatchDim(self, self_bdim), 0);
+  }
+  return std::make_tuple(result, 0);
+};
+
 std::tuple<at::Tensor,optional<int64_t>,at::Tensor,optional<int64_t>>
 nll_loss_forward_self_target_batch_rule(
     const at::Tensor & self, optional<int64_t> self_bdim,
@@ -239,6 +263,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(cross_entropy_loss);
   m.impl("nll_loss_backward", nll_loss_backward_plumbing);
   VMAP_SUPPORT("mse_loss", mse_loss_batch_rule);
+  VMAP_SUPPORT("mse_loss_backward", mse_loss_backward_batch_rule);
 }
 
 }}
