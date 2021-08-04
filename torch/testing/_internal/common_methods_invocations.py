@@ -2613,12 +2613,13 @@ def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
     strides = (1, 2, (1, 2))
 
     def generator():
-        for shape, kernel_size, dilation, padding, stride in product(shapes, kernel_sizes, dilations, paddings, strides):
+        cases = product(shapes, kernel_sizes, dilations, paddings, strides)
+        for shape, kernel_size, dilation, padding, stride in cases:
             tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
             yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
 
         # With default args
-        yield SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad), args=((3, 3),))
+        yield SampleInput(make_tensor((1, 1, 5 ,5), device, dtype, requires_grad=requires_grad), args=((3, 3),))
 
     return list(generator())
 
