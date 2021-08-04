@@ -286,7 +286,7 @@ Returns:
 )")
       .def(
           "buffer",
-          &::c10d::GradBucket::getTensor,
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -321,8 +321,8 @@ Returns:
 )")
       .def(
           "set_buffer",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Replaces the tensor in the bucket with the input tensor buffer.
