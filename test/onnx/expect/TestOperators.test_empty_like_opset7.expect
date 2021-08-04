@@ -53,10 +53,10 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_value: 5
+            dim_param: "ConstantFill2_dim_0"
           }
           dim {
-            dim_value: 8
+            dim_param: "ConstantFill2_dim_1"
           }
         }
       }

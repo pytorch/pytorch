@@ -16,6 +16,7 @@
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -36,43 +37,60 @@ namespace jit {
 //  3. existing type: Scalar[], inferred type: Tensor
 //    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
 //    it is more compatible with ONNX.
-TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
+std::pair<TypePtr, bool> MergeInferredType(
+    TypePtr existing_type,
+    TypePtr inferred_type) {
   auto new_list_type = inferred_type->cast<ListType>();
+  auto use_inferred_type = false;
   if (new_list_type) {
-    return inferred_type;
+    return std::make_pair(inferred_type, true);
   }
   auto new_tensor_type = inferred_type->cast<TensorType>();
   auto old_tensor_type = existing_type->cast<TensorType>();
 
   if (new_tensor_type && old_tensor_type) {
     if (!old_tensor_type->device()) {
-      // device not available means this is an invalid tensor type (most likely
-      // an empty one) -> return inferred type directly.
-      return new_tensor_type;
+      // device not avaible means this is an invalid tensor type (most likely an
+      // empty one) return inferred type directly.
+      return std::make_pair(new_tensor_type, true);
     }
     auto type = old_tensor_type;
     if (new_tensor_type->dim()) {
       type = type->withSymbolicShapes(new_tensor_type->symbolic_sizes());
+      use_inferred_type = true;
     }
     if (new_tensor_type->scalarType().has_value()) {
       type = type->withScalarType(new_tensor_type->scalarType());
+      use_inferred_type = true;
     }
-    return type;
+    return std::make_pair(type, use_inferred_type);
   }
 
   if (old_tensor_type) {
-    return existing_type;
+    return std::make_pair(existing_type, false);
   }
 
   auto old_list_type = existing_type->cast<ListType>();
   if (new_tensor_type && old_list_type) {
     if (new_tensor_type->sizes().isComplete()) {
-      return inferred_type;
+      return std::make_pair(inferred_type, true);
     }
-    return existing_type;
+    return std::make_pair(existing_type, false);
   }
 
-  return inferred_type;
+  return std::make_pair(inferred_type, true);
+}
+
+void MergeInferredTypeAndSetMap(
+    Value* dest_v,
+    TypePtr existing_type,
+    TypePtr inferred_type) {
+  TypePtr mergedType;
+  bool inferred;
+  std::tie(mergedType, inferred) =
+      MergeInferredType(existing_type, inferred_type);
+  dest_v->setType(mergedType);
+  ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
 
 namespace {
@@ -170,13 +188,13 @@ void UpdateTorchValueByOnnxValueInfo(
     const auto torch_tensor_type =
         TorchTensorTypeFromONNX(p_type.tensor_type(), symbol_map);
     if (torch_tensor_type) {
-      v->setType(MergeInferredType(v->type(), torch_tensor_type));
+      MergeInferredTypeAndSetMap(v, v->type(), torch_tensor_type);
     }
   } else if (p_type.has_sequence_type()) {
     const auto torch_list_type =
         TorchListTypeFromONNX(p_type.sequence_type(), symbol_map);
     if (torch_list_type) {
-      v->setType(MergeInferredType(v->type(), torch_list_type));
+      MergeInferredTypeAndSetMap(v, v->type(), torch_list_type);
     }
   }
 }
@@ -1410,10 +1428,88 @@ void ONNXShapeTypeInference(
 
 } // namespace
 
+std::pair<bool, bool> AreInputsReliableOrStatic(Node* n) {
+  auto reliable = true;
+  auto complete = true;
+  for (auto input : n->inputs()) {
+    reliable &=
+        ConstantValueMap::GetTypeReliable(input->debugName()).value_or(false);
+    if (auto pt = input->type()->cast<TensorType>()) {
+      if (!pt->sizes().isComplete()) {
+        complete = false;
+      }
+    }
+  }
+  return std::make_pair(reliable, complete);
+}
+
+// There is no need to put onnx type here, but we need this
+// for some legacy tests when onnx_shape_inference=False.
+static std::unordered_set<std::string> nodeTypeReliableForTracer = {
+    "prim::ListConstruct",
+    "onnx::Cast",
+    "onnx::Constant",
+    "com.microsoft::Gelu"};
+
+void UpdateReliable(
+    torch::jit::Value* output,
+    const std::pair<bool, bool>& inferred_type_reliable) {
+  auto inferred =
+      ConstantValueMap::GetUseInferredType(output->debugName()).value_or(false);
+  auto isTypeReliableForTracer =
+      nodeTypeReliableForTracer.find(
+          output->node()->kind().toDisplayString()) !=
+      nodeTypeReliableForTracer.end();
+  if (!inferred && !isTypeReliableForTracer &&
+      !output->node()->kind().is_onnx()) {
+    std::cerr
+        << "WARNING: The shape inference of "
+        << output->node()->kind().toDisplayString()
+        << " type is missing, so it may result in wrong shape inference for the exported graph. "
+        << "Please consider adding it in symbolic function." << std::endl;
+  }
+  auto reliable = false;
+  if (inferred) {
+    reliable = inferred_type_reliable.first;
+  } else {
+    if (inferred_type_reliable.second && isTypeReliableForTracer) {
+      reliable = true;
+    }
+  }
+  // Assume that the tracer can estimate rank correctly,
+  // then the output tensor of Shape should always be reliable.
+  if (output->node()->kind() == ::c10::onnx::Shape) {
+    reliable = true;
+  }
+  ConstantValueMap::SetTypeReliable(output->debugName(), reliable);
+  if (!reliable) {
+    if (auto output_tensor_type = output->type()->cast<TensorType>()) {
+      output->setType(output_tensor_type->withSymbolicShapes(
+          ::c10::SymbolicShape(output_tensor_type->dim())));
+    }
+  }
+}
+
+void UpdateReliable(Node* n) {
+  auto input_reliable = AreInputsReliableOrStatic(n);
+  for (auto output : n->outputs()) {
+    UpdateReliable(output, input_reliable);
+  }
+}
+
+void SetGraphInputTypeReliable(const Graph* g) {
+  for (auto graph_input : g->inputs()) {
+    if (!ConstantValueMap::HasTypeReliable(graph_input->debugName())) {
+      ConstantValueMap::SetTypeReliable(graph_input->debugName(), true);
+    }
+  }
+}
+
 void ONNXShapeTypeInference(
     Node* n,
     const ParamMap& params_dict,
     int opset_version) {
+  SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
   if (IsValidONNXNode(n)) {
@@ -1471,12 +1567,23 @@ void ONNXShapeTypeInference(
       GRAPH_DEBUG(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
+  } else {
+    UpdateReliable(n);
   }
 
   SpecialPostProcess(n);
   if (IsValidONNXNode(n)) {
     ProcessConstantValueMap(n, opset_version);
+    if (n->kind() != prim::ListConstruct) {
+      for (auto input : n->inputs()) {
+        if (input->node()->kind() == prim::ListConstruct) {
+          UpdateReliable(input, AreInputsReliableOrStatic(input->node()));
+        }
+      }
+    }
+    UpdateReliable(n);
   }
+
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
 }
@@ -1549,8 +1656,8 @@ void ONNXUpdateTypeFromTensor(
     const at::Tensor& output,
     bool onnx_shape_inference) {
   if (onnx_shape_inference) {
-    graph_output->setType(
-        MergeInferredType(TensorType::create(output), graph_output->type()));
+    MergeInferredTypeAndSetMap(
+        graph_output, TensorType::create(output), graph_output->type());
   } else {
     graph_output->inferTypeFrom(output);
   }
@@ -1615,11 +1722,9 @@ size_t ONNXAssignOutputShape(
                              ->getElementType()
                              ->cast<TensorType>();
         elem_type = elem_type->withScalarType(var.scalar_type());
-        graph->outputs()
-            .at(outputs_index)
-            ->setType(MergeInferredType(
-                graph->outputs().at(outputs_index)->type(),
-                ListType::create(elem_type)));
+        auto graph_output = graph->outputs().at(outputs_index);
+        MergeInferredTypeAndSetMap(
+            graph_output, graph_output->type(), ListType::create(elem_type));
       } else {
         graph->outputs()
             .at(outputs_index)
@@ -1696,6 +1801,7 @@ void ONNXShapeTypeInference(
     const ParamMap& params_dict,
     int opset_version) {
   ConstantValueMap::ClearMaps();
+  SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 

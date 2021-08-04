@@ -47,7 +47,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
-                    onnx_shape_inference=False):
+                    onnx_shape_inference=True):
     # export the model to ONNX
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
