@@ -22,6 +22,7 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <string>
 
 
 namespace at {
@@ -108,7 +109,7 @@ Tensor det(const Tensor& self) {
 Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
   checkSameDevice("torch.linalg.det", out, self, "out");
   checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg_det");
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point or complex tensor as input");
 
@@ -121,7 +122,7 @@ Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
 }
 
 Tensor linalg_det(const Tensor& self) {
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg_det");
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point or complex tensor as input");
 
@@ -129,7 +130,7 @@ Tensor linalg_det(const Tensor& self) {
 }
 
 Tensor logdet(const Tensor& self) {
-  squareCheckInputs(self);
+  squareCheckInputs(self, "logdet");
   TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
               "Expected a floating point tensor as input");
 
@@ -152,7 +153,7 @@ Tensor logdet(const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg_slogdet");
   ScalarType t = self.scalar_type();
   TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
               "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
@@ -282,7 +283,7 @@ Tensor linalg_matrix_power_impl(
     c10::optional<Tensor> _out) {
   auto out = _out.value_or(Tensor());
 
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg_matrix_power");
   if (_out.has_value()) {
     checkSameDevice("matrix_power", out, self);
     checkLinalgCompatibleDtype("matrix_power", out, self);
@@ -2053,7 +2054,7 @@ Tensor differential_analytic_matrix_function(
 // Mathematics 2019, 7, 1174.
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
-  squareCheckInputs(a);
+  squareCheckInputs(a, "linalg_matrix_exp");
   TORCH_CHECK((at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
               "Expected a floating point or complex tensor as input. Got: ", a.scalar_type());
 
@@ -2524,8 +2525,7 @@ void _linalg_cond_check_ord(c10::variant<Scalar, c10::string_view> ord_variant) 
 
 // Numerical or None norms
 Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
-  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
-    self.dim(), " dimensions.");
+  TORCH_CHECK(self.dim() >= 2, "linalg_cond: The input tensor must have at least 2 dimensions.");
 
   // The default case is using 2-norm
   Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
@@ -2556,12 +2556,11 @@ Tensor linalg_cond(const Tensor& self, const optional<Scalar>& opt_ord) {
   }
 
   // ord == ±1 ord == ±inf
-  // since at::inverse is used in the implementation, self has to be a tensor consisting of square matrices
-  // the same check as squareCheckInputs(self) but with a slightly more informative error message
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond with ±1 or ±inf norm types only supports square matrices or batches of square matrices "
-              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
-
+  if (ord.isFloatingPoint()) { // ord == ±1
+    squareCheckInputs(self, ("linalg_cond(ord=" + std::to_string(ord.to<double>()) + ")").c_str());
+  } else { // ord == ±inf
+    squareCheckInputs(self, ("linalg_cond(ord=" + std::to_string(ord.to<int64_t>()) + ")").c_str());
+  }
   return _linalg_cond_helper(self, ord_variant);
 }
 
@@ -2578,13 +2577,7 @@ Tensor& linalg_cond_out(const Tensor& self, const optional<Scalar>& opt_ord, Ten
 
 // Frobenius or nuclear norms
 Tensor linalg_cond(const Tensor& self, c10::string_view ord) {
-  // the same checks as squareCheckInputs(self) but with a slightly more informative error message
-  TORCH_CHECK(self.dim() >= 2, "linalg_cond only supports matrices or batches of matrices, but got a tensor with ",
-    self.dim(), " dimensions.");
-  TORCH_CHECK(self.size(-1) == self.size(-2),
-              "linalg_cond with frobenius or nuclear norm types only supports square matrices or batches of square matrices "
-              "but got ", self.size(-1), " by ", self.size(-2), " matrices");
-
+  squareCheckInputs(self, ("linalg_cond(ord=" + std::string(ord) + ")").c_str());
   c10::variant<Scalar, c10::string_view> ord_variant = ord;
   _linalg_cond_check_ord(ord_variant);
 
