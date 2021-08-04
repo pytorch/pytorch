@@ -110,6 +110,7 @@ allow_list = [
     ("aten::_bmm", datetime.date(2021, 8, 14)),
     ("aten::_bmm.out", datetime.date(2021, 8, 14)),
     ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
+    ("aten::matrix_exp_backward", datetime.date(2021, 8, 31)),
     ("aten::_cumsum", datetime.date(2021, 8, 31)),
     ("aten::_cumprod", datetime.date(2021, 8, 31)),
 ]
