@@ -3942,6 +3942,20 @@ new_module_tests = [
         with_tf32=True,
         tf32_precision=0.005,
     ),
+    dict(
+        module_name='Flatten',
+        constructor_args=(-3, -1),
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc="no_batch_dim",
+    ),
+    dict(
+        module_name='Unflatten',
+        constructor_args=(-2, torch.Size([2, 2])),
+        input_size=(3, 4, 5),
+        reference_fn=single_batch_reference_fn,
+        desc="no_batch_dim",
+    ),
 ]
 
 # add conv padding mode tests:
@@ -3984,7 +3998,7 @@ for padding_mode, cpp_padding_mode in zip(
 # Check that non linear activations work with no batch dimensions
 non_linear_activations_no_batch = [
     'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
-    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU',
+    'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU', 'GLU',
     'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
     'Tanhshrink', 'Threshold'
 ]
@@ -4000,7 +4014,7 @@ non_linear_activations_extra_info: Dict[str, dict] = {
 for non_linear_activation in non_linear_activations_no_batch:
     activation_test_info = dict(
         module_name=non_linear_activation,
-        input_size=(3,),
+        input_size=(4,),
         reference_fn=single_batch_reference_fn,
         desc='no_batch_dim',
         test_cpp_api_parity=False,
