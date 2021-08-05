@@ -592,12 +592,29 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkWeightQParams(model):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qparams"))
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
+
+            def checkSerDeser(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        # make sure seralization works
+                        state_dict = copy.deepcopy(model.state_dict())
+                        self.assertTrue(module_name + "._weight_qparams" in state_dict)
+
+                        # check load_state_dict restores states
+                        module = getattr(model, module_name)
+                        prev_scale = module._weight_qparams["scale"]
+                        module._weight_qparams["scale"] = None
+                        model.load_state_dict(state_dict)
+                        self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
+
 
             checkWeightQParams(qr)
             qr = copy.deepcopy(qr)
             # make sure the qparams are preserved after copy
             checkWeightQParams(qr)
+
+            checkSerDeser(qr)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
