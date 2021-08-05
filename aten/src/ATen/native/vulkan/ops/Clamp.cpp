@@ -290,8 +290,8 @@ Tensor& hardsigmoid_(Tensor& self) {
 }
 
 Tensor& hardshrink(
-    Tensor& self,
-    const Scalar& lambd) {
+    Tensor& self_arg,
+    const c10::optional<Scalar>& lambd) {
   TORCH_CHECK(
       lambd,
       "'lambd' must not be None");
@@ -357,7 +357,7 @@ Tensor& hardshrink(
 
 Tensor& hardshrink_(
     Tensor& self,
-    const Scalar& lambd) {
+    const c10::optional<Scalar>& lambd) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -435,8 +435,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp_"), TORCH_FN(clamp_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid"), hardsigmoid);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
-  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), hardshrink);
-  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), hardshrink_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), TORCH_FN(hardshrink));
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), TORCH_FN(hardshrink_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), hardswish);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), hardswish_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), hardtanh);
