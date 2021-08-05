@@ -69,19 +69,16 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             return self.fn(data, *self.args, **self.kwargs)
         elif nesting_level > 0:
             if isinstance(data, DataChunk):
-                result = data.__class__([self._apply(i, nesting_level - 1) for i in data.raw_iterator()])
+                return type(data)([self._apply(i, nesting_level - 1) for i in data.raw_iterator()])
             elif isinstance(data, list):
-                result = [self._apply(i, nesting_level - 1) for i in data.raw_iterator()]
+                return [self._apply(i, nesting_level - 1) for i in data]
             else:
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            return result
         else:
             if isinstance(data, DataChunk):
-                result = data.__class__([self._apply(i, nesting_level) for i in data.raw_iterator()])
-                return result
+                return type(data)([self._apply(i, nesting_level) for i in data.raw_iterator()])
             elif isinstance(data, list):
-                result = [self._apply(i, nesting_level) for i in data.raw_iterator()]
-                return result
+                return [self._apply(i, nesting_level) for i in data]
             else:
                 return self.fn(data, *self.args, **self.kwargs)
 
@@ -168,6 +165,7 @@ class TransformsIterDataPipe(MapIterDataPipe):
         datapipe: Iterable DataPipe being transformed
         transforms: A transform or a sequence of transforms from torchvision or torchaudio.
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  transforms: Callable,
