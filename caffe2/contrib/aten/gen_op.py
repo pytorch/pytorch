@@ -77,7 +77,7 @@ RETURN_MAP = {
     'at::Scalar': 'assignTo(Output(${offset}),${output}.type(), ${output});',
     'bool': 'assignToValue<int64_t>(Output(${offset}),${output});',
     'int64_t': 'assignToValue<int64_t>(Output(${offset}),${output});',
-    'std::vector<at::Tensor>': 'assignListStartingAt(${offset}, ${output});',
+    '::std::vector<at::Tensor>': 'assignListStartingAt(${offset}, ${output});',
 }
 
 # for each non-Tensor aten argument, how to we read it from caffe2's
@@ -90,8 +90,8 @@ ARGUMENT_MAP = {
     'double': 'double ${arg} = readAttribute<float>("${arg}");',
     'int64_t': 'int64_t ${arg} = readAttribute<int64_t>("${arg}");',
     'at::IntArrayRef': 'auto ${arg} = readIntArrayRef("${arg}");',
-    'std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
-    'std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
+    '::std::array<bool,2>': 'auto ${arg} = readBoolMask<2>("${arg}");',
+    '::std::array<bool,3>': 'auto ${arg} = readBoolMask<3>("${arg}");',
 }
 
 # for BC reasons we want to route some of the functions to different
@@ -189,7 +189,7 @@ def get_output(o, i):
     if len(o['returns']) == 1:
         return 'the_result'
     else:
-        return 'std::get<{}>(the_result)'.format(i)
+        return '::std::get<{}>(the_result)'.format(i)
 
 
 def attribute_names(o):

@@ -164,6 +164,7 @@ class FxGraphDrawer:
             print("tm", tm)
         result += "|" + "dtype" + "=" + str(tm.dtype) + r"\l"
         result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\l"
+        result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\l"
         result += "|" + "stride" + "=" + str(tm.stride) + r"\l"
         if tm.is_quantized:
             if tm.qscheme in {

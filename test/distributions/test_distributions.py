@@ -4204,37 +4204,39 @@ class TestLazyLogitsInitialization(TestCase):
     def test_lazy_logits_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                probs = param.pop('probs')
-                param['logits'] = probs_to_logits(probs)
-                dist = Dist(**param)
-                # Create new instance to generate a valid sample
-                dist.log_prob(Dist(**param).sample())
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('probs' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('probs' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('probs' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            probs = param.pop('probs')
+            param['logits'] = probs_to_logits(probs)
+            dist = Dist(**param)
+            # Create new instance to generate a valid sample
+            dist.log_prob(Dist(**param).sample())
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('probs', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('probs', dist.__dict__, msg=message)
 
     def test_lazy_probs_initialization(self):
         for Dist, params in self.examples:
             param = params[0].copy()
-            if 'probs' in param:
-                dist = Dist(**param)
-                dist.sample()
-                message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
-                self.assertFalse('logits' in vars(dist), msg=message)
-                try:
-                    dist.enumerate_support()
-                except NotImplementedError:
-                    pass
-                self.assertFalse('logits' in vars(dist), msg=message)
-                batch_shape, event_shape = dist.batch_shape, dist.event_shape
-                self.assertFalse('logits' in vars(dist), msg=message)
+            if 'probs' not in param:
+                continue
+            dist = Dist(**param)
+            dist.sample()
+            message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            try:
+                dist.enumerate_support()
+            except NotImplementedError:
+                pass
+            self.assertNotIn('logits', dist.__dict__, msg=message)
+            batch_shape, event_shape = dist.batch_shape, dist.event_shape
+            self.assertNotIn('logits', dist.__dict__, msg=message)
 
 
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -4529,7 +4531,7 @@ class TestValidation(TestCase):
                 # TransformedDistribution has a distribution instance
                 # as the argument, so we cannot do much about that
                 continue
-            for param in params:
+            for i, param in enumerate(params):
                 d_nonval = Dist(validate_args=False, **param)
                 d_val = Dist(validate_args=True, **param)
                 for v in torch.tensor([-2.0, -1.0, 0.0, 1.0, 2.0]):
@@ -4550,6 +4552,25 @@ class TestValidation(TestCase):
                             except RuntimeError:
                                 pass
 
+                # check correct samples are ok
+                valid_value = d_val.sample()
+                d_val.log_prob(valid_value)
+                # check invalid values raise ValueError
+                if valid_value.dtype == torch.long:
+                    valid_value = valid_value.float()
+                invalid_value = torch.full_like(valid_value, math.nan)
+                try:
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "Expected value argument .* to be within the support .*",
+                    ):
+                        d_val.log_prob(invalid_value)
+                except AssertionError as e:
+                    fail_string = "Support ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
+
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
@@ -4558,8 +4579,10 @@ class TestValidation(TestCase):
                     with self.assertRaises(ValueError):
                         Dist(validate_args=True, **param)
                 except AssertionError as e:
-                    fail_string = 'ValueError not raised for {} example {}/{}'
-                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
+                    fail_string = "ValueError not raised for {} example {}/{}"
+                    raise AssertionError(
+                        fail_string.format(Dist.__name__, i + 1, len(params))
+                    ) from e
 
     def test_warning_unimplemented_constraints(self):
         class Delta(Distribution):

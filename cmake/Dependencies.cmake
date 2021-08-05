@@ -83,22 +83,32 @@ else()
 endif()
 
 if(USE_TBB)
-  message(STATUS "Compiling TBB from source")
-  # Unset our restrictive C++ flags here and reset them later.
-  # Remove this once we use proper target_compile_options.
-  set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-  set(CMAKE_CXX_FLAGS)
+  if(USE_SYSTEM_TBB)
+    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
 
-  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-  set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-  set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
+  else()
+    message(STATUS "Compiling TBB from source")
+    # Unset our restrictive C++ flags here and reset them later.
+    # Remove this once we use proper target_compile_options.
+    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    set(CMAKE_CXX_FLAGS)
 
-  set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
+    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
+
+    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
+
+    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
+
+    add_library(TBB::tbb ALIAS tbb)
+  endif()
 endif()
 
 # ---[ protobuf
@@ -129,10 +139,16 @@ elseif(BLAS STREQUAL "ATLAS")
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
+  set(BLAS_INFO "atlas")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+  set(BLAS_INFO "open")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
@@ -152,6 +168,9 @@ elseif(BLAS STREQUAL "MKL")
     include_directories(AFTER SYSTEM ${MKL_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkl)
     set(CAFFE2_USE_MKL ON)
+    set(BLAS_INFO "mkl")
+    set(BLAS_FOUND 1)
+    set(BLAS_LIBRARIES caffe2::mkl)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
@@ -161,12 +180,17 @@ elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+  set(BLAS_INFO "veclib")
+  set(BLAS_FOUND 1)
+  set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   find_library(BLAS_LIBRARIES blas)
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
   list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
   set(GENERIC_BLAS_FOUND TRUE)
+  set(BLAS_INFO "generic")
+  set(BLAS_FOUND 1)
 else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
@@ -213,6 +237,18 @@ if(USE_FFTW OR NOT MKL_FOUND)
       SET(USE_FFTW ON)
       include_directories(${FFTW3_INCLUDE_DIR})
     endif()
+  endif()
+endif()
+
+# --- [ PocketFFT
+set(AT_POCKETFFT_ENABLED 0)
+if(NOT MKL_FOUND)
+  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h
+            PATHS /usr/local/include
+            PATHS $ENV{POCKETFFT_HOME}
+           )
+  if(POCKETFFT_INCLUDE_DIR)
+    set(AT_POCKETFFT_ENABLED 1)
   endif()
 endif()
 
@@ -905,7 +941,7 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
   # If not given a Python installation, then use the current active Python
-  if(NOT DEFINED PYTHON_EXECUTABLE)
+  if(NOT PYTHON_EXECUTABLE)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
@@ -934,7 +970,7 @@ if(BUILD_PYTHON)
   # executable that we already found (if we didn't actually find an executable
   # then these will just use "python", but at least they'll be consistent with
   # each other).
-  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+  if(NOT PYTHON_INCLUDE_DIR)
     # TODO: Verify that sysconfig isn't inaccurate
     pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
     if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
@@ -943,9 +979,9 @@ if(BUILD_PYTHON)
     else()
       message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
     endif()
-  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+  endif(NOT PYTHON_INCLUDE_DIR)
 
-  if(NOT DEFINED PYTHON_LIBRARY)
+  if(NOT PYTHON_LIBRARY)
     pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
     if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
       set(PYTHON_LIBRARY "${_py_lib}")
@@ -955,7 +991,7 @@ if(BUILD_PYTHON)
       endif()
       message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
     endif()
-  endif(NOT DEFINED PYTHON_LIBRARY)
+  endif(NOT PYTHON_LIBRARY)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
@@ -1703,7 +1739,9 @@ if(NOT INTERN_BUILD_MOBILE)
   endif()
 
   find_package(VSX) # checks VSX
-  find_package(AVX) # checks AVX and AVX2
+  # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
+  # cached results will be used so no extra overhead.
+  find_package(AVX)
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
   # however, we want to enable the AVX codepaths, so we still need to

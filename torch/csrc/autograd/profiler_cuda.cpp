@@ -61,10 +61,12 @@ struct CUDAMethods : public CUDAStubs {
   }
 
   void nvtxMarkA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxMark(name);
   }
 
   void nvtxRangePushA(const char* name) const override {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ::nvtxRangePushA(name);
   }
 

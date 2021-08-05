@@ -325,7 +325,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init([](const std::vector<Stmt*>& stmts) {
         return tensorexpr::Block::make(stmts);
       }))
-      .def("__str__", [](const Stmt& self) {
+      .def("__str__", [](Stmt& self) {
         std::stringstream ss;
         ss << self;
         return ss.str();
@@ -334,16 +334,16 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "make",
           [](const BufHandle& buf,
-             std::vector<ExprHandle>& indicies,
+             std::vector<ExprHandle>& indices,
              const ExprHandle& value) {
-            return Store::make(buf, indicies, value);
+            return Store::make(buf, indices, value);
           },
           py::return_value_policy::reference);
 
   py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
       .def(
           "index_var",
-          [](const For& self) { return VarHandle(self.var()); },
+          [](For& self) { return VarHandle(self.var()); },
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference)
       .def("set_parallel", &For::set_parallel)
@@ -393,8 +393,8 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<Tensor*>&>())
       .def(py::init([](Stmt* s, const std::vector<BufHandle>& bufs) {
-        std::unordered_set<const Buf*> buf_nodes;
-        for (const auto& buf : bufs) {
+        std::unordered_set<Buf*> buf_nodes;
+        for (auto& buf : bufs) {
           buf_nodes.insert(buf.node());
         }
         return std::make_unique<LoopNest>(s, buf_nodes);
@@ -427,7 +427,7 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_enclosing_loopnest",
-          [](const LoopNest& self, const Stmt* s) {
+          [](const LoopNest& self, Stmt* s) {
             return self.getEnclosingLoopNest(s);
           },
           py::return_value_policy::reference)
@@ -444,10 +444,14 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
-          "get_parent_loop",
-          [](const LoopNest& self, const Stmt* s) {
-            return self.getParentLoop(s);
+          "get_loop_at",
+          [](const LoopNest& self, For* root, const std::vector<int>& indices) {
+            return self.getLoopAt(root, indices);
           },
+          py::return_value_policy::reference)
+      .def(
+          "get_parent_loop",
+          [](const LoopNest& self, Stmt* s) { return self.getParentLoop(s); },
           py::return_value_policy::reference)
       .def_static(
           "get_loop_stmts_in_loopnest",
@@ -494,6 +498,12 @@ void initTensorExprBindings(PyObject* module) {
             return f;
           },
           py::return_value_policy::reference)
+      .def(
+          "tile",
+          [](LoopNest& self, For* x, For* y, int x_factor, int y_factor) {
+            return self.tile(x, y, x_factor, y_factor);
+          },
+          py::return_value_policy::reference)
       .def_static(
           "distribute_loop",
           [](For* f) { return LoopNest::distributeLoop(f); },
@@ -507,6 +517,14 @@ void initTensorExprBindings(PyObject* module) {
       .def_static(
           "distribute_loop_over_inner_loops",
           [](For* f) { return LoopNest::distributeLoopOverInnerLoops(f); },
+          py::return_value_policy::reference)
+      .def_static(
+          "unsafe_fuse_loops",
+          [](const std::vector<For*>& loops) {
+            For* fused_loop = nullptr;
+            LoopNest::unsafeFuseLoops(loops, &fused_loop);
+            return fused_loop;
+          },
           py::return_value_policy::reference)
       .def_static(
           "fuse_loops",
@@ -546,7 +564,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
-            std::pair<const Buf*, Stmt*> ret =
+            std::pair<Buf*, Stmt*> ret =
                 LoopNest::cacheAccesses(producer.node(), name, consumer);
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
@@ -623,9 +641,47 @@ void initTensorExprBindings(PyObject* module) {
             op, argInputs, outputShape, outputType.scalar_type());
       });
 
+  py::class_<ArgValue>(te, "ArgValue")
+      .def(py::init([](py::handle inp) {
+        return std::make_unique<ArgValue>(convertPyToArgValue(inp));
+      }))
+      .def(
+          "as_buf",
+          [](const ArgValue& self) { return c10::get<BufHandle>(self); })
+      .def(
+          "as_var",
+          [](const ArgValue& self) { return c10::get<VarHandle>(self); })
+      .def(
+          "as_float",
+          [](const ArgValue& self) { return c10::get<double>(self); })
+      .def(
+          "as_int",
+          [](const ArgValue& self) { return c10::get<int64_t>(self); })
+      .def("as_bool", [](const ArgValue& self) { return c10::get<bool>(self); })
+      .def(
+          "as_none",
+          [](const ArgValue& self) { return c10::get<ArgNone>(self); })
+      .def(
+          "as_buflist",
+          [](const ArgValue& self) { return c10::get<BufList>(self); })
+      .def("as_intlist", [](const ArgValue& self) {
+        return c10::get<IntList>(self);
+      });
+
+  py::class_<c10::ScalarType>(te, "ScalarType");
+
   using TSGraph = std::shared_ptr<Graph>;
   py::class_<TensorExprKernel>(te, "TensorExprKernel")
       .def(py::init<const TSGraph&>())
+      .def(py::init([](const TSGraph& g,
+                       std::unordered_map<std::string, NNCLoweringFunction>
+                           custom_lowerings_str) {
+        std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings;
+        for (auto& kv : custom_lowerings_str) {
+          custom_lowerings[c10::Symbol::fromQualString(kv.first)] = kv.second;
+        }
+        return std::make_unique<TensorExprKernel>(g, custom_lowerings);
+      }))
       .def(
           "run",
           [](TensorExprKernel& self, const py::tuple& inputs) {

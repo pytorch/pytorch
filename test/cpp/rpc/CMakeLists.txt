@@ -30,7 +30,7 @@ target_include_directories(
   ${ATen_CPU_INCLUDE})
 target_include_directories(
   test_cpp_rpc PRIVATE
-  $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>)
+  $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
 target_link_libraries(test_cpp_rpc PRIVATE ${TORCH_RPC_TEST_DEPENDENCY_LIBS})
 
 if(USE_CUDA)

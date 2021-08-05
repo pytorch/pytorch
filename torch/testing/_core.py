@@ -25,6 +25,7 @@ __all__ = [
     "floating_and_complex_types_and",
     "floating_types",
     "floating_types_and",
+    "double_types",
     "floating_types_and_half",
     "get_all_complex_dtypes",
     "get_all_dtypes",
@@ -35,12 +36,7 @@ __all__ = [
     "integral_types",
     "integral_types_and",
     "make_non_contiguous",
-    "rand_like",
-    "randn_like",
 ]
-
-rand_like = torch.rand_like
-randn_like = torch.randn_like
 
 # Helper function that returns True when the dtype is an integral dtype,
 # False otherwise.
@@ -137,8 +133,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
     # Compares complex tensors' real and imaginary parts separately.
     # (see NOTE Test Framework Tensor "Equality")
     if a.is_complex():
-        a = a.resolve_conj()
-        b = b.resolve_conj()
         if equal_nan == "relaxed":
             a = a.clone()
             b = b.clone()
@@ -224,12 +218,15 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
 
         msg = None
         if not result:
-            msg = ("Comparing" + s + "{0} and {1} gives a "
-                   "difference of {2}, but the allowed difference "
-                   "with rtol={3} and atol={4} is "
-                   "only {5}!").format(a, b, diff,
-                                       rtol, atol, allowed_diff)
-
+            if rtol == 0 and atol == 0:
+                msg = f"{a} != {b}"
+            else:
+                msg = (
+                    f"Comparing{s}{a} and {b} gives a "
+                    f"difference of {diff}, but the allowed difference "
+                    f"with rtol={rtol} and atol={atol} is "
+                    f"only {allowed_diff}!"
+                )
         return result, msg
 
     if isinstance(a, complex) or isinstance(b, complex):
@@ -339,6 +336,10 @@ def floating_and_complex_types():
 
 def floating_and_complex_types_and(*dtypes):
     return _floating_and_complex_types + _validate_dtypes(*dtypes)
+
+_double_types = _dispatch_dtypes((torch.float64, torch.complex128))
+def double_types():
+    return _double_types
 
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():

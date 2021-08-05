@@ -313,6 +313,7 @@ core_sources_full_mobile = [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
     "torch/csrc/jit/tensorexpr/external_functions.cpp",
@@ -323,22 +324,22 @@ libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_tr
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
-    "torch/lib/c10d/comm.cpp",
-    "torch/lib/c10d/default_comm_hooks.cpp",
-    "torch/lib/c10d/FileStore.cpp",
-    "torch/lib/c10d/GlooDeviceFactory.cpp",
-    "torch/lib/c10d/logger.cpp",
-    "torch/lib/c10d/ParamCommsUtils.cpp",
-    "torch/lib/c10d/PrefixStore.cpp",
-    "torch/lib/c10d/ProcessGroup.cpp",
-    "torch/lib/c10d/ProcessGroupGloo.cpp",
-    "torch/lib/c10d/ProcessGroupMPI.cpp",
-    "torch/lib/c10d/ProcessGroupWrapper.cpp",
-    "torch/lib/c10d/reducer.cpp",
-    "torch/lib/c10d/sequence_num.cpp",
-    "torch/lib/c10d/Store.cpp",
-    "torch/lib/c10d/TCPStore.cpp",
-    "torch/lib/c10d/Utils.cpp",
+    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
+    "torch/csrc/distributed/c10d/FileStore.cpp",
+    "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/logger.cpp",
+    "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
+    "torch/csrc/distributed/c10d/PrefixStore.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroup.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupGloo.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
+    "torch/csrc/distributed/c10d/reducer.cpp",
+    "torch/csrc/distributed/c10d/sequence_num.cpp",
+    "torch/csrc/distributed/c10d/Store.cpp",
+    "torch/csrc/distributed/c10d/TCPStore.cpp",
+    "torch/csrc/distributed/c10d/Utils.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -360,6 +361,8 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.cpp",
     "torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.cpp",
+    "torch/csrc/distributed/c10d/HashStore.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupRoundRobin.cpp",
     "torch/csrc/distributed/rpc/agent_utils.cpp",
     "torch/csrc/distributed/rpc/message.cpp",
     "torch/csrc/distributed/rpc/profiler/remote_profiler_manager.cpp",
@@ -380,12 +383,10 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/tensorpipe_agent.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_utils.cpp",
     "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
+    "torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.cpp",
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
-    "torch/csrc/distributed/rpc/metrics/registry.cpp",
-    "torch/lib/c10d/HashStore.cpp",
-    "torch/lib/c10d/ProcessGroupRoundRobin.cpp",
 ]
 
 libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_distributed_extra_sources
@@ -528,14 +529,14 @@ libtorch_cuda_core_sources = [
 
 # These files are the only ones that are supported on Windows.
 libtorch_cuda_distributed_base_sources = [
-    "torch/lib/c10d/reducer_cuda.cpp",
+    "torch/csrc/distributed/c10d/reducer_cuda.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
+    "torch/csrc/distributed/c10d/NCCLUtils.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
-    "torch/lib/c10d/NCCLUtils.cpp",
-    "torch/lib/c10d/ProcessGroupNCCL.cpp",
 ]
 
 libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + libtorch_cuda_distributed_extra_sources
@@ -552,6 +553,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/data/samplers/sequential.cpp",
     "torch/csrc/api/src/data/samplers/stream.cpp",
     "torch/csrc/api/src/enum.cpp",
+    "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
     "torch/csrc/api/src/serialize.cpp",
     "torch/csrc/api/src/nn/init.cpp",
@@ -644,6 +646,7 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
+    "torch/csrc/autograd/python_saved_variable_hooks.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_function.cpp",
@@ -680,6 +683,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/python_dict.cpp",
     "torch/csrc/jit/python/python_interpreter.cpp",
     "torch/csrc/jit/python/python_ir.cpp",
+    "torch/csrc/jit/python/python_list.cpp",
     "torch/csrc/jit/python/python_tracer.cpp",
     "torch/csrc/jit/python/script_init.cpp",
     "torch/csrc/jit/frontend/concrete_module_type.cpp",
@@ -715,9 +719,9 @@ libtorch_python_core_sources = [
 ]
 
 libtorch_python_distributed_core_sources = [
-    "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
-    "torch/lib/c10d/frontend.cpp",
+    "torch/csrc/distributed/c10d/python_comm_hook.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -757,6 +761,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
+    "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
@@ -820,6 +825,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Conv.cpp",
     "aten/src/ATen/native/mkldnn/Copy.cpp",
+    "aten/src/ATen/native/mkldnn/Gelu.cpp",
     "aten/src/ATen/native/mkldnn/IDeepRegistration.cpp",
     "aten/src/ATen/native/mkldnn/Linear.cpp",
     "aten/src/ATen/native/mkldnn/MKLDNNCommon.cpp",
@@ -840,6 +846,7 @@ aten_cpu_source_non_codegen_list = [
 
 aten_cpu_source_codegen_list = [
     "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/AdaptiveMaxPoolKernel.cpp",
 ]
 
 # When building lite interpreter in OSS, "aten/src/ATen/native/cpu/AdaptiveAvgPoolKernel.cpp" will go through
@@ -903,6 +910,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/fbgemm_utils.cpp",
+    "aten/src/ATen/native/quantized/cpu/fused_obs_fake_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/int_repr_quant.cpp",
     "aten/src/ATen/native/quantized/cpu/make_per_tensor_quantized_tensor.cpp",
     "aten/src/ATen/native/quantized/cpu/q_adaavgpool.cpp",
@@ -973,6 +981,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ConvolutionMM3d.cpp",
     "aten/src/ATen/native/ConvolutionTBC.cpp",
     "aten/src/ATen/native/Copy.cpp",
+    "aten/src/ATen/native/Correlation.cpp",
+    "aten/src/ATen/native/CPUFallback.cpp",
     "aten/src/ATen/native/Cross.cpp",
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
     "aten/src/ATen/native/DilatedMaxPool3d.cpp",
@@ -997,7 +1007,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Integration.cpp",
     "aten/src/ATen/native/Itertools.cpp",
     "aten/src/ATen/native/LegacyBridge.cpp",
-    "aten/src/ATen/native/LegacyNNDefinitions.cpp",
     "aten/src/ATen/native/Lerp.cpp",
     "aten/src/ATen/native/Linear.cpp",
     "aten/src/ATen/native/LinearAlgebra.cpp",
@@ -1077,12 +1086,9 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
-    "aten/src/TH/THAllocator.cpp",
-    "aten/src/TH/THBlas.cpp",
     "aten/src/TH/THGeneral.cpp",
     "aten/src/TH/THStorageFunctions.cpp",
     "aten/src/TH/THTensor.cpp",
-    "aten/src/TH/THTensorMoreMath.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",

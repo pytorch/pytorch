@@ -79,7 +79,6 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
   return splits;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg(
     {OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
@@ -443,6 +442,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::einsum.sublist(Tensor a, ...) -> Tensor"),
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           einsum(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.Scalar(Scalar a) -> Tensor"),
          [](Stack* stack) {
            at::Scalar s;
@@ -745,6 +752,22 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
+     // This is an alternative to aten::cat op that takes variable number of
+     // parameters as input.
+     // Format:
+     //    prim::VarConcat(Tensors..., dim) -> Tensor
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::VarConcat(...) -> Tensor"),
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           auto dim = pop(stack).toInt();
+           std::vector<at::Tensor> inputs(num_inputs - 1);
+           for (int i = 0; i < num_inputs - 1; ++i) {
+             inputs[num_inputs - 2 - i] = pop(stack).toTensor();
+           }
+           push(stack, at::cat(inputs, dim));
+         },
+         aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool"),
@@ -1468,7 +1491,6 @@ void dictConstructFromList(Stack* stack) {
           dictCopy,                                                            \
           aliasAnalysisFromSchema())
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
@@ -2402,7 +2424,6 @@ void hashValue(Stack* stack) {
   push(stack, value.hash());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 RegisterOperators reg2({
     // registered as Any[] so that heterogenous tuples can be called with len()
     OperatorGenerator(
@@ -2805,6 +2826,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (int i = 0; i < l.size(); i++) {
             sum = sum + l.extract(i);
           }

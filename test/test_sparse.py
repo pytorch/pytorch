@@ -6,12 +6,13 @@ import random
 from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
-    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, make_tensor
+    do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, make_tensor, \
+    DeterministicGuard
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA)
+    (instantiate_device_type_tests, ops, dtypes, dtypesIfCPU, onlyCPU, onlyCUDA, deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 
@@ -738,9 +739,9 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @onlyCUDA
-    def test_cuda_empty(self, _):
+    def test_cuda_empty(self, device):
         def test_tensor(x):
-            y = x.cuda(0)
+            y = x.to(device)
             self.assertEqual(x.sparse_dim(), y.sparse_dim())
             self.assertEqual(x.dense_dim(), y.dense_dim())
             x = y.cpu()
@@ -1103,8 +1104,11 @@ class TestSparse(TestCase):
 
             a = torch.stack(a_list).cuda()
             b = torch.stack(b_list).cuda()
-            ab_nondeterministic = torch._bmm(a, b, deterministic=False)
-            ab_deterministic = torch._bmm(a, b, deterministic=True)
+            with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+                torch.use_deterministic_algorithms(False)
+                ab_nondeterministic = torch.bmm(a, b)
+                torch.use_deterministic_algorithms(True)
+                ab_deterministic = torch.bmm(a, b)
             diff_abs = (ab_deterministic - ab_nondeterministic).abs()
             diff_rel = diff_abs / ab_deterministic.abs()
             diff_rel[torch.isnan(diff_rel)] = 0
@@ -2210,7 +2214,7 @@ class TestSparse(TestCase):
         self.assertFalse(z._indices().numel() != 2 and z.is_coalesced())
 
     @onlyCUDA
-    def test_storage_not_null(self, _):
+    def test_storage_not_null(self):
         x = torch.cuda.sparse.FloatTensor(2)
         self.assertNotEqual(x.get_device(), -1)
 
@@ -2218,20 +2222,22 @@ class TestSparse(TestCase):
         self.assertNotEqual(x.get_device(), -1)
 
     @onlyCUDA
-    @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_same_gpu(self, _):
+    @deviceCountAtLeast(2)
+    def test_same_gpu(self, devices):
         def check_device(x, device_id):
             self.assertEqual(x.get_device(), device_id)
             self.assertEqual(x._values().get_device(), device_id)
             self.assertEqual(x._indices().get_device(), device_id)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.tensor([5]).cuda(1)
+        dev1, dev2 = devices[0], devices[1]
+
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.tensor([5], device=dev2)
         x = self.sparse_tensor(i, v, torch.Size([3]), device=1)
         check_device(x, 1)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.empty(1, 0).cuda(1)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.empty(1, 0, device=dev2)
         x = self.sparse_tensor(i, v, torch.Size([3, 0]), device=1)
         check_device(x, 1)
 
@@ -2241,13 +2247,13 @@ class TestSparse(TestCase):
         x = self.sparse_empty(3, 0, device=1)
         check_device(x, 1)
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.tensor([5]).cuda(0)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.tensor([5], device=dev1)
         # NB: non-legacy constructor allows this and moves indices
         self.assertRaises(RuntimeError, lambda: self.legacy_sparse_tensor(i, v, torch.Size([3])))
 
-        i = self.index_tensor([[2]]).cuda(1)
-        v = torch.empty(1, 0).cuda(0)
+        i = self.index_tensor([[2]], device=dev2)
+        v = torch.empty(1, 0, device=dev1)
         # NB: non-legacy constructor allows this and moves indices
         self.assertRaises(RuntimeError, lambda: self.legacy_sparse_tensor(i, v, torch.Size([3, 0])))
 
@@ -2261,7 +2267,7 @@ class TestSparse(TestCase):
         self.assertEqual(x2.get_device(), device)
 
     @onlyCUDA
-    def test_new_device_single_gpu(self, _):
+    def test_new_device_single_gpu(self):
         self._test_new_device((), 0)
         self._test_new_device((30, 20), 0)
         self._test_new_device((30, 20, 10), 0)
@@ -2269,7 +2275,7 @@ class TestSparse(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def test_new_device_multi_gpu(self, _):
+    def test_new_device_multi_gpu(self):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
@@ -3376,6 +3382,26 @@ class TestSparse(TestCase):
             a[0] = 100
 
         self.assertRaises(TypeError, assign_to)
+
+    def test_cpu_sparse_dense_mul(self, device):
+        # general multiplication is not supported, but 0dim multiplication is supported
+        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
+        t23 = s.to_dense()
+        t0 = torch.tensor(2.0, device=device)
+        r = s * 2.0
+        self.assertEqual(r, 2.0 * s)
+        self.assertEqual(r, t0 * s)
+        self.assertEqual(r, s * t0)
+        if device == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"mul\(sparse, dense\) is not supported"):
+                s * t23
+            with self.assertRaisesRegex(RuntimeError, r"mul\(dense, sparse\) is not supported"):
+                t23 * s
+        elif device == 'cuda':
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                s * t23
+            with self.assertRaisesRegex(NotImplementedError, "CUDA"):
+                t23 * s
 
 
 class TestSparseOneOff(TestCase):
