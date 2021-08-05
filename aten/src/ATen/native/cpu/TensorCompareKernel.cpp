@@ -1,3 +1,4 @@
+#include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorCompare.h>
 
 #include <numeric>
@@ -161,12 +162,12 @@ static void max_kernel_impl(
   });
 }
 
-static void _aminmax_kernel_impl(
-    Tensor& min_result,
-    Tensor& max_result,
+static void aminmax_kernel(
     const Tensor& self,
     int64_t dim,
-    bool keepdim) {
+    bool keepdim,
+    Tensor& min_result,
+    Tensor& max_result) {
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -174,7 +175,7 @@ static void _aminmax_kernel_impl(
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "_aminmax_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -416,7 +417,7 @@ static void clamp_min_scalar_kernel_impl(TensorIterator& iter, Scalar min_) {
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
