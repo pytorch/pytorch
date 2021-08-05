@@ -799,6 +799,8 @@ class TestEqualizeFx(QuantizationTestCase):
         4 layers with the highest quantization errors.
         """
 
+        torch.manual_seed(1)
+
         class M(nn.Module):
             def __init__(self):
                 super().__init__()
