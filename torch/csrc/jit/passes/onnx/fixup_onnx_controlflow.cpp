@@ -361,7 +361,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
          const ::c10::SymbolicShape& b) -> ::c10::SymbolicShape {
     std::vector<::c10::ShapeSymbol> dims;
     if (a.rank() && b.rank() && a.rank() == b.rank()) {
-      for (const auto j : c10 : irange(a.rank().value())) {
+      for (const auto j : c10::irange(a.rank().value())) {
         if (a[j] == b[j]) {
           dims.emplace_back(a[j]);
         } else {
