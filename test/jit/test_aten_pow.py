@@ -9,16 +9,16 @@ class TestAtenPow(TestCase):
         @torch.jit.script
         def fn_int_int(a: int, b: int):
             return a ** b
-        # Existing correct behavior of aten::pow
-        assert fn_int_int(2, 1) == 2 ** 1
-        assert fn_int_int(2, 0) == 2 ** 0
-        assert fn_int_int(2, -2) == 2 ** (-2)
-        assert fn_int_int(-2, 2) == (-2) ** 2
-        assert fn_int_int(-2, 0) == (-2) ** 0
-        assert fn_int_int(-2, -2) == (-2) ** (-2)
-        assert fn_int_int(-2, -1) == (-2) ** (-1)
-        assert fn_int_int(0, 2) == 0 ** 1
-        assert fn_int_int(0, 0) == 0 ** 0
+        # Existing correct behaviors of aten::pow
+        self.assertEqual(fn_int_int(2, 1), 2 ** 1)
+        self.assertEqual(fn_int_int(2, 0), 2 ** 0)
+        self.assertEqual(fn_int_int(2, -2), 2 ** (-2))
+        self.assertEqual(fn_int_int(-2, 2), (-2) ** 2)
+        self.assertEqual(fn_int_int(-2, 0), (-2) ** 0)
+        self.assertEqual(fn_int_int(-2, -2), (-2) ** (-2))
+        self.assertEqual(fn_int_int(-2, -1), (-2) ** (-1))
+        self.assertEqual(fn_int_int(0, 2), 0 ** 1)
+        self.assertEqual(fn_int_int(0, 0), 0 ** 0)
         # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_int_int, 0, -2)
 
@@ -28,20 +28,20 @@ class TestAtenPow(TestCase):
         @torch.jit.script
         def fn_int_float(a: int, b: float):
             return a ** b
-        # Existing correct behavior of aten::pow
-        assert fn_int_float(2, 2.5) == 2 ** 2.5
-        assert fn_int_float(2, -2.5) == 2 ** (-2.5)
-        assert fn_int_float(2, -0.0) == 2 ** (-0.0)
-        assert fn_int_float(2, 0.0) == 2 ** (0.0)
-        assert fn_int_float(-2, 2.0) == (-2) ** 2.0
-        assert fn_int_float(-2, -2.0) == (-2) ** (-2.0)
-        assert fn_int_float(-2, -3.0) == (-2) ** (-3.0)
-        assert fn_int_float(-2, -0.0) == (-2) ** (-0.0)
-        assert fn_int_float(-2, 0.0) == (-2) ** (0.0)
-        assert fn_int_float(0, 2.0) == 0 ** 2.0
-        assert fn_int_float(0, 0.5) == 0 ** 0.5
-        assert fn_int_float(0, 0.0) == 0 ** 0.0
-        assert fn_int_float(0, -0.0) == 0 ** (-0.0)
+        # Existing correct behaviors of aten::pow
+        self.assertEqual(fn_int_float(2, 2.5), 2 ** 2.5)
+        self.assertEqual(fn_int_float(2, -2.5), 2 ** (-2.5))
+        self.assertEqual(fn_int_float(2, -0.0), 2 ** (-0.0))
+        self.assertEqual(fn_int_float(2, 0.0), 2 ** (0.0))
+        self.assertEqual(fn_int_float(-2, 2.0), (-2) ** 2.0)
+        self.assertEqual(fn_int_float(-2, -2.0), (-2) ** (-2.0))
+        self.assertEqual(fn_int_float(-2, -3.0), (-2) ** (-3.0))
+        self.assertEqual(fn_int_float(-2, -0.0), (-2) ** (-0.0))
+        self.assertEqual(fn_int_float(-2, 0.0), (-2) ** (0.0))
+        self.assertEqual(fn_int_float(0, 2.0), 0 ** 2.0)
+        self.assertEqual(fn_int_float(0, 0.5), 0 ** 0.5)
+        self.assertEqual(fn_int_float(0, 0.0), 0 ** 0.0)
+        self.assertEqual(fn_int_float(0, -0.0), 0 ** (-0.0))
         # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_int_float, 0, -2.5)
 
@@ -51,18 +51,19 @@ class TestAtenPow(TestCase):
         @torch.jit.script
         def fn_float_int(a: float, b: int):
             return a ** b
-        assert fn_float_int(2.5, 2) == 2.5 ** 2
-        assert fn_float_int(2.5, -2) == 2.5 ** (-2)
-        assert fn_float_int(2.5, -0) == 2.5 ** (-0)
-        assert fn_float_int(2.5, 0) == 2.5 ** 0
-        assert fn_float_int(-2.5, 2) == 2.5 ** 2
-        assert fn_float_int(-2.5, -2) == (-2.5) ** (-2)
-        assert fn_float_int(-2.5, -3) == (-2.5) ** (-3)
-        assert fn_float_int(-2.5, -0) == (-2.5) ** (-0)
-        assert fn_float_int(-2.5, 0) == (-2.5) ** 0
-        assert fn_float_int(0.0, 2) == 0 ** 2
-        assert fn_float_int(0.0, 0) == 0 ** 0
-        assert fn_float_int(0.0, -0) == 0 ** (-0)
+        # Existing correct behaviors of aten::pow
+        self.assertEqual(fn_float_int(2.5, 2), 2.5 ** 2)
+        self.assertEqual(fn_float_int(2.5, -2), 2.5 ** (-2))
+        self.assertEqual(fn_float_int(2.5, -0), 2.5 ** (-0))
+        self.assertEqual(fn_float_int(2.5, 0), 2.5 ** 0)
+        self.assertEqual(fn_float_int(-2.5, 2), 2.5 ** 2)
+        self.assertEqual(fn_float_int(-2.5, -2), (-2.5) ** (-2))
+        self.assertEqual(fn_float_int(-2.5, -3), (-2.5) ** (-3))
+        self.assertEqual(fn_float_int(-2.5, -0), (-2.5) ** (-0))
+        self.assertEqual(fn_float_int(-2.5, 0), (-2.5) ** 0)
+        self.assertEqual(fn_float_int(0.0, 2), 0 ** 2)
+        self.assertEqual(fn_float_int(0.0, 0), 0 ** 0)
+        self.assertEqual(fn_float_int(0.0, -0), 0 ** (-0))
         # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_float_int, 0.0, -2)
 
@@ -72,16 +73,18 @@ class TestAtenPow(TestCase):
         @torch.jit.script
         def fn_float_float(a: float, b: float):
             return a ** b
-        assert fn_float_float(2.5, 2.0) == 2.5 ** 2.0
-        assert fn_float_float(2.5, -2.0) == 2.5 ** (-2.0)
-        assert fn_float_float(2.5, -0.0) == 2.5 ** (-0.0)
-        assert fn_float_float(2.5, 0.0) == 2.5 ** 0.0
-        assert fn_float_float(-2.5, 2.0) == 2.5 ** 2.0
-        assert fn_float_float(-2.5, -2.0) == (-2.5) ** (-2.0)
-        assert fn_float_float(-2.5, -3.0) == (-2.5) ** (-3.0)
-        assert fn_float_float(-2.5, -0.0) == (-2.5) ** (-0.0)
-        assert fn_float_float(-2.5, 0.0) == (-2.5) ** 0.0
-        assert fn_float_float(0.0, 2.0) == 0.0 ** 2.0
-        assert fn_float_float(0.0, 0.0) == 0.0 ** 0.0
-        assert fn_float_float(0.0, -0.0) == 0.0 ** (-0.0)
+        # Existing correct behaviors of aten::pow
+        self.assertEqual(fn_float_float(2.5, 2.0), 2.5 ** 2.0)
+        self.assertEqual(fn_float_float(2.5, -2.0), 2.5 ** (-2.0))
+        self.assertEqual(fn_float_float(2.5, -0.0), 2.5 ** (-0.0))
+        self.assertEqual(fn_float_float(2.5, 0.0), 2.5 ** 0.0)
+        self.assertEqual(fn_float_float(-2.5, 2.0), 2.5 ** 2.0)
+        self.assertEqual(fn_float_float(-2.5, -2.0), (-2.5) ** (-2.0))
+        self.assertEqual(fn_float_float(-2.5, -3.0), (-2.5) ** (-3.0))
+        self.assertEqual(fn_float_float(-2.5, -0.0), (-2.5) ** (-0.0))
+        self.assertEqual(fn_float_float(-2.5, 0.0), (-2.5) ** 0.0)
+        self.assertEqual(fn_float_float(0.0, 2.0), 0.0 ** 2.0)
+        self.assertEqual(fn_float_float(0.0, 0.0), 0.0 ** 0.0)
+        self.assertEqual(fn_float_float(0.0, -0.0), 0.0 ** (-0.0))
+        # zero base and negative exponent case that should trigger RunTimeError
         self.assertRaises(RuntimeError, fn_float_float, 0.0, -2.0)
