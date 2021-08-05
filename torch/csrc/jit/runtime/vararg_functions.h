@@ -44,5 +44,7 @@ void raiseException(Stack& stack);
 
 void tupleIndex(Stack& stack);
 
+void tupleUninitialized(Stack& stack);
+
 } // namespace jit
 } // namespace torch

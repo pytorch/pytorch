@@ -723,7 +723,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
-         [](Stack* stack) { push(stack, IValue::uninitialized()); },
+         [](Stack* stack) { tupleUninitialized(*stack); },
          aliasAnalysisSpecialCase()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Print(...) -> ()"),

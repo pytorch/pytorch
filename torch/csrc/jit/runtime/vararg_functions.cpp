@@ -396,5 +396,9 @@ void tupleIndex(Stack& stack) {
   stack.emplace_back(tuple->elements()[norm_index]);
 }
 
+void tupleUninitialized(Stack& stack) {
+  push(stack, IValue::uninitialized());
+}
+
 } // namespace jit
 } // namespace torch

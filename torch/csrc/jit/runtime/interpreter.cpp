@@ -642,6 +642,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             tupleIndex(stack);
           }
             INST_NEXT;
+          case INST(TUPLE_UNINITIALIZED): {
+            INST_GUARD;
+            tupleIndex(stack);
+          }
+            INST_NEXT;
           case INST(ISINSTANCE): {
             INST_GUARD;
             at::ArrayRef<TypePtr> types(
