@@ -12,6 +12,7 @@ import torch.serialization
 import re
 import collections
 import contextlib
+import copy
 import numbers
 import warnings
 from torch._six import string_classes
@@ -93,10 +94,11 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
         warnings.warn("'_retain_param_name' is deprecated and ignored. "
                       "It will be removed in the next PyTorch release.")
     if strip_doc_string is not None:
-        warnings.warn("`strip_doc_string' is deprecated and ignored. It will be removed in "
-                      "the next PyTorch release. The behavior is now controlled by the "
-                      "'verbose' arg")
-
+        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
+                      "next PyTorch release. It's combined with `verbose' argument now. ")
+    if example_outputs is not None:
+        warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
+                      "next release.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
@@ -469,9 +471,6 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(args, (torch.Tensor, int, float, bool)):
         args = (args, )
 
-    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
-        example_outputs = (example_outputs,)
-
     graph, params, torch_out, module = _create_jit_graph(model, args)
 
     params_dict = _get_named_param_dict(graph, params)
@@ -483,8 +482,20 @@ def _model_to_graph(model, args, verbose=False,
                             module=module)
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
-        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
-                                            "ScriptFunction."
+        input_args = copy.deepcopy(args)
+        input_kwargs = {}
+        if isinstance(input_args[-1], dict):
+            input_kwargs = input_args[-1]
+            input_args = input_args[:-1]
+        try:
+            model_copy = copy.deepcopy(model)
+            output = model_copy(*input_args, **input_kwargs)
+        except Exception:
+            output = model(*input_args, **input_kwargs)
+
+        if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
+            example_outputs = (example_outputs,)
+
         if isinstance(example_outputs, list):
             example_outputs = [example_outputs]
 
