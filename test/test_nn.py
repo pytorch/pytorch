@@ -13213,6 +13213,7 @@ class TestNNDeviceType(NNTestCase):
                                           (False, (10, 0, 512))]:
             input = torch.rand(*input_shape, device=device)
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
+
             self._test_module_empty_input(encoder_layer, input, check_size=False)
 
     @onlyOnCPUAndCUDA
