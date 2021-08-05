@@ -67,9 +67,8 @@ class FiniteTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # TODO: also explicitly recheck invariants on inplace/out mutation
-        assert not kwargs
         with no_dispatch():
-            rs = func(*args)
+            rs = func(*args, **kwargs)
         return tree_map(lambda e: FiniteTensor(e) if isinstance(e, torch.Tensor) else e, rs)
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
