@@ -417,7 +417,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   // format can be found in `torch/serialization.py`.
   auto& tensor = ivalue.toTensor();
 
-  if (tensor.is_sparse()){
+  if (tensor.is_sparse()) {
     pushLiteralSparseTensor(tensor);
     return;
   }

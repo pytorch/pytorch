@@ -659,11 +659,11 @@ void Unpickler::rebuildSparseCooTensor() {
     std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
     bool requires_grad = elements.at(idx++).toBool();
     bool pinned_memory = elements.at(idx++).toBool();
-    auto data_type = static_cast<ScalarType>(elements.at(idx++).toInt());
-    auto options = TensorOptions()
+    auto data_type = static_cast<c10::ScalarType>(elements.at(idx++).toInt());
+    auto options = c10::TensorOptions()
                        .dtype(data_type)
-                       .layout(Layout::Sparse)
-                       .device(DeviceType::CPU)
+                       .layout(c10::Layout::Sparse)
+                       .device(c10::DeviceType::CPU)
                        .pinned_memory(pinned_memory)
                        .requires_grad(requires_grad);
     // rebuild indices
