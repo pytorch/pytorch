@@ -2630,7 +2630,7 @@ Tensor differential_analytic_matrix_function(
 }
 
 Tensor linalg_matrix_exp_differential(const Tensor& self, const Tensor& grad, bool adjoint) {
-  NoTF32Guard disable_tf32;
+  at::NoTF32Guard disable_tf32;
 
   return differential_analytic_matrix_function(self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
 }
