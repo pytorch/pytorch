@@ -207,8 +207,7 @@ pool3d_shape_check(
               "dilationT: ", dilationT, " dilationH: ", dilationH, " dilationW: ", dilationW);
 
   TORCH_CHECK(ndim == 4 || ndim == 5,
-              fn_name, ": Expected 4D or 5D tensor for input with optional non-zero batch dim, but got ndim: ",
-              ndim);
+              fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
   for (int64_t i = 1; i < ndim; ++i) {
     TORCH_CHECK(input.size(i) > 0,

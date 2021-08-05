@@ -10,8 +10,7 @@ TORCH_META_FUNC(adaptive_max_pool3d) (const Tensor& input, IntArrayRef output_si
   auto ndim = input.ndimension();
   TORCH_CHECK(
     ndim == 4 || ndim == 5,
-    "adaptive_max_pool3d(): Expected 4D or 5D tensor with optional 0-dim batch size, but got: ",
-    input.sizes());
+    "adaptive_max_pool3d(): Expected 4D or 5D tensor, but got: ", input.sizes());
   for (int64_t i = 1; i < ndim; i++) {
     TORCH_CHECK(
         input.size(i) > 0,

@@ -341,11 +341,11 @@ void max_pool3d_with_indices_backward_out_cuda_template(
 
   TORCH_CHECK((input.ndimension() == 4 || input.ndimension() == 5),
     "max_pool2d_with_indices_backward_out_cuda_template(): ",
-    "Expected non-empty 4D or 5D input tensor with optional zero batch dim, but got ", input.sizes());
+    "Expected 4D or 5D input tensor, but got ", input.sizes());
 
   TORCH_CHECK((gradOutput.ndimension() == 4 || gradOutput.ndimension() == 5),
     "max_pool2d_with_indices_backward_out_cuda_template(): ",
-    "Expected non-empty 4D or 5D gradOutput tensor with optional zero batch dim, but got ", gradOutput.sizes());
+    "Expected 4D or 5D gradOutput tensor, but got ", gradOutput.sizes());
 
   // Resize and initialize result tensor.
   gradInput.resize_as_(input);
