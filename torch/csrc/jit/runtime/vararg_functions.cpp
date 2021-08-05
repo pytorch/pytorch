@@ -400,5 +400,9 @@ void tupleUninitialized(Stack& stack) {
   push(stack, IValue::uninitialized());
 }
 
+void uncheckedCast() {
+  noop;
+}
+
 } // namespace jit
 } // namespace torch

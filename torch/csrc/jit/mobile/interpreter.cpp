@@ -224,6 +224,10 @@ bool InterpreterState::run(Stack& stack) {
           raiseException(stack);
           ++pc;
         } break;
+        case UNCHECK_CAST: {
+          uncheckedCast();
+          ++pc;
+        } break;
         case ISINSTANCE: {
           at::ArrayRef<TypePtr> types(
               &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));

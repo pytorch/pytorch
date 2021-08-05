@@ -57,6 +57,7 @@ namespace jit {
   _(RAISE_EXCEPTION, "") /* Raise exception */                                 \
   _(TUPLE_INDEX, "O") /* get the value of tup at index N */                    \
   _(TUPLE_UNINITIALIZED, "O") /* get the value of tup at index N */            \
+  _(UNCHECK_CAST, "") /* unchecked cast conversion */                          \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
   _(EXIT, "EX") /* exit the last entered contextmanager */
 
