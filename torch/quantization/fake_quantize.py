@@ -280,6 +280,8 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
         self.register_buffer("observer_enabled", torch.tensor([0], dtype=torch.long))
         self.is_symmetric_quant = _is_symmetric_quant(self.activation_post_process.qscheme)
 
+        self.quant_min, self.quant_max = self.activation_post_process.quant_min, self.activation_post_process.quant_max
+
     @torch.jit.export
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
         return self.activation_post_process.calculate_qparams()
