@@ -189,6 +189,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
         opset_version (int, default 9):
             Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
             defined in torch/onnx/symbolic_helper.py.
+        _retain_param_name (bool, default True): [Deprecated and ignored. Will be removed in next PyTorch
+            release]
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
@@ -303,8 +305,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1.
 
-        enable_onnx_checker (bool, default True): If True the onnx model checker will be run
-            to ensure the exported model is a valid ONNX model.
+        enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
+            Pytorch release.
         use_external_data_format (bool, default False): If True, then some of the model
             parameters are stored in external data files and not in the ONNX model file itself.
             Models larger than 2GB cannot be exported in one file because of size limits imposed
@@ -314,6 +316,10 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             If True,  argument ``f`` must be a string specifying the location of the model.
             The external data files will be stored in the same directory as ``f``.
             This argument is ignored unless ``operator_export_type=OperatorExportTypes.ONNX``.
+
+    Raises:
+      ONNXCheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
+        model to the file ``f`` even if this is raised.
     """
 
     from torch.onnx import utils
