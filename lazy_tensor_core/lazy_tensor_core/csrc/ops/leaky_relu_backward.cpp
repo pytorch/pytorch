@@ -7,8 +7,7 @@ namespace ir {
 namespace ops {
 
 LeakyReluBackward::LeakyReluBackward(const Value& grad_output,
-                                     const Value& input,
-                                     double negative_slope,
+                                     const Value& input, double negative_slope,
                                      bool self_is_result)
     : Node(ir::OpKind(at::aten::leaky_relu_backward), {grad_output, input},
            input.shape(),
@@ -24,7 +23,7 @@ NodePtr LeakyReluBackward::Clone(OpList operands) const {
 std::string LeakyReluBackward::ToString() const {
   std::stringstream ss;
   ss << Node::ToString() << ", negative_slope=" << negative_slope_
-      << ", self_is_result=" << self_is_result_;
+     << ", self_is_result=" << self_is_result_;
   return ss.str();
 }
 
