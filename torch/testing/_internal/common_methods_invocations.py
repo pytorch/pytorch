@@ -2214,6 +2214,7 @@ def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **k
         ((2, 8, 8, 8), (None, 7)),
         ((1, 8, 4, 3), (5, None)),
         ((1, 8, 4, 3), (None, None)),
+        ((1, 8, 4, 3), (5)),
     )
 
     def generator():
