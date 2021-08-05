@@ -35,21 +35,21 @@ class TORCH_API Reducer {
   }
   virtual ~Reducer() = default;
 
-  const Expr* initializer() const {
+  Expr* initializer() const {
     return init_;
   }
 
   ReduceOp* operator()(
-      const Buf* result_buf,
+      Buf* result_buf,
       ExprHandle body,
-      const std::vector<const Expr*>& output,
-      const std::vector<const Var*>& inner) const;
+      const std::vector<Expr*>& output,
+      const std::vector<Var*>& inner) const;
 
   ReduceOp* operator()(
-      const Buf* result_buf,
-      const Expr* body,
-      const std::vector<const Expr*>& output,
-      const std::vector<const Var*>& inner) const;
+      Buf* result_buf,
+      Expr* body,
+      const std::vector<Expr*>& output,
+      const std::vector<Var*>& inner) const;
 
   // Polymorphic handling of Body functions with a variety of parameters.
   static ExprHandle getReduceBody(
@@ -104,11 +104,11 @@ class TORCH_API Reducer {
   // Completes the reduction operator by applying the interaction function to
   // the accumulation and the body expression.
   static Expr* complete(
-      const Buf* accumulator,
+      Buf* accumulator,
       ReduceInteraction interaction,
       ExprHandle body,
-      const std::vector<const Expr*>& output_args,
-      const std::vector<const Var*>& reduce_args) {
+      const std::vector<Expr*>& output_args,
+      const std::vector<Var*>& reduce_args) {
     ExprHandle accum =
         ExprHandle(new Load(body.dtype(), accumulator, output_args));
     auto e = interaction(accum, body);
@@ -116,7 +116,7 @@ class TORCH_API Reducer {
   }
 
  private:
-  const Expr* init_;
+  Expr* init_;
   ReduceInteraction interaction_;
 };
 
@@ -128,17 +128,14 @@ class TORCH_API Reducer {
 class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  ReduceOp(
-      const Expr* body,
-      std::vector<const Var*> reduce_args,
-      const Reducer& reducer)
+  ReduceOp(Expr* body, std::vector<Var*> reduce_args, const Reducer& reducer)
       : ExprNodeBase(body->dtype()),
         body_(body),
         reduce_args_(std::move(reduce_args)),
         reducer_(reducer) {}
 
   // return the body expression which obtains the value to be reduced.
-  const Expr* body() const {
+  Expr* body() const {
     return body_;
   }
 
@@ -148,13 +145,13 @@ class TORCH_API ReduceOp : public ExprNode<ReduceOp> {
   }
 
   // returns variables associated with the axes of reduction.
-  const std::vector<const Var*>& reduce_args() const {
+  const std::vector<Var*>& reduce_args() const {
     return reduce_args_;
   }
 
  private:
-  const Expr* body_;
-  std::vector<const Var*> reduce_args_;
+  Expr* body_;
+  std::vector<Var*> reduce_args_;
   const Reducer reducer_;
 };
 
@@ -223,7 +220,7 @@ class ReductionExpander : public IRMutator {
     return s->accept_mutator(this);
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
+  Expr* mutate(ReduceOp* v) override {
     return v->body();
   }
 };

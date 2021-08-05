@@ -266,7 +266,7 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
       "GradBucket",
       R"(
 This class mainly passes a flattened gradient tensor
-(returned by :meth:`~torch.distributed.GradBucket.get_tensor`)
+(returned by :meth:`~torch.distributed.GradBucket.buffer`)
 to DDP communication hook.
 This tensor can be further decomposed into a list of per-parameter tensors within this bucket
 (returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
@@ -285,17 +285,17 @@ Returns:
     All the gradients are bucketized.
 )")
       .def(
-          "get_tensor",
-          &::c10d::GradBucket::getTensor,
+          "buffer",
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A flattened 1D ``torch.Tensor``,
+    A flattened 1D ``torch.Tensor`` buffer,
     which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
           "gradients",
-          &::c10d::GradBucket::getPerParameterTensors,
+          &::c10d::GradBucket::getGradients,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -303,7 +303,7 @@ Returns:
 )")
       .def(
           "parameters",
-          &::c10d::GradBucket::getModelParamsForBucket,
+          &::c10d::GradBucket::getParameters,
           py::call_guard<py::gil_scoped_release>(),
                     R"(
 Returns:
@@ -312,7 +312,7 @@ Returns:
 )")
       .def(
           "is_last",
-          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          &::c10d::GradBucket::isLast,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -320,12 +320,12 @@ Returns:
     This also means that this bucket corresponds to the first few layers in the forward pass.
 )")
       .def(
-          "set_tensor",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          "set_buffer",
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Replaces the tensor in the bucket with the input tensor.
+Replaces the tensor in the bucket with the input tensor buffer.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -338,6 +338,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init<
               std::vector<std::vector<at::Tensor>>,
               std::vector<std::vector<size_t>>,
+              std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
@@ -346,6 +347,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
+          py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
@@ -1505,7 +1507,7 @@ Example::
 
                 >>> def allreduce(process_group: dist.ProcessGroup, bucket: dist.GradBucket): -> torch.futures.Future
                 >>>     group_to_use = process_group if process_group is not None else torch.distributed.group.WORLD
-                >>>     tensor = bucket.get_tensor().div_(group_to_use.size())
+                >>>     tensor = bucket.buffer().div_(group_to_use.size())
                 >>>     return torch.distributed.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
                 >>> ddp_model.register_comm_hook(state=None, hook=allreduce)
 

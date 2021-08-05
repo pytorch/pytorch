@@ -4,7 +4,8 @@
 name: linux-xenial-py3.6-gcc7-bazel-test
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+  pull_request:
+    types: [unassigned]
   push:
     branches:
       - master
@@ -28,9 +29,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default')) }}
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -49,6 +57,7 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -104,7 +113,7 @@ jobs:
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
       JOB_BASE_NAME: linux-xenial-py3.6-gcc7-bazel-test-build-and-test
@@ -249,7 +258,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: always()
-    needs: [build-and-test, ]
+    needs: [build-and-test, ciflow_should_run]
     runs-on: linux.2xlarge
     steps:
       - name: Log in to ECR
