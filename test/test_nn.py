@@ -13254,6 +13254,19 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(tgt.grad, torch.zeros_like(tgt))
 
     @onlyOnCPUAndCUDA
+    def test_Transformer_empty(self, device):
+        for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
+            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
+            src = torch.rand(*src_shape, requires_grad=True, device=device)
+            tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
+
+            out = transformer_model(src, tgt)
+            out.sum().backward()
+
+            self.assertEqual(tgt, torch.zeros_like(tgt))
+            self.assertEqual(tgt.grad, torch.zeros_like(tgt.grad))
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
