@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -1861,22 +1861,46 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
                         args=(gather_variable((S, S // 2), 0, S, True, device=device),)),
             )
 
+
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    # Ordered as (shape, positional args, kwargs)
-    test_cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
-        ((S, S, S), (), {}),
-        ((S, S, S), (1,), {}),
-        ((S, S, S), ((1, 2,),), {}),
-        ((S, S, S), (1,), {'keepdim': True}),
-        ((), (0,), {}),
-        ((), (), {}),
-        ((), (0,), {'keepdim': True}),
+    # Ordered as (input shape, kwargs)
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S, S), {}),
+        ((S, S, S), {'dim': 1}),
+        ((S, S, S), {'dim': (1, 2,)}),
+        ((S, S, S), {'dim': 1, 'keepdim': True}),
+        ((), {'dim': 0}),
+        ((), {}),
+        ((), {'dim': 0, 'keepdim': True}),
     )
-    return tuple(SampleInput((make_tensor(size, device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad)),
-                             args=args, kwargs=kwargs)
-                 for size, args, kwargs in test_cases)
+
+    samples: List[SampleInput] = []
+    for shape, kwargs in test_cases:
+        samples.append(SampleInput(
+            make_tensor(shape, device, dtype, requires_grad=requires_grad),
+            kwargs=kwargs))
+
+    return samples
+
+# TODO (@heitorschueroff) Once aminmax supports multiple dims this should
+# be combined with the above test.
+def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S, S), {}),
+        ((S, S, S), {'dim': 1}),
+        ((S, S, S), {'dim': 1, 'keepdim': True}),
+        ((), {'dim': 0}),
+        ((), {}),
+        ((), {'dim': 0, 'keepdim': True}),
+    )
+
+    samples: List[SampleInput] = []
+    for shape, kwargs in test_cases:
+        samples.append(SampleInput(
+            make_tensor(shape, device, dtype, requires_grad=requires_grad),
+            kwargs=kwargs))
+
+    return samples
 
 def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -6515,6 +6539,17 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
+    OpInfo('aminmax',
+           ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
+           dtypes=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           decorators=(onlyOnCPUAndCUDA,),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_aminmax,
+           skips=(
+               # FIXME: aminmax does not check for safe casting to output
+               SkipInfo('TestCommon', 'test_out'),
+           )),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
