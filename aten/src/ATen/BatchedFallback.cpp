@@ -90,7 +90,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
   const auto& schema = op.schema();
   warnFallback(schema, /*in_place*/true);
 
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
 
@@ -173,7 +173,7 @@ void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, torch::j
 
   // Strategy: For each batch, we are going to push slices (where applicable)
   // of the arguments onto `stack`, and call `op`.
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();
@@ -262,7 +262,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
               "The fallback path does not support operations with no returns.");
   warnFallback(schema, /*in_place*/false);
 
-  const auto num_arguments = schema.arguments().size();
+  const auto num_arguments = static_cast<int64_t>(schema.arguments().size());
   const auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
 
@@ -316,7 +316,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
   // more easily in the next step.
   std::vector<Tensor> output_shards(num_batches * num_returns);
 
-  for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
+  for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
     auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     auto input_physical_views_iter = input_physical_views.begin();

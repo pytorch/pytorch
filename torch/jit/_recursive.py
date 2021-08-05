@@ -499,7 +499,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 continue
             item = getattr(nn_module, name, None)
             if inspect.ismethod(item) and _jit_internal.is_ignored_fn(item):
-                unbound_function = getattr(type(nn_module), name)
+                unbound_function = getattr(nn_module, name).__func__
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
             elif concrete_type.is_ignored_attribute(name):
@@ -665,11 +665,11 @@ def check_module_initialized(mod):
     # This is to avoid importing torch.distributed.nn
     if not hasattr(mod, 'remote_parameters'):
         for name, param in mod._parameters.items():
-            if torch.nn.parameter.is_lazy(param):
+            if param is not None and torch.nn.parameter.is_lazy(param):
                 raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
         for name, buf in mod._buffers.items():
-            if torch.nn.parameter.is_lazy(buf):
+            if buf is not None and torch.nn.parameter.is_lazy(buf):
                 raise RuntimeError("'{}' has uninitialized buffers {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
 

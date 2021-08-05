@@ -13,66 +13,6 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-#define IS_NODE(T, node)                        \
-  {                                             \
-    auto* node_ = dynamic_cast<const T*>(node); \
-    ASSERT_NE(nullptr, node_);                  \
-  }
-
-#define IS_NODE_WITH_NAME(T, node, name)     \
-  auto* name = dynamic_cast<const T*>(node); \
-  ASSERT_NE(nullptr, name);
-
-#define IS_NODE_WITH_NAME_AND_CAST(T, node, name, Type)        \
-  const T* name = nullptr;                                     \
-  {                                                            \
-    auto* node_ = dynamic_cast<const Cast*>(node);             \
-    ASSERT_NE(nullptr, node_);                                 \
-    ASSERT_EQ(node_->dtype().scalar_type(), ScalarType::Type); \
-    name = dynamic_cast<const T*>(node_->src_value());         \
-  }                                                            \
-  ASSERT_NE(nullptr, name);
-
-#define IS_IMM_WITH_VAL(T, node, val)                \
-  {                                                  \
-    auto* node_ = dynamic_cast<const T##Imm*>(node); \
-    ASSERT_NE(nullptr, node_);                       \
-    ASSERT_EQ(node_->value(), val);                  \
-  }
-
-#define IS_VAR_WITH_NAME(node, name)              \
-  {                                               \
-    auto* node_ = dynamic_cast<const Var*>(node); \
-    ASSERT_NE(nullptr, node_);                    \
-    ASSERT_EQ(node_->name_hint(), name);          \
-  }
-
-#define IS_BINOP_W_VARS(T, node, name, v1, v2) \
-  const T* name = nullptr;                     \
-  {                                            \
-    name = dynamic_cast<const T*>(node);       \
-    ASSERT_NE(nullptr, name);                  \
-    IS_VAR_WITH_NAME(name->lhs(), v1);         \
-    IS_VAR_WITH_NAME(name->rhs(), v2);         \
-  }
-
-#define IS_BINOP_W_CONST(T, node, name, v, c) \
-  const T* name = nullptr;                    \
-  {                                           \
-    name = dynamic_cast<const T*>(node);      \
-    ASSERT_NE(nullptr, name);                 \
-    IS_VAR_WITH_NAME(name->lhs(), v);         \
-    IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
-  }
-
-#define IS_RAND(node)                                    \
-  {                                                      \
-    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
-    ASSERT_NE(nullptr, node_);                           \
-    ASSERT_EQ(node_->op_type(), kRand);                  \
-  }
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -87,7 +27,6 @@ TEST(Simplify, ConstantFoldSimple) {
   ASSERT_EQ(eval.value<float>(), 5.f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -104,7 +43,6 @@ TEST(Simplify, ConstantFoldTwoLayer) {
   ASSERT_EQ(eval.value<float>(), -4.f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldShifts) {
   KernelScope kernel_scope;
   ExprHandle a(7);
@@ -120,7 +58,6 @@ TEST(Simplify, ConstantFoldShifts) {
   ASSERT_EQ(eval.value<int>(), 7 << (4 - 3));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldBitwise) {
   KernelScope kernel_scope;
   ExprHandle a(59);
@@ -136,7 +73,6 @@ TEST(Simplify, ConstantFoldBitwise) {
   ASSERT_EQ(eval.value<int>(), (59 ^ 22) & 101);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMultiOp) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -156,7 +92,6 @@ TEST(Simplify, ConstantFoldMultiOp) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldMinMax) {
   KernelScope kernel_scope;
   ExprHandle a(12.0f);
@@ -177,7 +112,6 @@ TEST(Simplify, ConstantFoldMinMax) {
   ASSERT_EQ(eval.value<float>(), 15.f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldIntrinsics) {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -200,7 +134,6 @@ TEST(Simplify, ConstantFoldIntrinsics) {
   ASSERT_EQ(eval.value<float>(), ref.value<float>());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldCastToBool) {
   KernelScope kernel_scope;
   ExprHandle f = Cast::make(kBool, IntImm::make(0));
@@ -209,7 +142,6 @@ TEST(Simplify, ConstantFoldCastToBool) {
   ASSERT_EQ(eval.value<bool>(), false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConstantFoldWithVar) {
   KernelScope kernel_scope;
   {
@@ -217,7 +149,7 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2) + ExprHandle(4));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    Mul* root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const IntImm*>(root->lhs()), nullptr);
 
@@ -231,7 +163,7 @@ TEST(Simplify, ConstantFoldWithVar) {
     ExprHandle body = x * (ExprHandle(2.f) + ExprHandle(4.f));
 
     ExprHandle newF = IRSimplifier::simplify(body);
-    const Mul* root = newF.AsNode<Mul>();
+    Mul* root = newF.AsNode<Mul>();
     ASSERT_NE(root, nullptr);
     ASSERT_NE(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
 
@@ -241,7 +173,6 @@ TEST(Simplify, ConstantFoldWithVar) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldSimple) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
@@ -289,7 +220,6 @@ TEST(Simplify, ConditionalSelectFoldSimple) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   KernelScope kernel_scope;
   ExprHandle a(3.0f);
@@ -338,7 +268,6 @@ TEST(Simplify, ConditionalSelectFoldTwoLayer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, ConditionalSelectFoldWithVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -360,7 +289,6 @@ TEST(Simplify, ConditionalSelectFoldWithVar) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, UnFoldableExpr) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -368,7 +296,7 @@ TEST(Simplify, UnFoldableExpr) {
   ExprHandle body = (ExprHandle(3) * x) + (ExprHandle(5) * y);
 
   ExprHandle newF = IRSimplifier::simplify(body);
-  const Add* root = newF.AsNode<Add>();
+  Add* root = newF.AsNode<Add>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->lhs()), nullptr);
   ASSERT_EQ(dynamic_cast<const FloatImm*>(root->rhs()), nullptr);
@@ -379,7 +307,6 @@ TEST(Simplify, UnFoldableExpr) {
   ASSERT_EQ(eval.value<float>(), 9 + 10);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashSimple) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -401,14 +328,13 @@ TEST(Simplify, HashSimple) {
   ASSERT_NE(hash_a, hash_f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalence) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle f = (x * y) + (x * y);
 
-  const Add* root = f.AsNode<Add>();
+  Add* root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -439,13 +365,12 @@ TEST(Simplify, HashEquivalence) {
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceRand) {
   KernelScope kernel_scope;
   ExprHandle f =
       Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
 
-  const Add* root = f.AsNode<Add>();
+  Add* root = f.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   HashProvider hasher;
@@ -460,7 +385,6 @@ TEST(Simplify, HashEquivalenceRand) {
   ASSERT_NE(hash_l, hash_r);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashEquivalenceAfterFolding) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -487,12 +411,11 @@ TEST(Simplify, HashEquivalenceAfterFolding) {
   ASSERT_EQ(hash_l_n, hash_r_n);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashDifferenceTypes) {
   KernelScope kernel_scope;
 
   HashProvider hasher;
-  std::vector<const Expr*> immediates;
+  std::vector<Expr*> immediates;
 
   immediates.push_back(new DoubleImm(1));
   immediates.push_back(new FloatImm(1));
@@ -522,7 +445,6 @@ TEST(Simplify, HashDifferenceTypes) {
   ASSERT_EQ(hasher.hash(ff1.node()), hasher.hash(ff2.node()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashLargeExpression) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -567,7 +489,6 @@ TEST(Simplify, HashLargeExpression) {
   ASSERT_NE(hash_t, hash_f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, HashForLoopOptions) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -610,7 +531,6 @@ TEST(Simplify, HashForLoopOptions) {
 }
 
 /// (2 + x) + 4 => x + 6
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdd) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -626,9 +546,9 @@ TEST(Simplify, SimplifyAdd) {
   ExprHandle body = (ExprHandle(2) + x) + ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Var* lhs = dynamic_cast<const Var*>(root->lhs());
+  Var* lhs = dynamic_cast<Var*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->name_hint(), "x");
   const IntImm* rhs = dynamic_cast<const IntImm*>(root->rhs());
@@ -637,25 +557,23 @@ TEST(Simplify, SimplifyAdd) {
 }
 
 /// (2 - x) - 4 => -2 - x
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySub) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (ExprHandle(2) - x) - ExprHandle(4);
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Sub* root = simplified.AsNode<Sub>();
+  Sub* root = simplified.AsNode<Sub>();
   ASSERT_NE(root, nullptr);
   const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), -2.f);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// 2 * (1 - x) - 4 => 2 * (-3 - x)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiLayer) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -669,7 +587,6 @@ TEST(Simplify, SimplifyMultiLayer) {
 }
 
 /// 2 * (3 * x) - (x * 4) => 2 * x
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiTerm) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -677,18 +594,17 @@ TEST(Simplify, SimplifyMultiTerm) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  Mul* root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
   const IntImm* lhs = dynamic_cast<const IntImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// 2 * (3 * (long)x) - (x * 4) => 2 * x
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyCasts) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -696,31 +612,29 @@ TEST(Simplify, SimplifyCasts) {
       (ExprHandle(2) * ((ExprHandle(3) * x)) - (x * ExprHandle(4)));
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Mul* root = simplified.AsNode<Mul>();
+  Mul* root = simplified.AsNode<Mul>();
   ASSERT_NE(root, nullptr);
   const LongImm* lhs = dynamic_cast<const LongImm*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
   ASSERT_EQ(lhs->value(), 2);
-  const Var* rhs = dynamic_cast<const Var*>(root->rhs());
+  Var* rhs = dynamic_cast<Var*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
   ASSERT_EQ(rhs->name_hint(), "x");
 }
 
 /// (x + 0) * 1 => x
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesNoOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
   ExprHandle body = (x + ExprHandle(0)) * 1;
 
   ExprHandle simplified = IRSimplifier::simplify(body);
-  const Var* root = simplified.AsNode<Var>();
+  Var* root = simplified.AsNode<Var>();
   ASSERT_NE(root, nullptr);
   ASSERT_EQ(root->name_hint(), "x");
 }
 
 /// Cannot simplify this.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -729,22 +643,21 @@ TEST(Simplify, SimplifyMultiVar) {
 
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
-  const Mul* lhs = dynamic_cast<const Mul*>(root->lhs());
+  Mul* lhs = dynamic_cast<Mul*>(root->lhs());
   ASSERT_NE(lhs, nullptr);
-  const Var* varX = dynamic_cast<const Var*>(lhs->rhs());
+  Var* varX = dynamic_cast<Var*>(lhs->rhs());
   ASSERT_NE(varX, nullptr);
   ASSERT_EQ(varX->name_hint(), "y");
-  const Mul* rhs = dynamic_cast<const Mul*>(root->rhs());
+  Mul* rhs = dynamic_cast<Mul*>(root->rhs());
   ASSERT_NE(rhs, nullptr);
-  const Var* varY = dynamic_cast<const Var*>(rhs->rhs());
+  Var* varY = dynamic_cast<Var*>(rhs->rhs());
   ASSERT_NE(varY, nullptr);
   ASSERT_EQ(varY->name_hint(), "x");
 }
 
 // x + 2 + y => x + y + 2
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_SimplifyReorderings) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -752,7 +665,7 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
   ExprHandle body = x + 2 + y;
   ExprHandle simplified = IRSimplifier::simplify(body);
 
-  const Add* root = simplified.AsNode<Add>();
+  Add* root = simplified.AsNode<Add>();
   ASSERT_NE(root, nullptr);
 
   IS_NODE_WITH_NAME(Add, root->lhs(), rhs);
@@ -762,7 +675,6 @@ TEST(Simplify, DISABLED_SimplifyReorderings) {
 }
 
 /// y + x * 0 => y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminatesVar) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -773,7 +685,6 @@ TEST(Simplify, SimplifyEliminatesVar) {
   IS_VAR_WITH_NAME(simplified.node(), "y");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyAdds) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -845,7 +756,6 @@ TEST(Simplify, SimplifyAdds) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMuls) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1048,7 +958,6 @@ TEST(Simplify, SimplifyMuls) {
 }
 
 // Sub an expr from itself will result in zero.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySubs) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1215,7 +1124,6 @@ TEST(Simplify, SimplifySubs) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDiv) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1235,7 +1143,370 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Simplify, SimplifyDivWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) / 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext3) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) / (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) / (-6)));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = -4;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext4) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) / 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) / 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext5) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext6) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) / 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) / 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyDivWithLoopContext7) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) / (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) / (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = -j;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext0) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i % 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i % 100)));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext1) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext2) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i + 25) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + 25) % 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = i + 1;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext3) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  A[i] = (i + 24) % (-6);
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {6}, kInt);
+  auto for_stmt = For::make(i, 0, 6, Store::make(a_buf, {i}, (i + 24) % (-6)));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext4) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 5; i++) {
+  //  A[i] = (i - 5) % 6;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {5}, kInt);
+  auto for_stmt = For::make(i, 0, 5, Store::make(a_buf, {i}, (i + (-5)) % 6));
+
+  const Stmt* simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NOT:   A[i] = i - 5;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext5) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j = For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NEXT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext6) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = -1; j < 9; j++) {
+  //    A[i, j+1] = (i + 6*j) % 6;
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, -1, 9, Store::make(a_buf, {i, j + 1}, (i + j * 6) % 6));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+TEST(Simplify, SimplifyModWithLoopContext7) {
+  KernelScope kernel_scope;
+  // Stmt to simplify:
+  // for (int i = 0; i < 6; i++) {
+  //  for (int j = 0; j < 10; j++) {
+  //    A[i, j] = (i + 6*j) % (-6);
+  //  }
+  //}
+  VarHandle i("i", kInt);
+  VarHandle j("j", kInt);
+  BufHandle a_buf("A", {6, 10}, kInt);
+  auto for_j =
+      For::make(j, 0, 10, Store::make(a_buf, {i, j}, (i + j * 6) % (-6)));
+  auto for_i = For::make(i, 0, 6, for_j);
+
+  const Stmt* simplified = IRSimplifier::simplify(for_i);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK:   for (int j
+# CHECK-NOT:   A[i, j] = i;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(Simplify, SimplifyMod) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1363,7 +1634,6 @@ TEST(Simplify, SimplifyMod) {
 }
 
 // Test that mixing ops together simplifies as expected.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultiOp) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1433,7 +1703,6 @@ TEST(Simplify, SimplifyMultiOp) {
 }
 
 // Test that chaining many ops together works as expected.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyManyOps) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1482,7 +1751,6 @@ TEST(Simplify, SimplifyManyOps) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorization) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1611,7 +1879,6 @@ TEST(Simplify, SimplifyFactorization) {
 }
 
 // (4 * x + y + z * 2) + (4 * x + y + z * 4) => 2 * (y + 3 * z + 4 * x)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFactorizeUneven) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1639,7 +1906,6 @@ TEST(Simplify, SimplifyFactorizeUneven) {
 
 // (x * y) + (2 * x) * (x + y) => 3 * (x * y) + 2 * (x * x)
 // This is kind of a placeholder test for variable factorization.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1664,7 +1930,6 @@ TEST(Simplify, SimplifyDeeperTerms) {
 
 // Tests the difference between two less trivial expressions.
 // (m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n) => 1
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDeeperDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1679,7 +1944,6 @@ TEST(Simplify, SimplifyDeeperDifference) {
 
 // Test constant folding into the difference between expressions.
 // 2 + char((m * (1 * n_1) + (n  + 1)) - (m *  (1 * n_1) + n)) => 3
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFoldComplexDifference) {
   KernelScope kernel_scope;
   VarHandle n("n", kInt);
@@ -1695,7 +1959,6 @@ TEST(Simplify, SimplifyFoldComplexDifference) {
   IS_IMM_WITH_VAL(Int, simplified.node(), 3);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyIfComponents) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1718,7 +1981,6 @@ TEST(Simplify, SimplifyIfComponents) {
   IS_VAR_WITH_NAME(ifexpr->false_value(), "y");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOpaqueTerms) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -1745,7 +2007,6 @@ TEST(Simplify, SimplifyOpaqueTerms) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicMinMax) {
   KernelScope kernel_scope;
 
@@ -1782,7 +2043,6 @@ TEST(Simplify, SimplifySymbolicMinMax) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMax) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -2087,7 +2347,6 @@ TEST(Simplify, SimplifyNestedMax) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyNestedMin) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -2392,7 +2651,6 @@ TEST(Simplify, SimplifyNestedMin) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyWontReorderFloat) {
   KernelScope kernel_scope;
 
@@ -2505,7 +2763,6 @@ TEST(Simplify, SimplifyWontReorderFloat) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPattern) {
   KernelScope kernel_scope;
 
@@ -2714,7 +2971,6 @@ TEST(Simplify, SimplifyRoundModPattern) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2775,7 +3031,6 @@ TEST(Simplify, SimplifyRoundModPatternFactorization) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
@@ -2833,7 +3088,6 @@ TEST(Simplify, SimplifyRoundModPatternMultivar) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPattern) {
   KernelScope kernel_scope;
 
@@ -2928,7 +3182,6 @@ TEST(Simplify, SimplifyModRoundModPattern) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   KernelScope kernel_scope;
 
@@ -2998,7 +3251,6 @@ TEST(Simplify, SimplifyModRoundModPatternFactorization) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   KernelScope kernel_scope;
 
@@ -3121,7 +3373,6 @@ TEST(Simplify, SimplifyModRoundModPatternMultivar) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyDivisionScalarFactorization) {
   KernelScope kernel_scope;
 
@@ -3194,7 +3445,6 @@ TEST(Simplify, SimplifyDivisionScalarFactorization) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantBranches) {
   KernelScope kernel_scope;
 
@@ -3253,7 +3503,6 @@ TEST(Simplify, SimplifyConstantBranches) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantCond) {
   KernelScope kernel_scope;
 
@@ -3366,7 +3615,6 @@ TEST(Simplify, SimplifyConstantCond) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyCond) {
   KernelScope kernel_scope;
   // If the branches are empty in different ways, eliminate.
@@ -3395,7 +3643,6 @@ TEST(Simplify, SimplifyEliminateEmptyCond) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyConstantComparisons) {
   KernelScope kernel_scope;
 
@@ -3442,7 +3689,6 @@ TEST(Simplify, SimplifyConstantComparisons) {
   IS_IMM_WITH_VAL(Int, simplified.node(), 42);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySymbolicComparisons) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -3581,7 +3827,6 @@ TEST(Simplify, SimplifySymbolicComparisons) {
   TookFalseBranch(IRSimplifier::simplify(body));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   KernelScope kernel_scope;
 
@@ -3642,7 +3887,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthFor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyOneLoopFor) {
   KernelScope kernel_scope;
 
@@ -3712,7 +3956,6 @@ TEST(Simplify, SimplifyOneLoopFor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   KernelScope kernel_scope;
 
@@ -3732,7 +3975,6 @@ TEST(Simplify, SimplifyForWontLoseLoopOptions) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyMultilevelFor) {
   KernelScope kernel_scope;
 
@@ -3792,7 +4034,6 @@ TEST(Simplify, SimplifyMultilevelFor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyForCleansUp) {
   KernelScope kernel_scope;
 
@@ -3823,7 +4064,6 @@ TEST(Simplify, SimplifyForCleansUp) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateEmptyFor) {
   KernelScope kernel_scope;
 
@@ -3841,7 +4081,6 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFlattenBlock) {
   KernelScope kernel_scope;
 
@@ -3927,7 +4166,6 @@ TEST(Simplify, SimplifyFlattenBlock) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   KernelScope kernel_scope;
 
@@ -4002,7 +4240,6 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DontSimplifyRand) {
   KernelScope kernel_scope;
 
@@ -4037,7 +4274,6 @@ TEST(Simplify, DontSimplifyRand) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyReorderForCond) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -4237,7 +4473,6 @@ TEST(Simplify, SimplifyReorderForCond) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyFuseConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
@@ -4658,7 +4893,6 @@ TEST(Simplify, SimplifyFuseConditions) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifySyncThreads) {
   KernelScope kernel_scope;
   BufHandle a("A", {4}, kInt);
@@ -4757,7 +4991,6 @@ TEST(Simplify, SimplifySyncThreads) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyRampSubBroadcast) {
   KernelScope kernel_scope;
   int num_lanes = 4;
@@ -4772,7 +5005,6 @@ TEST(Simplify, SimplifyRampSubBroadcast) {
   ASSERT_EQ(newRamp->lanes(), num_lanes);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, SimplifyBroadcastTermExpander) {
   KernelScope kernel_scope;
   int num_lanes = 8;
@@ -4795,7 +5027,6 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   // Before:
   //   for (int n = 1; n < N; n++) {
@@ -4821,7 +5052,6 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   // Before:
   //   for (int n = 1; n < N; n++) {
@@ -4847,7 +5077,6 @@ TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   // This test mimics the unpadded region of a conv2d.  We want to remove any
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
@@ -4883,7 +5112,6 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
       oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   // This test mimics the padded region of a conv2d.  We want to adjust the
   // loop bounds such that the condition will be always met.  Note that this

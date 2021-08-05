@@ -71,8 +71,11 @@ Tensor TransformerEncoderLayerImpl::forward(
   else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
   }
-  else {
-    TORCH_CHECK(false, "activation should be kGELU/kReLU, not ", torch::enumtype::get_enum_name(options.activation()));
+  else if (c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation())) {
+    auto callable_activation = *c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation());
+    src2 = linear2(dropout(callable_activation(linear1(ret))));
+  } else {
+    TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");
   }
 
   // add & norm
@@ -185,10 +188,11 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
     return F::gelu(input);
   } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
     return F::relu(input);
+  } else if(c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation())) {
+    auto callable_activation = *c10::get_if<std::function<Tensor(const Tensor&)> >(&options.activation());
+    return callable_activation(input);
   } else {
-    TORCH_CHECK(false,
-      "Unknown activation: ",
-      torch::enumtype::get_enum_name(options.activation()));
+    TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");
   }
 }
 
@@ -202,6 +206,7 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
@@ -264,6 +269,7 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
+  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }

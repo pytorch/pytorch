@@ -16,8 +16,6 @@ namespace {
 std::pair<std::vector<StackEntry>, std::string> getStackTraceWithModuleHierarchy(
     const DebugInfoTuple& source_callstack,
     const std::string& caller_name) {
-  constexpr size_t kSourceRange = 1;
-  constexpr size_t kModuleInstanceInfo = 2;
   std::vector<StackEntry> entries;
 
   const SourceRange& range =
