@@ -116,7 +116,7 @@ class UnBatchIterDataPipe(IterDataPipe):
         if unbatch_level < -1:
             raise ValueError("unbatch_level must be -1 or >= 0")
         if unbatch_level == -1:
-            if isinstance(element, list):
+            if isinstance(element, list) or isinstance(element, DataChunk):
                 for item in element:
                     for i in self._dive(item, unbatch_level=-1):
                         yield i
@@ -125,11 +125,12 @@ class UnBatchIterDataPipe(IterDataPipe):
         elif unbatch_level == 0:
             yield element
         else:
-            if not isinstance(element, list):
+            if isinstance(element, list) or isinstance(element, DataChunk):
+                for item in element:
+                    for i in self._dive(item, unbatch_level=unbatch_level - 1):
+                        yield i
+            else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
-            for item in element:
-                for i in self._dive(item, unbatch_level=unbatch_level - 1):
-                    yield i
 
 
 @functional_datapipe('bucket_batch')
@@ -180,7 +181,8 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
         else:
             bucket: List[T_co]
             batch: List[T_co] = []
-            for bucket in self.bucket_ds:
+            for bucket_or_chunk in self.bucket_ds:
+                bucket = list(bucket_or_chunk)
                 # In-place sort within bucket
                 bucket.sort(key=self.sort_key)
                 for start in range(0, len(bucket), self.batch_size):

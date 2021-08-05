@@ -36,7 +36,7 @@ class DataChunk(object):
         return len(self.items)
 
     def as_str(self, indent=''):
-        res = indent + "[" + ",".join([str(i) for i in iter(self)]) + "]"
+        res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
         return res
 
     def __str__(self):

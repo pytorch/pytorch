@@ -46,7 +46,8 @@ class FilterIterDataPipe(MapIterDataPipe):
             return self._returnIfTrue(data)
         elif nesting_level > 0:
             if isinstance(data, DataChunk):
-                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1)
+                                                   for i in data.raw_iterator()])
                 return data.__class__(list(result))
             elif isinstance(data, list):
                 result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
@@ -71,7 +72,9 @@ class FilterIterDataPipe(MapIterDataPipe):
             return data
 
     def _isNonEmpty(self, data):
-        return data is not None and not (data == [] and self.drop_empty_batches)
+        return data is not None and \
+            not (data == [] and self.drop_empty_batches) and \
+            not (isinstance(data, DataChunk) and len(data) == 0 and self.drop_empty_batches)
 
     def __len__(self):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
