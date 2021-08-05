@@ -55,6 +55,23 @@ class LoggingTensor(torch.Tensor):
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, rs)
         return rs
 
+class FiniteTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, elem, *args, **kwargs):
+        assert torch.isfinite(elem).all()
+        return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+    def __repr__(self):
+        return f"FiniteTensor({super().__repr__})"
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # TODO: also explicitly recheck invariants on inplace/out mutation
+        assert not kwargs
+        with no_dispatch():
+            rs = func(*args)
+        return tree_map(lambda e: FiniteTensor(e) if isinstance(e, torch.Tensor) else e, rs)
+
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
     log_list: List[str]
@@ -204,6 +221,23 @@ $2 = torch._ops.aten.abs($0, $1)''')
         self.assertExpectedInline(s1, """LoggingTensor(tensor([1.]))""")
         self.assertEqual(s1, s2)
         self.assertEqual(s1, s3)
+
+    def test_finite_tensor(self) -> None:
+        x = FiniteTensor(torch.ones(1))
+        self.assertRaises(AssertionError, lambda: x / torch.zeros(1))
+
+        class InfGrad(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output / torch.zeros_like(grad_output)
+
+        y = torch.randn(1, requires_grad=True)
+        z = InfGrad.apply(y)
+        self.assertRaises(AssertionError, lambda: z.backward(FiniteTensor(torch.ones(1))))
 
     def test_custom_autograd(self) -> None:
         escape = [None]
