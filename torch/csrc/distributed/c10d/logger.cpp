@@ -247,6 +247,15 @@ void Logger::set_runtime_stats_and_log() {
         c10::Join(", ", get_bucket_sizes());
     ddp_logging_data_->strs_map["rebuilt_bucket_size_limits"] =
         c10::Join(", ", get_bucket_size_limits());
+    // Log per-bucket variable indices
+    std::vector<std::string> per_bucket_variable_indices;
+    auto indices = get_per_bucket_variable_indices();
+    per_bucket_variable_indices.reserve(indices.size());
+    for (const auto& bucket_indices : indices) {
+      per_bucket_variable_indices.push_back(c10::Join(" ", bucket_indices));
+    }
+    ddp_logging_data_->strs_map["rebuilt_per_bucket_param_indices"] =
+      c10::Join(", ", per_bucket_variable_indices);
   }
   // Log gradient ready order
   if (!reducer_->grad_ready_order_indices_.empty()) {
@@ -256,15 +265,6 @@ void Logger::set_runtime_stats_and_log() {
     ddp_logging_data_->strs_map["prev_iteration_grad_ready_order_indices"] =
         c10::Join(", ", reducer_->grad_ready_order_indices_);
   }
-  // Log per-bucket variable indices
-  std::vector<std::string> per_bucket_variable_indices;
-  auto indices = get_per_bucket_variable_indices();
-  per_bucket_variable_indices.reserve(indices.size());
-  for (const auto& bucket_indices : indices) {
-    per_bucket_variable_indices.push_back(c10::Join(" ", bucket_indices));
-  }
-  ddp_logging_data_->strs_map["per_bucket_variable_indices"] =
-      c10::Join(", ", per_bucket_variable_indices);
 
   reset_performance_stats();
 
