@@ -123,8 +123,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   // TODO: use kineto
   void reportMemoryUsage(
-      void* /* unused */,
+      void* ptr,
       int64_t alloc_size,
+      int64_t total_allocated,
+      int64_t total_reserved,
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
       std::lock_guard<std::mutex> guard(state_mutex_);
@@ -137,24 +139,32 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
             cpu_trace->span,
             libkineto::ActivityType::CPU_INSTANT_EVENT,
             kMemoryEventName));
-      auto& act = cpu_trace->activities.back();
-      act.device = libkineto::processId();
-      act.resource = libkineto::systemThreadId();
+        auto& act = cpu_trace->activities.back();
+        act.device = libkineto::processId();
+        act.resource = libkineto::systemThreadId();
 
-      act.startTime = start_time;
-      act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
-      act.addMetadata("Device Id", std::to_string(device.index()));
-      act.addMetadata("Bytes", std::to_string(alloc_size));
+        act.startTime = start_time;
+        act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
+        act.addMetadata("Device Id", std::to_string(device.index()));
+        act.addMetadata(
+            "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
+        act.addMetadata("Bytes", std::to_string(alloc_size));
+        if (total_allocated >= 0) {
+          act.addMetadata("Allocated Bytes", std::to_string(total_allocated));
+        }
+        if (total_reserved >= 0) {
+          act.addMetadata("Reserved Bytes", std::to_string(total_reserved));
+        }
 #endif // USE_KINETO
 
-      kineto_events_.emplace_back();
-      auto& evt = kineto_events_.back();
-      evt.name(kMemoryEventName)
-        .startUs(start_time)
-        .deviceIndex(device.index())
-        .deviceType(device.type())
-        .nBytes(alloc_size)
-        .startThreadId(at::RecordFunction::currentThreadId());
+        kineto_events_.emplace_back();
+        auto& evt = kineto_events_.back();
+        evt.name(kMemoryEventName)
+          .startUs(start_time)
+          .deviceIndex(device.index())
+          .deviceType(device.type())
+          .nBytes(alloc_size)
+          .startThreadId(at::RecordFunction::currentThreadId());
     }
   }
 

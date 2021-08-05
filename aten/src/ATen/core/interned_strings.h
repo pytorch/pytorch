@@ -203,8 +203,6 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
-  _(aten, matrix_exp)                \
-  _(aten, linalg_matrix_exp)         \
   _(aten, matrix_power)              \
   _(aten, linalg_matrix_power)       \
   _(aten, chain_matmul)              \
@@ -212,6 +210,7 @@ namespace c10 {
   _(aten, linalg_norm)               \
   _(aten, linalg_vector_norm)        \
   _(aten, linalg_matrix_norm)        \
+  _(aten, linalg_matrix_exp)         \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
