@@ -13216,6 +13216,16 @@ class TestNNDeviceType(NNTestCase):
             self._test_module_empty_input(encoder_layer, input, check_size=False)
 
     @onlyOnCPUAndCUDA
+    def test_TransformerEncoder_empty(self, device):
+        for batch_first, input_shape in [(True, (0, 10, 512)),
+                                          (False, (10, 0, 512))]:
+            input = torch.rand(*input_shape, device=device)
+            encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
+            transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6)
+
+            self._test_module_empty_input(transformer_encoder, input, check_size=False)
+
+    @onlyOnCPUAndCUDA
     def test_TransformerDecoderLayer_empty(self, device):
         for batch_first, memory_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
                                                      (False, (10, 0, 512), (20, 0, 512))]:
