@@ -408,7 +408,7 @@ enum class C10_API_ENUM ProfilerState {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
