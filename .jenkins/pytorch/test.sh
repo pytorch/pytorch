@@ -483,7 +483,7 @@ else
   fi
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" == *backward* && "${SHARD_NUMBER}" -lt 2 ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 fi
