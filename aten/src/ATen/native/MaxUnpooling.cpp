@@ -72,6 +72,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
           oheight,
           "x",
           owidth);
+      (void)error_index;
     }
   }
   return output;
@@ -203,6 +204,7 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
             oH,
             "x",
             oW);
+        (void)error_index;
       }
     }
   }
@@ -382,6 +384,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
         owidth,
         ", oheight= ",
         oheight);
+    (void)error_index;
   }
 }
 
@@ -526,6 +529,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
         oW,
         ",oH= ",
         oH);
+    (void)error_index;
   }
 }
 
