@@ -506,7 +506,7 @@ def add_fully_qualified_names_to_logger_results(
 ) -> None:
     """
     For each logged value from `model_name`, adds the fully qualified names
-    found in `model` under the field, 'fully_qualified_name'. 
+    found in `model` under the field, 'fully_qualified_name'.
 
     The fully qualified name can be found by tracing the `model` and using the
     node_name_to_scope to map the 'ref_node_name' field in the logger to fully
