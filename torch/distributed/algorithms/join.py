@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 
 
-class _JoinHook():
+class JoinHook():
     r"""
     This defines a join hook, which provides two entry points in the join
     context manager: a main hook, which is called repeatedly while there exists
@@ -15,10 +15,8 @@ class _JoinHook():
     have joined.
 
     To implement a join hook for the generic join context manager, define a
-    class that inherits from :class:`_JoinHook`, override ``main_hook()`` and
-    ``post_hook()`` as appropriate, and override ``device()`` and
-    ``process_group()`` to provide the device and process group information,
-    respectively, which are needed for the join context manager implementation.
+    class that inherits from :class:`JoinHook` and override ``main_hook()`` and
+    ``post_hook()`` as appropriate.
     """
     def main_hook(self) -> None:
         r"""
@@ -41,35 +39,35 @@ class _JoinHook():
         ...
 
 
-class _Joinable(ABC):
+class Joinable(ABC):
     r"""
     This defines an abstract base class for joinable classes. A joinable class
-    (inheriting from :class:`_Joinable`) should implement :meth:`_join_hook()`,
-    which returns a :class:`_JoinHook` instance, in addition to
-    :meth:`_join_device()` and :meth:`_join_process_group()` that return device
-    and process group information, respectively.
+    (inheriting from :class:`Joinable`) should implement :meth:`join_hook`,
+    which returns a :class:`JoinHook` instance, in addition to
+    :meth:`join_device` and :meth:`join_process_group` that return device and
+    process group information, respectively.
     """
     @abstractmethod
     def __init__(self):
-        super(_Joinable, self).__init__()
+        super(Joinable, self).__init__()
         self._join_config = _JoinConfig.construct_disabled_join_config()
 
     @abstractmethod
-    def _join_hook(self, **kwargs) -> _JoinHook:
+    def join_hook(self, **kwargs) -> JoinHook:
         r"""
-        Returns a :class:`_JoinHook` instance for the given :class:`_Joinable`.
+        Returns a :class:`JoinHook` instance for the given :class:`Joinable`.
 
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
                 to modify the behavior of the join hook at run time; all
-                :class:`_Joinable` instances sharing the same join context
+                :class:`Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
         """
         ...
 
     @property
     @abstractmethod
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         r"""
         Returns the device from which to perform collective communications
         needed by the join context manager implementation itself.
@@ -78,7 +76,7 @@ class _Joinable(ABC):
 
     @property
     @abstractmethod
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         r"""
         Returns the process group for the collective communications needed by
         the join context manager itself.
@@ -88,7 +86,7 @@ class _Joinable(ABC):
 
 class _JoinConfig(NamedTuple):
     r"""
-    This includes all fields needed from a :class:`_Joinable` instance for the
+    This includes all fields needed from a :class:`Joinable` instance for the
     join context manager side.
     """
     enable: bool
@@ -110,31 +108,31 @@ class _JoinConfig(NamedTuple):
 
 
 
-class _Join():
+class Join():
     r"""
     This class defines the generic join context manager, which allows custom
     hooks to be called after a process joins. These hooks should shadow the
     collective communications of non-joined processes to prevent hanging and
-    erroring and to ensure algorithmic correctness. Refer to :class:`_JoinHook`
+    erroring and to ensure algorithmic correctness. Refer to :class:`JoinHook`
     for details about the hook definition.
 
     .. warning::
-        The context manager requires each participating :class:`_Joinable` to
-        call the method `notify_join_context()` before its own per-iteration
-        collective communications to ensure correctness.
+        The context manager requires each participating :class:`Joinable` to
+        call the method :meth:`notify_join_context()` before its own per-
+        iteration collective communications to ensure correctness.
 
     .. warning::
         The context manager requires that all ``process_group`` attributes in
-        the ``_JoinHook`` objects are the same. If there are multiple
-        ``_JoinHook`` objects, then the ``device`` of the first is used. The
-        process group and device information is used for checking for non-
+        the :class:`JoinHook` objects are the same. If there are multiple
+        :class:`JoinHook` objects, then the ``device`` of the first is used.
+        The process group and device information is used for checking for non-
         joined processes and for notifying processes to throw an exception if
         ``throw_on_early_termination`` is enabled, both of which using an all-
         reduce.
 
     Arguments:
-        joinables (List[_Joinable]): a list of the participating
-            :class:`_Joinable` s; their hooks are iterated over in the given
+        joinables (List[Joinable]): a list of the participating
+            :class:`Joinable` s; their hooks are iterated over in the given
             order.
 
         enable (bool): a flag enabling uneven input detection; setting to
@@ -171,7 +169,7 @@ class _Join():
     """
     def __init__(
         self,
-        joinables: List[_Joinable],
+        joinables: List[Joinable],
         enable: bool = True,
         throw_on_early_termination: bool = False,
         **kwargs,
@@ -179,7 +177,7 @@ class _Join():
         if len(joinables) == 0:
             raise ValueError("The join context manager requires at least one joinable")
         self._joinables = joinables
-        self._join_hooks = [joinable._join_hook(**kwargs) for joinable in self._joinables]
+        self._join_hooks = [joinable.join_hook(**kwargs) for joinable in self._joinables]
         self._enable = enable
         self._throw_on_early_termination = throw_on_early_termination
         self._set_joinable_configs()
@@ -187,7 +185,7 @@ class _Join():
 
     def _set_joinable_configs(self) -> None:
         r"""
-        Sets the :class:`_JoinConfig` of each participating :class:`_Joinable`.
+        Sets the :class:`_JoinConfig` of each participating :class:`Joinable`.
         """
         assert len(self._joinables) > 0
         is_first_joinable = True
@@ -211,17 +209,17 @@ class _Join():
         Raises:
             ValueError
                 If there are multiple conflicting ``process_group`` attributes
-                among the ``_Joinable`` objects.
+                among the ``Joinable`` objects.
         """
         process_group = None
         device = None
         for joinable in self._joinables:
             if process_group is None:
-                process_group = joinable._join_process_group
-            elif process_group != joinable._join_process_group:
+                process_group = joinable.join_process_group
+            elif process_group != joinable.join_process_group:
                 raise ValueError("Using join context manager with multiple process groups")
             if device is None:
-                device = joinable._join_device
+                device = joinable.join_device
         self._process_group = process_group
         self._rank = dist.get_rank(self._process_group)
         self._device = device
@@ -305,24 +303,24 @@ class _Join():
         raise RuntimeError(f"Rank {self._rank} exhausted all inputs.")
 
     @staticmethod
-    def notify_join_context(joinable: _Joinable):
+    def notify_join_context(joinable: Joinable):
         r"""
         Notifies the join context manager that the calling process has not yet
         joined; then, if ``throw_on_early_termination=True``, checks if uneven
         inputs have been detected (i.e. if one process has already joined) and
         throws an exception if so.
 
-        This method should be called from a :class:`_Joinable` object before
+        This method should be called from a :class:`Joinable` object before
         its per-iteration collective communications. For example, this should
         be called at the beginning of the forward pass in
         :class:`DistributedDataParallel`.
 
-        Only the first :class:`_Joinable` object passed into the context
+        Only the first :class:`Joinable` object passed into the context
         manager performs the collective communications in this method, and
         for the others, this method is vacuous.
 
         Arguments:
-            joinable (_Joinable): the :class:`_Joinable` object calling this
+            joinable (Joinable): the :class:`Joinable` object calling this
                 method.
 
         Returns:
@@ -332,15 +330,15 @@ class _Join():
         """
         assert hasattr(joinable, "_join_config"), \
             f"Check that the {type(joinable)} constructor calls the " \
-            "``_Joinable`` constructor"
+            "``Joinable`` constructor"
 
         join_config = joinable._join_config
         # First joinable is responsible for the collective communications
         if not join_config.is_first_joinable or not join_config.enable:
             return None
 
-        device = joinable._join_device
-        process_group = joinable._join_process_group
+        device = joinable.join_device
+        process_group = joinable.join_process_group
 
         # Schedule an all-reduce to indicate that the caller has not yet joined
         ones = torch.ones(1, device=device)
