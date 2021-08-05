@@ -293,6 +293,7 @@ class TestForeach(TestCase):
         self._pointwise_test(
             dtype, inplace_op, inplace_ref, inputs, is_fastpath and disable_fastpath, is_inplace=True, values=values)
 
+    @skipMeta
     @ops(foreach_pointwise_op_db)
     def test_pointwise_op_fastpath(self, device, dtype, op):
         disable_fastpath = dtype in torch.testing.get_all_int_dtypes() + [torch.bool]
