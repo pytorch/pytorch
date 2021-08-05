@@ -38,6 +38,7 @@ class TORCH_API IMethod {
   virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
 
  private:
+  bool isArgumentNamesInitialized_ { false };
   std::vector<std::string> argumentNames_;
 };
 

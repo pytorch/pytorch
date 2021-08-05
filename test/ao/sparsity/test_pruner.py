@@ -96,11 +96,39 @@ class MultipleLinearMixed(nn.Module):
         return x
 
 
-class Conv2d(nn.Module):
+class Conv2dA(nn.Module):
     def __init__(self):
         super().__init__()
         self.seq = nn.Sequential(
             nn.Conv2d(1, 32, 3, 1, bias=False),
+        )
+        self.conv2d = nn.Conv2d(32, 64, 3, 1, bias=False)
+
+    def forward(self, x):
+        x = self.seq(x)
+        x = self.conv2d(x)
+        return x
+
+
+class Conv2dB(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = nn.Sequential(
+            nn.Conv2d(1, 32, 3, 1, bias=True),
+        )
+        self.conv2d = nn.Conv2d(32, 64, 3, 1, bias=True)
+
+    def forward(self, x):
+        x = self.seq(x)
+        x = self.conv2d(x)
+        return x
+
+
+class Conv2dC(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.seq = nn.Sequential(
+            nn.Conv2d(1, 32, 3, 1, bias=True),
         )
         self.conv2d = nn.Conv2d(32, 64, 3, 1, bias=False)
 
@@ -197,9 +225,10 @@ class TestBasePruner(TestCase):
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_prepare_conv2d(self):
-        model = Conv2d()
+        models = [Conv2dA(), Conv2dB(), Conv2dC()]
         for device in DEVICES:
-            self._test_prepare_conv2d_on_device(model, torch.device(device))
+            for model in models:
+                self._test_prepare_conv2d_on_device(model, torch.device(device))
 
     def _test_convert_linear_on_device(self, model, device):
         model = model.to(device)
@@ -226,9 +255,10 @@ class TestBasePruner(TestCase):
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_convert_conv2d(self):
-        model = Conv2d()
+        models = [Conv2dA(), Conv2dB(), Conv2dC()]
         for device in DEVICES:
-            self._test_convert_conv2d_on_device(model, torch.device(device))
+            for model in models:
+                self._test_convert_conv2d_on_device(model, torch.device(device))
 
     def _test_step_linear_on_device(self, model, is_basic, device):
         model = model.to(device)
@@ -270,6 +300,7 @@ class TestBasePruner(TestCase):
         assert model(x).shape == (1, 64, 24, 24)
 
     def test_step_conv2d(self):
-        model = Conv2d()
+        models = [Conv2dA(), Conv2dB(), Conv2dC()]
         for device in DEVICES:
-            self._test_step_conv2d_on_device(model, torch.device(device))
+            for model in models:
+                self._test_step_conv2d_on_device(model, torch.device(device))
