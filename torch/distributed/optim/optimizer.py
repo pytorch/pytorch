@@ -2,7 +2,6 @@ from typing import List, Optional
 import logging
 
 import torch.distributed.rpc as rpc
-import torch.optim as optim
 import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
