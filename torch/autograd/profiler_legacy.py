@@ -186,7 +186,7 @@ def _parse_legacy_records(thread_records):
                     duplicate = (
                         prev_record.name() == record.name()
                         and prev_record.kind() == record.kind()
-                        and prev_record.node_id() == record.node_id()
+                        and prev_record.start_us() == record.start_us()
                     )
                     if duplicate:
                         filtered_handles.add(record_key)
