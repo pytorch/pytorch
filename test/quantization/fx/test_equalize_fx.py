@@ -49,7 +49,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 
-qconfig_dict = {
+default_qconfig_dict = {"": default_qconfig}
+
+specific_qconfig_dict = {
     "": None,
     "object_type": [(nn.Linear, default_qconfig),
                     (F.linear, default_qconfig),
@@ -268,8 +270,60 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_occurrence) in tests:
             m = M().eval()
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+
+    def test_input_weight_equalization_branching(self):
+        """ Tests that graphs containing branches are prepared correctly.
+        Specifically, equalization observers should not be inserted in front of
+        branches in which both initial layers in the branches plan to be
+        quantized.
+        """
+
+        # Tests that we do not add an equalization observer due to both initial
+        # nodes in the branch containing layers that need to be equalized.
+        # Note that this should print out 2 warning messages for not being able
+        # to equalize layers linear1 and linear1 because it is part of a branch
+        class TestBranchingWithoutEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+                self.linear2 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = self.linear2(x)
+                return torch.add(y, z)
+
+        no_eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 0,
+            ns.call_module(MinMaxObserver): 3,
+        }
+
+        m = TestBranchingWithoutEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_eq_branching_node_occurrence)
+
+        # Tests that we will add an equalization observer because there is only
+        # one initial node in the branch that needs to be equalized
+        class TestBranchingWithEqualizationModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear1 = nn.Linear(5, 5)
+
+            def forward(self, x):
+                y = self.linear1(x)
+                z = torch.add(x, 5)
+                return torch.add(y, z)
+
+        eq_branching_node_occurrence = {
+            ns.call_module(_InputEqualizationObserver): 1,
+            ns.call_module(MinMaxObserver): 2,
+        }
+
+        m = TestBranchingWithEqualizationModel().eval()
+        prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=eq_branching_node_occurrence)
 
     @skipIfNoFBGEMM
     def test_input_weight_equalization_convert(self):
@@ -295,13 +349,17 @@ class TestEqualizeFx(QuantizationTestCase):
             elif ndim == 4:
                 x = torch.rand((16, 3, 224, 224))
 
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             output = prepared(x)
 
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref_output = convert_ref(x)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_fx(prepared)  # Check if compile
             self.assertEqual(output, convert_ref_output)
@@ -349,7 +407,7 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -398,7 +456,7 @@ class TestEqualizeFx(QuantizationTestCase):
             exp_eq_scales = self.get_expected_eq_scales(m, x.detach().numpy())
             exp_weights, exp_bias = self.get_expected_weights_bias(m, x.detach().numpy(), exp_eq_scales)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -454,7 +512,7 @@ class TestEqualizeFx(QuantizationTestCase):
             exp_inp_act_vals = self.get_expected_inp_act_vals(m, x, exp_eq_scales, exp_weights, exp_bias)
             exp_weight_act_vals = self.get_expected_weight_act_vals(exp_weights)
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             convert_ref = _convert_equalization_ref(prepared)
             convert_ref(x)
@@ -695,7 +753,7 @@ class TestEqualizeFx(QuantizationTestCase):
             elif ndim == 4:
                 x = torch.rand((16, 3, 224, 224))
 
-            prepared = prepare_fx(m, qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
             prepared(x)
             equalized_quantized_model = convert_fx(prepared)
 
@@ -716,13 +774,17 @@ class TestEqualizeFx(QuantizationTestCase):
             m = M().eval()
 
             # No equalization
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict={})
+            prepared = prepare_fx(copy.deepcopy(m), specific_qconfig_dict, equalization_qconfig_dict={})
             prepared(x)
             quantized = convert_fx(prepared)  # Check if compile
             quantized_output = quantized(x)
 
             # With equalization
-            prepared = prepare_fx(copy.deepcopy(m), qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared = prepare_fx(
+                copy.deepcopy(m),
+                specific_qconfig_dict,
+                equalization_qconfig_dict=default_equalization_qconfig_dict
+            )
             prepared(x)
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
