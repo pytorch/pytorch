@@ -381,10 +381,11 @@ def gen_variable_type(
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
             'generated_comment':
-            f'@generated from {template_path}/VariableType.cpp'
+            f'@generated from {template_path}/VariableType.cpp',
         },
         env_callable=gen_variable_type_func,
-        num_shards=5
+        num_shards=5,
+        sharded_keys={'type_derived_method_definitions', 'wrapper_registrations'}
     )
 
 @with_native_function
