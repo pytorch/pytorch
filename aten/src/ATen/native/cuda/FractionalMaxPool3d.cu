@@ -169,8 +169,7 @@ void fractional_max_pool3d_out_cuda_template(
     TORCH_CHECK(
                 ndims == 4 || ndims == 5,
                 "fractional_max_pool3d_out_cuda_template(): ",
-                "Expected 4D or 5D tensor with optional 0-dim batch size, but got: ",
-                ndims);
+                "Expected 4D or 5D tensor, but got: ", input.sizes());
     for (int64_t i = 1; i < ndims; ++i) {
       TORCH_CHECK(input.size(i) > 0,
         "fractional_max_pool3d_out_cuda_template(): ",

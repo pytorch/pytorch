@@ -13302,22 +13302,22 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyOnCPUAndCUDA
     def test_FractionalMaxPool2d_zero_batch(self, device):
-        mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5)).to(device)
-        inp = torch.ones(0, 16, 50, 32).to(device)
+        mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
+        inp = torch.ones(0, 16, 50, 32, device=device)
         self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            inp = torch.randn(1, 0, 50, 32).to(device)
+            inp = torch.randn(1, 0, 50, 32, device=device)
             mod(inp)
 
     @onlyOnCPUAndCUDA
     def test_FractionalMaxPool3d_zero_batch(self, device):
         mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
-        inp = torch.ones(0, 16, 50, 32, 32).to(device)
+        inp = torch.ones(0, 16, 50, 32, 32, device=device)
         self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, "Expected input"):
-            inp = torch.randn(1, 0, 50, 32, 32).to(device)
+            inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
 
     @onlyOnCPUAndCUDA

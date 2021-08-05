@@ -31,8 +31,7 @@ TORCH_META_FUNC(fractional_max_pool2d) (
 
   int64_t ndims = input.ndimension();
   TORCH_CHECK(ndims == 3 || ndims == 4,
-              "fractional_max_pool2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got: ",
-              input.sizes());
+              "fractional_max_pool2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
   for (int64_t i = 1; i < ndims; ++i) {
     TORCH_CHECK(input.size(i) > 0,
                 "fractional_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, but got",
