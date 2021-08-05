@@ -9,6 +9,7 @@ dictated by just sharding.
 
 import json
 import os
+import re
 from typing import Dict
 
 from typing_extensions import TypedDict
@@ -17,6 +18,13 @@ from typing_extensions import TypedDict
 class Config(TypedDict):
     num_shards: int
     runner: str
+
+
+def get_disabled_issues() -> str:
+    pr_body = os.getenv('PR_BODY', '')
+    regex = '(?i)(Close(d|s)?|Resolve(d|s)?|Fix(ed|es)?) #([0-9]+)'
+    issue_numbers = [x[4] for x in re.findall(regex, pr_body)]
+    return ','.join(issue_numbers)
 
 
 def main() -> None:
@@ -64,6 +72,7 @@ def main() -> None:
     print(json.dumps({'matrix': matrix, 'render-matrix': render_matrix}, indent=2))
     print(f'::set-output name=matrix::{json.dumps(matrix)}')
     print(f'::set-output name=render-matrix::{json.dumps(render_matrix)}')
+    print(f'::set-output name=ignore-disabled-issues::{get_disabled_issues()}')
 
 
 if __name__ == "__main__":
