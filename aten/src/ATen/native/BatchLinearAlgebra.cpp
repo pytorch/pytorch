@@ -3070,16 +3070,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(const Tensor& self, bool some, boo
 */
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices) {
-    TORCH_CHECK(self.dim() >= 2,
-                "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(self.dim() >= 2,
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
 
-    bool some = !full_matrices;
-    Tensor U, S, V;
-    std::tie(U, S, V) = at::_svd_helper(self, some, /*compute_uv=*/true);
+  bool some = !full_matrices;
+  Tensor U, S, V;
+  std::tie(U, S, V) = at::_svd_helper(self, some, /*compute_uv=*/true);
 
-    Tensor Vh = V.conj().transpose(-2, -1);
-    return std::make_tuple(U, S, Vh);
-
+  Tensor Vh = V.conj().transpose(-2, -1);
+  return std::make_tuple(U, S, Vh);
 }
 
 static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
