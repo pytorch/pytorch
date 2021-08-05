@@ -292,9 +292,9 @@ struct cpu_scatter_gather_base_kernel {
   }
 };
 
-void gather_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+void gather_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cpu_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    result, dim, index, self,
+    const_cast<Tensor&>(result), dim, index, self,
     "gather_out_cpu", tensor_assign);
 }
 

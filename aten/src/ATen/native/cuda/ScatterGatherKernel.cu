@@ -420,9 +420,9 @@ struct cuda_scatter_fill_base_kernel {
   }
 }; // struct cuda_scatter_fill_base_kernel
 
-void gather_cuda_kernel(Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
+void gather_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, const Tensor& index) {
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/false>()(
-    result, dim, index, self,
+    const_cast<Tensor&>(result), dim, index, self,
     "gather_out_cuda", tensor_assign);
 }
 
