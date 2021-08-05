@@ -26,27 +26,6 @@ TORCH_CUDA_CU_API void THNN_(MultiMarginCriterion_updateGradInput)(
     THCTensor* weights, // [OPTIONAL]
     accreal margin);
 
-TORCH_CUDA_CU_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* output,
-    int64_t reduction,
-    THCTensor* weights, // [OPTIONAL]
-    THCTensor* total_weight,
-    int64_t ignore_index);
-
-TORCH_CUDA_CU_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
-    THCState* state,
-    THCTensor* input,
-    THCIndexTensor* target,
-    THCTensor* gradOutput,
-    THCTensor* gradInput,
-    int64_t reduction,
-    THCTensor* weights, // [OPTIONAL]
-    THCTensor* total_weight,
-    int64_t ignore_index);
-
 TORCH_CUDA_CU_API void THNN_(SpatialConvolutionMM_updateOutput)(
     THCState* state,
     THCTensor* input,
