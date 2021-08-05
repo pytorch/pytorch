@@ -649,7 +649,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(UNCHECK_CAST): {
             INST_GUARD;
-            uncheckedCast();
+            uncheckedCast(stack);
           }
             INST_NEXT;
           case INST(ISINSTANCE): {

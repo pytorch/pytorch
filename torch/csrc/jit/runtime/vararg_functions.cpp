@@ -400,8 +400,8 @@ void tupleUninitialized(Stack& stack) {
   push(stack, IValue::uninitialized());
 }
 
-void uncheckedCast() {
-  noop;
+void uncheckedCast(Stack& stack) {
+  noop(&stack);
 }
 
 } // namespace jit

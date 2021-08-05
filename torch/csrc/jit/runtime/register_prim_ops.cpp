@@ -234,7 +234,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::unchecked_cast(t x) -> t"),
-         [](Stack* stack) { uncheckedCast(); },
+         [](Stack* stack) { uncheckedCast(*stack); },
          aliasAnalysisSpecialCase()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::IntImplicit(Tensor a) -> int"),

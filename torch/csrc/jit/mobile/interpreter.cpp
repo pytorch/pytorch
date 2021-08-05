@@ -225,7 +225,7 @@ bool InterpreterState::run(Stack& stack) {
           ++pc;
         } break;
         case UNCHECK_CAST: {
-          uncheckedCast();
+          uncheckedCast(stack);
           ++pc;
         } break;
         case ISINSTANCE: {
