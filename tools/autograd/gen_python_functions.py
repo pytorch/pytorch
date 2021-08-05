@@ -256,7 +256,8 @@ def create_python_bindings_sharded(
         },
         key_fn=key_func,
         env_callable=env_func,
-        num_shards=num_shards
+        num_shards=num_shards,
+        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs'}
     )
 
 def load_signatures(

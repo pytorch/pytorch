@@ -419,5 +419,6 @@ def gen_trace_type(out: str, native_yaml_path: str, template_path: str) -> None:
             f'@generated from {template_path}/TraceType.cpp',
         },
         env_callable=gen_trace_type_func,
-        num_shards=5
+        num_shards=5,
+        sharded_keys={'trace_method_definitions', 'trace_wrapper_registrations'}
     )
