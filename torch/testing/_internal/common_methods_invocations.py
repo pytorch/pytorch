@@ -4747,6 +4747,37 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         for shape, kwargs in shapes_and_kwargs
     ]
 
+def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    batch_size = 2
+    num_channels = 3
+    modes = ("bilinear", "nearest")
+    align_cornerss = (False, True)
+    padding_modes = ("zeros", "border", "reflection")
+
+    sample_inputs = []
+    for dim in (2, 3):
+        input = _make_tensor((batch_size, num_channels, *[S] * dim))
+        grid = _make_tensor((batch_size, *[S] * dim, dim))
+
+        modes_ = (*modes, "bicubic") if dim == 2 else modes
+
+        for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
+            sample_inputs.append(
+                SampleInput(
+                    input,
+                    args=(grid,),
+                    kwargs=dict(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                )
+            )
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -8264,6 +8295,23 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.grid_sample",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sample,
+        supports_gradgrad=False,
+        gradcheck_nondet_tol=1e-15,
         skips=(
             SkipInfo(
                 "TestJit",
