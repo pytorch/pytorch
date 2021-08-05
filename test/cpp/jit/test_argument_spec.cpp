@@ -45,7 +45,6 @@ autograd::Variable undef() {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
   auto const CF = at::CPU(at::kFloat);
   auto const CD = at::CPU(at::kDouble);
@@ -131,7 +130,6 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
 //   ASSERT_NE(hashCode(ptt_vs22_vs22_1_true), hashCode(ptt_vs22_vs22_1_false));
 // }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ArgumentSpecTest, Basic_CUDA) {
   auto& CF = at::CPU(at::kFloat);
   auto& CD = at::CPU(at::kDouble);
