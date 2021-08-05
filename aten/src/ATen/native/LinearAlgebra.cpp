@@ -2065,7 +2065,7 @@ Tensor linalg_matrix_exp(const Tensor& a) {
     return a.clone();
   } else if (n == 1) {
     return a.exp();
-  } else{
+  } else {
     return at::native::mexp(a);
   }
 }

@@ -203,6 +203,8 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, matrix_exp)                \
+  _(aten, linalg_matrix_exp)         \
   _(aten, matrix_power)              \
   _(aten, linalg_matrix_power)       \
   _(aten, chain_matmul)              \
