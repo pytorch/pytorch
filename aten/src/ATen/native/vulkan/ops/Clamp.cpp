@@ -289,6 +289,14 @@ Tensor& hardsigmoid_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(hardsigmoid_));
 }
 
+Tensor& hardshrink(Tensor& self) {
+  return ops::activation(selft, VK_KERNET(hardshrink));
+}
+
+Tensor& hardshrink_(Tensor& self) {
+  return ops::activation_(selft, VK_KERNET(hardshrink_));
+}
+
 Tensor sigmoid(const Tensor& self) {
   return ops::activation(self, VK_KERNEL(sigmoid));
 }
@@ -312,6 +320,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp_"), TORCH_FN(clamp_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid"), hardsigmoid);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), hardsigmoid_);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink"), hardshrink);
+  m.impl(TORCH_SELECTIVE_NAME("aten::hardshrink_"), hardshrink_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish"), hardswish);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardswish_"), hardswish_);
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), hardtanh);
