@@ -6064,6 +6064,20 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
+    @onlyCUDA
+    @dtypes(torch.int32, torch.int64)
+    def test_matmul_long_tensor(self, device, dtype):
+        m = 256
+        n = 128
+
+        mat1 = torch.randn(m, n, device=device, dtype=dtype)
+        mat2 = torch.randn(n, m, device=device, dtype=dtype)
+
+        int_product = mat1 @ mat2
+        fp_product = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)
+
+        self.assertEqual(fp_product, int_product)
+
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
