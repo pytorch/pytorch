@@ -120,6 +120,8 @@ class profile(object):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.

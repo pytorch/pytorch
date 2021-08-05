@@ -363,6 +363,8 @@ class profile(object):
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -753,10 +755,10 @@ class emit_nvtx(object):
             torch.autograd.ProfilerConfig(
                 ProfilerState.NVTX,
                 self.record_shapes,
-                False,
-                False,
-                False,
-                False),
+                profile_memory=False,
+                with_stack=False,
+                with_flops=False,
+                with_module_hierarchy=False),
             set()
         )
         return self
