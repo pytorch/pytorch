@@ -289,7 +289,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         # This test checks that given this edge condition, the model can be loaded and executed
         # in Caffe2 backend correctly.
         torch.onnx._export(model, input, f, verbose=True, export_type=ExportTypes.ZIP_ARCHIVE,
-                           input_names=["input1", "fc1.bias"], _retain_param_name=False,
+                           input_names=["input1", "fc1.bias"],
                            keep_initializers_as_inputs=True)
 
         f.seek(0)
