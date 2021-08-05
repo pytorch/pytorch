@@ -214,6 +214,23 @@ public:
     );
   }
 
+  /// Create a function from a boxed kernel functor which defines
+  /// `operator()(const OperatorHandle&, DispatchKeySet, Stack*)`
+  /// (receiving arguments from boxed calling convention) and inherits
+  /// from `c10::OperatorKernel`.  Unlike makeFromBoxedFunction, functions
+  /// registered in this way can also carry additional state which
+  /// is managed by the functor; this is useful if you're writing an
+  /// adapter to some other implementation, e.g., a Python callable, which
+  /// is dynamically associated with the registered kernel.
+  template<class KernelFunctor>
+  static CppFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
+    return CppFunction(
+      c10::KernelFunction::makeFromBoxedFunctor(std::move(kernelFunctor)),
+      /* cpp_signature */ c10::nullopt, // not known for boxed functions
+      /* schema */ nullptr
+    );
+  }
+
   /// Create a function from an unboxed kernel function.
   /// This is typically used to register common operators.
   template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>

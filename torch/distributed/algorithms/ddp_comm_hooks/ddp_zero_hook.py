@@ -13,6 +13,105 @@ from torch.nn.parallel.distributed import DistributedDataParallel
 _NO_PARAM_UPDATE = None
 
 
+def _perform_local_step(
+    bucket: dist.GradBucket,
+    zero: ZeroRedundancyOptimizer,
+    rank: int,
+):
+    r"""
+    Performs a local optimizer step using the gradients provided by ``bucket``.
+
+    Arguments:
+        bucket (dist.GradBucket): the bucket providing the gradients.
+        zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
+            instance to perform the :meth:`_local_step`.
+        rank (int): the calling process's rank.
+
+    .. warning::
+        This function assumes that appropriate synchronization has taken place
+        so that the bucket's gradients can be used.
+    """
+    overlap_info = zero._overlap_info
+    bucket_index = bucket.index()
+    assert len(zero.optim.param_groups) == 1, \
+        "Overlapping DDP with ZeRO only supports a single parameter group"
+
+    # Construct the `gradients` input for the local optimizer step, which
+    # expects `None` in a list position to indicate that the corresponding
+    # parameter should not be updated
+    num_local_optim_params = len(zero.optim.param_groups[0]["params"])
+    gradients: List[Optional[torch.Tensor]] = \
+        [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
+    assert bucket_index in overlap_info.offsets, \
+        f"Bucket index {bucket_index} was not assigned to rank {rank}"
+    offset = overlap_info.offsets[bucket_index]
+    for i, grad in enumerate(bucket.gradients()):
+        gradients[offset + i] = grad
+
+    zero._local_step(gradients)
+
+
+def _broadcast_bucket(
+    bucket_index: int,
+    zero: ZeroRedundancyOptimizer,
+    assigned_rank: int,
+):
+    r"""
+    Broadcasts a bucket's parameters.
+
+    Arguments:
+        bucket_index (int): the index of the bucket corresponding to the
+            parameters to broadcast.
+        zero (ZeroRedundancyOptimizer): the calling process's
+            :class:`ZeroRedundancyOptimizer` instance.
+        assigned_rank (int): the rank assigned to the bucket; it has the
+            updated parameters and serves as the source for the broadcast.
+    """
+    overlap_info = zero._overlap_info
+    device = overlap_info.params_per_bucket[bucket_index][0].device
+    device_index = zero._device_to_device_index[device]
+    assert bucket_index in zero._buckets[device_index][assigned_rank]
+    overlap_info.broadcast_handles.append(
+        dist.broadcast(
+            zero._buckets[device_index][assigned_rank][bucket_index],
+            src=assigned_rank,
+            async_op=True
+        )
+    )
+
+def _collect_ddp_bucket_info(
+    bucket: dist.GradBucket,
+    zero: ZeroRedundancyOptimizer,
+    rank: int,
+    assigned_rank: int,
+):
+    r"""
+    Collects :class:`DistributedDataParallel` gradient bucket information for
+    the :class:`ZeroRedundancyOptimizer` instance ``zero`` to use when
+    overlapping.
+
+    Arguments:
+        bucket (dist.GradBucket): the current gradient bucket.
+        zero (ZeroRedundancyOptimizer): the calling process's
+            :class:`ZeroRedundancyOptimizer` instance.
+        rank (int): the calling process's rank.
+        assigned_rank (int): the rank assigned to update the parameters
+            corresponding to ``bucket``.
+    """
+    overlap_info = zero._overlap_info
+    bucket_index = bucket.index()
+    bucket_params = bucket.parameters()
+    assert len(bucket_params) > 0, "Bucket {bucket_index} is empty"
+    params_per_rank = overlap_info.params_per_rank
+    params_per_bucket = overlap_info.params_per_bucket
+
+    # Collect relevant information
+    if assigned_rank == rank:
+        overlap_info.offsets[bucket_index] = len(params_per_rank[assigned_rank])
+    params_per_rank[assigned_rank].extend(bucket_params)
+    params_per_bucket.append(bucket_params)
+
+
 def hook_with_zero_step(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
@@ -91,7 +190,7 @@ def hook_with_zero_step(
         """
         fut = hook(state, bucket)
         overlap_info = zero._overlap_info
-        bucket_index = bucket.get_index()
+        bucket_index = bucket.index()
 
         # Proceed as normal until the DDP buckets have been rebuilt
         if not ddp._has_rebuilt_buckets:
@@ -102,32 +201,33 @@ def hook_with_zero_step(
             overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
 
         rank = zero.global_rank
-        rank_to_update = zero._ddp_bucket_index_to_rank(bucket_index)
+        assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
 
         # Once DDP buckets have been rebuilt but ZeRO has not been
         # properly initialized yet, collect the information needed
         if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
-            bucket_params = bucket.get_model_params_for_bucket()
-            assert len(bucket_params) > 0, "Empty bucket"
-            params_per_rank = overlap_info.params_per_rank
-            params_per_bucket = overlap_info.params_per_bucket
-            if rank_to_update == rank:
-                overlap_info.offsets[bucket_index] = len(params_per_rank[rank_to_update])
-            params_per_rank[rank_to_update].extend(bucket_params)
-            params_per_bucket.append(bucket_params)
+            _collect_ddp_bucket_info(bucket, zero, rank, assigned_rank)
             return fut
 
         assert overlap_info.status == _OverlapStatus.INITIALIZED
 
         # Save the bucket reference and all-reduce future for the final bucket
-        if rank_to_update == rank:
+        if assigned_rank == rank:
             overlap_info.bucket_index_to_bucket[bucket_index] = bucket
             overlap_info.bucket_index_to_future[bucket_index] = fut
 
+        # Check that buckets are indexed incrementally starting from 0 in the
+        # order of their autograd hooks firing
+        if len(overlap_info.bucket_indices_seen) > 0:
+            assert overlap_info.bucket_indices_seen[-1] == bucket_index - 1, \
+                "Bucket indices are not in incremental order"
+        else:
+            assert bucket_index == 0, "Bucket indices do not start from 0"
+        overlap_info.bucket_indices_seen.append(bucket_index)
+
+        # Directly return the future without any optimizer computation if this
+        # is not the last bucket
         num_buckets = len(overlap_info.params_per_bucket)
-        # NOTE: The implementation from this point forward assumes that the
-        # buckets are indexed incrementally starting from 0 in the order of
-        # their autograd hooks firing
         is_last_bucket = bucket_index == num_buckets - 1
         if not is_last_bucket:
             return fut
@@ -138,46 +238,26 @@ def hook_with_zero_step(
         # all-reduce future since that would add synchronization that delays
         # all optimizer computation to wait for that last all-reduce
         for bucket_index in range(num_buckets):
-            rank_to_update = zero._ddp_bucket_index_to_rank(bucket_index)
-            num_local_optim_params = len(zero.optim.param_groups[0]["params"])
-            if rank_to_update == rank:
-                gradients: List[Optional[torch.Tensor]] = \
-                    [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
-                assert bucket_index in overlap_info.offsets, \
-                    f"Bucket index {bucket_index} was not assigned to rank {rank}"
-                offset = overlap_info.offsets[bucket_index]
-                # Ensure that the all-reduce completes before performing the
-                # the parameter update
+            assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
+            if assigned_rank == rank:
+                # Wait on the bucket's all-reduce future to ensure correct
+                # gradients
                 assert bucket_index in overlap_info.bucket_index_to_future, \
                     f"All-reduce future for bucket {bucket_index} not saved " \
                     f"on rank {rank}"
                 allreduce_future = overlap_info.bucket_index_to_future[bucket_index]
                 allreduce_future.wait()
-                bucket_gradients = overlap_info.bucket_index_to_bucket[bucket_index].get_per_parameter_tensors()
-                for i, grad in enumerate(bucket_gradients):
-                    gradients[offset + i] = grad
-                zero._local_step(gradients)
-            device = overlap_info.params_per_bucket[bucket_index][0].device
-            device_index = zero._device_to_device_index[device]
-            assert bucket_index in zero._buckets[device_index][rank_to_update]
-            overlap_info.broadcast_handles.append(
-                dist.broadcast(
-                    zero._buckets[device_index][rank_to_update][bucket_index],
-                    src=rank_to_update,
-                    async_op=True
-                )
-            )
+
+                # Perform the partial optimizer step
+                curr_bucket = overlap_info.bucket_index_to_bucket[bucket_index]
+                _perform_local_step(curr_bucket, zero, rank)
+
+            _broadcast_bucket(bucket_index, zero, assigned_rank)
 
         # Ensure that all parameter updates are finished before the
         # next forward pass
-        assert len(overlap_info.broadcast_handles) == num_buckets, \
-            f"Missing at least one broadcast handle on rank {rank}"
-        _ = list(map(lambda x: x.wait(), overlap_info.broadcast_handles))
-        overlap_info.broadcast_handles.clear()
-
-        # Reset per-iteration information
-        overlap_info.bucket_index_to_future.clear()
-        overlap_info.bucket_index_to_bucket.clear()
+        overlap_info.wait_for_broadcasts(num_buckets, rank)
+        overlap_info.clear_per_iter_info()
 
         return fut
 
@@ -275,70 +355,33 @@ def hook_with_zero_step_interleaved(
             """
             assert ddp._has_rebuilt_buckets
 
-            bucket_index = bucket.get_index()
+            bucket_index = bucket.index()
             rank = zero.global_rank
+            assigned_rank = zero._ddp_bucket_index_to_rank(bucket_index)
             overlap_info = zero._overlap_info
             if overlap_info.status == _OverlapStatus.UNINITIALIZED:
                 overlap_info.status = _OverlapStatus.DDP_HAS_REBUILT_BUCKETS
 
-            bucket_params = bucket.get_model_params_for_bucket()
-            assert len(bucket_params) > 0, "Empty bucket"
-            rank_to_update = zero._ddp_bucket_index_to_rank(bucket_index)
-
             # Once DDP buckets have been rebuilt but ZeRO has not been
             # properly initialized yet, collect the information needed
             if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
-                params_per_rank = overlap_info.params_per_rank
-                params_per_bucket = overlap_info.params_per_bucket
-                if rank_to_update == rank:
-                    overlap_info.offsets[bucket_index] = len(params_per_rank[rank_to_update])
-                params_per_rank[rank_to_update].extend(bucket_params)
-                params_per_bucket.append(bucket_params)
-
-                return bucket.get_tensor()
+                _collect_ddp_bucket_info(bucket, zero, rank, assigned_rank)
+                return bucket.buffer()
 
             overlap_info.bucket_indices_seen.append(bucket_index)
-            if rank_to_update == rank:
-                assert len(zero.optim.param_groups) == 1, \
-                    "Overlapping DDP with ZeRO only supports a single " \
-                    "parameter group"
-                # Construct the `gradients` input for the local optimizer step,
-                # which expects `None` in a list position to indicate that the
-                # corresponding parameter should not be updated
-                num_local_optim_params = len(zero.optim.param_groups[0]["params"])
-                gradients: List[Optional[torch.Tensor]] = \
-                    [_NO_PARAM_UPDATE for _ in range(num_local_optim_params)]
-                assert bucket_index in overlap_info.offsets, \
-                    f"Bucket index {bucket_index} was not assigned to rank " \
-                    f"{rank}"
-                offset = overlap_info.offsets[bucket_index]
-                bucket_gradients = bucket.get_per_parameter_tensors()
-                for i, grad in enumerate(bucket_gradients):
-                    gradients[offset + i] = grad
-                zero._local_step(gradients)
+            if assigned_rank == rank:
+                _perform_local_step(bucket, zero, rank)
 
-            device = bucket_params[0].device
-            device_index = zero._device_to_device_index[device]
-            assert bucket_index in zero._buckets[device_index][rank_to_update]
-            overlap_info.broadcast_handles.append(
-                dist.broadcast(
-                    zero._buckets[device_index][rank_to_update][bucket_index],
-                    src=rank_to_update,
-                    async_op=True
-                )
-            )
+            _broadcast_bucket(bucket_index, zero, assigned_rank)
 
             num_buckets = len(overlap_info.params_per_bucket)
             if len(overlap_info.bucket_indices_seen) == num_buckets:
                 # Ensure that all parameter updates are finished before the
                 # next forward pass
-                assert len(overlap_info.broadcast_handles) == num_buckets, \
-                    f"Missing at least one broadcast handle on rank {rank}"
-                _ = list(map(lambda x: x.wait(), overlap_info.broadcast_handles))
-                overlap_info.broadcast_handles.clear()
-                overlap_info.bucket_indices_seen.clear()
+                overlap_info.wait_for_broadcasts(num_buckets, rank)
+                overlap_info.clear_per_iter_info()
 
-            return bucket.get_tensor()
+            return bucket.buffer()
 
         return fut.then(zero_step)
 
