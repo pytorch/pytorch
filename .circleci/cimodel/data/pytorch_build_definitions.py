@@ -415,6 +415,26 @@ def instantiate_configs(only_slow_gradcheck):
             )
             c.dependent_tests.append(bc_breaking_check)
 
+        if (
+            compiler_name != "clang"
+            and not is_libtorch
+            and not is_vulkan
+            and not is_pure_torch
+            and not is_noarch
+            and not is_slow_gradcheck
+            and not only_slow_gradcheck
+        ):
+            distributed_test = Conf(
+                c.gen_build_name("") + "distributed",
+                [],
+                is_xla=False,
+                restrict_phases=["test"],
+                is_libtorch=False,
+                is_important=True,
+                parent_build=c,
+            )
+            c.dependent_tests.append(distributed_test)
+
         config_list.append(c)
 
     return config_list

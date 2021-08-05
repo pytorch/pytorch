@@ -224,6 +224,7 @@ jobs:
     needs: [ciflow_should_run]
     env:
       TEST_RUNNER_TYPE: linux.2xlarge
+      ENABLE_DISTRIBUTED_TEST: True
       ENABLE_JIT_LEGACY_TEST: ''
       ENABLE_MULTIGPU_TEST: ''
       ENABLE_NOGPU_NO_AVX_TEST: ''
