@@ -76,7 +76,7 @@ def select_model_mode_for_export(model, mode):
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, _retain_param_name=None, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
            enable_onnx_checker=None, use_external_data_format=False):
     if operator_export_type is None:
