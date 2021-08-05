@@ -8,6 +8,8 @@
 namespace torch {
 namespace nn {
 
+using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU, std::function<Tensor(const Tensor&)> >;
+
 /// Options for the `TransformerEncoderLayer`
 ///
 /// Example:
@@ -15,8 +17,6 @@ namespace nn {
 /// auto options = TransformerEncoderLayer(512, 8).dropout(0.2);
 /// ```
 struct TORCH_API TransformerEncoderLayerOptions {
-
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
   /* implicit */ TransformerEncoderLayerOptions(int64_t d_model, int64_t nhead);
 
@@ -32,7 +32,7 @@ struct TORCH_API TransformerEncoderLayerOptions {
   /// the dropout value, default is 0.1
   TORCH_ARG(double, dropout) = 0.1;
 
-  /// the activation function of intermediate layer, either ``torch::kReLU`` or ``torch::GELU``, default is ``torch::kReLU``
+  /// the activation function of intermediate layer, can be ``torch::kReLU``, ``torch::GELU``, or a unary callable. Default: ``torch::kReLU``
   TORCH_ARG(activation_t, activation) = torch::kReLU;
 };
 
@@ -46,8 +46,6 @@ struct TORCH_API TransformerEncoderLayerOptions {
 /// TransformerDecoderLayer model(TransformerDecoderLayerOptions(512, 8).dropout(0.2));
 /// ```
 struct TORCH_API TransformerDecoderLayerOptions {
-
-  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
   TransformerDecoderLayerOptions(int64_t d_model, int64_t nhead);
 
@@ -63,7 +61,7 @@ struct TORCH_API TransformerDecoderLayerOptions {
   /// dropout value. Default: 1
   TORCH_ARG(double, dropout) = 0.1;
 
-  /// activation function of intermediate layer, can be either ``torch::kGELU`` or ``torch::kReLU``. Default: ``torch::kReLU``
+  /// activation function of intermediate layer, can be ``torch::kGELU``, ``torch::kReLU``, or a unary callable. Default: ``torch::kReLU``
   TORCH_ARG(activation_t, activation) = torch::kReLU;
 };
 

@@ -1,12 +1,15 @@
-{%- set exclude_test = exclude_test|default(false) -%}
+{# squid_proxy is an private ELB that only available for GHA custom runners #}
+{%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
+{# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
+{%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (!{{ build_environment }})
+name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
@@ -16,6 +19,8 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- endif %}
 
 {%- if is_scheduled %}
@@ -35,6 +40,8 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  # This is used for the phase of adding wheel tests only, will be removed once completed
+  IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -76,6 +83,7 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -147,6 +155,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -168,6 +181,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -224,6 +238,10 @@ jobs:
           path:
             artifacts.zip
       {%- endif %}
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -287,6 +305,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -343,12 +366,14 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -391,6 +416,10 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -415,6 +444,11 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -482,6 +516,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enables SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -550,6 +589,10 @@ jobs:
           name: pytorch_github_io
           if-no-files-found: error
           path: pytorch_github_io.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
