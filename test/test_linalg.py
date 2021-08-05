@@ -6070,8 +6070,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m = 256
         n = 128
 
-        mat1 = torch.randn(m, n, device=device, dtype=dtype)
-        mat2 = torch.randn(n, m, device=device, dtype=dtype)
+        mat1 = torch.ones(m, n, device=device, dtype=dtype)
+        mat2 = torch.ones(n, m, device=device, dtype=dtype)
 
         int_product = mat1 @ mat2
         fp_product = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)

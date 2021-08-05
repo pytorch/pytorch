@@ -141,23 +141,31 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
             c10::nullopt /* pin_memory */));
   }
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
-    scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
-    scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
-    scalar_t* result_ptr = result_->data_ptr<scalar_t>();
-    at::cuda::blas::gemm<scalar_t>(
-      transpose_mat1 ? 't' : 'n',
-      transpose_mat2 ? 't' : 'n',
-      m, n, k,
-      alpha_val,
-      mat1_ptr, mat1_ld,
-      mat2_ptr, mat2_ld,
-      beta_val,
-      result_ptr, result_ld
+  std::cout << ">>>>> CUDA MATMUL\n";
+
+  if (isIntegralType(scalar_type, false)) {
+  }
+  else {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
+      scalar_t alpha_val = alpha.to<scalar_t>();
+      scalar_t beta_val = beta.to<scalar_t>();
+      scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
+      scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
+      scalar_t* result_ptr = result_->data_ptr<scalar_t>();
+      at::cuda::blas::gemm<scalar_t>(
+        transpose_mat1 ? 't' : 'n',
+        transpose_mat2 ? 't' : 'n',
+        m, n, k,
+        alpha_val,
+        mat1_ptr, mat1_ld,
+        mat2_ptr, mat2_ld,
+        beta_val,
+        result_ptr, result_ld
     );
   });
+  }
+
+
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
