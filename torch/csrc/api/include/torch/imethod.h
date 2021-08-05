@@ -32,14 +32,14 @@ class TORCH_API IMethod {
   // script and python methods.  This is a more portable dependency
   // than a ScriptMethod FunctionSchema, which has more information
   // than can be generally expected from a python method.
-  const std::vector<std::string>& getArgumentNames();
+  const std::vector<std::string>& getArgumentNames() const;
 
  protected:
   virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
 
  private:
-  bool isArgumentNamesInitialized_ { false };
-  std::vector<std::string> argumentNames_;
+  mutable bool isArgumentNamesInitialized_ { false };
+  mutable std::vector<std::string> argumentNames_;
 };
 
 } // namespace torch
