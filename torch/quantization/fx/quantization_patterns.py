@@ -221,6 +221,24 @@ QAT_CONV_MODULE_CLASSES = \
      torch.nn.intrinsic.qat.ConvReLU3d)
 
 
+##########################
+# Helper Functions
+##########################
+
+def _load_weight_qparams(
+        self, state_dict, prefix, local_metadata, strict,
+        missing_keys, unexpected_keys, error_msgs):
+    key = prefix + "_weight_qparams"
+    if key in state_dict:
+        self._weight_qparams = state_dict[key]
+        state_dict.pop(key)
+
+def _save_weight_qparams(self, destination, prefix, keep_vars):
+    for attr_name in dir(self):
+        if "_weight_qparams" == attr_name and \
+           isinstance(getattr(self, attr_name), dict):
+            weight_qparams = getattr(self, attr_name)
+            destination[prefix + attr_name] = weight_qparams
 
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
@@ -604,7 +622,9 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     weight_post_process = qconfig.weight()
                     # run weight observer
                     weight_post_process(float_conv.weight)
-                float_conv.weight_qparams = get_qparam_dict(weight_post_process)
+                float_conv._weight_qparams = get_qparam_dict(weight_post_process)
+                float_conv._register_state_dict_hook(_save_weight_qparams)
+                float_conv._register_load_state_dict_pre_hook(_load_weight_qparams, with_module=True)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
@@ -824,7 +844,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # Run weight observer
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
-                float_linear.weight_qparams = get_qparam_dict(weight_post_process)
+                float_linear._weight_qparams = get_qparam_dict(weight_post_process)
+                float_linear._register_state_dict_hook(_save_weight_qparams)
+                float_linear._register_load_state_dict_pre_hook(_load_weight_qparams, with_module=True)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
