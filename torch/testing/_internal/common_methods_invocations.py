@@ -21,7 +21,7 @@ from torch.testing import \
      integral_types_and, all_types, double_types)
 from .._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
+    (onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
 from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
 from torch.testing._internal.common_utils import \
@@ -1066,6 +1066,22 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
+def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        (()),
+        ((S, )),
+        ((S, S)),
+        ((S, M, S))
+    )
+
+    def generator():
+        for shape in cases:
+            yield SampleInput(make_arg(shape))
+
+    return list(generator())
+
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -1861,22 +1877,46 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
                         args=(gather_variable((S, S // 2), 0, S, True, device=device),)),
             )
 
+
 def sample_inputs_amax_amin(op_info, device, dtype, requires_grad, **kwargs):
-    # Ordered as (shape, positional args, kwargs)
-    test_cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
-        ((S, S, S), (), {}),
-        ((S, S, S), (1,), {}),
-        ((S, S, S), ((1, 2,),), {}),
-        ((S, S, S), (1,), {'keepdim': True}),
-        ((), (0,), {}),
-        ((), (), {}),
-        ((), (0,), {'keepdim': True}),
+    # Ordered as (input shape, kwargs)
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S, S), {}),
+        ((S, S, S), {'dim': 1}),
+        ((S, S, S), {'dim': (1, 2,)}),
+        ((S, S, S), {'dim': 1, 'keepdim': True}),
+        ((), {'dim': 0}),
+        ((), {}),
+        ((), {'dim': 0, 'keepdim': True}),
     )
-    return tuple(SampleInput((make_tensor(size, device, dtype,
-                                          low=None, high=None,
-                                          requires_grad=requires_grad)),
-                             args=args, kwargs=kwargs)
-                 for size, args, kwargs in test_cases)
+
+    samples: List[SampleInput] = []
+    for shape, kwargs in test_cases:
+        samples.append(SampleInput(
+            make_tensor(shape, device, dtype, requires_grad=requires_grad),
+            kwargs=kwargs))
+
+    return samples
+
+# TODO (@heitorschueroff) Once aminmax supports multiple dims this should
+# be combined with the above test.
+def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
+    test_cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
+        ((S, S, S), {}),
+        ((S, S, S), {'dim': 1}),
+        ((S, S, S), {'dim': 1, 'keepdim': True}),
+        ((), {'dim': 0}),
+        ((), {}),
+        ((), {'dim': 0, 'keepdim': True}),
+    )
+
+    samples: List[SampleInput] = []
+    for shape, kwargs in test_cases:
+        samples.append(SampleInput(
+            make_tensor(shape, device, dtype, requires_grad=requires_grad),
+            kwargs=kwargs))
+
+    return samples
 
 def sample_inputs_argmax_argmin(op_info, device, dtype, requires_grad, **kwargs):
     test_cases = (
@@ -2292,6 +2332,26 @@ def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
 
+def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+    cases = (((1, 3, 9, 9), 3, 1, 1, True, False, 2),
+             ((1, 3, 9, 9), (4, 4), (2, 3), 1, True, False, 2),
+             ((1, 3, 9, 9), (6, 6), (3, 3), (2, 3), True, True, 2),
+             ((2, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
+             ((1, 1, 4, 4), (2, 2), (), (0, ), False, True, -2),
+             ((1, 2, 6, 6), (4, 4), (2, 2), (2, ), True, True, None))
+
+    def generator():
+        for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override in cases:
+            yield SampleInput(make_arg(input_shape),
+                              args=(kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override))
+        # Case with just input_shape and kernel_size
+        yield SampleInput(make_arg((1, 3, 9, 9)), args=((3, 3)))
+
+    return list(generator())
+
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
         return make_tensor(size, device, dtype, requires_grad=requires_grad)
@@ -2514,6 +2574,34 @@ def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
         ((6,), (6,), {}),
         ((6,), None, {}),
         # When 'trapezoid' is called with an empty input, it does not produce an output with requires_grad
+        # See Issue #{61619}
+        # ((6,0), (6,0), {}),
+        ((2, 3), (1, 3), {}),
+        ((3, 3), (3, 3), {}),
+        ((3, 3), (3, 3), {'dim': -2}),
+        ((5,), None, {'dx': 2.0}),
+        ((2, 2), None, {'dx': 3.0})
+    ]
+    samples = []
+    for y_shape, x_shape, kwarg in y_shape_x_shape_and_kwargs:
+        y_tensor = make_tensor(y_shape, device, dtype, low=None, high=None,
+                               requires_grad=requires_grad)
+        if x_shape is not None:
+            x_tensor = make_tensor(x_shape, device, dtype, low=None, high=None,
+                                   requires_grad=requires_grad)
+            samples.append(SampleInput(y_tensor, args=(x_tensor,), kwargs=kwarg))
+        else:
+            samples.append(SampleInput(y_tensor, kwargs=kwarg))
+    return samples
+
+def sample_cumulative_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
+
+    y_shape_x_shape_and_kwargs = [
+        ((2, 3), (2, 3), {}),
+        ((2, 3), (2, 3), {'dim': 1}),
+        ((6,), (6,), {}),
+        ((6,), None, {}),
+        # When 'cumulative_trapezoid' is called with an empty input, it does not produce an output with requires_grad
         # See Issue #{61619}
         # ((6,0), (6,0), {}),
         ((2, 3), (1, 3), {}),
@@ -3626,6 +3714,23 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad):
 
     return list(sample_generator())
 
+
+def sample_inputs_nextafter(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    cases = (
+        ((S, S), (S, S), False),
+        ((S, S), (S,), False),
+        ((S, ), (S, S), True)
+    )
+
+    def generator():
+        for shape, other_shape, broadcasts_input in cases:
+            yield SampleInput(make_arg(shape), args=(make_arg(other_shape),), broadcasts_input=broadcasts_input)
+
+    return list(generator())
+
+
 def sample_inputs_diag(op_info, device, dtype, requires_grad, **kwargs):
     vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
 
@@ -4625,6 +4730,7 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
     ]
 
+<<<<<<< HEAD
 def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
     def make_input():
         input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
@@ -4639,6 +4745,23 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
     return [
         SampleInput(make_input().reshape(*shape_lhs, *shape_rhs), kwargs=dict(ind=len(shape_lhs)))
         for shape_lhs, shape_rhs in shapes
+=======
+def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), None),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), None),
+        ((S, S, S), None),
+    ]
+
+    return [
+        SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
+        for shape, kwargs in shapes_and_kwargs
+>>>>>>> upstream/master
     ]
 
 foreach_unary_op_db: List[OpInfo] = [
@@ -4911,6 +5034,16 @@ def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
     one_hot = np.zeros((a.size, num_classes), dtype=a.dtype)
     np.put(one_hot, idcs, 1)
     return one_hot.reshape(*a.shape, -1)
+
+
+def reference_mse_loss(input, target, reduction="mean"):
+    se = (input - target) ** 2
+    if reduction == "mean":
+        return np.mean(se)
+    elif reduction == "sum":
+        return np.sum(se)
+    else:  # reduction == "none"
+        return se
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -6414,7 +6547,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     OpInfo('nansum',
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bool),
            supports_out=False,
            sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True)),
     # TODO(@heitorschueroff) Add test for dtype kwarg
@@ -6460,6 +6592,24 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_softmax_variant, with_dtype=True),
            assert_autodiffed=True,
            supports_out=False),
+    OpInfo('aminmax',
+           ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
+           dtypes=all_types_and(torch.bool),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           decorators=(onlyOnCPUAndCUDA,),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_aminmax,
+           skips=(
+               # FIXME: aminmax does not check for safe casting to output
+               SkipInfo('TestCommon', 'test_out'),
+           )),
+    OpInfo('nn.functional.relu',
+           aten_name="relu",
+           supports_autograd=True,
+           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_nn_activation_relu,
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -6482,6 +6632,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    OpInfo('nn.functional.avg_pool2d',
+           aten_name='avg_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_avgpool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
@@ -6505,6 +6662,10 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
         ],
     ),
+    OpInfo('nextafter',
+           dtypes=floating_types_and(torch.bfloat16),
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_nextafter),
     OpInfo('topk',
            dtypes=all_types(),
            dtypesIfCPU=all_types_and(torch.bfloat16),
@@ -6544,6 +6705,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_gelu,
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=True,
            supports_out=False,
@@ -7699,6 +7861,12 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_trapezoid),
+    OpInfo('cumulative_trapezoid',
+           dtypes=all_types_and_complex_and(),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
+           supports_forward_ad=True,
+           supports_out=False,
+           sample_inputs_func=sample_cumulative_trapezoid),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -8117,6 +8285,22 @@ op_db: List[OpInfo] = [
         ),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
+    ),
+    OpInfo(
+        "nn.functional.mse_loss",
+        ref=reference_mse_loss,
+        sample_inputs_func=sample_inputs_mse_loss,
+        supports_out=False,
+        dtypesIfCPU=floating_types_and(torch.float16),
+        backward_dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
     ),
 ]
 
