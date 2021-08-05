@@ -139,7 +139,7 @@ class CIWorkflow:
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
         with open(output_file_path, "w") as output_file:
-            output_file.writelines([f"# @generated DO NOT EDIT MANUALLY\n"])
+            output_file.writelines(["# @generated DO NOT EDIT MANUALLY\n"])
             output_file.write(workflow_template.render(asdict(self)))
             output_file.write("\n")
         print(output_file_path)
@@ -178,7 +178,7 @@ WINDOWS_WORKFLOWS = [
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         on_pull_request=True,
-        ciflow_config = CIFlowConfig(
+        ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
             labels={'ciflow/scheduled'}
@@ -286,7 +286,7 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         on_pull_request=True,
-        ciflow_config = CIFlowConfig(
+        ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
             labels={'ciflow/scheduled'}
@@ -300,7 +300,7 @@ LINUX_WORKFLOWS = [
         is_libtorch=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         on_pull_request=True,
-        ciflow_config = CIFlowConfig(
+        ciflow_config=CIFlowConfig(
             enabled=True,
             trigger_action_only=True,
             labels={'ciflow/scheduled'},
