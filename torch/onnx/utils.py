@@ -25,6 +25,9 @@ from typing import List, Tuple, Union
 __IN_ONNX_EXPORT = False
 
 
+class ONNXCheckerError(Exception):
+    pass
+
 def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
@@ -72,26 +75,32 @@ def select_model_mode_for_export(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=True, do_constant_folding=True,
+           opset_version=None, _retain_param_name=None, do_constant_folding=True,
            example_outputs=None, strip_doc_string=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=True, use_external_data_format=False):
+           enable_onnx_checker=None, use_external_data_format=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
+
+    if enable_onnx_checker is not None:
+        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in"
+                      "the next PyTorch release. To proceed despite ONNX checker failures, you"
+                      "can catch torch.onnx.ONNXCheckerError.")
+
     if _retain_param_name is not None:
         warnings.warn("`_retain_param_name' is deprecated and ignored. Will be removed in "
                       "next release. The code now will work as it is True to keep the original "
                       "parameter names in the final ONNX graph.")
+
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
             strip_doc_string=strip_doc_string, dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, enable_onnx_checker=enable_onnx_checker,
-            use_external_data_format=use_external_data_format)
+            custom_opsets=custom_opsets, use_external_data_format=use_external_data_format)
 
 
 def _is_constant_tensor_list(node):
@@ -636,8 +645,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, do_constant_folding=True, strip_doc_string=True,
             dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False,
-            onnx_shape_inference=True):
+            use_external_data_format=False, onnx_shape_inference=True):
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError("torch.nn.DataParallel is not supported by ONNX "
@@ -709,13 +717,6 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                     strip_doc_string, val_keep_init_as_ip, custom_opsets, val_add_node_names,
                     val_use_external_data_format, model_file_location)
 
-            if enable_onnx_checker and \
-                operator_export_type is OperatorExportTypes.ONNX and \
-                    not val_use_external_data_format:
-                # Only run checker if enabled and we are using ONNX export type and
-                # large model format export in not enabled.
-                _check_onnx_proto(proto)
-
             if export_type == ExportTypes.PROTOBUF_FILE:
                 assert(len(export_map) == 0)
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -746,6 +747,17 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                         opened_file.write(v)
             else:
                 raise RuntimeError("Unknown export type")
+
+            # The ONNX checker only works for ONNX graph. So if the operator_export_type is not ONNX,
+            # we can skip this check.
+            # If large model format export is enabled, proto will only contain data location instead of
+            # raw data and _check_onnx_proto() will fail because it can only handle the raw ONNX proto
+            # string in memory.
+            if (operator_export_type is OperatorExportTypes.ONNX) and (not val_use_external_data_format):
+                try:
+                    _check_onnx_proto(proto)
+                except RuntimeError as e:
+                    raise ONNXCheckerError(e)
     finally:
         assert __IN_ONNX_EXPORT
         __IN_ONNX_EXPORT = False
