@@ -2642,6 +2642,59 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
+    assert mode in ('constant', 'reflect', 'replicate', 'circular')
+    # Supports 2-D, 3-D, 4-D, 5-D tensors
+    shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))
+    pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 2, 1, 1, 2))
+
+    def generator():
+        cases = product(shapes, pads)
+
+        for shape, pad in cases:
+            # Not all combinations of shapes and pads are valid
+            # Below are the checks to remove skip invalid combinations
+
+            # Function requires len(pad)/2 <= len(shape)
+            if not (len(pad) // 2 <= len(shape)):
+                continue
+
+            if mode in ['reflect', 'replicate', 'circular']:
+                input_dim = len(shape)
+                # Valid pad length for given input dim
+                if len(pad) == 2 and not (input_dim in (2, 3)):
+                    continue
+                if len(pad) == 4 and not (input_dim in (3, 4)):
+                    continue
+                if len(pad) == 6 and not (input_dim in (4, 5)):
+                    continue
+
+                # Expected XD or YD (batch mode) tensor with possibly 0 batch size
+                # and other non-zero dimensions for input
+                if len(pad) == 2 and input_dim == 2 and shape[0] == 0:
+                    continue
+                if len(pad) == 4 and input_dim == 3 and shape[0] == 0:
+                    continue
+                if len(pad) == 6 and input_dim == 4 and shape[0] == 0:
+                    continue
+
+            if mode == 'circular':
+                if not (len(pad) == 2 * (input_dim - 2)):
+                    continue
+
+            if mode in ['reflect', 'replicate', 'circular']:
+                args = (pad, mode)
+                tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+                yield SampleInput(tensor, args=args)
+            else:
+                for pad_value in (1., 2.):
+                    tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+                    args = (pad, mode, pad_value)
+                    yield SampleInput(tensor, args=args)
+
+    return list(generator())
+
+
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
 # Creates matrices with a positive nonzero determinant
 def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
@@ -6572,6 +6625,48 @@ op_db: List[OpInfo] = [
            dtypesIfCPU=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_activation_relu,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='constant',
+           supports_autograd=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='reflect',
+           supports_autograd=True,
+           dtypes=floating_and_complex_types(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='replicate',
+           supports_autograd=True,
+           dtypes=floating_and_complex_types(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False),
+    OpInfo('nn.functional.pad',
+           variant_test_name='circular',
+           supports_autograd=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=partial(sample_inputs_nn_pad, mode='circular'),
+           supports_forward_ad=True,
+           check_batched_grad=False,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           ),
            supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
