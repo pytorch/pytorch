@@ -42,5 +42,7 @@ void dequantize(Stack& stack);
 
 void raiseException(Stack& stack);
 
+void tupleIndex(Stack& stack);
+
 } // namespace jit
 } // namespace torch

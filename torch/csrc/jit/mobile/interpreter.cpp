@@ -215,6 +215,10 @@ bool InterpreterState::run(Stack& stack) {
           raiseException(stack);
           ++pc;
         } break;
+        case TUPLE_INDEX: {
+          raiseException(stack);
+          ++pc;
+        } break;
         case ISINSTANCE: {
           at::ArrayRef<TypePtr> types(
               &(code_->types_[inst.X]), &(code_->types_[inst.X + inst.N]));

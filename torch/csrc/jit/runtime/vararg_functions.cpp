@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/ATen.h>
@@ -382,6 +383,17 @@ void dequantize(Stack& stack) {
 
 void raiseException(Stack& stack) {
   throw JITException(pop(stack).toStringRef());
+}
+
+void tupleIndex(Stack& stack) {
+  int64_t index = pop(stack).toInt();
+  auto tuple = pop(stack).toTuple();
+  auto norm_index = normalizeIndex(index, tuple->elements().size());
+  if (norm_index < 0 ||
+      norm_index > static_cast<int64_t>(tuple->elements().size())) {
+    throw std::out_of_range("Tuple list index out of range");
+  }
+  stack.emplace_back(tuple->elements()[norm_index]);
 }
 
 } // namespace jit
