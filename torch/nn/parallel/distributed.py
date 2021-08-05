@@ -10,9 +10,9 @@ import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import (
-    _Join,
-    _Joinable,
-    _JoinHook,
+    Join,
+    Joinable,
+    JoinHook,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
@@ -39,6 +39,7 @@ def _tree_flatten_with_rref(output):
     # Need to return flattened tensors, spec to re-pack them, as well
     # as if the return type was actually an RRef to reconstruct.
     return output_tensor_list, treespec, output_is_rref
+
 
 def _tree_unflatten_with_rref(output, treespec, output_is_rref):
     output = tree_unflatten(output, treespec)
@@ -140,14 +141,15 @@ class _DDPSink(Function):
         return (None, *grad_outputs)
 
 
-class _DDPJoinHook(_JoinHook):
+class _DDPJoinHook(JoinHook):
     def __init__(self, ddp, divide_by_initial_world_size):
         """
         Sets config variables for internal usage.
         """
-        assert isinstance(ddp, DistributedDataParallel), \
-            "DDP join hook requires passing in a DistributedDataParallel " \
+        assert isinstance(ddp, DistributedDataParallel), (
+            "DDP join hook requires passing in a DistributedDataParallel "
             "instance as the state"
+        )
         ddp.logger._set_uneven_input_join()
         self.ddp = ddp
         self.ddp._divide_by_initial_world_size = divide_by_initial_world_size
@@ -196,7 +198,7 @@ class _DDPJoinHook(_JoinHook):
         self.ddp._sync_final_model(is_last_joiner)
 
 
-class DistributedDataParallel(Module, _Joinable):
+class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
@@ -460,19 +462,18 @@ class DistributedDataParallel(Module, _Joinable):
     ):
 
         super(DistributedDataParallel, self).__init__()
-        _Joinable.__init__(self)
+        Joinable.__init__(self)
         self.logger = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
                 RuntimeError,
                 "DistributedDataParallel is not needed when a module "
-                "doesn't have any parameter that requires a gradient."
+                "doesn't have any parameter that requires a gradient.",
             )
 
         if device_ids is not None and len(device_ids) > 1:
             self._log_and_throw(
-                ValueError,
-                "device_ids can only be None or contain a single element."
+                ValueError, "device_ids can only be None or contain a single element."
             )
 
         self.is_multi_device_module = len({p.device for p in module.parameters()}) > 1
@@ -483,7 +484,7 @@ class DistributedDataParallel(Module, _Joinable):
                 "DistributedDataParallel's input module must be on "
                 "the same type of devices, but input module parameters locate in {}.".format(
                     distinct_device_types
-                )
+                ),
             )
 
         self.device_type = list(distinct_device_types)[0]
@@ -503,7 +504,7 @@ class DistributedDataParallel(Module, _Joinable):
                         device_ids,
                         output_device,
                         {p.device for p in module.parameters()},
-                    )
+                    ),
                 )
 
             self.device_ids = None
@@ -550,7 +551,7 @@ class DistributedDataParallel(Module, _Joinable):
                 self._log_and_throw(
                     RuntimeError,
                     "Modules with uninitialized parameters can't be used with `DistributedDataParallel`. "
-                    "Run a dummy forward pass to correctly initialize the modules"
+                    "Run a dummy forward pass to correctly initialize the modules",
                 )
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = int(250 * 1024 * 1024)
@@ -575,6 +576,7 @@ class DistributedDataParallel(Module, _Joinable):
             param_to_name_mapping = {}
         # Builds reducer.
         self._ddp_init_helper(parameters, expect_sparse_gradient, param_to_name_mapping)
+        self._has_rebuilt_buckets = False
 
     def _sync_params_and_buffers(self, authoritative_rank=0):
         module_states = []
@@ -592,7 +594,9 @@ class DistributedDataParallel(Module, _Joinable):
             self.logger.set_error_and_log(f"{str(err_type)}: {err_msg}")
         raise err_type(err_msg)
 
-    def _ddp_init_helper(self, parameters, expect_sparse_gradient, param_to_name_mapping):
+    def _ddp_init_helper(
+        self, parameters, expect_sparse_gradient, param_to_name_mapping
+    ):
         """
         Initialization helper function that does the following:
         (1) bucketing the parameters for reductions
@@ -607,7 +611,7 @@ class DistributedDataParallel(Module, _Joinable):
         # that are defined first, such that their gradients don't spill into
         # a much larger bucket, adding unnecessary latency after gradient
         # computation finishes. Experiments showed 1MB is a reasonable value.
-        bucket_indices = dist._compute_bucket_assignment_by_size(
+        bucket_indices, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
             parameters[0],
             [dist._DEFAULT_FIRST_BUCKET_BYTES, self.bucket_bytes_cap],
             expect_sparse_gradient[0],
@@ -619,6 +623,7 @@ class DistributedDataParallel(Module, _Joinable):
         self.reducer = dist.Reducer(
             parameters,
             list(reversed(bucket_indices)),
+            list(reversed(per_bucket_size_limits)),
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
@@ -719,12 +724,13 @@ class DistributedDataParallel(Module, _Joinable):
 
         # The following modules_params and modules_buffers are used for
         # param/buffer sync in _sync_params.
-        self.modules_params = [
-            list(self._get_parameters(self.module))
-        ]
+        self.modules_params = [list(self._get_parameters(self.module))]
         # Collect buffers for modules, filtering out buffers that should be ignored.
         named_module_buffers = [
-            [(buffer, buffer_name) for buffer_name, buffer in self.module.named_buffers()]
+            [
+                (buffer, buffer_name)
+                for buffer_name, buffer in self.module.named_buffers()
+            ]
         ]
         self.modules_buffers = [
             [
@@ -738,9 +744,7 @@ class DistributedDataParallel(Module, _Joinable):
         return parameters, expect_sparse_gradient
 
     def _build_param_to_name_mapping(self, parameters):
-        param_to_param_index = {
-            parameters[0][i] : i for i in range(len(parameters[0]))
-        }
+        param_to_param_index = {parameters[0][i]: i for i in range(len(parameters[0]))}
         param_set = set(parameters[0])
         param_index_to_param_fqn = {}
         for module_name, module in self.module.named_modules():
@@ -753,7 +757,7 @@ class DistributedDataParallel(Module, _Joinable):
                         self._log_and_throw(
                             ValueError,
                             f"Param with name {fqn} found in module parameters, but not DDP parameters."
-                            " This indicates a bug in DDP, please report an issue to PyTorch."
+                            " This indicates a bug in DDP, please report an issue to PyTorch.",
                         )
                     param_index = param_to_param_index[param]
                     param_index_to_param_fqn[param_index] = fqn
@@ -767,7 +771,7 @@ class DistributedDataParallel(Module, _Joinable):
                     f" got conflicting lengths: {len(param_set)} vs "
                     f"{len(param_index_to_param_fqn)}. This indicates a bug in DDP"
                     ", please report an issue to PyTorch."
-                )
+                ),
             )
 
         return param_index_to_param_fqn
@@ -805,7 +809,7 @@ class DistributedDataParallel(Module, _Joinable):
                 "when using DDP with the default process "
                 "group. That is, when you have called "
                 "init_process_group and have not passed "
-                "process_group argument to DDP constructor"
+                "process_group argument to DDP constructor",
             )
 
     @contextmanager
@@ -841,11 +845,10 @@ class DistributedDataParallel(Module, _Joinable):
 
             # Notify the join context that this process has not joined, if
             # needed
-            work = _Join.notify_join_context(self)
+            work = Join.notify_join_context(self)
             if work:
                 self.reducer._set_forward_pass_work_handle(
-                    work,
-                    self._divide_by_initial_world_size
+                    work, self._divide_by_initial_world_size
                 )
 
             # Calling _rebuild_buckets before forward compuation,
@@ -856,6 +859,7 @@ class DistributedDataParallel(Module, _Joinable):
             # This should be called only once during whole training period.
             if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
+                self._has_rebuilt_buckets = True
 
             if self.require_forward_param_sync:
                 self._sync_params()
@@ -891,15 +895,24 @@ class DistributedDataParallel(Module, _Joinable):
         if self.static_graph and self.num_iterations == 1:
             # Need to grab list of tensors from user output in order to pass
             # to custom autograd function.
-            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(output)
-            passthrough_tensor_list = _DDPSink.apply(
-                self.reducer,
-                *output_tensor_list
+            output_tensor_list, treespec, output_is_rref = _tree_flatten_with_rref(
+                output
             )
+            output_placeholders = [None for _ in range(len(output_tensor_list))]
+            # Do not touch tensors that have no grad_fn, which can cause issues
+            # such as https://github.com/pytorch/pytorch/issues/60733
+            for i, output in enumerate(output_tensor_list):
+                if torch.is_tensor(output) and output.grad_fn is None:
+                    output_placeholders[i] = output
+
+            passthrough_tensor_list = _DDPSink.apply(self.reducer, *output_tensor_list)
+            for i in range(len(output_placeholders)):
+                if output_placeholders[i] is None:
+                    output_placeholders[i] = passthrough_tensor_list[i]
 
             # Reconstruct output data structure.
             output = _tree_unflatten_with_rref(
-                passthrough_tensor_list, treespec, output_is_rref
+                output_placeholders, treespec, output_is_rref
             )
         return output
 
@@ -1135,14 +1148,14 @@ class DistributedDataParallel(Module, _Joinable):
             >>>     # blocking for rank 1's allreduce to complete.
             >>>     torch.cuda.synchronize(device=rank)
         """
-        return _Join(
+        return Join(
             [self],
             enable,
             throw_on_early_termination,
-            divide_by_initial_world_size=divide_by_initial_world_size
+            divide_by_initial_world_size=divide_by_initial_world_size,
         )
 
-    def _join_hook(
+    def join_hook(
         self,
         **kwargs,
     ):
@@ -1154,7 +1167,7 @@ class DistributedDataParallel(Module, _Joinable):
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
                 to modify the behavior of the join hook at run time; all
-                :class:`_Joinable` instances sharing the same join context
+                :class:`Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
 
         The hook supports the following keyword arguments:
@@ -1171,16 +1184,15 @@ class DistributedDataParallel(Module, _Joinable):
         """
         divide_by_initial_world_size = kwargs.get("divide_by_initial_world_size", True)
         return _DDPJoinHook(
-            self,
-            divide_by_initial_world_size=divide_by_initial_world_size
+            self, divide_by_initial_world_size=divide_by_initial_world_size
         )
 
     @property
-    def _join_device(self):
+    def join_device(self):
         return self.device
 
     @property
-    def _join_process_group(self):
+    def join_process_group(self):
         return self.process_group
 
     def register_comm_hook(self, state: object, hook: callable):
@@ -1202,7 +1214,7 @@ class DistributedDataParallel(Module, _Joinable):
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
             hook (callable): Callable with the following signature:
-                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[List[torch.tensor]]``:
+                             ``hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]``:
 
                              This function is called once the bucket is ready. The
                              hook can perform whatever processing is needed and return
@@ -1212,8 +1224,7 @@ class DistributedDataParallel(Module, _Joinable):
                              new value of grad bucket's tensors. Once a bucket is ready,
                              c10d reducer would call this hook and use the tensors returned
                              by the Future and copy grads to individual parameters.
-                             Note that the future's return type must be a list with a
-                             tensor as its single element.
+                             Note that the future's return type must be a single tensor.
 
                              We also provide an API called ``get_future`` to retrieve a
                              Future associated with the completion of ``c10d.ProcessGroup.Work``.
@@ -1229,29 +1240,19 @@ class DistributedDataParallel(Module, _Joinable):
             before calling backward.
 
         .. warning ::
-            The Future object that hook returns should contain a list that contains a
-            single tensor that has the same shape with the tensors inside grad bucket.
-
-        .. warning ::
-            DDP communication hook does not support single-process multiple-device mode.
-            Gradbucket tensors should consist of only a single tensor.
+            The Future object that hook returns should contain a single tensor
+            that has the same shape with the tensors inside grad bucket.
 
         .. warning ::
             ``get_future`` API supports NCCL, and partially GLOO and MPI backends (no support
-            for peer-to-peer operations like send/recv) and will return a ``torch._C.Future``
-            which is an internal type and should be used with caution. It can still be used by
-            ``register_comm_hook`` API, but it is subject to some subtle differences compared
-            to ``torch.futures.Future``.
-
-        .. warning ::
-            DDP communication hook is experimental and subject to change.
+            for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
         Example::
-            Below is an example of a noop hook that returns the same tensors.
+            Below is an example of a noop hook that returns the same tensor.
 
-            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future
+            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result([bucket.get_tensor()])
+            >>>     fut.set_result(bucket.buffer())
             >>>     return fut
 
             >>> ddp.register_comm_hook(state=None, hook=noop)
@@ -1260,13 +1261,13 @@ class DistributedDataParallel(Module, _Joinable):
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future
-            >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
+            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
             >>>         decoded_tensor = decode(fut.value()[0]) # decode gradients
-            >>>         return [decoded_tensor]
+            >>>         return decoded_tensor
             >>>     return fut.then(decode)
 
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
@@ -1289,13 +1290,6 @@ class DistributedDataParallel(Module, _Joinable):
         .. warning ::
             DDP communication hook can only be registered once and should be registered
             before calling backward.
-
-        .. warning ::
-            DDP communication hook does not support single-process multiple-device mode.
-            Gradbucket tensors should consist of only a single tensor.
-
-        .. warning ::
-            DDP communication hook is experimental and subject to change.
 
         Example::
             Below is an example of a FP16 compression where gradients are
@@ -1334,7 +1328,7 @@ class DistributedDataParallel(Module, _Joinable):
             self._log_and_throw(
                 ValueError,
                 "BUG! Expected rank_cond to be true for at least one process."
-                " This indicates a bug in PyTorch, please report an issue."
+                " This indicates a bug in PyTorch, please report an issue.",
             )
         return rank_to_use.item()
 
@@ -1364,8 +1358,7 @@ class DistributedDataParallel(Module, _Joinable):
             if isinstance(layer, torch.nn.modules.SyncBatchNorm):
                 if self.device_type == "cpu":
                     self._log_and_throw(
-                        ValueError,
-                        "SyncBatchNorm layers only work with GPU modules"
+                        ValueError, "SyncBatchNorm layers only work with GPU modules"
                     )
 
     def _check_comm_hook(self, hook):
@@ -1379,16 +1372,16 @@ class DistributedDataParallel(Module, _Joinable):
         ):
             self._log_and_throw(
                 ValueError,
-                "Communication hook: bucket annotation should be dist.GradBucket."
+                "Communication hook: bucket annotation should be dist.GradBucket.",
             )
 
-        if sig.return_annotation != inspect._empty and (
-            sig.return_annotation != torch.futures.Future
-            and sig.return_annotation != torch._C.Future
+        if (
+            sig.return_annotation != inspect._empty
+            and sig.return_annotation != torch.futures.Future[torch.Tensor]
         ):
             self._log_and_throw(
                 ValueError,
-                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+                "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
     @property
@@ -1448,7 +1441,7 @@ class DistributedDataParallel(Module, _Joinable):
         if sample_rate < 1:
             self._log_and_throw(
                 ValueError,
-                "DDP runtime logging sample rate should be equal or greater than 1"
+                "DDP runtime logging sample rate should be equal or greater than 1",
             )
         self.reducer._set_ddp_runtime_logging_sample_rate(sample_rate)
 
