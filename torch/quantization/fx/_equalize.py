@@ -11,7 +11,6 @@ from .utils import (
     maybe_get_next_module,
     _parent_name,
 )
-from .graph_module import QuantizedGraphModule
 from ..observer import (
     PerChannelMinMaxObserver,
     _with_args,
@@ -20,7 +19,6 @@ from ..observer import (
 from ..utils import check_min_max_valid
 
 from collections import namedtuple
-import copy
 from typing import Dict, Any, List, Tuple, Optional
 import warnings
 
@@ -82,7 +80,7 @@ class _InputEqualizationObserver(nn.Module):
         return self.input_obs(x_orig)
 
     def get_input_minmax(self):
-        return (self.input_obs.min_vals, self.input_obs.max_vals)
+        return (self.input_obs.min_val, self.input_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         # Reshape the equalization scale along axis=1 so that it can be
@@ -156,7 +154,7 @@ class _WeightEqualizationObserver(nn.Module):
         return self.weight_col_obs(w_orig)
 
     def get_weight_col_minmax(self):
-        return (self.weight_col_obs.min_vals, self.weight_col_obs.max_vals)
+        return (self.weight_col_obs.min_val, self.weight_col_obs.max_val)
 
     def set_equalization_scale(self, equalization_scale):
         self.equalization_scale = equalization_scale
@@ -711,7 +709,7 @@ def _convert_equalization_ref(model: GraphModule):
 # Functions for running the equalized model on the Numeric Suite              #
 ###############################################################################
 
-def _get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor) -> Dict[str, float]:
+def get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor) -> Dict[str, float]:
     """ Runs the Numeric Suite on model_a and model_b and returns a dictionary
     containing the SQNR between layers in model_a and model_b.
 
@@ -752,18 +750,19 @@ def _get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor
         torch.quantization.ns.utils.compute_sqnr, 'sqnr'
     )
 
+    ns.add_fully_qualified_names_to_logger_results(activation_comparison_dict, model_b, 'int8')
+
     # Construct a dictionary mapping layer names to the SQNR values
     layer_sqnr_dict = {}
     for key in activation_comparison_dict:
-        layer = activation_comparison_dict[key]['node_output']['int8'][0]['ref_node_name']
+        layer = activation_comparison_dict[key]['node_output']['int8'][0]['fully_qualified_name']
         sqnr = activation_comparison_dict[key]['node_output']['int8'][0]['sqnr'][0]
         layer_sqnr_dict[layer] = sqnr
 
     return layer_sqnr_dict
 
-def _get_equalization_qconfig_dict(
+def get_equalization_qconfig_dict(
     layer_sqnr_dict: Dict[str, float],
-    model_b: nn.Module,
     num_layers_to_equalize: int
 ) -> Any:
     """ Given the layer to SQNR dictionary, find the layers with the highest
@@ -783,79 +782,11 @@ def _get_equalization_qconfig_dict(
     layer_sqnr_sorted = sorted(layer_sqnr_dict.items(), key=lambda item: item[1])
     layers_to_equalize = layer_sqnr_sorted[:num_layers_to_equalize]
 
-    # Trace the model so that we can find the accurate node_name_to_scope
-    from ..quantize_fx import QuantizationTracer
-    tracer = QuantizationTracer([], [])
-    tracer.trace(model_b)
-
     # Constructs an equalization_qconfig_dict that specifies to only equalize
     # the layers with the highest quantization errors
     module_to_qconfig_list = list(
-        map(
-            lambda item: (
-                tracer.node_name_to_scope[item[0]][0],
-                default_equalization_qconfig,
-            ),
-            layers_to_equalize,
-        )
+        map(lambda item: (item[0], default_equalization_qconfig), layers_to_equalize)
     )
 
     equalization_qconfig_dict = {"module_name": module_to_qconfig_list}
     return equalization_qconfig_dict
-
-def selctive_equalization_with_numeric_suite(
-    float_model: nn.Module,
-    qconfig_dict: Any,
-    input: torch.Tensor,
-    num_layers_to_equalize: int,
-    prepare_custom_config_dict: Dict[str, Any] = None,
-    convert_custom_config_dict: Dict[str, Any] = None,
-) -> QuantizedGraphModule:
-    """ Selectively equalizes the given float model and returns a equalized and
-    quantized model with the following steps:
-
-      1. Quantize the float model
-      2. Run the Numeric Suite between the float and quantized model to obtain the
-         SQNR for each layer
-      3. Construct an equalization_qconfig_dict specifying to only equalize the
-         layers with the highest quantization errors
-      4. Quantize and equalize the float model with the constructed
-         equalization_qconfig_dict to generate a selectively equalized model
-
-    Args:
-        float_model: A float model, must be in eval mode
-        qconfig_dict: Dictionary for specifying qconfigs for layers
-        input: Inputs to use during calibration
-        num_layers_to_equalize: Number of layers with the highest quantization
-           errors to equalize
-        prepare_custom_config_dict: Dictionary for custom configurations during prepare
-        convert_custom_config_dict: Dictionary for custom configurations during convert
-    """
-
-    from torch.quantization.quantize_fx import prepare_fx, convert_fx
-
-    # Quantize the float model
-    prepared_model = prepare_fx(copy.deepcopy(float_model), qconfig_dict, prepare_custom_config_dict)
-    prepared_model(input)
-    quantized_model = convert_fx(prepared_model, convert_custom_config_dict=convert_custom_config_dict)
-
-    # Get the SQNR between the float and quantized model
-    layer_to_sqnr_dict = _get_layer_sqnr_dict(float_model, quantized_model, input)
-    # Construct the equalization_qconfig_dict equalizing layers with the highest
-    # quantization errors
-    selective_equalization_qconfig_dict = _get_equalization_qconfig_dict(
-        layer_to_sqnr_dict,
-        quantized_model,
-        num_layers_to_equalize
-    )
-
-    # Create the selectively equalized model
-    prepared_model = prepare_fx(
-        copy.deepcopy(float_model),
-        qconfig_dict,
-        prepare_custom_config_dict,
-        selective_equalization_qconfig_dict,
-    )
-    prepared_model(input)
-    equalized_model = convert_fx(prepared_model, convert_custom_config_dict=convert_custom_config_dict)
-    return equalized_model

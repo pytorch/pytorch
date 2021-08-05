@@ -940,9 +940,12 @@ class _NnapiSerializer(object):
         start_ctype, start_dim = self.get_constant_value(node.inputsAt(1), "IntType")
         end_ctype, end_dim = self.get_constant_value(node.inputsAt(2), "IntType")
 
-        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS:
+        # channels last with channels == 1 or (height & width both 1)
+        is_trivial_flatten = len(in_oper.shape) == 4 and (
+            in_oper.shape[1] == 1 or (in_oper.shape[2] == 1 and in_oper.shape[3] == 1))
+        if in_oper.dim_order != DimOrder.PRESUMED_CONTIGUOUS and not is_trivial_flatten:
             raise Exception(
-                "Currently, reshape is not supported on NHWC tensors")
+                "Currently, flatten is not supported on NHWC tensors unless C=1 or H=W=1")
 
         if start_dim < 0:
             start_dim += len(in_oper.shape)
@@ -962,7 +965,7 @@ class _NnapiSerializer(object):
         if non_flattened_dims.count(0) > 1:
             raise Exception("Only 1 dim can be flexible")
 
-        out_oper = in_oper._replace(shape=out_shape)
+        out_oper = in_oper._replace(shape=out_shape, dim_order=DimOrder.PRESUMED_CONTIGUOUS)
         out_id = self.add_tensor_operand(node.outputsAt(0), out_oper)
 
         for idx, dim in enumerate(out_shape):
