@@ -51,8 +51,8 @@ class CpuTimer : public Timer {
   explicit CpuTimer(c10::Device /* unused */) {}
 
   c10::optional<int64_t> measureDifference(Event start, Event end) override {
-    int64_t start_time = getTime(start);
-    int64_t end_time = getTime(end);
+    int64_t start_time = getTimeRef(start);
+    int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
     // avg_time will return invalid value.
     // For some cases like DDP runs on non-sync mode, backward compute

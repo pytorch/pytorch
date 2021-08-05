@@ -60,7 +60,7 @@ class TORCH_API Timer {
   // Record the current event, i.e., mark it as having occurred now. Default
   // CPU implementation.
   virtual void record(Event event) {
-    getTime(event) = current_time_in_nanos();
+    getTimeRef(event) = current_time_in_nanos();
   }
 
   // Return the difference between when two events occurred, in nanoseconds.
@@ -71,7 +71,7 @@ class TORCH_API Timer {
 
   // Return host-side timestamp, or nullopt if it has not yet been recorded.
   c10::optional<int64_t> getTimestamp(Event event) {
-    auto time = getTime(event);
+    auto time = getTimeRef(event);
     if (time == kUnsetTime) {
       return c10::nullopt;
     } else {
@@ -80,7 +80,7 @@ class TORCH_API Timer {
   }
 
   // Return host-side time member variable corresponding to the given event.
-  int64_t& getTime(Event event) {
+  int64_t& getTimeRef(Event event) {
     switch (event) {
       case Event::kForwardStart:
         return forward_start_time;
