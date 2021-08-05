@@ -11,7 +11,7 @@ namespace ops {
 class LeakyReluBackward : public Node {
  public:
   LeakyReluBackward(const Value& grad_output, const Value& input,
-                    double negative_slope, bool self_is_result=false);
+                    double negative_slope, bool self_is_result = false);
 
   NodePtr Clone(OpList operands) const override;
 
