@@ -76,36 +76,26 @@ void check_allany_for_meta(
   namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
 }
 
-TORCH_PRECOMPUTE_FUNC2(all, dim)
+ TORCH_PRECOMPUTE_META_FUNC2(all, dim)
+ (const Tensor& self,
+  int64_t dim,
+  bool keepdim) {
+   dim = maybe_wrap_dim(dim, self.dim());
+   check_allany_for_meta(*this, "all", self, dim, keepdim);
+   return {
+     .dim_=dim
+   };
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(any, dim)
 (const Tensor& self,
  int64_t dim,
  bool keepdim) {
-  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
-  structured_all_dim::precompute_out res(dim_);
-  return res;
- }
-
-TORCH_META_FUNC2(all, dim)
-(const Tensor& self,
- int64_t dim,
- bool keepdim,
- structured_all_dim::precompute_out precompute) {
-  check_allany_for_meta(*this, "all", self, precompute.dim, keepdim);
-}
-
-TORCH_PRECOMPUTE_FUNC2(any, dim)
-(const Tensor& self, int64_t dim, bool keepdim) {
-  int64_t dim_ = maybe_wrap_dim(dim, self.dim());
-  structured_any_dim::precompute_out res(dim_);
-  return res;
-}
-
-TORCH_META_FUNC2(any, dim)
-(const Tensor& self,
- int64_t dim,
- bool keepdim,
- structured_any_dim::precompute_out precompute) {
-  check_allany_for_meta(*this, "any", self, precompute.dim, keepdim);
+  dim = maybe_wrap_dim(dim, self.dim());
+  check_allany_for_meta(*this, "any", self, dim, keepdim);
+  return {
+    .dim_=dim
+  };
 }
 
 void check_argmax_argmin(
@@ -1274,9 +1264,9 @@ Tensor all(const Tensor& self) {
 
 TORCH_IMPL_FUNC(all_out)
 (const Tensor& self, int64_t dim, bool keepdim, const Tensor& result, at::meta::structured_all_dim::precompute_out precompute) {
-  auto iter = get_allany_iter(self, result, precompute.dim, keepdim);
+  auto iter = get_allany_iter(self, result, precompute.dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, precompute.dim, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 1, precompute.dim_, keepdim)) {
     _all(mut_result, iter);
   }
 }
@@ -1310,9 +1300,9 @@ TORCH_IMPL_FUNC(any_out)
  bool keepdim,
  const Tensor& result,
  at::meta::structured_any_dim::precompute_out precompute) {
-  auto iter = get_allany_iter(self, result, precompute.dim, keepdim);
+  auto iter = get_allany_iter(self, result, precompute.dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, precompute.dim, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 0, precompute.dim_, keepdim)) {
     _any(mut_result, iter);
   }
 }

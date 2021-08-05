@@ -447,32 +447,27 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
-        precomputed = "" if not g.structured else g.out.precomputed
+        meta_return = "void"
+        precomputed = g.out.precomputed if g.structured else None
 
         if precomputed:
-            precomputed_arg_types = [arg.lstrip().split(" ")[0].strip() for arg in precomputed.split(",")]
-            precomputed_arg_names = [arg.lstrip().split(" ")[1].strip() for arg in precomputed.split(",")]
-            precomputed_arg_names_private = [arg + "_" for arg in precomputed_arg_names]
-            init_list = ", ".join([f"{pub}({pri})" for (pri, pub) in zip(precomputed_arg_names_private, precomputed_arg_names)])
-            init_list = f": {init_list}"
-            precomputed_args_private = ", ".join(f"{typ} {name}" for (typ, name) in zip(precomputed_arg_types, precomputed_arg_names_private))
-            precompute_decl = f"precompute_out precompute({args_str});"
+            elements_with_cpp_types = []
+            for elem in precomputed.elements:
+                elements_with_cpp_types.append(f"{elem.ty} {elem.name}")
 
-            args_str += f", precompute_out precompute"
+            precomputed_elements = ";\n".join(elements_with_cpp_types)
+            meta_return = "precompute_out"
+            precomputed_decl = f"""
+                struct TORCH_API precompute_out {{
+                    {precomputed_elements};
+            }};"""
         else:
-            precomputed_args = ""
-            precomputed_args_private = ""
-            init_list = ""
-            precompute_decl = ""
+            precomputed_decl = ""
+
         return f"""\
 struct TORCH_API structured_{name} : public {parent_class} {{
-    struct TORCH_API precompute_out {{
-        precompute_out({precomputed_args_private if precomputed_args_private is not None else ""}) {init_list} {{}}
-        {precomputed.replace(",", ";") if precomputed is not None else ""};
-
-    }};
-    void meta({args_str});
-    {precompute_decl}
+    {precomputed_decl}
+    {meta_return} meta({args_str});
 }};
 """
 

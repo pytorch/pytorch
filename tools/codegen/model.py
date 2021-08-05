@@ -1,7 +1,7 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
+from typing import Any, List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
 
@@ -229,7 +229,7 @@ class NativeFunction:
     # changes the semantics of set_output to call the parent class.
     structured_inherits: Optional[str]
 
-    precomputed: Optional[str]
+    precomputed: Optional['Precompute']
 
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
@@ -322,8 +322,9 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
-        precomputed = e.pop('precomputed', None)
-        assert precomputed is None or structured is True
+        precomputed_dict = e.pop('precomputed', None)
+        assert precomputed_dict is None or structured is True
+        precomputed = Precompute.build(precomputed_dict) if precomputed_dict else None
 
         from tools.codegen.api import cpp
 
@@ -1502,3 +1503,37 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
+
+@dataclass(frozen=True)
+class PrecomputedElement:
+    name: str
+    ty: str
+
+    @staticmethod
+    def build(src: str) -> 'PrecomputedElement':
+        ty, name = src.split(" ")
+        return PrecomputedElement(name=name, ty=ty)
+
+@dataclass(frozen=True)
+class Precompute:
+    elements: List[Argument]
+    replace: Optional[Dict[str, List[Argument]]]
+
+    @staticmethod
+    def build(src: Dict[str, Any]) -> 'Precompute':
+        assert "elements" in src
+        raw_elements = src["elements"].split(",")
+        elements = [PrecomputedElement.build(element.lstrip()) for element in raw_elements]
+
+        if "replace" in src:
+            name_to_element = {element.name: element for element in elements}
+            replace = {}
+            for raw_replace_item in src["replace"]:
+                arg, with_list = raw_replace_item.split(" -> ")
+                with_list = with_list.split(",")
+                with_list = [name_to_element[name.strip()] for name in with_list]
+                replace[arg] = with_list
+
+            return Precompute(elements=elements, replace=replace)
+
+        return Precompute(elements=elements, replace=None)

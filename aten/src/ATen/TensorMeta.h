@@ -26,8 +26,8 @@ namespace impl {
 #define TORCH_META_FUNC(name) void structured_##name::meta
 #define TORCH_META_FUNC2(name, overload) void structured_##name##_##overload::meta
 
-#define TORCH_PRECOMPUTE_FUNC(name) structured_##name::precompute_out structured_##name::precompute
-#define TORCH_PRECOMPUTE_FUNC2(name, overload) structured_##name##_##overload::precompute_out structured_##name##_##overload::precompute
+#define TORCH_PRECOMPUTE_META_FUNC(name) structured_##name::precompute_out structured_##name::meta
+#define TORCH_PRECOMPUTE_META_FUNC2(name, overload) structured_##name##_##overload::precompute_out structured_##name##_##overload::meta
 
 // Use this to define the prototype for an implementation.  This takes only
 // one argument, which is the name of the dispatch key entry you're

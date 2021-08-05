@@ -557,8 +557,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 )
             )
             if self.g.out.precomputed:
-                sig_body.append(f"auto precompute = op.precompute({meta_exprs});")
-                sig_body.append(f"op.meta({meta_exprs}, precompute);")
+                sig_body.append(f"auto precompute = op.meta({meta_exprs});")
             else:
                 sig_body.append(f"op.meta({meta_exprs});")
 
