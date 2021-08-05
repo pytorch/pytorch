@@ -474,7 +474,7 @@ void cuda_sparse_coo_softmax_backward(
             grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cuda(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cuda::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, unused);
         values.set_(r);
       }
     } else {
@@ -501,7 +501,7 @@ void cuda_sparse_coo_softmax_backward(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           } else {
-            auto r = softmax_backward_cuda(
+            auto r = at::cuda::_softmax_backward_data(
                 grad_values[j], out_values[i], dim - sparse_dim, unused);
             values[i].copy_(r);
           }
