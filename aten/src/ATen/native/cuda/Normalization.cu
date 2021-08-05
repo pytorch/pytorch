@@ -68,26 +68,29 @@ void batch_norm_elementwise(
     const c10::optional<Tensor>& bias_opt, const Tensor& mean_, const Tensor& invstd_) {
   switch (batch_norm_choose_impl(self)) {
   case Impl::Contiguous: {
-    c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
-    c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
-                                    "batch_norm_elementwise_cuda", [&] {
-      using accscalar_t = at::acc_type<scalar_t, true>;
-      const bool mixed_type = is_mixed_type(self, *weight, *bias);
-      if (mixed_type) {
-        batch_norm_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
-            out, self, *weight, *bias, mean_, invstd_);
-      } else {
-        batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
-            out, self, *weight, *bias, mean_, invstd_);
-      }
-    });
-    return;
+    if (out->iscontiguous()) {
+      c10::MaybeOwned<Tensor> weight = at::borrow_from_optional_tensor(weight_opt);
+      c10::MaybeOwned<Tensor> bias = at::borrow_from_optional_tensor(bias_opt);
+      AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(),
+                                      "batch_norm_elementwise_cuda", [&] {
+        using accscalar_t = at::acc_type<scalar_t, true>;
+        const bool mixed_type = is_mixed_type(self, *weight, *bias);
+        if (mixed_type) {
+          batch_norm_elemt_cuda_template<scalar_t, accscalar_t, int32_t>(
+              out, self, *weight, *bias, mean_, invstd_);
+        } else {
+          batch_norm_elemt_cuda_template<scalar_t, scalar_t, int32_t>(
+              out, self, *weight, *bias, mean_, invstd_);
+        }
+      });
+      return;
+    }
+    C10_FALLTHROUGH;
   }
   case Impl::ChannelsLast: {
     auto weight = at::borrow_from_optional_tensor(weight_opt);
     auto bias = at::borrow_from_optional_tensor(bias_opt);
-    if (self->is_contiguous() &&
+    if (out->is_contiguous() &&
         (!weight->defined() || weight->is_contiguous()) &&
         (!bias->defined() || bias->is_contiguous()) &&
         (!mean_.defined() || mean_.is_contiguous()) &&
