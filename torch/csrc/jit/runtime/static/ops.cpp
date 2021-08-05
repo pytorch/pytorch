@@ -213,7 +213,7 @@ std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n) {
 
 // Returns true if the node represents an op with variadic arguments.
 bool hasVarArgs(Node* n) {
-  if (n->kind() == prim::Concat) {
+  if (n->kind() == prim::VarConcat) {
     return true;
   }
   return false;
@@ -459,6 +459,11 @@ namespace {
 // they are vectorized by twice this constant.  An exception is logit, since it
 // contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
+
+// disable NNC temporarily until a code cache is implemented
+#ifdef TORCH_ENABLE_LLVM
+#undef TORCH_ENABLE_LLVM
+#endif
 
 #ifdef TORCH_ENABLE_LLVM
 
@@ -1570,24 +1575,28 @@ void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
 
 } // namespace
 
-REGISTER_OPERATOR_FUNCTOR(prim::Concat, prim_Concat, [](Node* n) -> SROperator {
-  return [](ProcessedNode* p_node) {
-    const size_t num_inputs = p_node->inputs().size();
-    std::vector<at::Tensor> inputs(num_inputs - 1);
-    for (const auto i : c10::irange(num_inputs - 1)) {
-      inputs[i] = p_node->Input(i).toTensor();
-    }
-    auto dim = p_node->Input(num_inputs - 1).toInt();
-    if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cat(inputs, dim);
-    } else {
-      check_cat_no_zero_dim(inputs);
-      dim = legacy_cat_wrap_dim(dim, inputs);
-      auto& out_t = p_node->Output(0).toTensor();
-      at::native::_cat_out_cpu(inputs, dim, out_t);
-    }
-  };
-});
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    prim::VarConcat,
+    prim_VarConcat,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const size_t num_inputs = p_node->inputs().size();
+        std::vector<at::Tensor> inputs(num_inputs - 1);
+        for (const auto i : c10::irange(num_inputs - 1)) {
+          inputs[i] = p_node->Input(i).toTensor();
+        }
+        auto dim = p_node->Input(num_inputs - 1).toInt();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = at::cat(inputs, dim);
+        } else {
+          check_cat_no_zero_dim(inputs);
+          dim = legacy_cat_wrap_dim(dim, inputs);
+          auto& out_t = p_node->Output(0).toTensor();
+          at::native::_cat_out_cpu(inputs, dim, out_t);
+        }
+      };
+    });
 
 } // namespace jit
 } // namespace torch
