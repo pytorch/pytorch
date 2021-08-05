@@ -490,11 +490,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
-``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
-
-``AVG`` is only available with the ``NCCL`` backend,
-and only for NCCL versions 2.10 or later.
 
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
@@ -502,10 +499,6 @@ The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
       .value("SUM", ::c10d::ReduceOp::SUM)
-#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
-                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
-      .value("AVG", ::c10d::ReduceOp::AVG)
-#endif
       .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
       .value("MIN", ::c10d::ReduceOp::MIN)
       .value("MAX", ::c10d::ReduceOp::MAX)
