@@ -2646,7 +2646,12 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
     assert mode in ('constant', 'reflect', 'replicate', 'circular')
     # Supports 2-D, 3-D, 4-D, 5-D tensors
     shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))
-    pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 2, 1, 1, 2))
+    pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 1, 1, 1, 1))
+
+    negative_pad_case = (
+        # (shape, pad)
+        ((1, 3, 4, 4), (-1, 1, -2, 1)),
+    )
 
     make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2655,7 +2660,7 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
             # Default args
             yield SampleInput(make_inp((1, 3, 3)), args=((2, 2),))
 
-        for shape, pad in product(shapes, pads):
+        for shape, pad in chain(product(shapes, pads), negative_pad_case):
             # Not all combinations of shapes and pads are valid
             # Below are the checks to remove skip invalid combinations
 
