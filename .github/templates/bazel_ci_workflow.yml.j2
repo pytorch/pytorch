@@ -5,6 +5,21 @@
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: !{{ build_environment }}
 {%- endblock %}
+
+on:
+{%- if on_pull_request %}
+  pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+{%- endif %}
+
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:

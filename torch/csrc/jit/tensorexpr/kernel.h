@@ -19,7 +19,7 @@ template <typename T>
 inline std::vector<int64_t> bufferSizes(const T& t) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < t->ndim(); i++) {
-    sizes.push_back(dynamic_cast<const IntImm*>(t->dim(i))->value());
+    sizes.push_back(dynamic_cast<IntImm*>(t->dim(i))->value());
   }
   return sizes;
 }
@@ -105,7 +105,7 @@ inline std::string getArgValueName(const ArgValue& a) {
 template <class T>
 std::vector<T> convertVecArgValue(const std::vector<ArgValue>& v) {
   std::vector<T> res;
-  for (const auto& x : v) {
+  for (auto& x : v) {
     auto val = c10::get_if<T>(&x);
     if (val) {
       res.push_back(*val);
@@ -132,7 +132,7 @@ TORCH_API Tensor* computeOperandValue(
 
 class TORCH_API TensorExprKernel {
   struct ConstantDescr {
-    const Buf* buf;
+    Buf* buf;
     void* ptr;
   };
 
@@ -196,7 +196,7 @@ class TORCH_API TensorExprKernel {
       std::vector<std::vector<ExprHandle>> shapes);
 
   ExprHandle chunk(
-      const Buf* b,
+      Buf* b,
       size_t chunkIdx,
       int64_t dim,
       int64_t chunks,
@@ -260,8 +260,8 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
-  std::unordered_set<const Buf*> bufOutputs_;
-  std::unordered_map<const torch::jit::Value*, const Buf*> bufs_;
+  std::unordered_set<Buf*> bufOutputs_;
+  std::unordered_map<const torch::jit::Value*, Buf*> bufs_;
   std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
   std::unique_ptr<CodeGen> codegen_;
