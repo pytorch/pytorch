@@ -906,7 +906,10 @@ RegisterOperators reg(
          float,
          float,
          complex),
-     DEFINE_INT_FLOAT_OP(aten::pow, static_cast<double>(powWrapper(a, b)), float),
+     DEFINE_INT_FLOAT_OP(
+         aten::pow,
+         static_cast<double>(powWrapper(a, b)),
+         float),
      DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
      DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
          aten::pow,
