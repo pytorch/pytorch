@@ -8,7 +8,6 @@ import pathlib
 import functools
 import json
 from dataclasses import dataclass
-import itertools
 import hashlib
 
 from tools.codegen.code_template import CodeTemplate
@@ -859,23 +858,30 @@ class FileManager:
             env_callable: Callable[[T], Dict[str, List[str]]],
             num_shards: int,
             base_env: Optional[Dict[str, Any]] = None,
+            sharded_keys: Set[str]
     ) -> None:
 
         everything: Dict[str, Any] = {'shard_id': 'Everything'}
         shards: List[Dict[str, Any]] = [{'shard_id': f'_{i}'} for i in range(num_shards)]
+        all_shards = [everything] + shards
 
         if base_env is not None:
-            everything.update(base_env)
-            for shard in shards:
+            for shard in all_shards:
                 shard.update(base_env)
+
+        for key in sharded_keys:
+            for shard in all_shards:
+                if key in shard:
+                    assert isinstance(shard[key], list), "sharded keys in base_env must be a list"
+                    shard[key] = shard[key].copy()
+                else:
+                    shard[key] = []
+
 
         def merge_env(into: Dict[str, List[str]], from_: Dict[str, List[str]]) -> None:
             for k, v in from_.items():
-                if k in into:
-                    assert isinstance(into[k], list)
-                    into[k] += v
-                else:
-                    into[k] = list(v)
+                assert k in sharded_keys, f"undeclared sharded key {k}"
+                into[k] += v
 
         for item in items:
             key = key_fn(item)
@@ -891,7 +897,7 @@ class FileManager:
         base_filename = filename[:dot_pos]
         extension = filename[dot_pos:]
 
-        for shard in itertools.chain((everything,), shards):
+        for shard in all_shards:
             shard_id = shard['shard_id']
             self.write_with_template(f"{base_filename}{shard_id}{extension}",
                                      filename,
