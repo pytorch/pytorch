@@ -150,6 +150,9 @@ class CIWorkflow:
             else:
                 self.num_test_shards_on_pull_request = self.num_test_shards
 
+        # Generate CI workflow name based on workflow configs
+        self.ci_workflow_name = self.generate_workflow_name()
+
         self.assert_valid()
 
     def assert_valid(self) -> None:
@@ -159,16 +162,15 @@ class CIWorkflow:
         if self.arch == 'windows':
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
-    def generate_workflow_name(self, workflow: 'CIWorkflow') -> str:
-        workflow_name = workflow.build_environment
-        if not workflow.on_pull_request:
+    def generate_workflow_name(self) -> str:
+        workflow_name = self.build_environment
+        if not self.on_pull_request:
             workflow_name = "master-only-" + workflow_name
-        if workflow.is_scheduled:
+        if self.is_scheduled:
             workflow_name = "periodic-" + workflow_name
         return workflow_name
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        workflow.ci_workflow_name = self.generate_workflow_name(workflow)
         output_file_path = GITHUB_DIR / f"workflows/generated-{workflow.ci_workflow_name}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"
