@@ -750,12 +750,10 @@ def get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor)
         torch.quantization.ns.utils.compute_sqnr, 'sqnr'
     )
 
-    ns.add_fully_qualified_names_to_logger_results(activation_comparison_dict, model_b, 'int8')
-
     # Construct a dictionary mapping layer names to the SQNR values
     layer_sqnr_dict = {}
     for key in activation_comparison_dict:
-        layer = activation_comparison_dict[key]['node_output']['int8'][0]['fully_qualified_name']
+        layer = activation_comparison_dict[key]['node_output']['int8'][0]['fqn']
         sqnr = activation_comparison_dict[key]['node_output']['int8'][0]['sqnr'][0]
         layer_sqnr_dict[layer] = sqnr
 

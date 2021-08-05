@@ -822,10 +822,10 @@ class TestEqualizeFx(QuantizationTestCase):
         # Quantize the float model
         prepared_model = prepare_fx(copy.deepcopy(float_model), specific_qconfig_dict)
         prepared_model(x)
-        quantized_model = convert_fx(prepared_model)
+        quantized_model = convert_fx(copy.deepcopy(prepared_model))
 
         # Get the SQNR between the float and quantized model
-        layer_to_sqnr_dict = get_layer_sqnr_dict(copy.deepcopy(float_model), quantized_model, x)
+        layer_to_sqnr_dict = get_layer_sqnr_dict(copy.deepcopy(prepared_model), quantized_model, x)
 
         # Construct the equalization_qconfig_dict equalizing layers with the highest
         # quantization errors
