@@ -50,4 +50,4 @@ class WeightNormSparsifier(BaseSparsifier):
             for row, col in zip(rows, cols):
                 new_mask[row:row + sparse_block_shape[0],
                          col:col + sparse_block_shape[1]] = 0
-            mask.data *= new_mask
+            mask.data = new_mask
