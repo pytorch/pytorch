@@ -36,9 +36,8 @@ class TORCH_API ThreadLocalState {
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;
 
-  optional<impl::TorchDispatchOverrideImpl> torch_dispatch_override_;
-
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
+  optional<impl::TorchDispatchOverrideImpl> torch_dispatch_override_;
   bool keep_grad_mode_ = true;
   bool grad_mode_enabled_;
 #endif

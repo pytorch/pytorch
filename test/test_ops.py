@@ -3,7 +3,6 @@ from functools import partial, wraps
 import warnings
 
 import torch
-import random
 
 from torch.testing import \
     (FileCheck, floating_and_complex_types_and, get_all_dtypes)
@@ -22,7 +21,6 @@ from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, 
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.utils._pytree import tree_map
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio

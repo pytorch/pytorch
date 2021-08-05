@@ -11,8 +11,7 @@ namespace at {
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
       debug_info_(c10::ThreadLocalDebugInfo::current()),
-      inference_mode_enabled_(c10::InferenceMode::is_enabled()),
-      torch_dispatch_override_(impl::PythonMode::get_torch_dispatch()) {
+      inference_mode_enabled_(c10::InferenceMode::is_enabled()) {
   rf_tls_ = at::get_record_function_tls_();
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
@@ -20,6 +19,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
   if (keep_grad_mode_) {
     grad_mode_enabled_ = GradMode::is_enabled();
   }
+  torch_dispatch_override_ = impl::PythonMode::get_torch_dispatch();
 #endif
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
 }
@@ -31,6 +31,9 @@ void ThreadLocalState::setThreadLocalState(
   if (state.keep_grad_mode_) {
     GradMode::set_enabled(state.grad_mode_enabled_);
   }
+  if (state.torch_dispatch_override_.has_value()) {
+    impl::PythonMode::set_torch_dispatch(state.torch_dispatch_override_.value());
+  }
 #endif
 
   at::set_record_function_tls_(state.rf_tls_);
@@ -40,10 +43,6 @@ void ThreadLocalState::setThreadLocalState(
   c10::impl::_force_tls_local_dispatch_key_set(state.dispatch_key_);
 
   c10::InferenceMode::_set_enabled(state.inference_mode_enabled_);
-
-  if (state.torch_dispatch_override_.has_value()) {
-    impl::PythonMode::set_torch_dispatch(state.torch_dispatch_override_.value());
-  }
 }
 
 } // namespace at

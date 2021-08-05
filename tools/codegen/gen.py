@@ -536,7 +536,8 @@ class ComputePythonMode:
                 return None
         if native_sig.returns_type().cpp_type() != "at::Tensor":
             return None
-        return f"""m.impl("aten::{f.func.name}", torch::CppFunction::makeFromBoxedFunction<&at::impl::dispatchFactoryToPython>());"""
+        return f"""\
+m.impl("aten::{f.func.name}", torch::CppFunction::makeFromBoxedFunction<&at::impl::dispatchFactoryToPython>());"""
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #

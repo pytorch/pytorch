@@ -1,7 +1,6 @@
 import torch
-import logging
 import contextlib
-from typing import List, Iterator
+from typing import Iterator
 from torch.utils._pytree import tree_map
 from functools import partial
 from torch.utils._torch_dispatch import enable_factory_dispatch
@@ -21,14 +20,14 @@ def check_metadata_consistency(wrapper_tensor):
     elem = wrapper_tensor.elem
     if wrapper_tensor.shape != elem.shape:
         raise RuntimeError(
-            f"This operator is not CompositeImplicitAutograd compliant: the "
-            f"shape of the tensor was modified directly without "
-            f"going through the PyTorch dispatcher.")
+            "This operator is not CompositeImplicitAutograd compliant: the "
+            "shape of the tensor was modified directly without "
+            "going through the PyTorch dispatcher.")
     if wrapper_tensor.dtype != elem.dtype:
         raise RuntimeError(
-            f"This operator is not CompositeImplicitAutograd compliant: the "
-            f"dtype of the tensor was modified directly without "
-            f"going through the PyTorch dispatcher.")
+            "This operator is not CompositeImplicitAutograd compliant: the "
+            "dtype of the tensor was modified directly without "
+            "going through the PyTorch dispatcher.")
 
 def is_view_fn(func):
     return func.__name__ in {
@@ -106,7 +105,7 @@ class CompositeCompliantTensor(torch.Tensor):
         return r
 
     def __repr__(self):
-        return f"CompositeCompliantTensor()"
+        return f"CompositeCompliantTensor({self.elem})"
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
