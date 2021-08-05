@@ -766,6 +766,19 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  Intrinsics(
+      IntrinsicsOp op_type,
+      Dtype dtype,
+      const std::vector<Expr*>& params)
+      : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
+        params_(params),
+        op_type_(op_type) {
+    if (OpArgCount(op_type) != nparams()) {
+      throw malformed_input("bad arg count in Intrinsics");
+    }
+  }
+
   bool isPure() const {
     return op_type_ != kRand;
   }

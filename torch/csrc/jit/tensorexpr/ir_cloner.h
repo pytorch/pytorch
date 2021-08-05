@@ -58,52 +58,52 @@ class ExternalCall;
 
 class TORCH_API IRCloner : public IRMutator {
  public:
-  ~IRCloner() = default;
-  Expr* mutate(Add* v);
-  Expr* mutate(Sub* v);
-  Expr* mutate(Mul* v);
-  Expr* mutate(Div* v);
-  Expr* mutate(Mod* v);
-  Expr* mutate(Max* v);
-  Expr* mutate(Min* v);
-  Expr* mutate(And* v);
-  Expr* mutate(Or* v);
-  Expr* mutate(Xor* v);
-  Expr* mutate(Lshift* v);
-  Expr* mutate(Rshift* v);
-  Expr* mutate(CompareSelect* v);
-#define IMM_MUTATE_DECLARE(Type, Name) Expr* mutate(Name##Imm* v);
+  ~IRCloner() override = default;
+  Expr* mutate(Add* v) override;
+  Expr* mutate(Sub* v) override;
+  Expr* mutate(Mul* v) override;
+  Expr* mutate(Div* v) override;
+  Expr* mutate(Mod* v) override;
+  Expr* mutate(Max* v) override;
+  Expr* mutate(Min* v) override;
+  Expr* mutate(And* v) override;
+  Expr* mutate(Or* v) override;
+  Expr* mutate(Xor* v) override;
+  Expr* mutate(Lshift* v) override;
+  Expr* mutate(Rshift* v) override;
+  Expr* mutate(CompareSelect* v) override;
+#define IMM_MUTATE_DECLARE(Type, Name) Expr* mutate(Name##Imm* v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
-  Expr* mutate(Cast* v);
-  Expr* mutate(BitCast* v);
-  Expr* mutate(Var* v);
-  Expr* mutate(Buf* v);
-  Expr* mutate(Ramp* v);
-  Expr* mutate(Load* v);
-  Expr* mutate(Broadcast* v);
-  Expr* mutate(IfThenElse* v);
-  Expr* mutate(Intrinsics* v);
+  Expr* mutate(Cast* v) override;
+  Expr* mutate(BitCast* v) override;
+  Expr* mutate(Var* v) override;
+  Expr* mutate(Buf* v) override;
+  Expr* mutate(Ramp* v) override;
+  Expr* mutate(Load* v) override;
+  Expr* mutate(Broadcast* v) override;
+  Expr* mutate(IfThenElse* v) override;
+  Expr* mutate(Intrinsics* v) override;
 
-  Expr* mutate(Term* v);
-  Expr* mutate(Polynomial* v);
-  Expr* mutate(RoundOff* v);
-  Expr* mutate(MaxTerm* v);
-  Expr* mutate(MinTerm* v);
+  Expr* mutate(Term* v) override;
+  Expr* mutate(Polynomial* v) override;
+  Expr* mutate(RoundOff* v) override;
+  Expr* mutate(MaxTerm* v) override;
+  Expr* mutate(MinTerm* v) override;
 
-  Expr* mutate(ReduceOp* v);
+  Expr* mutate(ReduceOp* v) override;
 
-  Stmt* mutate(For* v);
-  Stmt* mutate(Block* v);
-  Stmt* mutate(Store* v);
-  Stmt* mutate(AtomicAdd* v);
-  Stmt* mutate(SyncThreads* v);
-  Stmt* mutate(ExternalCall* v);
+  Stmt* mutate(For* v) override;
+  Stmt* mutate(Block* v) override;
+  Stmt* mutate(Store* v) override;
+  Stmt* mutate(AtomicAdd* v) override;
+  Stmt* mutate(SyncThreads* v) override;
+  Stmt* mutate(ExternalCall* v) override;
 
-  Stmt* mutate(Allocate* v);
-  Stmt* mutate(Free* v);
-  Stmt* mutate(Let* v);
-  Stmt* mutate(Cond* v);
+  Stmt* mutate(Allocate* v) override;
+  Stmt* mutate(Free* v) override;
+  Stmt* mutate(Let* v) override;
+  Stmt* mutate(Cond* v) override;
 };
 
 } // namespace tensorexpr

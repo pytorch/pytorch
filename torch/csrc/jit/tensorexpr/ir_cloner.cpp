@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/ir_cloner.h>
 
-#include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
@@ -45,7 +44,7 @@ static Expr* mutate_binary_op(
     case IRNodeType::kRshift:
       return new Rshift(lhs_new, rhs_new);
     default:
-      throw unsupported_dtype();
+      throw unimplemented_lowering(v);
   }
 }
 
@@ -129,10 +128,6 @@ Expr* IRCloner::mutate(BitCast* v) {
   return new BitCast(v->dtype(), src_value_new);
 }
 
-Expr* IRCloner::mutate(Var* v) {
-  return v;
-}
-
 Expr* IRCloner::mutate(Ramp* v) {
   Expr* base_new = v->base()->accept_mutator(this);
   Expr* stride_new = v->stride()->accept_mutator(this);
@@ -149,20 +144,19 @@ Expr* IRCloner::mutate(Load* v) {
   return new Load(v->dtype(), buf_new, indices_new);
 }
 
+// We do not clone Vars since the original IR and cloned IR are expected to
+// share the underlying variables.
+Expr* IRCloner::mutate(Var* v) {
+  return v;
+}
+
+// We do not clone Bufs since the original IR and cloned IR are expected to
+// share the underlying Bufs. In spite of Bufs having expressions as dims and
+// initializers, this is the expected usage of clone at this point.
+//
+// TODO: Revisit this if Bufs need to be cloned as well.
 Expr* IRCloner::mutate(Buf* v) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  Var* var_new = dynamic_cast<Var*>(
-      const_cast<Expr*>(v->base_handle()->accept_mutator(this)));
-
-  std::vector<Expr*> dims_new;
-  dims_new.reserve(v->dims().size());
-  for (auto dim : v->dims()) {
-    dims_new.push_back(dim->accept_mutator(this));
-  }
-
-  Expr* initializer_new =
-      v->initializer() ? v->initializer()->accept_mutator(this) : nullptr;
-  return new Buf(var_new, dims_new, v->dtype(), initializer_new);
+  return v;
 }
 
 Expr* IRCloner::mutate(Broadcast* v) {
@@ -185,7 +179,7 @@ Expr* IRCloner::mutate(Intrinsics* v) {
   for (auto param : v->params()) {
     params_new.push_back(param->accept_mutator(this));
   }
-  return new Intrinsics(v->op_type(), params_new);
+  return new Intrinsics(v->op_type(), v->dtype(), params_new);
 }
 
 Expr* IRCloner::mutate(Term* v) {
@@ -275,7 +269,8 @@ Stmt* IRCloner::mutate(Store* v) {
     indices_new.push_back(ind->accept_mutator(this));
   }
   auto value_new = v->value()->accept_mutator(this);
-  return new Store(v->buf(), indices_new, value_new);
+  Buf* buf_new = dynamic_cast<Buf*>(v->buf()->accept_mutator(this));
+  return new Store(buf_new, indices_new, value_new);
 }
 
 Stmt* IRCloner::mutate(AtomicAdd* v) {
@@ -285,15 +280,18 @@ Stmt* IRCloner::mutate(AtomicAdd* v) {
     indices_new.push_back(ind->accept_mutator(this));
   }
   auto value_new = v->value()->accept_mutator(this);
-  return new AtomicAdd(v->buf(), indices_new, value_new);
+  Buf* buf_new = dynamic_cast<Buf*>(v->buf()->accept_mutator(this));
+  return new AtomicAdd(buf_new, indices_new, value_new);
 }
 
 Stmt* IRCloner::mutate(Allocate* v) {
-  return new Allocate(v->buf());
+  Buf* buf_new = dynamic_cast<Buf*>(v->buf()->accept_mutator(this));
+  return new Allocate(buf_new);
 }
 
 Stmt* IRCloner::mutate(Free* v) {
-  return new Free(v->buf());
+  Buf* buf_new = dynamic_cast<Buf*>(v->buf()->accept_mutator(this));
+  return new Free(buf_new);
 }
 
 Stmt* IRCloner::mutate(SyncThreads* v) {
