@@ -1,4 +1,5 @@
 import cimodel.data.simple.ios_definitions as ios_definitions
+import cimodel.lib.miniutils as miniutils
 
 
 class IOSNightlyJob:
@@ -36,6 +37,7 @@ class IOSNightlyJob:
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
             "requires": extra_requires,
             "context": "org-member",
+            "use_metal": miniutils.quote(str(int(True)))
             # "filters": {"branches": {"only": "nightly"}},
         }
 

@@ -7788,7 +7788,6 @@ workflows:
               only: nightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
-          use_metal: "1"
           name: pytorch_ios_12_0_0_nightly_x86_64_build
       - binary_ios_build:
           build_environment: libtorch-ios-12.0.0-nightly-arm64-build
@@ -7798,7 +7797,6 @@ workflows:
               only: nightly
           ios_arch: arm64
           ios_platform: OS
-          use_metal: "1"
           name: pytorch_ios_12_0_0_nightly_arm64_build
       - binary_ios_upload:
           build_environment: libtorch-ios-12.0.0-nightly-binary-build-upload
