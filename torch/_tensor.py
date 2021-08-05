@@ -1016,6 +1016,12 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).rename(names)
 
+    def itemsize(self):
+        return self.element_size()
+
+    def nbytes(self):
+        return self.numel() * self.element_size()
+
     @property
     def grad(self):
         """
