@@ -75,7 +75,8 @@ class TORCH_API Reducer {
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string> paramNames);
+      std::unordered_map<size_t, std::string> paramNames,
+      int64_t first_bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -523,6 +524,8 @@ class TORCH_API Reducer {
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;
+  // Bytes capacity of first bucket, can be configured by user
+  int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.
   std::unordered_set<size_t> perIterationReadyParams_;
   // Retrieves parameter names that have not been marked as ready as part of
