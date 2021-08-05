@@ -116,7 +116,10 @@ class BasePruner(abc.ABC):
 
     def bias_hook(self, module, input, output):
         if getattr(module, '_bias', None) is not None:
-            output += module._bias
+            idx = [1] * len(output.shape)
+            idx[1] = output.shape[1]
+            bias = module._bias.reshape(idx)
+            output += bias
         return output
 
     def prepare(self, use_path=False, *args, **kwargs):
