@@ -142,6 +142,52 @@ $0 = input('x')
 $1 = input('y')
 $2 = torch._ops.aten.abs($0, out=$1)''')
 
+
+    def test_kwarg_only(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1, 1))
+            z = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            log_input("z", z)
+            torch.addmv(x, y, z)
+            torch.addmv(x, y, z, beta=2)
+            torch.addmv(x, y, z, alpha=2)
+            torch.addmv(x, y, z, beta=2, alpha=2)
+
+        # The expectation is that beta/alpha don't show up when they're
+        # defaulted
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = input('z')
+$3 = torch._ops.aten.addmv($0, $1, $2)
+$4 = torch._ops.aten.addmv($0, $1, $2, beta=2)
+$5 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
+$6 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+
+    def test_kwarg_only_and_positional_default(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            torch.ops.aten.kl_div(x, y)
+            torch.ops.aten.kl_div(x, y, 2)
+            torch.ops.aten.kl_div(x, y, log_target=True)
+            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+
+        # What we are testing here is that we omit reduction
+        # if it is defaulted, even if a kwarg is set
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = torch._ops.aten.kl_div($0, $1)
+$3 = torch._ops.aten.kl_div($0, $1, 2)
+$4 = torch._ops.aten.kl_div($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
+
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
