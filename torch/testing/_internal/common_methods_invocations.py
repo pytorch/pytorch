@@ -4730,7 +4730,6 @@ def sample_inputs_softplus(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(make_input(low=1), kwargs=dict(threshold=1)),
     ]
 
-<<<<<<< HEAD
 def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
     def make_input():
         input = make_fullrank_matrices_with_distinct_singular_values(12, 12, device=device, dtype=dtype)
@@ -4745,7 +4744,8 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
     return [
         SampleInput(make_input().reshape(*shape_lhs, *shape_rhs), kwargs=dict(ind=len(shape_lhs)))
         for shape_lhs, shape_rhs in shapes
-=======
+    ]
+
 def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -4761,7 +4761,6 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
     return [
         SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
         for shape, kwargs in shapes_and_kwargs
->>>>>>> upstream/master
     ]
 
 foreach_unary_op_db: List[OpInfo] = [
