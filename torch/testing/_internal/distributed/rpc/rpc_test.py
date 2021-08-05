@@ -641,9 +641,18 @@ class RpcTest(RpcAgentTestFixture):
     def test_send_to_rank(self):
         dst_rank = (self.rank + 1) % self.world_size
 
+        # Test dense tensor
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
             self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test sparse tensor
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            tensor = build_sparse_tensor()
+            add_tensor = build_sparse_tensor()
+            expected_tensor = (tensor + add_tensor)
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(tensor, add_tensor))
+            self.assertEqual(expected_tensor, ret)
 
         # Test invalid ranks
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:

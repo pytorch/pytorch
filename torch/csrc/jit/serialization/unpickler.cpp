@@ -550,6 +550,8 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (module_name == "torch._utils" && class_name == "_rebuild_sparse_coo_tensor") {
+    rebuildSparseCooTensor();
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
       auto elems = pop(stack_).toTuple()->elements();
@@ -645,6 +647,45 @@ void Unpickler::readGlobal(
     }
   }
   stack_.emplace_back(int64_t(globals_.size() - 1));
+}
+
+void Unpickler::rebuildSparseCooTensor() {
+  globals_.emplace_back([this] {
+    auto tup = pop(stack_).toTuple();
+    const auto& elements =  tup->elements();
+    size_t idx = 0;
+    std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
+    bool requires_grad =  elements.at(idx++).toBool();
+    // rebuild indices
+    auto& indices_storage = elements.at(idx++).toTensor();
+    at::Tensor indices_result = at::empty({0}, indices_storage.options());
+    int64_t indices_offset = elements.at(idx++).toInt();
+    std::vector<int64_t> indices_size = tupleToIntList(elements.at(idx++));
+    std::vector<int64_t> indices_stride = tupleToIntList(elements.at(idx++));
+    bool indices_requires_grad = elements.at(idx++).toBool();
+    at::TensorImpl* indices_impl = indices_result.unsafeGetTensorImpl();
+    indices_impl->set_storage_keep_dtype(indices_storage.storage());
+    indices_impl->set_storage_offset(indices_offset);
+    indices_impl->set_sizes_and_strides(indices_size, indices_stride);
+    indices_result = autograd::make_variable(indices_result, indices_requires_grad);
+    // rebuild values
+    auto& values_storage = elements.at(idx++).toTensor();
+    at::Tensor values_result = at::empty({0}, values_storage.options());
+    int64_t values_offset = elements.at(idx++).toInt();
+    std::vector<int64_t> values_size = tupleToIntList(elements.at(idx++));
+    std::vector<int64_t> values_stride = tupleToIntList(elements.at(idx++));
+    bool values_requires_grad = elements.at(idx++).toBool();
+    at::TensorImpl* values_impl = values_result.unsafeGetTensorImpl();
+    values_impl->set_storage_keep_dtype(values_storage.storage());
+    values_impl->set_storage_offset(values_offset);
+    values_impl->set_sizes_and_strides(values_size, values_stride);
+    values_result = autograd::make_variable(values_result, values_requires_grad);
+    // rebuild result tensor
+    // TODO: Decide on the correct TensorOptions
+    at::Tensor result = at::_sparse_coo_tensor_unsafe(indices_result, values_result, size, values_storage.options());
+    result = autograd::make_variable(result, requires_grad);
+    stack_.emplace_back(std::move(result));
+  });
 }
 
 void Unpickler::rebuildTensor(bool quantized) {
