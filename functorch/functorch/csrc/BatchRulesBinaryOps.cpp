@@ -126,7 +126,6 @@ std::tuple<Tensor,optional<int64_t>> comparison_pointwise_batch_rule(
   return std::make_tuple( std::move(result), 0 );
 }
 
-
 std::tuple<Tensor,optional<int64_t>> clamp_tensor_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const optional<Tensor>& min, optional<int64_t> min_bdim, const optional<Tensor>& max, optional<int64_t> max_bdim) {
@@ -245,7 +244,11 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_POINTWISE(sigmoid_backward);
   BINARY_POINTWISE(tanh_backward);
   BINARY_POINTWISE(threshold_backward);
+  BINARY_POINTWISE(leaky_relu_backward);
+  BINARY_POINTWISE(hardtanh_backward);
+  BINARY_POINTWISE(hardswish_backward);
 
+  OP_DECOMPOSE(type_as);
 
   OP_DECOMPOSE2(max, other);
   OP_DECOMPOSE2(min, other);
