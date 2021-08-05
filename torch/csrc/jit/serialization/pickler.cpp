@@ -375,20 +375,24 @@ void Pickler::pushTensorData(const at::Tensor& tensor) {
 
 void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
   // The arguments to this function are:
-  // size, requires_grad,
-  // indices_storage, indices_offset, indices_size, indices_stride, indices_requires_grad,
-  // values_storage, values_offset, values_size, values_stride, values_requires_grad,
-  // backward_hooks
+  // size, requires_grad, pinned memory, data_type,
+  // indices_storage, indices_offset, indices_size, indices_stride,
+  // indices_requires_grad, values_storage, values_offset, values_size,
+  // values_stride, values_requires_grad, backward_hooks
   pushGlobal("torch._utils", "_rebuild_sparse_coo_tensor");
   // size
   push<PickleOpCode>(PickleOpCode::MARK);
   push<PickleOpCode>(PickleOpCode::MARK);
-  for (auto size :  tensor.sizes()) {
+  for (auto size : tensor.sizes()) {
     pushInt(size);
   }
   push<PickleOpCode>(PickleOpCode::TUPLE);
   // requires_grad
   pushIValue(tensor.requires_grad());
+  // pinned memory
+  pushBool(tensor.options().pinned_memory());
+  // data type
+  pushInt(static_cast<uint16_t>(tensor.scalar_type()));
   // indices
   pushTensorData(tensor._indices());
   // values
@@ -399,7 +403,7 @@ void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
   // Construct the collections.OrderedDict for the backward_hooks
   push<PickleOpCode>(PickleOpCode::REDUCE);
   push<PickleOpCode>(PickleOpCode::TUPLE);
-  // Call torch._utils._rebuild_tensor_v2
+  // Call torch._utils._rebuild_sparse_coo_tensor
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
