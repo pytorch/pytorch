@@ -25,7 +25,7 @@ T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
 
-class DataChunk(object):
+class DataChunk(List[T]):
     def __init__(self, items):
         self.items = items
 
@@ -42,7 +42,7 @@ class DataChunk(object):
     def __str__(self):
         return self.as_str()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T]:
         for i in self.items:
             yield i
 

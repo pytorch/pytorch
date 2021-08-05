@@ -31,7 +31,7 @@ class ShardingFilterIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('batch')
-class BatchIterDataPipe(IterDataPipe[List[T_co]]):
+class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
     r""" :class:`BatchIterDataPipe`.
 
     Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
@@ -67,7 +67,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         self.length = None
         self.wrapper_class = DataChunk
 
-    def __iter__(self) -> Iterator[List[T_co]]:
+    def __iter__(self) -> Iterator[DataChunk[T_co]]:
         batch: List[T_co] = []
         for x in self.datapipe:
             batch.append(x)
@@ -177,7 +177,11 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     def __iter__(self) -> Iterator[List[T_co]]:
         # Bucket without sorting remains same order, directly returns BatchDataset
         if self.sort_key is None:
-            yield from BatchIterDataPipe(self.datapipe, batch_size=self.batch_size, drop_last=self.drop_last)
+            for element in BatchIterDataPipe(self.datapipe, batch_size=self.batch_size, drop_last=self.drop_last):
+                if isinstance(element, DataChunk):
+                    yield list(element.raw_iterator())
+                else:
+                    yield element
         else:
             bucket: List[T_co]
             batch: List[T_co] = []

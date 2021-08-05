@@ -113,7 +113,7 @@ class TestDataChunk(TestCase):
 
     def test_as_string(self):
         elements = list(range(10))
-        chunk = DataChunk(elements)
+        chunk : DataChunk[int] = DataChunk(elements)
         self.assertEquals(str(chunk), str(elements))
 
 
@@ -789,6 +789,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         filter_dp = input_ds.filter(nesting_level=-1, filter_fn=_filter_fn, fn_kwargs={'val': 5})
         expected_dp1 = [[5, 6, 7, 8, 9]]
+        print(list(filter_dp))
         self.assertEqual(len(list(filter_dp)), len(expected_dp1))
         for data, exp in zip(filter_dp, expected_dp1):
             self.assertEqual(data, exp)
