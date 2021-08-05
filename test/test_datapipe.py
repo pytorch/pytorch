@@ -42,6 +42,7 @@ import torch.utils.data.sharding
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils.data import (
     DataLoader,
+    DataChunk,
     IterDataPipe,
     MapDataPipe,
     RandomSampler,
@@ -108,6 +109,14 @@ def create_temp_dir_and_files():
             (temp_sub_dir, temp_sub_file1_name, temp_sub_file2_name)]
 
 
+class TestDataChunk(TestCase):
+
+    def test_as_string(self):
+        elements = list(range(10))
+        chunk = DataChunk(elements)
+        self.assertEquals(str(chunk), str(elements))
+
+
 class TestIterableDataPipeBasic(TestCase):
 
     def setUp(self):
@@ -140,7 +149,6 @@ class TestIterableDataPipeBasic(TestCase):
             count = count + 1
             self.assertTrue((pathname in self.temp_files) or (pathname in self.temp_sub_files))
         self.assertEqual(count, len(self.temp_files) + len(self.temp_sub_files))
-
 
     def test_loadfilesfromdisk_iterable_datapipe(self):
         # test import datapipe class directly
@@ -215,7 +223,6 @@ class TestIterableDataPipeBasic(TestCase):
             with open(temp_file, 'rb') as f:
                 self.assertEqual(data_ref[1].read(), f.read())
             data_ref[1].close()
-
 
     def test_routeddecoder_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
@@ -697,7 +704,6 @@ class TestFunctionalIterDataPipe(TestCase):
             for i in unbatch_dp:
                 print(i)
 
-
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
         with self.assertRaises(AssertionError):
@@ -787,7 +793,8 @@ class TestFunctionalIterDataPipe(TestCase):
         for data, exp in zip(filter_dp, expected_dp1):
             self.assertEqual(data, exp)
 
-        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False, filter_fn=_filter_fn, fn_kwargs={'val': 5})
+        filter_dp = input_ds.filter(nesting_level=-1, drop_empty_batches=False,
+                                    filter_fn=_filter_fn, fn_kwargs={'val': 5})
         expected_dp2: List[List[int]] = [[], [5, 6, 7, 8, 9]]
         self.assertEqual(len(list(filter_dp)), len(expected_dp2))
         for data, exp in zip(filter_dp, expected_dp2):
@@ -825,7 +832,6 @@ class TestFunctionalIterDataPipe(TestCase):
         self.assertEqual(len(list(filter_dp)), len(expected_dp6))
         for data2, exp2 in zip(filter_dp, expected_dp6):
             self.assertEqual(data2, exp2)
-
 
     def test_sampler_datapipe(self):
         input_dp = IDP(range(10))
@@ -1153,6 +1159,7 @@ class TestTyping(TestCase):
 
         class DP3(IterDataPipe[Tuple[T_co, str]]):
             r""" DataPipe without fixed type with __init__ function"""
+
             def __init__(self, datasource):
                 self.datasource = datasource
 
@@ -1168,6 +1175,7 @@ class TestTyping(TestCase):
 
         class DP4(IterDataPipe[tuple]):
             r""" DataPipe without __iter__ annotation"""
+
             def __iter__(self):
                 raise NotImplementedError
 
@@ -1177,6 +1185,7 @@ class TestTyping(TestCase):
 
         class DP5(IterDataPipe):
             r""" DataPipe without type annotation"""
+
             def __iter__(self) -> Iterator[str]:
                 raise NotImplementedError
 
@@ -1187,6 +1196,7 @@ class TestTyping(TestCase):
 
         class DP6(IterDataPipe[int]):
             r""" DataPipe with plain Iterator"""
+
             def __iter__(self) -> Iterator:
                 raise NotImplementedError
 
@@ -1205,7 +1215,6 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP8, IterDataPipe))
         self.assertTrue(DP8.type.param == Awaitable[str])
-
 
     def test_construct_time(self):
         class DP0(IterDataPipe[Tuple]):
@@ -1269,10 +1278,8 @@ class TestTyping(TestCase):
             with self.assertRaisesRegex(RuntimeError, r"Expected an instance as subtype"):
                 list(dp)
 
-
     def test_reinforce(self):
         T = TypeVar('T', int, str)
-
 
         class DP(IterDataPipe[T]):
             def __init__(self, ds):
@@ -1306,6 +1313,7 @@ class TestTyping(TestCase):
         with runtime_validation_disabled():
             self.assertEqual(list(d for d in dp), ds)
 
+
 class NumbersDataset(IterDataPipe):
     def __init__(self, size=10):
         self.size = size
@@ -1321,7 +1329,7 @@ class TestGraph(TestCase):
         numbers_dp = NumbersDataset(size=50)
         mapped_dp = numbers_dp.map(lambda x: x * 10)
         graph = torch.utils.data.graph.traverse(mapped_dp)
-        expected : Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
+        expected: Dict[Any, Any] = {mapped_dp: {numbers_dp: {}}}
         self.assertEqual(expected, graph)
 
     # TODO(VitalyFedyunin): This test is incorrect because of 'buffer' nature
@@ -1376,6 +1384,7 @@ class TestSharding(TestCase):
             items.append(i)
 
         self.assertEqual(sorted(expected), sorted(items))
+
 
 if __name__ == '__main__':
     run_tests()
