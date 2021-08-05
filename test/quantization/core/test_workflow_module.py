@@ -1096,6 +1096,12 @@ class TestFusedObsFakeQuantModule(TestCase):
             torch.testing.assert_allclose(mod.state_dict()['activation_post_process.min_val'], running_min_op)
             torch.testing.assert_allclose(mod.state_dict()['activation_post_process.max_val'], running_max_op)
 
+    def test_fused_mod_reduce_range(self):
+        obs = FusedMovingAvgObsFakeQuantize(quant_min=0, quant_max=255, dtype=torch.quint8, reduce_range=True)
+
+        self.assertEqual(obs.quant_min, 0)
+        self.assertEqual(obs.quant_max, 127)
+
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
@@ -1111,7 +1117,7 @@ class TestFusedObsFakeQuantModule(TestCase):
         model = Model()
         model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
         sample_input = torch.randn(2, 2)
-        model.qconfig = torch.quantization.default_fused_qat_config
+        model.qconfig = torch.quantization.default_qat_qconfig_v2
         ref_model = torch.quantization.QuantWrapper(model)
         ref_model = torch.quantization.prepare_qat(ref_model)
         ref_model(sample_input)
