@@ -1428,20 +1428,19 @@
   device_guard: False
 
 - func: cumprod(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: cumprod.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cumprod
 
 - func: cumprod_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  structured_delegate: cumprod.out
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: cumprod_
 
 - func: cumprod.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: cumprod_out
+    CPU, CUDA: cumprod_out
 
 - func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1459,20 +1458,19 @@
   device_guard: False
 
 - func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: cumsum.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: cumsum
 
 - func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+  structured_delegate: cumsum.out
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: cumsum_
 
 - func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: cumsum_out
+    CPU, CUDA: cumsum_out
 
 - func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1483,6 +1481,10 @@
 
 - func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+
+- func: cumulative_trapezoid.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
+
+- func: cumulative_trapezoid.dx(Tensor y, *, Scalar dx=1, int dim=-1) -> Tensor
 
 - func: ctc_loss.IntList(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank=0, int reduction=Mean, bool zero_infinity=False) -> Tensor
 
@@ -2701,15 +2703,26 @@
 
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
 
+# DEPRECATED: Use torch.aminmax instead
 - func: _aminmax(Tensor self) -> (Tensor, Tensor)
-  variants: function
   dispatch:
     CPU, CUDA: _aminmax_all
 
+# DEPRECATED: Use torch.aminmax instead
 - func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
-  variants: function
   dispatch:
     CPU, CUDA: _aminmax
+
+- func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: aminmax.out
+  variants: function, method
+
+- func: aminmax.out(Tensor self, *, int? dim=None, bool keepdim=False, Tensor(a!) min, Tensor(b!) max) -> (Tensor(a!) min, Tensor(b!) max)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  dispatch:
+    CPU, CUDA: aminmax_out
 
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
@@ -3557,6 +3570,8 @@
 - func: gelu_backward(Tensor grad, Tensor self) -> Tensor
   structured_delegate: gelu_backward.grad_input
   python_module: nn
+  dispatch:
+    MkldnnCPU: mkldnn_gelu_backward
 
 - func: infinitely_differentiable_gelu_backward(Tensor grad, Tensor self) -> Tensor
   variants: function
@@ -5326,6 +5341,12 @@
 - func: choose_qparams_optimized(Tensor input, int numel, int n_bins, float ratio, int bit_width) -> (Tensor, Tensor)
   variants: function
 
+- func: _to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CompositeExplicitAutograd: _to_copy
+
 # to(Device) must not exist because all constructors of Device also works for
 # TensorOptions. Otherwise, an ambiguity error is thrown.
 # See NOTE [ TensorOptions Constructors ].
@@ -6032,12 +6053,6 @@
   dispatch:
     CPU, CUDA: addbmm
 
-- func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
-  device_check: NoCheck   # TensorIterator
-  variants: method
-  dispatch:
-    CompositeExplicitAutograd: addcdiv_
-
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
@@ -6582,32 +6597,38 @@
 - func: _gather_sparse_backward(Tensor self, int dim, Tensor index, Tensor grad) -> Tensor
 
 - func: addcmul.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: addcmul_out
 
 - func: addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  structured_delegate: addcmul.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: addcmul
 
 - func: addcmul_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  structured_delegate: addcmul.out
   device_check: NoCheck   # TensorIterator
   variants: method
-  dispatch:
-    CompositeExplicitAutograd: addcmul_
 
 - func: addcdiv.out(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  structured_inherits: TensorIteratorBase
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: addcdiv_out
 
 - func: addcdiv(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor
+  structured_delegate: addcdiv.out
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: addcdiv
+
+- func: addcdiv_(Tensor(a!) self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor(a!)
+  structured_delegate: addcdiv.out
+  device_check: NoCheck   # TensorIterator
+  variants: method
 
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100) -> Tensor
   python_module: nn
@@ -7464,26 +7485,6 @@
     CPU: _index_copy_impl_
     CUDA: _index_copy_impl_
 
-- func: _cumsum(Tensor self, int dim) -> Tensor
-  dispatch:
-    CPU: _cumsum_cpu
-    CUDA: _cumsum_cuda
-
-- func: _cumsum.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cumsum_out_cpu
-    CUDA: _cumsum_out_cuda
-
-- func: _cumprod(Tensor self, int dim) -> Tensor
-  dispatch:
-    CPU: _cumprod_cpu
-    CUDA: _cumprod_cuda
-
-- func: _cumprod.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: _cumprod_out_cpu
-    CUDA: _cumprod_out_cuda
-
 - func: _amp_foreach_non_finite_check_and_unscale_(Tensor(a!)[] self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   variants: function
   dispatch:
@@ -8293,15 +8294,14 @@
 
 - func: nll_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
+  structured: True
   dispatch:
     CPU: nll_loss_backward_out_cpu
     CUDA: nll_loss_backward_out_cuda
 
 - func: nll_loss_backward(Tensor grad_output, Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index, Tensor total_weight) -> Tensor
   python_module: nn
-  dispatch:
-    CPU: nll_loss_backward_cpu
-    CUDA: nll_loss_backward_cuda
+  structured_delegate: nll_loss_backward.grad_input
 
 - func: nll_loss2d.out(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
