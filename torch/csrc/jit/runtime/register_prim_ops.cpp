@@ -80,10 +80,10 @@ c10::List<std::string> splitNoneSeparator(const std::string& string) {
 }
 
 template <typename T, typename U>
-double powWrapper(T a, U b) {
+auto powWrapper(T a, U b) {
   TORCH_CHECK(
       !(a == 0.0 && b < 0.0), "0.0 cannot be raised to a negative power")
-  return static_cast<double>(pow(a, b));
+  return pow(a, b);
 }
 
 RegisterOperators reg(
@@ -900,13 +900,13 @@ RegisterOperators reg(
      // results
      DEFINE_GENERIC_OP_WITH_COMPLEX(
          aten::pow,
-         powWrapper(a, b),
-         powWrapper(a, b),
+         static_cast<double>(powWrapper(a, b)),
+         static_cast<double>(powWrapper(a, b)),
          static_cast<c10::complex<double>>(pow(a, b)),
          float,
          float,
          complex),
-     DEFINE_INT_FLOAT_OP(aten::pow, powWrapper(a, b), float),
+     DEFINE_INT_FLOAT_OP(aten::pow, static_cast<double>(powWrapper(a, b)), float),
      DEFINE_FLOAT_COMPLEX_OP(aten::pow, pow(a, b), complex),
      DEFINE_SCALAR_BINARY_OP_AVOID_COLLISION(
          aten::pow,
@@ -919,7 +919,7 @@ RegisterOperators reg(
            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t a, b;
            pop(stack, a, b);
-           push(stack, powWrapper(a, b));
+           push(stack, static_cast<double>(powWrapper(a, b)));
          },
          aliasAnalysisFromSchema()),
      // min and max are in prim:: because there is a difference between
