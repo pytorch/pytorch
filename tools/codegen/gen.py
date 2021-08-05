@@ -453,7 +453,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         if precomputed:
             elements_with_cpp_types = []
             for elem in precomputed.elements:
-                elements_with_cpp_types.append(f"{elem.ty} {elem.name}")
+                elements_with_cpp_types.append(elem.decl())
 
             precomputed_elements = ";\n".join(elements_with_cpp_types)
             meta_return = "precompute_out"

@@ -603,17 +603,28 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # I didn't do it for this version
                 sig_body.append(f"at::{api_name}({out_exprs});")
             elif self.backend_index.dispatch_key != DispatchKey.Meta:
-                impl_exprs = ', '.join(
-                    e.expr for e in translate(
-                        context,
-                        structured.impl_arguments(self.g),
-                        method=False
-                    )
-                )
+                impl_exprs_gen =  (e.expr for e in translate(context, structured.impl_arguments(self.g), method=False))
                 if self.g.out.precomputed:
-                    sig_body.append(f"op.impl({impl_exprs}, precompute);")
+                    impl_exprs_replaced = []
+                    used_precomputed_elements = set()
+
+                    for expr in impl_exprs_gen:
+                        if expr in self.g.out.precomputed.replace:
+                            for replacement in self.g.out.precomputed.replace[expr]:
+                                impl_exprs_replaced.append(f"precompute.{replacement.name}")
+                                used_precomputed_elements.add(replacement)
+                        else:
+                            impl_exprs_replaced.append(expr)
+
+                    for element in self.g.out.precomputed.elements:
+                        if element not in used_precomputed_elements:
+                            impl_exprs_replaced.append(f"precompute.{element.name}")
+
+                    impl_exprs = ', '.join(impl_exprs_replaced)
                 else:
-                    sig_body.append(f"op.impl({impl_exprs});")
+                    impl_exprs = ', '.join(impl_exprs_gen)
+
+                sig_body.append(f"op.impl({impl_exprs});")
 
 
             # Destructively return the final tensors

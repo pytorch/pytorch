@@ -1263,10 +1263,10 @@ Tensor all(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(all_out)
-(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result, at::meta::structured_all_dim::precompute_out precompute) {
-  auto iter = get_allany_iter(self, result, precompute.dim_, keepdim);
+(const Tensor& self, int64_t dim_, bool keepdim, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, precompute.dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 1, dim_, keepdim)) {
     _all(mut_result, iter);
   }
 }
@@ -1296,13 +1296,12 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self,
- int64_t dim,
+ int64_t dim_,
  bool keepdim,
- const Tensor& result,
- at::meta::structured_any_dim::precompute_out precompute) {
-  auto iter = get_allany_iter(self, result, precompute.dim_, keepdim);
+ const Tensor& result) {
+  auto iter = get_allany_iter(self, result, dim_, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, precompute.dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 0, dim_, keepdim)) {
     _any(mut_result, iter);
   }
 }

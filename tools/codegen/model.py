@@ -1514,6 +1514,9 @@ class PrecomputedElement:
         ty, name = src.split(" ")
         return PrecomputedElement(name=name, ty=ty)
 
+    def decl(self) -> str:
+        return f"{self.ty} {self.name}"
+
 @dataclass(frozen=True)
 class Precompute:
     elements: List[Argument]

@@ -8797,7 +8797,7 @@
   python_module: nn
   structured: True
   precomputed:
-    elements: int kH, int kW, int dH, int dW, int padH, int padW, int64_t nbatch, int64_t nInputPlane, int64_t inputHeight, int64_t inputWidth, int64_t outputWidth, int64_t outputHeight
+    elements: int kH, int kW, int dH, int dW, int padH, int padW
     replace:
       - kernel_size -> kH, kW
       - stride -> dH, dW

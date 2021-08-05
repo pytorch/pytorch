@@ -88,13 +88,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
         dH=dH,
         dW=dW,
         padH=padH,
-        padW=padW,
-        nbatch=nbatch,
-        nInputPlane=nInputPlane,
-        inputHeight=inputHeight,
-        inputWidth=inputWidth,
-        outputWidth=outputWidth,
-        outputHeight=outputHeight
+        padW=padW
   };
 }
 
@@ -154,27 +148,28 @@ TORCH_META_FUNC(avg_pool2d_backward) (
 
 namespace native {
 
-TORCH_IMPL_FUNC(avg_pool2d_out_cpu) (
-  const Tensor &input,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  const Tensor &output,
-  at::meta::structured_avg_pool2d::precompute_out precompute
-) {
+TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
+(const Tensor& input,
+ int kH,
+ int kW,
+ int dH,
+ int dW,
+ int padH,
+ int padW,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override,
+ const Tensor& output) {
   avg_pool2d_kernel(
       kCPU,
       output,
       input,
-      precompute.kW,
-      precompute.kH,
-      precompute.dW,
-      precompute.dH,
-      precompute.padW,
-      precompute.padH,
+      kW,
+      kH,
+      dW,
+      dH,
+      padW,
+      padH,
       count_include_pad,
       divisor_override);
 }
