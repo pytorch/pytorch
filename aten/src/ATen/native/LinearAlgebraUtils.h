@@ -214,6 +214,11 @@ static inline void squareCheckInputs(const Tensor& self, const char* const f_nam
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
 }
 
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
+  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
+}
+
 /*
  * Given a vector of int64_t infos, obtained after a batch operations,
  * this function checks if the computation over all these batches has been

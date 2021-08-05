@@ -106,33 +106,28 @@ Tensor det(const Tensor& self) {
   return at::linalg_det(self);
 }
 
-Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
-  checkSameDevice("torch.linalg.det", out, self, "out");
-  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
-  squareCheckInputs(self, "linalg_det");
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point or complex tensor as input");
-
-  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
-  at::native::resize_output(out, out_sizes);
-
-  auto det = std::get<0>(at::native::_det_lu_based_helper(self));
-  out.copy_(det);
-  return out;
-}
-
 Tensor linalg_det(const Tensor& self) {
   squareCheckInputs(self, "linalg_det");
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point or complex tensor as input");
+  checkFloatingOrComplex(self, "linalg_det");
 
   return std::get<0>(at::_det_lu_based_helper(self));
 }
 
+Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
+  checkSameDevice("torch.linalg.det", out, self, "out");
+  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
+
+  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
+  at::native::resize_output(out, out_sizes);
+
+  auto det = at::native::linalg_det(self);
+  out.copy_(det);
+  return out;
+}
+
 Tensor logdet(const Tensor& self) {
   squareCheckInputs(self, "logdet");
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+  checkFloatingOrComplex(self, "logdet");
 
   c10::ExclusivelyOwned<Tensor> det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
@@ -2016,34 +2011,6 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
       .view(a.sizes());
   }
 }
-
-// Based on:
-//
-// Mathias, Roy.
-// A Chain Rule for Matrix Functions and Applications.
-// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
-
-template <typename func_t>
-Tensor differential_analytic_matrix_function(
-    const Tensor& self, const Tensor& grad,
-    const func_t& matrix_function,
-    const bool backward_ad // Choose between forward or backward AD
-  ) {
-  // Given an analytic matrix function, this computes the differential (forward AD)
-  // or the adjoint of the differential (backward AD)
-  auto A = backward_ad ? self.transpose(-2, -1).conj() : self;
-  auto meta_grad_sizes = A.sizes().vec();
-  meta_grad_sizes[A.dim() - 2] *= 2;
-  meta_grad_sizes[A.dim() - 1] *= 2;
-
-  auto n = A.size(-1);
-  auto meta_grad = at::zeros(meta_grad_sizes, grad.options());
-  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
-  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
-  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
-
-  return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
-}
 } // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
@@ -2055,8 +2022,7 @@ Tensor differential_analytic_matrix_function(
 //
 Tensor linalg_matrix_exp(const Tensor& a) {
   squareCheckInputs(a, "linalg_matrix_exp");
-  TORCH_CHECK((at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
-              "Expected a floating point or complex tensor as input. Got: ", a.scalar_type());
+  checkFloatingOrComplex(a, "matrix_exp");
 
   NoTF32Guard disable_tf32;
 
@@ -2075,13 +2041,6 @@ Tensor linalg_matrix_exp(const Tensor& a) {
 Tensor matrix_exp(const Tensor& a) {
   return at::linalg_matrix_exp(a);
 }
-
-Tensor linalg_matrix_exp_backward(const Tensor& self, const Tensor& grad, bool backward_ad) {
-  NoTF32Guard disable_tf32;
-
-  return differential_analytic_matrix_function(self, grad, at::linalg_matrix_exp, /* backward_ad */ backward_ad);
-}
-
 
 Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
@@ -2322,11 +2281,8 @@ static Tensor& linalg_vector_norm_impl(const Tensor& self, const Scalar& scalar_
       "but got ", opt_dtype.value());
   }
 
+  checkFloatingOrComplex(self, "linalg.vector_norm");
   ScalarType in_dtype = opt_dtype.value_or(self.scalar_type());
-  TORCH_CHECK(
-      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
-      "linalg.vector_norm only supports floating point and complex dtypes, but got: ",
-      toString(in_dtype));
 
   IntArrayRef dim = opt_dim.value_or(IntArrayRef{});
 
