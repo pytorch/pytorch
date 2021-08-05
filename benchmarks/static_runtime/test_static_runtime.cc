@@ -5,17 +5,19 @@
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include "deep_wide_pt.h"
 #include "test_scripts.h"
+#include "test_utils.h"
 
 using namespace caffe2;
 using namespace torch;
 using namespace torch::jit;
+using namespace torch::jit::test;
 using c10::IValue;
 
-C10_DECLARE_bool(
-    static_runtime_enable_fast_math);
+C10_DECLARE_bool(static_runtime_enable_fast_math);
 
 namespace {
-static at::Tensor getTensor(const at::IValue& ival) {
+
+at::Tensor getTensor(const at::IValue& ival) {
   if (ival.isTensor()) {
     return ival.toTensor();
   } else if (ival.isTensorList()) {
@@ -32,135 +34,15 @@ static at::Tensor getTensor(const at::IValue& ival) {
   }
 }
 
-void compareTensorLists(
-    const std::vector<IValue>& l, /* expects */
-    const std::vector<IValue>& r /* values */) {
-  EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
-    ASSERT_TRUE(l[i].isTensor());
-    ASSERT_TRUE(r[i].isTensor());
-    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
-    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
-    if (!l[i].toTensor().defined()) {
-      EXPECT_TRUE(!r[i].toTensor().defined());
-    } else {
-      EXPECT_TRUE(l[i].toTensor().equal(r[i].toTensor()));
-    }
-  }
-}
-
-void compareTensorLists(
-    const std::vector<at::Tensor>& l, /* expects */
-    const std::vector<at::Tensor>& r /* values */) {
-  EXPECT_TRUE(l.size() == r.size());
-  for (int i = 0; i < l.size(); ++i) {
-    VLOG(2) << "expect " << i << ": \n" << l[i] << std::endl;
-    VLOG(2) << "output " << i << ": \n" << r[i] << std::endl;
-    if (!l[i].defined()) {
-      EXPECT_TRUE(!r[i].defined());
-    } else {
-      EXPECT_TRUE(l[i].equal(r[i]));
-    }
-  }
-}
-
-void compareResults(const IValue& expect, const IValue& actual, const bool use_allclose=false) {
-  if (expect.isTensor()) {
-    VLOG(2) << "expect " << expect.toTensor() << std::endl;
-    VLOG(2) << "output " << actual.toTensor() << std::endl;
-    EXPECT_TRUE(actual.isTensor());
-    if (use_allclose) {
-      EXPECT_TRUE(at::allclose(expect.toTensor(), actual.toTensor()));
-    } else {
-      EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
-    }
-    return;
-  } else if (expect.isTuple()) {
-    EXPECT_TRUE(actual.isTuple());
-    auto lhs = expect.toTuple()->elements();
-    auto rhs = actual.toTuple()->elements();
-    EXPECT_TRUE(lhs.size() == rhs.size());
-    for (size_t i = 0; i < lhs.size(); i++) {
-      compareResults(lhs[i], rhs[i]);
-    }
-  } else if (expect.isList()) {
-    EXPECT_TRUE(actual.isList());
-    auto lhs = expect.toList();
-    auto rhs = actual.toList();
-    EXPECT_TRUE(lhs.size() == rhs.size());
-    for (size_t i = 0; i < lhs.size(); i++) {
-      compareResults(lhs[i], rhs[i]);
-    }
-  } else if (expect.isGenericDict()) {
-    EXPECT_TRUE(actual.isGenericDict());
-    auto lhs = expect.toGenericDict();
-    auto rhs = actual.toGenericDict();
-    EXPECT_TRUE(lhs.size() == rhs.size());
-    for (auto& lh : lhs) {
-      auto f = rhs.find(lh.key());
-      EXPECT_FALSE(f == rhs.end());
-      compareResults(lh.value(), f->value());
-    }
-  } else {
-    // fall back to the default comparison impl in IValue
-    EXPECT_TRUE(expect == actual);
-  }
-}
-
-// Given a model/function in jit script, run the model/function
-// with the jit interpreter and static runtime, and compare the results
-void testStaticRuntime(
-    const std::string& jit_script,
-    const std::vector<IValue>& args,
-    const std::vector<IValue>& args2 = {},
-    const bool use_allclose = false) {
+bool testCanEnableStaticRuntime(const std::string& jit_script) {
   script::Module module("module");
   module.define(jit_script);
 
-  std::vector<IValue> args_tensors, args_copy;
-  for (const auto& ival : args) {
-    if (ival.isTensor()) {
-      args_tensors.emplace_back(ival);
-      const at::Tensor& t = ival.toTensor();
-      args_copy.emplace_back(t.clone());
-    }
-  }
+  Method method = module.get_method("forward");
+  auto graph = module.get_method("forward").graph();
 
-  auto expect = module.forward(args);
-
-  for (bool enable_out_variant : {true, false}) {
-    torch::jit::StaticModule smodule(
-        module, {true, enable_out_variant, enable_out_variant});
-    auto actual = smodule(args, {});
-    smodule.runtime().check_for_memory_leak();
-    // first run
-    compareResults(expect, actual, use_allclose);
-
-    // args2 is used to check for dynamic shapes
-    // it also exercises the memory planner
-    if (!args2.empty()) {
-      expect = module.forward(args2);
-      actual = smodule(args2, {});
-      smodule.runtime().check_for_memory_leak();
-      // second run
-      compareResults(expect, actual, use_allclose);
-
-      expect = module.forward(args);
-      actual = smodule(args, {});
-      smodule.runtime().check_for_memory_leak();
-      // third run
-      compareResults(expect, actual, use_allclose);
-    } else {
-      // run static runtime again to exercise the memory planner
-      actual = smodule(args, {});
-      smodule.runtime().check_for_memory_leak();
-      // second run
-      compareResults(expect, actual, use_allclose);
-    }
-  }
-
-  // make sure inputs were not modified
-  compareTensorLists(args_tensors, args_copy);
+  // here we do not freeze graph
+  return canEnableStaticRuntime(graph);
 }
 
 bool testHasInplaceOp(const std::string& jit_script) {
@@ -170,11 +52,11 @@ bool testHasInplaceOp(const std::string& jit_script) {
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  torch::jit::AliasDb alias_db(graph);
-  return torch::jit::HasInplaceOp(graph, alias_db);
+  AliasDb alias_db(graph);
+  return HasInplaceOp(graph, alias_db);
 }
 
-static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const string& kind) {
+Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
   for (auto& pnode : smodule.nodes()) {
     if (std::string(pnode.node()->kind().toQualString()) == kind) {
       return pnode.node();
@@ -183,16 +65,6 @@ static Node* getNodeWithKind(const torch::jit::StaticModule& smodule, const stri
   return nullptr;
 }
 
-bool testCanEnableStaticRuntime(const std::string& jit_script) {
-  script::Module module("module");
-  module.define(jit_script);
-
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
-
-  // here we do not freeze graph
-  return torch::jit::canEnableStaticRuntime(graph);
-}
 } // namespace
 
 TEST(StaticRuntime, InPlace) {
@@ -456,6 +328,25 @@ TEST(StaticRuntime, IndividualOps_Div) {
   testStaticRuntime(div_scalar_mode, args3, {a, 1.5, "trunc"});
 }
 
+TEST(StaticRuntime, IndividualOps_Mul) {
+  auto a = at::randn({3, 3});
+  auto b = at::randn({3, 3});
+  auto c = at::randn({3, 3, 3});
+  auto d = at::randn({3, 3, 3});
+
+  std::vector<IValue> tensor_args1{a, b};
+  std::vector<IValue> tensor_args2{c, d};
+
+  testStaticRuntime(mul_tensor, tensor_args1);
+  testStaticRuntime(mul_tensor, tensor_args1, tensor_args2);
+
+  std::vector<IValue> scalar_args1{a, 42};
+  std::vector<IValue> scalar_args2{c, 42};
+
+  testStaticRuntime(mul_scalar, scalar_args1);
+  testStaticRuntime(mul_scalar, scalar_args1, scalar_args2);
+}
+
 TEST(StaticRuntime, IndividualOps_Log) {
   // Ensure that the input values are valid.
   auto a = at::abs(at::randn({2, 3}));
@@ -487,6 +378,74 @@ TEST(StaticRuntime, IndividualOps_Sub) {
   std::vector<IValue> args3{a, 2.3, 4};
   testStaticRuntime(sub_scalar_alpha, args3);
   testStaticRuntime(sub_scalar_alpha, {c, 1.3, 2});
+}
+
+TEST(StaticRuntime, IndividualOps_NanToNum) {
+  const auto inf = std::numeric_limits<double>::infinity();
+  const auto nan = std::numeric_limits<double>::quiet_NaN();
+
+  auto a = torch::tensor({{1.0, nan}, {-inf, inf}});
+  auto b = torch::tensor({{1.0, nan, -inf}, {-inf, inf, inf}, {nan, 1.0, 1.0}});
+
+  std::vector<IValue> args1{a, 1.0, 2.0, -2.0};
+  std::vector<IValue> args2{b, 1.0, 2.0, -2.0};
+
+  testStaticRuntime(
+      nan_to_num_script,
+      args1,
+      /*args2*/ {},
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+  testStaticRuntime(
+      nan_to_num_script,
+      args1,
+      args2,
+      /*use_allclose*/ true,
+      /*use_equalnan*/ true);
+}
+
+TEST(StaticRuntime, IndividualOps_Stack) {
+  auto a = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+  auto b = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+  auto c = torch::tensor({{1.0, 2.0}, {3.0, 4.0}});
+
+  auto d = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+  auto e = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+  auto f = torch::tensor({{1.0, 2.0, 3.0}, {4.0, 4.0, 4.0}});
+
+  std::vector<IValue> args1_dim{a, b, 0};
+  std::vector<IValue> args2_dim{d, e, 1};
+
+  std::vector<IValue> args1_three_tensors{a, b, c};
+  std::vector<IValue> args2_three_tensors{d, e, f};
+
+  testStaticRuntime(stack_dim, args1_dim);
+  testStaticRuntime(stack_dim, args1_dim, args2_dim);
+
+  testStaticRuntime(stack_three, args1_three_tensors);
+  testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
+}
+
+TEST(StaicRuntime, IndividualOps_ReLU) {
+  auto a = torch::tensor({{1, -1}, {2, 0}});
+  auto b = torch::tensor({{1, -1, -1}, {2, 0, -1}});
+
+  std::vector<IValue> args1{a};
+  std::vector<IValue> args2{b};
+
+  testStaticRuntime(relu_script, args1);
+  testStaticRuntime(relu_script, args1, args2);
+}
+
+TEST(StaicRuntime, IndividualOps_Tanh) {
+  auto a = at::randn({2, 2});
+  auto b = at::randn({3, 3, 3});
+
+  std::vector<IValue> args1{a};
+  std::vector<IValue> args2{b};
+
+  testStaticRuntime(tanh_script, args1, /*args2*/ {}, /*use_allclose*/ true);
+  testStaticRuntime(tanh_script, args1, args2, /*use_allclose*/ true);
 }
 
 TEST(StaticRuntime, IndividualOps_Norm) {
@@ -630,6 +589,19 @@ TEST(StaticRuntime, IndividualOps_to) {
   test_to(at::ScalarType::Half, false, true, c10::MemoryFormat::ChannelsLast);
 }
 
+TEST(StaticRuntime, IndividualOps_Full) {
+  auto dtype = at::ScalarType::Int;
+  auto cpu = at::Device(DeviceType::CPU);
+  c10::List<int64_t> size0{4, 5};
+  std::vector<IValue> args{
+    size0, 4, dtype, at::kStrided, cpu, false};
+  c10::List<int64_t> size1{5, 6};
+  std::vector<IValue> args2{
+    size1, 5, dtype, at::kStrided, cpu, false};
+  testStaticRuntime(full_script, args);
+  testStaticRuntime(full_script, args, args2);
+}
+
 TEST(StaticRuntime, IndividualOps_FullLike) {
   auto a = at::randn({2, 3});
   auto b = at::randn({3, 2, 2});
@@ -663,6 +635,22 @@ TEST(StaticRuntime, Linear) {
 
   testStaticRuntime(linear_script, args, args2);
   testStaticRuntime(linear_script, args, args2_no_bias);
+}
+
+TEST(StaticRuntime, IndividualOps_VarCat) {
+  // 2D tensors - cat dim = 0
+  std::vector<IValue> args1 = {at::randn({4, 6}), at::randn({5, 6}), 0};
+  testStaticRuntime(var_cat_script, args1);
+
+  // 3D tensors - cat dim = 1
+  std::vector<IValue> args2 = {at::randn({4, 5, 6}), at::randn({4, 8, 6}), 1};
+  testStaticRuntime(var_cat_script, args2);
+
+  // 3D tensors - cat dim = 2
+  std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
+  testStaticRuntime(var_cat_script, args3);
+
+  testStaticRuntime(var_cat_script, args1, args2);
 }
 
 TEST(StaticRuntime, LongModel) {
@@ -853,7 +841,7 @@ TEST(StaticRuntime, CleanUpMemory) {
               enable_out_variant,
               optimize_memory,
               optimize_graph_output_memory};
-          torch::jit::StaticModule smod(mod, opts);
+          torch::jit::StaticModule smod(mod, false, opts);
 
           for (int batch_size : {1, 8, 32}) {
             for (int i = 0; i < 2; ++i) {
@@ -910,7 +898,9 @@ TEST(StaticRuntime, FusionPass) {
   }
 }
 
-TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
+TEST(
+    ProcessedNode,
+    VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableArguments) {
   script::Module module("module");
   // Not using out= variant.
   module.define(sigmoid_script);
@@ -928,7 +918,9 @@ TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithImmutableA
   EXPECT_FALSE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
 }
 
-TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
+TEST(
+    ProcessedNode,
+    VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArguments) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -944,4 +936,34 @@ TEST(ProcessedNode, VerifyOutputsNotOverlappingWithImmutableInputsWithMutableArg
 
   pnode.Output(0) = a;
   EXPECT_TRUE(pnode.verify_outputs_not_overlapping_with_immutable_inputs());
+}
+
+TEST(StaticRuntime, IndividualOps_isinstance) {
+  auto a = at::randn({2, 2});
+  auto b = at::randn({2, 2, 2});
+
+  std::vector<at::IValue> args{a};
+  std::vector<at::IValue> args2{b};
+
+  testStaticRuntime(isinstance_int_script, args);
+  testStaticRuntime(isinstance_int_script, args, args2);
+
+  testStaticRuntime(isinstance_tensor_script, args);
+  testStaticRuntime(isinstance_tensor_script, args, args2);
+
+  testStaticRuntime(isinstance_many_types_script, args);
+  testStaticRuntime(isinstance_many_types_script, args, args2);
+}
+
+TEST(StaticRuntime, IndividualOps_TypeCheck) {
+  auto a = at::zeros({2, 2}, at::kFloat);
+  a.to(at::kCPU);
+  auto b = at::ones({3, 3}, at::kFloat);
+  auto c = at::ones({2, 2, 2}, at::kFloat);
+
+  std::vector<IValue> args_correct = {a, b};
+  std::vector<IValue> args_incorrect = {a, c};
+
+  testStaticRuntime(typecheck_ir, args_correct);
+  testStaticRuntime(typecheck_ir, args_correct, args_incorrect);
 }

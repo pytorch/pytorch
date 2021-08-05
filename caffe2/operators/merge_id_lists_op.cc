@@ -2,10 +2,8 @@
 
 namespace caffe2 {
 namespace {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(MergeIdLists, MergeIdListsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(MergeIdLists)
     .NumInputs([](int n) { return (n > 0 && n % 2 == 0); })
     .NumOutputs(2)
@@ -29,7 +27,6 @@ within a batch. This can be an issue if ID_LIST are order sensitive.
     .Input(1, "values_0", "Values of the ID_LISTs batch for first feature")
     .Output(0, "merged_lengths", "Lengths of the merged ID_LISTs batch")
     .Output(1, "merged_values", "Values of the merged ID_LISTs batch");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(MergeIdLists);
 }
 }
