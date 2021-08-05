@@ -9,6 +9,39 @@ namespace at { namespace native {
 
 namespace {
 
+c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
+  if (resolve_conj) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
+c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, bool transpose_result) {
+  if (tensor.is_non_overlapping_and_dense()) { // common case
+      transpose_tensor = tensor.is_contiguous();
+      return resolve_conj_if_indicated(tensor, (transpose_tensor == transpose_result));
+  }
+  IntArrayRef tensor_strides = tensor.strides();
+  IntArrayRef tensor_sizes = tensor.sizes();
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
+    transpose_tensor = false;
+    return resolve_conj_if_indicated(tensor, (transpose_tensor == transpose_result));
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
+    transpose_tensor = true;
+    return resolve_conj_if_indicated(tensor, (transpose_tensor == transpose_result));
+  } else {
+    transpose_tensor = true;
+    if (tensor.is_conj() && (transpose_tensor != transpose_result)) {
+      Tensor t = tensor.conj().clone(at::MemoryFormat::Contiguous);
+      t._set_conj(true);
+      return c10::MaybeOwned<Tensor>::owned(static_cast<at::Tensor>(t));
+    } else {
+      return c10::MaybeOwned<Tensor>::owned(tensor.clone(at::MemoryFormat::Contiguous));
+    }
+  }
+}
+
 c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor) {
   if (tensor.is_non_overlapping_and_dense()) { // common case
       transpose_tensor = tensor.is_contiguous();
@@ -104,8 +137,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   c10::MaybeOwned<Tensor> result_ = prepare_matrix_for_cublas(result, transpose_result);
   bool transpose_mat1;
   bool transpose_mat2;
-  c10::MaybeOwned<Tensor> mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1);
-  c10::MaybeOwned<Tensor> mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2);
+  auto mat1_ = prepare_matrix_for_cublas(transpose_result ? mat2 : mat1, transpose_mat1, transpose_result);
+  auto mat2_ = prepare_matrix_for_cublas(transpose_result ? mat1 : mat2, transpose_mat2, transpose_result);
 
   if (transpose_result) {
     transpose_mat1 = !transpose_mat1;
@@ -148,8 +181,8 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();
     at::cuda::blas::gemm<scalar_t>(
-      transpose_mat1 ? 't' : 'n',
-      transpose_mat2 ? 't' : 'n',
+      transpose_mat1 ? mat1_->is_conj() ? 'c' : 't' : 'n',
+      transpose_mat2 ? mat2_->is_conj() ? 'c' : 't' : 'n',
       m, n, k,
       alpha_val,
       mat1_ptr, mat1_ld,

@@ -6961,7 +6961,7 @@ op_db: List[OpInfo] = [
            skips=(
                SkipInfo('TestJit', 'test_variant_consistency_jit',),
                # The greatest difference was 1.52587890625e-05 (-1.0001716613769531 vs. -1.0001869201660156), which occurred at index (1, 4, 8).
-               SkipInfo('TestCommon', 'test_conj_view'),
+               SkipInfo('TestMathBits', 'test_conj_view',),
            )),
     OpInfo('__rmod__',
            op=torch.Tensor.__rmod__,

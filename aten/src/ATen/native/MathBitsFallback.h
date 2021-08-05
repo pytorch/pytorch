@@ -24,65 +24,7 @@ struct MathOpFallback {
   // in-place operation corresponding to the math op represented by the bit. Im the future if this class
   // is generalized for ops that are not self inverse, then this must be replaced by op_inverse_inplace
   virtual Tensor& math_op_(Tensor&) = 0;
-  void linalg_fallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-    const auto& arguments = op.schema().arguments();
-    const auto num_arguments = arguments.size();
-    const auto stack_start = stack->size() - num_arguments;
-
-    // Mutable inputs to be tracked separately
-    std::vector<Tensor> mutable_inputs;
-
-    for (int64_t i = 0; i < num_arguments; ++i) {
-      auto& ivalue = (*stack)[stack_start + i];
-      if (!ivalue.isTensor() || !ivalue.isTensorList()) {
-        continue;
-      }
-      const auto& argument = arguments[i];
-      bool mut_arg = false;
-      if (argument.alias_info()) {
-        // Was already tested by is_write loop above
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(argument.alias_info()->isWrite());
-        mut_arg = true;
-      } else {
-        continue;
-      }
-
-      if (ivalue.isTensor()) {
-        if (!is_bit_set(ivalue.toTensor())) {
-          continue;
-        }
-
-        auto tensor = std::move(ivalue).toTensor();
-        TORCH_CHECK_NOT_IMPLEMENTED(!tensor.is_meta(), op_name, " fallback does not support meta tensors.");
-        if (mut_arg) {
-          // TODO: This is a waste if the argument is write only
-          _set_bit(tensor, false);
-          math_op_(tensor);
-          mutable_inputs.emplace_back(tensor);
-        }
-        (*stack)[stack_start + i] = std::move(tensor);
-      } else if (ivalue.isTensorList()) {
-        auto tensors = std::move(ivalue).toTensorList();
-        if (mut_arg) {
-          for(const auto j : c10::irange(tensors.size())) {
-            Tensor t = tensors[j];
-            _set_bit(t, false);
-            math_op_(t);
-            mutable_inputs.emplace_back(t);
-          }
-        }
-        (*stack)[stack_start + i] = std::move(tensors);
-      }
-    }
-
-    op.redispatchBoxed(dispatch_keys & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, key), stack);
-
-    for (auto& mutable_input : mutable_inputs) {
-      math_op_(mutable_input);
-      _set_bit(mutable_input, true);
-    }
-  }
-  void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  void generic_fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack, bool only_handle_mut_args) {
     // Situations to handle:
     //  1. Out-of-place operation.  Easy: materialize all inputs and
     //     call it a day.
@@ -157,7 +99,7 @@ struct MathOpFallback {
           _set_bit(tensor, false);
           math_op_(tensor);
           mutable_inputs.emplace_back(tensor);
-        } else {
+        } else if (!only_handle_mut_args) {
           tensor = resolve_bit(tensor);
         }
         (*stack)[stack_start + i] = std::move(tensor);
@@ -170,7 +112,7 @@ struct MathOpFallback {
             math_op_(t);
             mutable_inputs.emplace_back(t);
           }
-        } else {
+        } else if (!only_handle_mut_args){
           for(const auto j : c10::irange(tensors.size())) {
             tensors[j] = resolve_bit(tensors[j]);
           }
@@ -185,6 +127,13 @@ struct MathOpFallback {
       math_op_(mutable_input);
       _set_bit(mutable_input, true);
     }
+  }
+  void fallback_impl(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+    generic_fallback_impl(op, dispatch_keys, stack, false);
+  }
+  // only resolves conjugation for the mutable args
+  void linalg_fallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+    generic_fallback_impl(op, dispatch_keys, stack, true);
   }
 
   virtual ~MathOpFallback() = default;
