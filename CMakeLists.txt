@@ -241,6 +241,11 @@ option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
+option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF)
+if(USE_PRECOMPILED_HEADERS AND (CMAKE_VERSION VERSION_LESS "3.16"))
+  message(FATAL_ERROR "Precompiled headers require cmake >= 3.16")
+endif()
+
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
@@ -299,6 +304,8 @@ cmake_dependent_option(
     USE_TENSORPIPE "Use TensorPipe. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 option(USE_TBB "Use TBB" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_TBB "Use system-provided Intel TBB." OFF "USE_TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
@@ -382,6 +389,9 @@ if(USE_SYSTEM_LIBS)
   set(USE_SYSTEM_ONNX ON)
   set(USE_SYSTEM_XNNPACK ON)
   set(USE_SYSTEM_PYBIND11 ON)
+  if(USE_TBB)
+    set(USE_SYSTEM_TBB ON)
+  endif()
 endif()
 
 # Used when building Caffe2 through setup.py
