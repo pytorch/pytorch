@@ -343,6 +343,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
 }
 
 void registerOperator(Operator&& op) {
+  // std::cout << op.schema().name() << std::endl;
   if (op.schema().is_varret()) {
     Symbol s = Symbol::fromQualString(op.schema().name());
     if (!printerHasSpecialCaseFor(s)) {

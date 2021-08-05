@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/ATen.h>
@@ -377,6 +378,10 @@ void dequantize(Stack& stack) {
  Tuple[Tensor or other types] are supported, got type:",
         toString(iv.type()));
   }
+}
+
+void raiseException(Stack& stack) {
+  throw JITException(pop(stack).toStringRef());
 }
 
 } // namespace jit

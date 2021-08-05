@@ -40,5 +40,7 @@ void tupleSlice(Stack& stack, size_t begin, size_t end);
 
 void dequantize(Stack& stack);
 
+void raiseException(Stack& stack);
+
 } // namespace jit
 } // namespace torch

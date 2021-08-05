@@ -54,6 +54,7 @@ namespace jit {
   _(TUPLE_SLICE, "II") /* slice tup[X:(X+N)] */                                \
   _(FORK, "CN") /* launch a thread to run code entry x with N inputs  */       \
   _(WARN, "I") /* emit a warning with line information */                      \
+  _(RAISE_EXCEPTION, "") /* Raise exception */                                 \
   _(ENTER, "EN") /* enter scope of a contextmanager */                         \
   _(EXIT, "EX") /* exit the last entered contextmanager */
 
