@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/script_profile.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <string>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -785,7 +786,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // At the moment overhead does not seem exhorbitantly large.
   // Another option would be return vector of (string, InlinedCallstackPtrs)
   // string would contain function name and typename of self
-  std::string moduleHierarchy() const {
+  std::vector<std::string> moduleHierarchy() const {
+    std::vector<std::string> module_function_list;
     std::string module_hierarchy("TOP");
     for (size_t i = 0; i < frames.size(); ++i) {
       const Frame& frame = frames[i];
@@ -807,6 +809,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           .append(g_self_type)
           .append(")::")
           .append(fn_name);
+      module_function_list.emplace_back(std::move(module_hierarchy));
 
       size_t pc = frame.pc;
       // CALL nodes have already advanced the pc, so
@@ -822,17 +825,20 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           const auto& opt_module_info = std::get<2>(p);
           if (opt_module_info.has_value()) {
             const auto& module_instance_info = opt_module_info.value();
-            module_hierarchy.append(".");
-            module_hierarchy.append(
-                utils::get_module_info(module_instance_info));
-            module_hierarchy.append("::" + fn_name);
+            module_hierarchy =
+                std::move(utils::get_module_info(module_instance_info));
+            module_hierarchy.append("::").append(fn_name);
           } else {
             // This is likely a call to free function, not associated with
             // any class
-            module_hierarchy.append(".::").append(fn_name);
+            module_hierarchy = "::";
+            module_hierarchy.append(fn_name);
           }
+          module_function_list.emplace_back(std::move(module_hierarchy));
         }
       }
+
+      module_hierarchy = std::string();
       // If this node is of type callMethod then the following frame
       // will contain the op being executed.
       // For such callMethod node, we add the object instance name
@@ -848,16 +854,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         } else {
           class_instance_name = "INSTANCE_NAME_UNKNOWN";
         }
-        module_hierarchy.append(".").append(class_instance_name);
+        module_hierarchy = std::move(class_instance_name);
       } else if (node->kind() == prim::CallFunction) {
         auto function_constant = node->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
         auto fun_name = fun_type->function()->name();
-        module_hierarchy.append(".CALL_FUNCTION::").append(fun_name);
+        module_hierarchy = "CALL_FUNCTION::";
+        module_hierarchy.append(fun_name);
       }
     }
-    return module_hierarchy;
+    return module_function_list;
   }
 
   std::vector<StackEntry> callstack() const {
@@ -924,11 +931,11 @@ std::vector<StackEntry> currentCallstack() {
   return std::vector<StackEntry>();
 }
 
-std::string currentModuleHierarchy() {
+std::vector<std::string> currentModuleHierarchy() {
   if (tls_int_state_ptr_) {
     return tls_int_state_ptr_->moduleHierarchy();
   }
-  return std::string();
+  return std::vector<std::string>();
 }
 
 std::ostream& operator<<(std::ostream& out, const Code& code) {
