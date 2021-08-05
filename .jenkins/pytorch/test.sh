@@ -273,7 +273,8 @@ test_libtorch() {
     "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
-        "$TORCH_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
+        # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
+        "$BUILD_BIN_DIR"/static_runtime_test --gtest_output=xml:$TEST_REPORTS_DIR/static_runtime_test.xml
       fi
     fi
     assert_git_not_dirty
