@@ -139,7 +139,8 @@ class CIWorkflow:
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
         with open(output_file_path, "w") as output_file:
-            output_file.writelines(["# @generated DO NOT EDIT MANUALLY\n"])
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
+            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
             output_file.write(workflow_template.render(asdict(self)))
             output_file.write("\n")
         print(output_file_path)
