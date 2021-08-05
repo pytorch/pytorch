@@ -34,8 +34,8 @@ struct Argument {
         default_value_(std::move(default_value)),
         kwarg_only_(kwarg_only),
         alias_info_(std::move(alias_info)) {
-        bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
-        is_out_ = kwarg_only_ && is_alias;
+    bool is_alias = alias_info_.has_value() && alias_info_.value().isWrite();
+    is_out_ = kwarg_only_ && is_alias;
   }
   const std::string& name() const {
     return name_;

@@ -521,7 +521,8 @@ TEST(SchemaParserTest, NestedArrays) {
 }
 
 TEST(SchemaParserTest, OutVariant) {
-  auto s = parseSchema("at::foo(Tensor self, *, Tensor(a!) f, Tensor(b!) l) -> (Tensor(a!) f, Tensor(b!) l)");
+  auto s = parseSchema(
+      "at::foo(Tensor self, *, Tensor(a!) f, Tensor(b!) l) -> (Tensor(a!) f, Tensor(b!) l)");
   ASSERT_TRUE(s.arguments().at(1).is_out());
   ASSERT_TRUE(s.arguments().at(2).is_out());
 }
