@@ -31,10 +31,10 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=True, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=True,
-           use_external_data_format=False):
+           opset_version=None, _retain_param_name=None, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
+           use_external_data_format=None):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs

@@ -76,19 +76,33 @@ def select_model_mode_for_export(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=True, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
+           opset_version=None, _retain_param_name=None, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           enable_onnx_checker=None, use_external_data_format=False):
+           enable_onnx_checker=None, use_external_data_format=None):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
         else:
             operator_export_type = OperatorExportTypes.ONNX
+
     if enable_onnx_checker is not None:
-        warnings.warn("`enable_onnx_checker' is deprecated and ignored. It will be removed in"
-                      "the next PyTorch release. To proceed despite ONNX checker failures, you"
-                      "can catch torch.onnx.ONNXCheckerError.")
+        warnings.warn("'enable_onnx_checker' is deprecated and ignored. It will be removed in "
+                      "the next PyTorch release. To proceed despite ONNX checker failures, "
+                      "catch torch.onnx.ONNXCheckerError.")
+    if _retain_param_name is not None:
+        warnings.warn("'_retain_param_name' is deprecated and ignored. "
+                      "It will be removed in the next PyTorch release.")
+    if strip_doc_string is not None:
+        warnings.warn("`strip_doc_string' is deprecated and ignored. Will be removed in "
+                      "next PyTorch release. It's combined with `verbose' argument now. ")
+    if example_outputs is not None:
+        warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
+                      "next PyTorch release.")
+    if use_external_data_format is not None:
+        warnings.warn("`use_external_data_format' is deprecated and ignored. Will be removed in next "
+                      "PyTorch release. The code will work as it is False if models are not larger than 2GB, "
+                      "Otherwise set to False because of size limits imposed by Protocol Buffers.")
 
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
@@ -204,8 +218,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
 
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
     torch._C._jit_pass_lint(graph)
-
-    torch._C._jit_pass_onnx_fold_if(graph)
 
     torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
     torch._C._jit_pass_lint(graph)
@@ -549,9 +561,14 @@ def _model_to_graph(model, args, verbose=False,
 def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=None,
                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None,
-                            google_printer=False, opset_version=None, _retain_param_name=True,
+                            google_printer=False, opset_version=None, _retain_param_name=None,
                             keep_initializers_as_inputs=None, custom_opsets=None, add_node_names=True,
                             do_constant_folding=True, dynamic_axes=None):
+    if f is not None:
+        warnings.warn("'f' is deprecated and ignored. It will be removed in the next PyTorch release.")
+    if _retain_param_name is not None:
+        warnings.warn("'_retain_param_name' is deprecated and ignored. "
+                      "It will be removed in the next PyTorch release.")
     return _export_to_pretty_string(model, args, f, export_params, verbose, training,
                                     input_names, output_names, operator_export_type,
                                     export_type, example_outputs, google_printer,
@@ -587,8 +604,8 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
         args = _decide_input_format(model, args)
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
-                                                        example_outputs, _retain_param_name,
-                                                        val_do_constant_folding, fixed_batch_size=fixed_batch_size,
+                                                        example_outputs, val_do_constant_folding,
+                                                        fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes,
                                                         export_params=export_params,
                                                         keep_initializers_as_inputs=val_keep_init_as_ip)

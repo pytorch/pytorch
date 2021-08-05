@@ -39,6 +39,17 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.utils import ONNXCheckerError
 
+
+def flatten_tuples(elem):
+    tup = []
+    for t in elem:
+        if isinstance(t, (tuple)):
+            tup += flatten_tuples(t)
+        else:
+            tup += [t]
+    return tup
+
+
 def to_numpy(elem):
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
@@ -2938,7 +2949,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         class Empty(torch.nn.Module):
             def forward(self, x):
-                y = torch.empty(()) * 0
+                y = torch.empty(()).fill_(0)
                 y += x
                 return y
         x = torch.tensor(42.)
@@ -8842,8 +8853,13 @@ class TestONNXRuntime(unittest.TestCase):
         random_state = torch.rand((1, 1, 10, 30, 30))
         self.run_test(model, (random_data, empty_tensor),
                       input_names=["data", "state"],
-                      dynamic_axes={"state": [0, 1, 2, 3, 4]},
+                      dynamic_axes={"data": [0, 1, 2], "state": [0, 1, 2, 3, 4]},
                       test_with_inputs=[(random_data, random_state)])
+        self.run_test(model, (random_data, empty_tensor),
+                      input_names=["data", "state"],
+                      dynamic_axes={"state": [0, 1, 2, 3, 4]},
+                      test_with_inputs=[(random_data, random_state)],
+                      remained_onnx_input_idx=[1])
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -9784,6 +9800,19 @@ class TestONNXRuntime(unittest.TestCase):
         self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
         loaded_model = onnx.load_from_string(f.getvalue())
 
+
+    def test_tuple_output_from_if_with_raised_exception(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
+                if float(t) < 0:
+                    raise Exception("Negative input")
+                else:
+                    return torch.zeros(5), torch.zeros(5)
+        x = torch.zeros(1)
+        self.run_test(torch.jit.script(M()), (x,))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout, script_test_min_opset_version,

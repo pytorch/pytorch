@@ -3,60 +3,52 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
+    input: "input"
     output: "1"
-    name: "Shape_0"
-    op_type: "Shape"
-  }
-  node {
-    input: "1"
-    output: "2"
-    name: "ConstantFill_1"
-    op_type: "ConstantFill"
+    name: "ReduceMean_0"
+    op_type: "ReduceMean"
     attribute {
-      name: "dtype"
-      i: 1
-      type: INT
+      name: "axes"
+      ints: 1
+      type: INTS
     }
     attribute {
-      name: "input_as_shape"
-      i: 1
+      name: "keepdims"
+      i: 0
       type: INT
-    }
-    attribute {
-      name: "value"
-      f: 0
-      type: FLOAT
     }
   }
   name: "torch-jit-export"
   input {
-    name: "0"
+    name: "input"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 5
+            dim_value: 2
           }
           dim {
-            dim_value: 8
+            dim_param: "input_dim_1"
+          }
+          dim {
+            dim_param: "input_dim_2"
           }
         }
       }
     }
   }
   output {
-    name: "2"
+    name: "1"
     type {
       tensor_type {
         elem_type: 1
         shape {
           dim {
-            dim_value: 5
+            dim_value: 2
           }
           dim {
-            dim_value: 8
+            dim_param: "input_dim_2"
           }
         }
       }
@@ -64,5 +56,5 @@ graph {
   }
 }
 opset_import {
-  version: 7
+  version: 12
 }
