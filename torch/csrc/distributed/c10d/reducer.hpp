@@ -524,6 +524,9 @@ class TORCH_API Reducer {
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;
+  // Variable indices stored sequentially in order of when the gradient is ready
+  // for the current backwards pass.
+  std::vector<int> grad_ready_order_indices_;
   // Bytes capacity of first bucket, can be configured by user
   int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.

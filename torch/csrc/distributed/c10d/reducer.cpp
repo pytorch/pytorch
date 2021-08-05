@@ -604,6 +604,8 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
+  grad_ready_order_indices_.push_back(index);
+
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -1313,6 +1315,8 @@ void Reducer::prepare_for_backward(
 
   // Reset accounting.
   expect_autograd_hooks_ = true;
+  // Clear gradient ready order as it can be different in the next iteration.
+  grad_ready_order_indices_.clear();
 
   reset_bucket_counting();
 
