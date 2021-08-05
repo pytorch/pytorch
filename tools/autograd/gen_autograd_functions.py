@@ -350,7 +350,8 @@ def gen_autograd_functions_python(
             'py_function_initializers': [process_function(info, PY_FUNCTION_DEFINITION)],
             'py_function_props_and_getters': [process_function(info, PY_FUNCTION_PROPS_AND_GETTERS)],
         },
-        num_shards=num_shards
+        num_shards=num_shards,
+        sharded_keys={'py_function_initializers', 'py_function_props_and_getters'}
     )
 
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
