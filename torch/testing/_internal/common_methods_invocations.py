@@ -2648,10 +2648,14 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
     shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))
     pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 2, 1, 1, 2))
 
-    def generator():
-        cases = product(shapes, pads)
+    make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-        for shape, pad in cases:
+    def generator():
+        if mode == 'constant':
+            # Default args
+            yield SampleInput(make_inp((1, 3, 3)), args=((2, 2),))
+
+        for shape, pad in product(shapes, pads):
             # Not all combinations of shapes and pads are valid
             # Below are the checks to remove skip invalid combinations
 
@@ -2683,14 +2687,10 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
                     continue
 
             if mode in ['reflect', 'replicate', 'circular']:
-                args = (pad, mode)
-                tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
-                yield SampleInput(tensor, args=args)
+                yield SampleInput(make_inp(shape), args=(pad, mode))
             else:
                 for pad_value in (1., 2.):
-                    tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
-                    args = (pad, mode, pad_value)
-                    yield SampleInput(tensor, args=args)
+                    yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
     return list(generator())
 
@@ -6628,43 +6628,47 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
-           supports_autograd=True,
+           aten_name='constant_pad_nd',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='constant'),
-           skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
-           ),
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='reflect',
-           supports_autograd=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
            skips=(
+               # op name not found in JIT graph
+               # There are multiple aten ops, namely reflection_pad_{1,2,3}d
+               # so we can't use aten_name argument in opinfo
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='replicate',
-           supports_autograd=True,
            dtypes=floating_and_complex_types(),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
            skips=(
+               # op name not found in JIT graph
+               # There are multiple aten ops, namely replication_pad_{1,2,3}d
+               # so we can't use aten_name argument in opinfo
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='circular',
-           supports_autograd=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='circular'),
            supports_forward_ad=True,
            check_batched_grad=False,
            skips=(
+               # Doesn't have a corresponding aten operator.
+               # RuntimeError: aliasOp != torch::jit::getOperatorAliasMap().end()
                SkipInfo('TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            ),
            supports_out=False),
