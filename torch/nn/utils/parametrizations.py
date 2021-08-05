@@ -173,7 +173,7 @@ def orthogonal(module: Module,
                orthogonal_map: Optional[str] = None,
                *,
                use_trivialization: bool = True) -> Module:
-    r"""Applies an orthogonal or unitary paramtrization to a matrix or a batch of matrices.
+    r"""Applies an orthogonal or unitary parametrization to a matrix or a batch of matrices.
 
     Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, the parametrized
     matrix :math:`Q \in \mathbb{K}^{m \times n}` is **orthogonal** as
@@ -185,8 +185,8 @@ def orthogonal(module: Module,
             QQ^{\text{H}} &= \mathrm{I}_m \mathrlap{\qquad \text{if }m < n}
         \end{align*}
 
-    where :math:`Q^{\text{H}}` is the conjugate transpose when :math:`Q` is complex,
-    and the transpose when :math:`Q` is real-valued and
+    where :math:`Q^{\text{H}}` is the conjugate transpose when :math:`Q` is complex
+    and the transpose when :math:`Q` is real-valued, and
     :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
     In plain words, :math:`Q` will have orthonormal columns whenever :math:`m \geq n`
     and orthonormal rows otherwise.
@@ -197,9 +197,9 @@ def orthogonal(module: Module,
 
     - ``"matrix_exp"``/``"cayley"``:
       the :func:`~torch.matrix_exp` :math:`Q = \exp(A)` and the `Cayley map`_
-      :math:`Q = (\mathrm{I}_n + A/2)(\mathrm{I}_n - A/2)^{-1}` applied to a skew-symmetric
-      / skew-Hermitian matrix :math:`A` give an orthogonal / unitary matrix.
-    - ``"householder"``: the product of Householder reflectors is orthogonal / unitary
+      :math:`Q = (\mathrm{I}_n + A/2)(\mathrm{I}_n - A/2)^{-1}` are applied to a skew-symmetric
+      :math:`A` to give an orthogonal matrix.
+    - ``"householder"``: computes a product of Householder reflectors
       (:func:`~torch.linalg.householder_product`).
 
     ``"matrix_exp"``/``"cayley"`` often make the parametrized weight converge faster than
@@ -211,17 +211,18 @@ def orthogonal(module: Module,
     convergence of the parametrized layer at the expense of some extra memory use.
     See `Trivializations for Gradient-Based Optimization on Manifolds`_ .
 
+    Initial value of :math:`Q`:
+    If the original tensor is not parametrized and ``use_trivialization=True`` (default), the initial value
+    of :math:`Q` is that of the original tensor if it is orthogonal (or unitary in the complex case)
+    and it is orthogonalized via the QR decomposition otherwise (see :func:`torch.linalg.qr`).
+    Same happens when it is not parametrized and ``orthogonal_map="householder"`` even when ``use_trivialization=False``.
+    Otherwise, the initial value is the result of the composition of all the registered
+    parametrizations applied to the original tensor.
+
     .. note::
         This function is implemented using the parametrization functionality
         in :func:`~torch.nn.utils.parametrize.register_parametrization`.
 
-    .. note ::
-        If the original tensor is not parametrized and ``use_trivialization=True`` (default), the initial value
-        of ``Q`` is that of the original tensor if it is orthogonal (or unitary in the complex case)
-        and it is orthogonalized via the QR decomposition otherwise (see :func:`torch.linalg.qr`).
-        Same happens when it is not parametrized and ``orthogonal_map="householder"`` even when ``use_trivialization=False``.
-        Otherwise, the initial value is the result of the composition of all the registered
-        parametrizations applied to the original tensor.
 
     .. _`Cayley map`: https://en.wikipedia.org/wiki/Cayley_transform#Matrix_map
     .. _`Trivializations for Gradient-Based Optimization on Manifolds`: https://arxiv.org/abs/1909.09501
@@ -257,7 +258,7 @@ def orthogonal(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter of buffer with name '{}'".format(module, name)
+            "Module '{}' has no parameter ot buffer with name '{}'".format(module, name)
         )
 
     # We could implement this for 1-dim tensors as the maps on the sphere
@@ -471,7 +472,7 @@ def spectral_norm(module: Module,
     weight = getattr(module, name, None)
     if not isinstance(weight, Tensor):
         raise ValueError(
-            "Module '{}' has no parameter of buffer with name '{}'".format(module, name)
+            "Module '{}' has no parameter or buffer with name '{}'".format(module, name)
         )
 
     if dim is None:
