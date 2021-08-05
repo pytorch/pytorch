@@ -84,7 +84,8 @@ class Transformer(Module):
 
     def forward(self, src: Tensor, tgt: Tensor, src_mask: Optional[Tensor] = None, tgt_mask: Optional[Tensor] = None,
                 memory_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
         Args:
@@ -181,7 +182,8 @@ class TransformerEncoder(Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, src: Tensor, mask: Optional[Tensor] = None,
+                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
         Args:
@@ -255,6 +257,7 @@ class TransformerDecoder(Module):
 
         return output
 
+
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
     This standard encoder layer is based on the paper "Attention Is All You Need".
@@ -305,6 +308,7 @@ class TransformerEncoderLayer(Module):
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
+        self._attn_weights = None
 
         # Legacy string support for activation function.
         if isinstance(activation, str):
@@ -317,7 +321,8 @@ class TransformerEncoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerEncoderLayer, self).__setstate__(state)
 
-    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, src: Tensor, src_mask: Optional[Tensor] = None,
+                src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layer.
 
         Args:
@@ -344,16 +349,29 @@ class TransformerEncoderLayer(Module):
     # self-attention block
     def _sa_block(self, x: Tensor,
                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
-        x = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+        x, self._attn_weights = self.self_attn(x, x, x,
+                                               attn_mask=attn_mask,
+                                               key_padding_mask=key_padding_mask,
+                                               need_weights=True)
         return self.dropout1(x)
 
     # feed forward block
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout2(x)
+
+    def get_attn_weights(self) -> Tensor:
+        r"""Convenience method for getting the self-attention weights for a transformer layer.
+        This method will raise an exception if called before an initial pass through the model.
+
+        Returns the self-attention weights of the transformer layer.
+        """
+
+        if self._attn_weights is None:
+            raise ValueError('No attention weights have been computed yet. '
+                             'Please do a pass through the model before calling this method')
+
+        return self._attn_weights
 
 
 class TransformerDecoderLayer(Module):
@@ -413,6 +431,7 @@ class TransformerDecoderLayer(Module):
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
         self.dropout3 = Dropout(dropout)
+        self._attn_weights = None
 
         # Legacy string support for activation function.
         if isinstance(activation, str):
@@ -425,8 +444,10 @@ class TransformerDecoderLayer(Module):
             state['activation'] = F.relu
         super(TransformerDecoderLayer, self).__setstate__(state)
 
-    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None, memory_mask: Optional[Tensor] = None,
-                tgt_key_padding_mask: Optional[Tensor] = None, memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(self, tgt: Tensor, memory: Tensor, tgt_mask: Optional[Tensor] = None,
+                memory_mask: Optional[Tensor] = None,
+                tgt_key_padding_mask: Optional[Tensor] = None,
+                memory_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer.
 
         Args:
@@ -457,10 +478,10 @@ class TransformerDecoderLayer(Module):
     # self-attention block
     def _sa_block(self, x: Tensor,
                   attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor]) -> Tensor:
-        x = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           need_weights=False)[0]
+        x, self._attn_weights = self.self_attn(x, x, x,
+                                               attn_mask=attn_mask,
+                                               key_padding_mask=key_padding_mask,
+                                               need_weights=True)
         return self.dropout1(x)
 
     # multihead attention block
@@ -476,6 +497,19 @@ class TransformerDecoderLayer(Module):
     def _ff_block(self, x: Tensor) -> Tensor:
         x = self.linear2(self.dropout(self.activation(self.linear1(x))))
         return self.dropout3(x)
+
+    def get_attn_weights(self) -> Tensor:
+        r"""Convenience method for getting the self-attention weights for a transformer layer.
+        This method will raise an exception if called before an initial pass through the model.
+
+        Returns the self-attention weights of the transformer layer.
+        """
+
+        if self._attn_weights is None:
+            raise ValueError('No attention weights have been computed yet. '
+                             'Please do a pass through the model before calling this method')
+
+        return self._attn_weights
 
 
 def _get_clones(module, N):
