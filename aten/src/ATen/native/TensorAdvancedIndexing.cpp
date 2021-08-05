@@ -83,6 +83,17 @@ native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
   }
 }
 
+TORCH_META_FUNC(gather)
+(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
+  const Tensor& result = maybe_get_output();
+  if (result.defined()) {
+  	at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    at::assert_no_partial_overlap(result, index);
+  }
+  set_output(index.sizes(), self.options());
+}
+
 template <typename Meta>
 void scatter_meta_impl(
     Meta& meta,
@@ -1112,23 +1123,10 @@ Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, const 
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
 
-Tensor& gather_out_cpu_cuda(
-    const Tensor& self,
-    int64_t dim,
-    const Tensor& index,
-    bool sparse_grad,
-    Tensor& result) {
-  at::native::resize_output(result, index.sizes());
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  at::assert_no_partial_overlap(result, index);
+// gather_out_cpu_cuda
+TORCH_IMPL_FUNC(gather_out)
+(const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad, const Tensor& result) {
   gather_stub(result.device().type(), result, self, dim, index);
-  return result;
-}
-
-Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::gather_out_cpu_cuda(self, dim, index, sparse_grad, result);
 }
 
 Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
