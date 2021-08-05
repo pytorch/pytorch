@@ -1,34 +1,42 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7)
+name: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
-  push:
-    branches:
-      - master
-      - release/*
+  pull_request:
+    types: [unassigned]
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  # This is used for the phase of adding wheel tests only, will be removed once completed
+  IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
 
 concurrency:
-  group: pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
+  group: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
+  ciflow_should_run:
+    runs-on: ubuntu-18.04
+    if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) }}
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    needs: [ciflow_should_run]
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -47,6 +55,7 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -101,10 +110,10 @@ jobs:
 
   build:
     runs-on: linux.2xlarge
-    needs: [calculate-docker-image, ]
+    needs: [calculate-docker-image, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.calculate-docker-image.outputs.docker_image }}
-      JOB_BASE_NAME: pytorch-libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7-build
+      JOB_BASE_NAME: periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7-build
     steps:
       - name: Log in to ECR
         run: |
@@ -118,6 +127,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -172,6 +186,10 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
