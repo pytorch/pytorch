@@ -294,6 +294,20 @@ class ProcessGroupNCCLTest(TestCase):
                 tensors[i],
             )
 
+        # Avg (only available for NCCL 2.10+)
+        if hasattr(c10d.ReduceOp, "AVG"):
+            tensors = [torch.tensor([i + 1]).cuda(i) for i in range(self.num_gpus)]
+
+            allreduce(tensors, c10d.ReduceOp.AVG)
+
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
+
         # Product
         tensors = []
         for i in range(self.num_gpus):
@@ -1539,7 +1553,7 @@ class DistributedDataParallelTest(
         def allreduce_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future[torch.Tensor]:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [bucket.buffer() / self.world_size]
             return (
                 process_group.allreduce(tensors)
                 .get_future()
@@ -1764,7 +1778,7 @@ class DistributedDataParallelTest(
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future[torch.Tensor]:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [bucket.buffer() / self.world_size]
             fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
