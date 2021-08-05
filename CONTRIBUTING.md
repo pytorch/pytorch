@@ -519,6 +519,9 @@ git add index.rst jit.rst
 ...
 ```
 
+ - user-facing documentation should go on https://pytorch.org/docs
+ - developer-facing documentation should go in the wiki https://github.com/pytorch/pytorch/wiki (and possibly linked from contributing.md)
+
 #### Building C++ Documentation
 For C++ documentation (https://pytorch.org/cppdocs), we use
 [Doxygen](http://www.doxygen.nl/) and then convert it to
