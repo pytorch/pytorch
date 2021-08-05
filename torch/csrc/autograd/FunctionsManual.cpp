@@ -2601,6 +2601,40 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
   }
 }
 
+// Based on:
+//
+// Mathias, Roy.
+// A Chain Rule for Matrix Functions and Applications.
+// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
+
+template <typename func_t>
+Tensor differential_analytic_matrix_function(
+    const Tensor& self, const Tensor& grad,
+    const func_t& matrix_function,
+    const bool adjoint // Choose between forward (adjoint=false) or backward AD (adjoint=true)
+  ) {
+  // Given an analytic matrix function, this computes the differential (forward AD)
+  // or the adjoint of the differential (backward AD)
+  auto A = adjoint ? self.transpose(-2, -1).conj() : self;
+  auto meta_grad_sizes = A.sizes().vec();
+  meta_grad_sizes[A.dim() - 2] *= 2;
+  meta_grad_sizes[A.dim() - 1] *= 2;
+
+  auto n = A.size(-1);
+  auto meta_grad = at::zeros(meta_grad_sizes, grad.options());
+  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(A);
+  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(A);
+  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+
+  return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
+}
+
+Tensor linalg_matrix_exp_differential(const Tensor& self, const Tensor& grad, bool adjoint) {
+  at::NoTF32Guard disable_tf32;
+
+  return differential_analytic_matrix_function(self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
+}
+
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
   if (self.numel() == 0) {
     return at::empty_like(self);
