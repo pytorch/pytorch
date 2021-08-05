@@ -308,7 +308,7 @@ jobs:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
         env:
-          BUILD_ENVIRONMENT: pytorch-linux-xenial-py3.6-gcc5.4-backward
+          BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4-backward
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
