@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
+#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -459,7 +460,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::RaiseException(str msg) -> ()"),
-         [](Stack* stack) { throw JITException(pop(stack).toStringRef()); },
+         [](Stack* stack) { raiseException(*stack); },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::Size(int[] sizes) -> int[]"),

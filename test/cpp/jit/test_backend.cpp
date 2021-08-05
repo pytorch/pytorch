@@ -85,7 +85,6 @@ TEST(BackendTest, ToBackend) {
   auto mres = mlm.forward(inputs).toTuple()->elements();
   AT_ASSERT(mres[0].toTensor().equal(ref[0].toTensor()));
   AT_ASSERT(mres[1].toTensor().equal(ref[1].toTensor()));
-  // ASSERT_TRUE(false);
 }
 
 TEST(BackendTest, ToBackendNotAvailable) {
