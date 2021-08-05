@@ -9,7 +9,6 @@
 #include "caffe2/utils/conversions.h"
 
 #ifdef __HIPCC__
-#include <hip/hip_version.h>
 #if TORCH_HIP_VERSION < 210
 // rocblas doesn't fully support fp16 yet
 #define ROCBLAS_FP16 0

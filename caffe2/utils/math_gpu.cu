@@ -38,7 +38,6 @@
 #endif // __HIP_PLATFORM_HCC__
 
 #ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
 using CUBLAS_HALF_TYPE = rocblas_half;
 #else // __HIP_PLATFORM_HCC
 using CUBLAS_HALF_TYPE = __half;
