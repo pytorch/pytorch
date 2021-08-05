@@ -426,9 +426,10 @@ class record_function(ContextDecorator):
     def __init__(self, name: str):
         self.name: str = name
 
-        # NOTE: type hint it as Optional[...] will cause it infer to be None
-        # due to delayed initialization in __enter__.
-        self.rec: List["torch.classes.profiler.RecordFunction"] = []
+        # NOTE: type is required by jit.script. However, type hint it as
+        # Optional[...] will cause it infer to be None due to delayed
+        # initialization in __enter__. RecordFunction is not for public usage.
+        self.rec: List["torch.classes.profiler.RecordFunction"] = []  # type: ignore[name-defined]
 
     def __enter__(self):
         self.rec.append(torch.ops.profiler._record_function_enter(self.name))
