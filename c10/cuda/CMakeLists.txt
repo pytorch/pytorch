@@ -22,10 +22,10 @@ configure_file(
 set(C10_CUDA_SRCS
     CUDAStream.cpp
     CUDAFunctions.cpp
+    CUDAMiscFunctions.cpp
     CUDACachingAllocator.cpp
     impl/CUDAGuardImpl.cpp
     impl/CUDATest.cpp
-    CUDAFunctions.cpp
 )
 set(C10_CUDA_HEADERS
     CUDAException.h
@@ -34,6 +34,7 @@ set(C10_CUDA_HEADERS
     CUDAMathCompat.h
     CUDAStream.h
     CUDAFunctions.h
+    CUDAMiscFunctions.h
     impl/CUDAGuardImpl.h
     impl/CUDATest.h
 )

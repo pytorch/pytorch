@@ -51,6 +51,13 @@ class TORCH_API Timer {
   virtual ~Timer() = default;
 };
 
+// Local accumulator type for a single bucket.
+struct BucketAccumulator {
+  std::vector<size_t> indices;
+  size_t size = 0;
+  size_t size_limit = 0;
+};
+
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {
@@ -62,6 +69,7 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<std::vector<at::Tensor>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
@@ -75,7 +83,9 @@ class TORCH_API Reducer {
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  void initialize_buckets(
+      std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_sizes);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -168,31 +178,57 @@ class TORCH_API Reducer {
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
 
+  // When graph is not explicitly set by user as static and has unused
+  // parameters, this will return whether the graph has been static until the
+  // current iteration, which means unused params set has not changed.
+  bool ddp_graph_static();
+
  protected:
   // Forward declaration.
   struct Bucket;
 
   void push_rebuilt_params(const size_t& index);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable std::mutex mutex_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<std::vector<at::Tensor>> replicas_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<bool>> expect_sparse_gradients_;
 
   std::vector<std::vector<std::shared_ptr<torch::autograd::Node>>>
-      grad_accumulators_;
+      grad_accumulators_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_map<torch::autograd::Node*, size_t> gradAccToVariableMap_;
   std::vector<std::pair<uintptr_t, std::shared_ptr<torch::autograd::Node>>>
-      hooks_;
+      hooks_; // NOLINT(cppcoreguidelines-non-private-member-variables-in-classes)
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool expect_autograd_hooks_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool require_finalize_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   size_t next_bucket_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool has_marked_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool find_unused_parameters_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const bool gradient_as_bucket_view_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<size_t> unused_parameters_;
+  // Previous iteration's unused params, used for checking if unused parameters
+  // change between iterations. Only filled during the first backwards call.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<size_t> prev_iteration_unused_parameters_;
+  // Whether graph is static or not. When user does not explicitly set static
+  // graph, the only possible dynamism is set of unused parameters changing
+  // between iterations which is tracked by this flag.
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  bool ddp_graph_static_{true};
   // Locally used parameter maps indicating if parameters are used locally
   // during the current iteration or no_sync session if no_sync is on. One
   // tensor for each model replica and each tensor is one-dim int32 tensor of
@@ -352,6 +388,10 @@ class TORCH_API Reducer {
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
     bool expect_sparse_gradient = false;
+    // "Limit" of cumulative parameter sizes that this bucket manages. It is
+    // actually a soft limit because we don't shard parameters across buckets
+    // so a single parameter may push it over the cap.
+    size_t bucket_size_limit;
   };
 
   std::vector<Bucket> buckets_;
@@ -508,7 +548,8 @@ class TORCH_API Reducer {
 // The index of tensors[i] assigned to bucket is tensor_indices[i],
 // when tensor_indices is empty, the index of tensors[i] assigned to
 // bucket is i.
-TORCH_API std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
+TORCH_API std::tuple<std::vector<std::vector<size_t>>, std::vector<size_t>>
+compute_bucket_assignment_by_size(
     const std::vector<at::Tensor>& tensors,
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
