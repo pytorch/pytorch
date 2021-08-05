@@ -5031,7 +5031,10 @@ def multi_head_attention_forward(
     #
     q = q.contiguous().view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
-        k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        if bsz == 0:
+            k = k.contiguous().view(num_heads, 0, head_dim).transpose(0, 1)
+        else:
+            k = k.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_k.size(0) == bsz * num_heads, \
@@ -5040,7 +5043,10 @@ def multi_head_attention_forward(
             f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
-        v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
+        if bsz == 0:
+            v = v.contiguous().view(num_heads, 0, head_dim).transpose(0, 1)
+        else:
+            v = v.contiguous().view(-1, bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert static_v.size(0) == bsz * num_heads, \
