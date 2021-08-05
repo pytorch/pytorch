@@ -207,30 +207,23 @@ uint64_t computeFlops(const std::string &op_name, const std::unordered_map<std::
     if (mat1_size.size() == 0) {
       return 0;
     }
+
     int64_t overlap_dim = mat1_size.back();
     if (overlap_dim == 0) {
-      TORCH_WARN("Failed to compute flops for op ", op_name ," on a mat1_size of 0.");
       return 0;
     }
 
-    uint64_t gemm_multiply_factor = 2;
-    if (op_name == kMMOp) {
-      gemm_multiply_factor *= (overlap_dim - 1);
-    } else if (op_name == kAddMMOp) {
-      gemm_multiply_factor *= overlap_dim;
-    }
-
-    uint64_t prod_dim = 1;
+    const uint64_t gemm_multiply_factor = 2;
+    uint64_t flops = 1;
     for(int64_t dim : mat1_size) {
-      prod_dim *= dim;
+      flops *= dim;
     }
-    prod_dim /= overlap_dim;
+    flops /= overlap_dim;
     for(int64_t dim : mat2_size) {
-      prod_dim *= dim;
+      flops *= dim;
     }
-    prod_dim /= overlap_dim;
-
-    return prod_dim * gemm_multiply_factor;
+    flops *= gemm_multiply_factor;
+    return flops;
   } else if (op_name == kMulOp) {
     if (extra_args.find(kMatSize) == extra_args.end()) {
       TORCH_WARN("Calculating flops for aten::mul.Tensor requires mat_size in saved arguments.");
