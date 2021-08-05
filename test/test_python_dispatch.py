@@ -152,20 +152,22 @@ $2 = torch._ops.aten.abs($0, out=$1)''')
             log_input("y", y)
             log_input("z", z)
             torch.addmv(x, y, z)
+            torch.addmv(x, y, z, beta=1)
             torch.addmv(x, y, z, beta=2)
             torch.addmv(x, y, z, alpha=2)
             torch.addmv(x, y, z, beta=2, alpha=2)
 
         # The expectation is that beta/alpha don't show up when they're
-        # defaulted
+        # defaulted.  This is even if the user explicitly specified it.
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
 $2 = input('z')
 $3 = torch._ops.aten.addmv($0, $1, $2)
-$4 = torch._ops.aten.addmv($0, $1, $2, beta=2)
-$5 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
-$6 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+$4 = torch._ops.aten.addmv($0, $1, $2)
+$5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
+$6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
+$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
