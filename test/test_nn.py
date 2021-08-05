@@ -13253,12 +13253,6 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(tgt.grad, torch.zeros_like(tgt))
 
     @onlyOnCPUAndCUDA
-    def test_TransformerEncoderLayer_TransformerDecoderLayer_empty(self, device):
-        for batch_first, input_shape in [(True, (0, 10, 512)),
-                                         (False, (10, 0, 512))]:
-            input = torch.rand(*input_shape, requires_grad=True, device=device)
-
-    @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
     def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
