@@ -7,6 +7,8 @@
 #include <exception>
 
 #include <ATen/record_function.h>
+#include <c10/util/ScopeExit.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -76,7 +78,7 @@ void slot_named_params_recurse(
     const std::string& parent_name) {
   auto slots = obj->slots();
   size_t nslots = slots.size();
-  for (size_t i = 0; i < nslots; ++i) {
+  for (const auto i : c10::irange(nslots)) {
     auto slot = slots[i];
     std::string name =
         parent_name.size() == 0 ? parent_name : parent_name + ".";
@@ -177,23 +179,41 @@ void Method::run(Stack& stack) const {
   debug_info->setMethodName(function_->name());
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
+  std::string error_message;
+  auto failure_guard = c10::make_scope_exit([&]() {
+    if (!observer) {
+      return;
+    }
+
+#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
+    if (error_message.empty()) {
+      error_message = owner_->getDebugTable().getSourceDebugString(
+          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
+    }
+#endif
+
+    observer->onFailRunMethod(
+        instance_key,
+        error_message.empty() ? "Unknown exception" : error_message.c_str());
+  });
+
   try {
     stack.insert(stack.begin(), owner_->_ivalue()); // self
     function_->run(stack);
     if (observer) {
       observer->onExitRunMethod(instance_key);
     }
+    failure_guard.release();
     // This exception must be caught first as it derived from c10::Error
   } catch (c10::BackendRuntimeException& e) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
     e.pushDebugHandle(function_->getExceptionDebugHandle());
     // symbolicate all handles
-    e.add_context(owner_->getDebugTable().getSourceDebugString(
-        e.getDebugHandles(), getTopModuleTypeName(*owner_)));
+    auto debug_string = owner_->getDebugTable().getSourceDebugString(
+        e.getDebugHandles(), getTopModuleTypeName(*owner_));
+    e.add_context(debug_string);
 #endif
-    if (observer) {
-      observer->onFailRunMethod(instance_key, e.what());
-    }
+    error_message = e.what();
     TORCH_RETHROW(e);
   } catch (c10::Error& error) {
 #if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
@@ -201,33 +221,8 @@ void Method::run(Stack& stack) const {
         function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
     error.add_context(debug_string);
 #endif
-    if (observer) {
-      observer->onFailRunMethod(instance_key, error.what());
-    }
+    error_message = error.what();
     TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-#if defined(SYMBOLICATE_MOBILE_DEBUG_HANDLE)
-      auto debug_string = owner_->getDebugTable().getSourceDebugString(
-          function_->getExceptionDebugHandle(), getTopModuleTypeName(*owner_));
-      error.add_context(debug_string);
-#endif
-      if (observer) {
-        observer->onFailRunMethod(instance_key, error.what());
-      }
-      TORCH_RETHROW(error);
-    }
   }
 }
 

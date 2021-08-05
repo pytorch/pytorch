@@ -151,7 +151,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
   // NOLINTNEXTLINE(modernize-use-override)
-  virtual ~DefaultMobileCPUAllocator() override = default;
+  ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
@@ -178,8 +178,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) const override {
     if (C10_UNLIKELY(0u == nbytes)) {
       return {
           nullptr,
@@ -214,8 +213,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     };
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual DeleterFnPtr raw_deleter() const override {
+  DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
 };
@@ -283,7 +281,8 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
               << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -318,7 +317,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
