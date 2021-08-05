@@ -2027,7 +2027,7 @@ template <typename func_t>
 Tensor differential_analytic_matrix_function(
     const Tensor& self, const Tensor& grad,
     const func_t& matrix_function,
-    const bool backward_ad // Choose between forward or reverse AD
+    const bool backward_ad // Choose between forward or backward AD
   ) {
   // Given an analytic matrix function, this computes the differential (forward AD)
   // or the adjoint of the differential (backward AD)
@@ -2044,7 +2044,7 @@ Tensor differential_analytic_matrix_function(
 
   return matrix_function(meta_grad).narrow(-2, 0, n).narrow(-1, n, n);
 }
-}; // end anon namespace
+} // end anon namespace
 
 // Computes the matrix exponential for a given batch of squared matrices.
 // The implementaion is based on:
@@ -2066,7 +2066,7 @@ Tensor linalg_matrix_exp(const Tensor& a) {
     return a.clone();
   } else if (n == 1) {
     return a.exp();
-  } else{
+  } else {
     return at::native::mexp(a);
   }
 }
