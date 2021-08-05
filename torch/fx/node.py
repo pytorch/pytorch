@@ -500,10 +500,14 @@ class Node:
         """
         if self.op == 'call_function':
             assert callable(self.target)
-            return normalize_function(self.target, self.args, self.kwargs, arg_types, kwarg_types)  # type: ignore[arg-type]
+            return normalize_function(
+                self.target, self.args, self.kwargs, arg_types, kwarg_types,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs)  # type: ignore[arg-type]
         elif self.op == 'call_module':
             assert isinstance(self.target, str)
-            return normalize_module(root, self.target, self.args, self.kwargs)  # type: ignore[arg-type]
+            return normalize_module(
+                root, self.target, self.args, self.kwargs,
+                normalize_to_only_use_kwargs=normalize_to_only_use_kwargs)  # type: ignore[arg-type]
 
         return None
 
