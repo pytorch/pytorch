@@ -1,4 +1,4 @@
-#include "reportMemoryUsage.h"
+#include <ATen/test/reportMemoryUsage.h>
 
 #include <gtest/gtest.h>
 
