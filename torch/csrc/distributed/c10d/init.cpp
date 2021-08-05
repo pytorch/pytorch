@@ -286,7 +286,7 @@ Returns:
 )")
       .def(
           "buffer",
-          &::c10d::GradBucket::getTensor,
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -295,7 +295,7 @@ Returns:
 )")
       .def(
           "gradients",
-          &::c10d::GradBucket::getPerParameterTensors,
+          &::c10d::GradBucket::getGradients,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -303,7 +303,7 @@ Returns:
 )")
       .def(
           "parameters",
-          &::c10d::GradBucket::getModelParamsForBucket,
+          &::c10d::GradBucket::getParameters,
           py::call_guard<py::gil_scoped_release>(),
                     R"(
 Returns:
@@ -312,7 +312,7 @@ Returns:
 )")
       .def(
           "is_last",
-          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          &::c10d::GradBucket::isLast,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -321,8 +321,8 @@ Returns:
 )")
       .def(
           "set_buffer",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Replaces the tensor in the bucket with the input tensor buffer.
