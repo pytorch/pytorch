@@ -39,7 +39,6 @@ from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import register_custom_op_symbolic, unregister_custom_op_symbolic
 from torch.onnx.utils import ONNXCheckerError
 
-
 def to_numpy(elem):
     if isinstance(elem, torch.Tensor):
         if elem.requires_grad:
