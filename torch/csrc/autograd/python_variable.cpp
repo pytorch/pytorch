@@ -1507,9 +1507,10 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
-  // Pre-scan for arguments that match defaults
-  int64_t default_suffix_len = 0;
-  for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+  // Find the first valid idx that isn't defaulted.  E.g., if there
+  // are no defaulted arguments, idx == arguments.size() - 1
+  int64_t idx = arguments.size() - 1;
+  for (; idx >= 0; idx--) {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
       break;
@@ -1519,18 +1520,28 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
     if (default_ivalue != ivalue) {
       break;
     }
-    default_suffix_len++;
   }
 
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments - default_suffix_len));
+  // Find the split point between kwarg-only and regular.
+  // (Why +1?  As in the normal indexing convention, end is exclusive, begin is
+  // inclusive.  So if idx is actually kwarg only--we don't know yet--it is
+  // only included if I set end to +1)
+  const int64_t kwarg_only_end = idx + 1;
+  for (; idx >= 0; idx--) {
+    const auto& arg = schema.arguments()[idx];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+  const int64_t kwarg_only_begin = idx + 1;
+  const int64_t positional_end = idx + 1;
 
-  // TODO: actually populate kwargs sometimes?  At the moment, every argument
-  // just gets passed positionally
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_end));
   py::dict kwargs;
 
-  for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
-    auto& ivalue = arguments[idx];
-    // Search for Tensors (as they may have the torch functions we need)
+  // Find overloaded tensors
+  for (int64_t idx = 0; idx < kwarg_only_end; idx++) {
+    const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
@@ -1548,7 +1559,17 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         }
       }
     }
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(ivalue)).release().ptr());
+  }
+
+  // Populate positional arguments
+  for (int64_t idx = 0; idx < positional_end; idx++) {
+    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
+  }
+
+  // Populate keyword arguments
+  for (int64_t idx = kwarg_only_begin; idx < kwarg_only_end; idx++) {
+    const auto& arg = schema.arguments()[idx];
+    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
   }
 
   auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(
