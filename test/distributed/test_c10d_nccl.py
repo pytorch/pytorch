@@ -1712,7 +1712,7 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl(self):
+    def test_hook_then_sgd_nccl(self):
         sgd_lr = 1e-2
         sgd_momentum = 0.9
         sgd_weight_decay = 0.01
@@ -1725,7 +1725,7 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
+    def test_hook_then_sgd_nccl_grad_as_bucket_view(self):
         sgd_lr = 1e-2
         sgd_momentum = 0.9
         sgd_weight_decay = 0.01

@@ -771,6 +771,18 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
+if(USE_PRECOMPILED_HEADERS)
+  target_precompile_headers(torch_cpu PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+  # Exclude some files from using PCH
+  set_source_files_properties(
+      # Errors when ATen.h is included
+      ${Torch_BINARY_DIR}/aten/src/ATen/core/TensorMethods.cpp
+      # Builds with incompatible compiler flags
+      ${Caffe2_CPU_SRCS_AVX2}
+      ${Caffe2_CPU_SRCS_AVX512}
+      PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
 
 if(CMAKE_COMPILER_IS_GNUCXX AND BUILD_LIBTORCH_CPU_WITH_DEBUG)
   # To enable debug fission we need to build libtorch_cpu with debug info on,
@@ -827,6 +839,11 @@ if(USE_ROCM)
     target_link_libraries(torch_hip PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_hip PRIVATE USE_NCCL)
   endif()
+
+  if(USE_PRECOMPILED_HEADERS)
+    target_precompile_headers(torch_hip PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+  endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   if(CUDA_SEPARABLE_COMPILATION)
@@ -863,6 +880,18 @@ elseif(USE_CUDA)
   elseif(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
+  endif()
+
+  if(USE_PRECOMPILED_HEADERS)
+    if(BUILD_SPLIT_CUDA)
+      target_precompile_headers(torch_cuda_cpp PRIVATE
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+    else()
+      target_precompile_headers(torch_cuda PRIVATE
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+    endif()
   endif()
 endif()
 
