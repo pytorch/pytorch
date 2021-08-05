@@ -6070,13 +6070,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         m = 256
         n = 128
 
-        mat1 = torch.ones(m, n, device=device, dtype=dtype)
-        mat2 = torch.ones(n, m, device=device, dtype=dtype)
+        mat1 = torch.randint(0, 100, (m, n), device=device, dtype=dtype)
+        mat2 = torch.randint(100, 1000, (n, m), device=device, dtype=dtype)
 
         int_product = mat1 @ mat2
         fp_product = (mat1.to(torch.double) @ mat2.to(torch.double)).to(dtype)
 
         self.assertEqual(fp_product, int_product)
+
+        mat1 = torch.randint(0, 100, (m, m), device=device, dtype=dtype)
+        mat2 = torch.randint(100, 1000, (m, m), device=device, dtype=dtype)
+
+        for transpose_mat1 in [True, False]:
+            for transpose_mat2 in [True, False]:
+                tmat1 = mat1.t() if transpose_mat1 else mat1
+                tmat2 = mat2.t() if transpose_mat2 else mat2
+
+                int_prod = tmat1 @ tmat2
+                fp_prod = (tmat1.to(torch.double) @ tmat2.to(torch.double)).to(dtype)
+
+                self.assertEqual(int_prod, fp_prod)
 
     @slowTest
     @onlyOnCPUAndCUDA
