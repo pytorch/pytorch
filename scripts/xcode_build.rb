@@ -62,7 +62,6 @@ end
 # link system frameworks
 frameworks = ['Accelerate', 'MetalPerformanceShaders']
 frameworks.each do |framework|
-    next if exist_framework?(target.frameworks_build_phases, framework)
     path = "System/Library/Frameworks/#{framework}.framework"
     framework_ref = project.frameworks_group.new_reference(path)
     framework_ref.name = "#{framework}.framework"
