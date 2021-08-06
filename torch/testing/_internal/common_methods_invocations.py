@@ -890,7 +890,7 @@ class ReductionOpInfo(OpInfo):
         # the OpInfo base class. However, the test_reductions.py file will still
         # generate its own inputs.
         def sample_inputs_func(*args, **kwargs):
-            result: list[SampleInput] = []
+            result: List[SampleInput] = []
             f = sample_inputs_reduction_wrapper(supports_multiple_dims)
             for sample in f(*args, **kwargs):
                 for args, kwargs in generate_args_kwargs(sample.input, **sample.kwargs):
