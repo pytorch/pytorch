@@ -52,6 +52,7 @@ def _calculate_job_times(reports: List["Report"]) -> Dict[str, float]:
         assert 'format_version' in v_report.keys() and v_report.get('format_version') == 2, \
             "S3 format currently handled is version 2 only"
         files: Dict[str, Any] = v_report['files']
+        print(f"found a total of {len(files)} files from report.")
         for name, test_file in files.items():
             if name not in jobs_to_times:
                 jobs_to_times[name] = (test_file['total_seconds'], 1)
@@ -103,6 +104,8 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
     if len(s3_reports) == 0:
         print('Gathered no reports from S3. Please proceed without them.')
         return dict()
+    else:
+        print(f"Gathered {len(s3_reports)} reports from S3.")
 
     return _calculate_job_times(s3_reports)
 
