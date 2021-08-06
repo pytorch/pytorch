@@ -241,3 +241,19 @@ Anomaly detection
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+
+Saved tensors default hooks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some operations need intermediary results to be saved during the forward pass
+in order to execute the backward pass.
+You can define how these saved tensors should be packed / unpacked using hooks.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    graph.set_saved_tensors_default_hooks
+    graph.reset_saved_tensors_default_hooks
+    graph.save_on_cpu
