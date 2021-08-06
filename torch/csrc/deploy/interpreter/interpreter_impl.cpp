@@ -494,6 +494,10 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return call_kwargs(obj, args, kwargs);
   }
 
+  bool hasattr(Obj obj, const char* attr) override {
+    return py::hasattr(unwrap(obj), attr);
+  }
+
   Obj attr(Obj obj, const char* attr) override {
     return wrap(unwrap(obj).attr(attr));
   }
