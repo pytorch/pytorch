@@ -2470,14 +2470,16 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
 
 TEST(RecordDebugHandles, Basic) {
   // Enable the profiler in this thread
+  const std::set<torch::autograd::profiler::ActivityType> activities(
+      {torch::autograd::profiler::ActivityType::CPU});
   torch::autograd::profiler::prepareProfiler(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
+      activities);
   torch::autograd::profiler::enableProfiler(
       torch::autograd::profiler::ProfilerConfig(
           torch::autograd::profiler::ProfilerState::KINETO, false, false),
-      {torch::autograd::profiler::ActivityType::CPU});
+      activities);
   {
     RECORD_USER_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS("my_function", 42, {});
     float x{5.9999}, y{2.1212};
