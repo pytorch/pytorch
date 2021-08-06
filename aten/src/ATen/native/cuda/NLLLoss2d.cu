@@ -282,43 +282,41 @@ void nll_loss2d_forward_out_cuda_template(
   total_weight.fill_(0);
 
   auto batch_size = target.size(0);
-  if (batch_size == 0) {
+  auto target_numel = target.numel();
+  if (batch_size != 0 && target_numel != 0) {
     // This guards from unnecessary operations and launching CUDA kernel with 0
     // blocks. launch kernel
-    return;
+    int64_t map_nelem = target_numel / batch_size;
+    int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+    blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
+    int total_blocks = blocks_per_sample * batch_size;
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "nll_loss2d_forward_kernel",
+        [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
+          nll_loss2d_forward_kernel<scalar_t, accscalar_t>
+              <<<total_blocks,
+                CUDA_NUM_THREADS,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                  output.data_ptr<scalar_t>(),
+                  total_weight.data_ptr<scalar_t>(),
+                  input_.data_ptr<scalar_t>(),
+                  target_.data_ptr<int64_t>(),
+                  optional_data<scalar_t>(weight_),
+                  reduction == at::Reduction::Mean,
+                  input_.size(0),
+                  input_.size(1),
+                  input_.size(2) * input_.size(3),
+                  blocks_per_sample,
+                  ignore_index);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
   }
-
-  int64_t map_nelem = target.numel() / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
-  blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
-  int total_blocks = blocks_per_sample * batch_size;
-
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      input.scalar_type(),
-      "nll_loss2d_forward_kernel",
-      [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        nll_loss2d_forward_kernel<scalar_t, accscalar_t>
-            <<<total_blocks,
-               CUDA_NUM_THREADS,
-               0,
-               at::cuda::getCurrentCUDAStream()>>>(
-                output.data_ptr<scalar_t>(),
-                total_weight.data_ptr<scalar_t>(),
-                input_.data_ptr<scalar_t>(),
-                target_.data_ptr<int64_t>(),
-                optional_data<scalar_t>(weight_),
-                reduction == at::Reduction::Mean,
-                input_.size(0),
-                input_.size(1),
-                input_.size(2) * input_.size(3),
-                blocks_per_sample,
-                ignore_index);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
-
   if (reduction == at::Reduction::Mean) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -410,45 +408,44 @@ void nll_loss2d_backward_out_cuda_template(
   }
 
   int64_t batch_size = target.size(0);
-  if (batch_size == 0) {
+  auto target_numel = target.numel();
+  if (batch_size != 0 && target_numel != 0) {
     // This guards from unnecessary operations and launching CUDA kernel with 1
     // blocks.
-    return;
+    auto target_ = target.contiguous();
+    auto weight_ = optional_contiguous(weight);
+
+    int64_t map_nelem = target_numel / batch_size;
+    int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+    blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
+    int total_blocks = blocks_per_sample * batch_size;
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        input.scalar_type(),
+        "nll_loss2d_backward_kernel",
+        [&] {
+          using accscalar_t = acc_type<scalar_t, true>;
+          nll_loss2d_backward_kernel<scalar_t, accscalar_t>
+              <<<total_blocks,
+                CUDA_NUM_THREADS,
+                0,
+                at::cuda::getCurrentCUDAStream()>>>(
+                  grad_input.data_ptr<scalar_t>(),
+                  grad_output.data_ptr<scalar_t>(),
+                  target_.data_ptr<int64_t>(),
+                  optional_data<scalar_t>(weight_),
+                  total_weight.data_ptr<scalar_t>(),
+                  reduction == at::Reduction::Mean,
+                  input.size(0),
+                  input.size(1),
+                  input.size(2) * input.size(3),
+                  blocks_per_sample,
+                  ignore_index);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+        });
   }
-
-  auto target_ = target.contiguous();
-  auto weight_ = optional_contiguous(weight);
-
-  int64_t map_nelem = target.numel() / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
-  blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
-  int total_blocks = blocks_per_sample * batch_size;
-
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      input.scalar_type(),
-      "nll_loss2d_backward_kernel",
-      [&] {
-        using accscalar_t = acc_type<scalar_t, true>;
-        nll_loss2d_backward_kernel<scalar_t, accscalar_t>
-            <<<total_blocks,
-               CUDA_NUM_THREADS,
-               0,
-               at::cuda::getCurrentCUDAStream()>>>(
-                grad_input.data_ptr<scalar_t>(),
-                grad_output.data_ptr<scalar_t>(),
-                target_.data_ptr<int64_t>(),
-                optional_data<scalar_t>(weight_),
-                total_weight.data_ptr<scalar_t>(),
-                reduction == at::Reduction::Mean,
-                input.size(0),
-                input.size(1),
-                input.size(2) * input.size(3),
-                blocks_per_sample,
-                ignore_index);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
 }
 } // namespace
 
