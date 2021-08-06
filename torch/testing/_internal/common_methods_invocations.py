@@ -2643,7 +2643,7 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
-    assert mode in ('caonstant', 'reflect', 'replicate', 'circular')
+    assert mode in ('constant', 'reflect', 'replicate', 'circular')
     if dtype == torch.bool and mode == 'circular':
         # test_dtypes fails on ASAN with for the case below
         # runtime error: load of value 190, which is not a valid value for type 'bool'
