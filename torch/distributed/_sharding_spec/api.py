@@ -1,11 +1,11 @@
 from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union
+from torch.distributed.remote_device import _RemoteDevice
 
 from ._internals import (
     Device,
     ShardMetadata,
-    is_valid_device,
     validate_non_overlapping_shards_metadata
 )
 
@@ -21,22 +21,17 @@ class PlacementSpec(ABC):
 @dataclass
 class DevicePlacementSpec(PlacementSpec):
     """
-    Associates placement of an entity with a single device. The device can be a
-    local device or a remote device specified by one of the following remote
-    formats:
-
-        1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
-        2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+    Associates placement of an entity with a single device.
 
     Args:
-        device(str, :class:`torch.device`): The device to place the entity on.
+        device(:class:`torch.distributed.remote_device._RemoteDevice`): The device to place the entity on.
     """
 
     device: Device
 
     def __post_init__(self):
-        if not is_valid_device(self.device):
-            raise ValueError(f'{self.device} is not a valid device')
+        if not isinstance(self.device, _RemoteDevice):
+            self.device = _RemoteDevice(self.device)
 
 
 class ShardingSpec(PlacementSpec):
@@ -64,36 +59,26 @@ class ChunkShardingSpec(ShardingSpec):
             The dimension to shard on, could be an integer representing the
             dimension or a string in case of named tensors where dimensions are
             named.
-        placement(List[Device]):
+        placement(List[_RemoteDevice] or List[str]):
             Specifies the placement of each shard of the Tensor. The size of
-            the list represents the number of shards to be created. This
-            parameter can be a list of devices
-            (ex: ["rank:0/cuda:0", "rank:1/cuda:1"]) or a list of custom
-            placement specs.
-
-            The device can be a local device or a remote device specified by one
-            of the following remote formats:
-
-                1. "rank:<rank>/<device>" (ex: "rank:0/cuda:0").
-                2. "<worker_name>/<device>" (ex: "trainer0/cuda:0").
+            the list represents the number of shards to be created. This could
+            be a list of
+            :class:`torch.distributed.remote_device._RemoteDevice`'s. This could
+            also should be a ``List[str]`` where each string represents remote
+            device as accepted by
+            :class:`torch.distributed.remote_device._RemoteDevice`
     """
 
     ShardingDim = Union[int, str]
 
     dim: ShardingDim
-    placements: List[Device]
+    placements: List[_RemoteDevice]
 
     def __post_init__(self):
         self._verify_dim(self.dim)
-        self._verify_devices(self.placements)
-
-    @staticmethod
-    def _verify_devices(placements):
-        if placements is None or len(placements) == 0:
-            raise ValueError(f'None/Empty placement provided: {placements}')
-        for dev in placements:
-            if not is_valid_device(dev):
-                raise ValueError(f'{dev} is not a valid device')
+        for i, remote_device in enumerate(self.placements):
+            if not isinstance(remote_device, _RemoteDevice):
+                self.placements[i] = _RemoteDevice(remote_device)
 
     @staticmethod
     def _verify_dim(dim):

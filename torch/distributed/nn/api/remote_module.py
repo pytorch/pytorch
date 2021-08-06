@@ -21,8 +21,8 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
+from torch.distributed.remote_device import _RemoteDevice
 from torch.distributed.rpc.internal import _internal_rpc_pickler
-from torch.distributed.utils import _parse_remote_device
 from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
@@ -420,7 +420,9 @@ class _RemoteModule(nn.Module):
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
-        self.on, self.device = _parse_remote_device(remote_device)
+        remote_device = _RemoteDevice(remote_device)
+        self.on = remote_device.remote_worker()
+        self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
         # then enable moving any input CPU tensors to the same cuda device.
