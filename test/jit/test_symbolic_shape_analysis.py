@@ -100,6 +100,20 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         FileCheck().check("Tensor = aten::view").run(foo.graph)
 
+    def test_if_propagation(self):
+        @torch.jit.script
+        def foo(i: int, z):
+            x = torch.ones([2, 3, 4, 5])
+            y = z.view([i, 3, 2, i])
+            if i == 4:
+                return x
+            else:
+                return y
+
+        torch._C._jit_pass_constant_propagation(foo.graph)
+        torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
+        FileCheck().check("*, 3, 2, *").check("*, 3, *, *) = prim::If").run(foo.graph)
+
     def test_unary_shape_functions(self):
         def apply(fn):
             return lambda x: fn(x)
