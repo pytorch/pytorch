@@ -164,10 +164,10 @@ class NLLLoss(_WeightedLoss):
             :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, C)`, :math:`(C)`, where `C = number of classes`, or
+        - Input: :math:`(C)` or :math:`(N, C)`, where `C = number of classes`, or
           :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
           in the case of `K`-dimensional loss.
-        - Target: :math:`(N)` or a scalar, where each value is
+        - Target: A scalar or :math:`(N)`, where each value is
           :math:`0 \leq \text{targets}[i] \leq C-1`, or
           :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1` in the case of
           K-dimensional loss.
