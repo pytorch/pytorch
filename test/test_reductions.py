@@ -667,7 +667,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
