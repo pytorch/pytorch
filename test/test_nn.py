@@ -12370,7 +12370,7 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
-        out = module(inp)
+        out = module(*inp)
         gO = torch.rand_like(out)
         out.backward(gO)
         if check_size:
@@ -12379,6 +12379,20 @@ class TestNNDeviceType(NNTestCase):
             if p.requires_grad:
                 self.assertEqual(p.grad, torch.zeros_like(p.grad))
         self.assertEqual(inp.grad, torch.zeros_like(inp))
+
+    def _test_module_empty_inputs(self, module, inputs):
+        for _inp in inputs:
+            _inp.requires_grad_(True)
+        out = module(*inputs)
+        gO = torch.rand_like(out)
+        out.backward(gO)
+
+        for p in module.parameters():
+            if p.requires_grad:
+                self.assertEqual(p.grad, torch.zeros_like(p.grad))
+
+        for _inp in inputs:
+            self.assertEqual(_inp.grad, torch.zeros_like(_inp))
 
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
@@ -13213,7 +13227,6 @@ class TestNNDeviceType(NNTestCase):
                                          (False, (10, 0, 512))]:
             input = torch.rand(*input_shape, device=device)
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
-
             self._test_module_empty_input(encoder_layer, input, check_size=False)
 
     @onlyOnCPUAndCUDA
@@ -13223,7 +13236,6 @@ class TestNNDeviceType(NNTestCase):
             input = torch.rand(*input_shape, device=device)
             encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=6).to(device)
-
             self._test_module_empty_input(transformer_encoder, input, check_size=False)
 
     @onlyOnCPUAndCUDA
@@ -13233,11 +13245,7 @@ class TestNNDeviceType(NNTestCase):
             memory = torch.rand(*memory_shape, device=device)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
             decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
-            out = decoder_layer(tgt, memory)
-            out.sum().backward()
-
-            self.assertEqual(tgt, torch.zeros_like(tgt))
-            self.assertEqual(tgt.grad, torch.zeros_like(tgt))
+            self._test_module_empty_inputs(decoder_layer, [tgt, memory])
 
     @onlyOnCPUAndCUDA
     def test_TransformerDecoder_empty(self, device):
@@ -13247,11 +13255,7 @@ class TestNNDeviceType(NNTestCase):
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
             decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=batch_first).to(device)
             transformer_decoder = nn.TransformerDecoder(decoder_layer, num_layers=6).to(device)
-            out = transformer_decoder(tgt, memory)
-            out.sum().backward()
-
-            self.assertEqual(tgt, torch.zeros_like(tgt))
-            self.assertEqual(tgt.grad, torch.zeros_like(tgt))
+            self._test_module_empty_inputs(transformer_decoder, [tgt, memory])
 
     @onlyOnCPUAndCUDA
     def test_Transformer_empty(self, device):
@@ -13259,12 +13263,7 @@ class TestNNDeviceType(NNTestCase):
             transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device)
-
-            out = transformer_model(src, tgt)
-            out.sum().backward()
-
-            self.assertEqual(tgt, torch.zeros_like(tgt))
-            self.assertEqual(tgt.grad, torch.zeros_like(tgt.grad))
+            self._test_module_empty_inputs(transformer_decoder, [src, tgt])
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.complex64)
