@@ -3,8 +3,23 @@
 {% block name -%}
 # Template is at:    .github/templates/bazel_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Bazel Linux CI (!{{ build_environment }})
+name: !{{ build_environment }}
 {%- endblock %}
+
+on:
+{%- if on_pull_request %}
+  pull_request:
+  {%- if ciflow_config.enabled %}
+    {%- if ciflow_config.trigger_action_only %}
+    types: [!{{ ciflow_config.trigger_action }}]
+    {%- else %}
+    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
+    {%- endif %}
+  {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
+{%- endif %}
+
 {% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
   build-and-test:
@@ -60,6 +75,7 @@ name: Bazel Linux CI (!{{ build_environment }})
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -106,6 +122,7 @@ name: Bazel Linux CI (!{{ build_environment }})
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -156,6 +173,11 @@ name: Bazel Linux CI (!{{ build_environment }})
     needs: [build-and-test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user

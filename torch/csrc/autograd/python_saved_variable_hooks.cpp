@@ -10,7 +10,7 @@ namespace torch { namespace autograd {
     pack_hook_(pack_hook.release().ptr()),
     unpack_hook_(unpack_hook.release().ptr()) {}
 
-  void PySavedVariableHooks::call_pack_hook(at::Tensor &tensor) {
+  void PySavedVariableHooks::call_pack_hook(const at::Tensor &tensor) {
     py::gil_scoped_acquire acquire;
     auto pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     auto wrapped = THPVariable_Wrap(tensor);
@@ -59,6 +59,7 @@ namespace torch { namespace autograd {
   }
 
   void PyDefaultSavedVariableHooks::reset_hooks() {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (Py_IsInitialized()) {
       py::gil_scoped_acquire gil;
       Py_XDECREF(pack_hook_);
@@ -69,10 +70,11 @@ namespace torch { namespace autograd {
   }
 
   std::unique_ptr<SavedVariableHooks> PyDefaultSavedVariableHooks::get_hooks() {
-    py::gil_scoped_acquire acquire;
     if (!pack_hook_ || !unpack_hook_) {
       return nullptr;
     }
+    std::lock_guard<std::mutex> lock(mutex_);
+    py::gil_scoped_acquire gil;
     py::function pack_hook = py::reinterpret_borrow<py::function>(pack_hook_);
     py::function unpack_hook = py::reinterpret_borrow<py::function>(unpack_hook_);
     return std::make_unique<PySavedVariableHooks>(pack_hook, unpack_hook);
