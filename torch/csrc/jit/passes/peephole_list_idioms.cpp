@@ -8,9 +8,13 @@
 #include <torch/csrc/jit/passes/value_refinement_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
+#include <stdexcept>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
+
+namespace {
 
 c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
@@ -23,13 +27,36 @@ c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   }
 }
 
+bool isListOrDict(Value* v) {
+  return v->type()->cast<ListType>() || v->type()->cast<DictType>();
+}
+
+struct DictNode {
+  explicit DictNode(Node* dict_creation_node) {
+    for (size_t i = 0; i < dict_creation_node->inputs().size(); i += 2) {
+      Value* key = dict_creation_node->input(i);
+      bool is_constant = toIValue(key) != c10::nullopt;
+      if (is_constant && dict.find(key) == dict.end()) {
+        dict.emplace(key, dict_creation_node->input(i + 1));
+      } else {
+        has_overlap = true;
+      }
+    }
+  }
+
+  std::unordered_map<Value*, Value*> dict;
+  bool has_overlap = false;
+};
+
+} // namespace
+
 // see [value refinement algorithm]
 
 struct ListLenRefiner {
   ListLenRefiner(
       std::shared_ptr<Graph> graph,
       std::unordered_set<Value*>& mutated_lists)
-      : graph_(std::move(graph)), mutated_lists_(mutated_lists) {}
+      : graph_(std::move(graph)), mutated_inputs_(mutated_lists) {}
 
   bool run() {
     std::unordered_set<Value*> li_with_len_use;
@@ -58,7 +85,7 @@ struct ListLenRefiner {
 
       auto first_input = n->input(0);
       if (first_input->type()->cast<ListType>() &&
-          !mutated_lists_.count(first_input)) {
+          !mutated_inputs_.count(first_input)) {
         if (!li_with_len_use.count(first_input)) {
           li_with_len_use.insert(first_input);
         } else {
@@ -138,7 +165,7 @@ struct ListLenRefiner {
   }
 
   std::shared_ptr<Graph> graph_;
-  std::unordered_set<Value*> mutated_lists_;
+  std::unordered_set<Value*> mutated_inputs_;
   // candidate lists for optimizations
   std::unordered_set<Value*> lists_to_refine_;
   // A stack of active refinements, one for each block
@@ -150,8 +177,8 @@ struct ListLenRefiner {
   bool changed_ = false;
 };
 
-// This pass only does optimizations on lists which aren't mutated,
-// so we first use the Alias Db to collect the set of list values
+// This pass only does optimizations on lists/dicts which aren't mutated,
+// so we first use the Alias Db to collect the set of list/dict values
 // which we shouldn't optimize.
 struct PeepholeOptimizeListIdiomsImpl {
   PeepholeOptimizeListIdiomsImpl(
@@ -162,33 +189,102 @@ struct PeepholeOptimizeListIdiomsImpl {
         refine_list_len_(refine_list_len) {}
 
   bool run() {
-    collectMutatedLists(graph_->block());
+    collectMutated(graph_->block());
     bool changed = runBlock(graph_->block());
     if (refine_list_len_) {
-      changed |= ListLenRefiner(graph_, mutated_lists_).run();
+      changed |= ListLenRefiner(graph_, mutated_inputs_).run();
     }
     return changed;
   }
 
  private:
-  void checkForMutatedList(Value* v) {
-    if (v->type()->cast<ListType>() && aliasDb_->hasWriters(v)) {
-      mutated_lists_.insert(v);
+  void checkForMutated(Value* v) {
+    if (isListOrDict(v) && aliasDb_->hasWriters(v)) {
+      mutated_inputs_.insert(v);
     }
   }
 
-  void collectMutatedLists(Block* b) {
+  void collectMutated(Block* b) {
     for (Value* v : b->inputs()) {
-      checkForMutatedList(v);
+      checkForMutated(v);
     }
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        checkForMutatedList(v);
+        checkForMutated(v);
       }
       for (Block* block : n->blocks()) {
-        collectMutatedLists(block);
+        collectMutated(block);
       }
     }
+  }
+
+  c10::optional<int64_t> computeLen(Node* node) {
+    if (node->kind() == prim::ListConstruct) {
+      return static_cast<int64_t>(node->inputs().size());
+    } else if (node->kind() == prim::DictConstruct) {
+      auto d = dictNodeToMap(node);
+      if (!d.has_overlap) {
+        return static_cast<int64_t>(d.dict.size());
+      }
+    }
+    return c10::nullopt;
+  }
+
+  bool optimizeLen(Node* len_node, Node* creation_node) {
+    auto len = computeLen(creation_node);
+    if (len != c10::nullopt) {
+      WithInsertPoint guard(len_node);
+      len_node->output()->replaceAllUsesWith(graph_->insertConstant(len));
+      return true;
+    }
+    return false;
+  }
+
+  // Turn a DictConstructNode into a std::unordered_map<Value*, Value*>.
+  // Uses a cache to avoid many passes over all of the node's inputs.
+  DictNode dictNodeToMap(Node* dict_creation_node) {
+    auto cached_dict = cached_dicts_.find(dict_creation_node);
+    if (cached_dict != cached_dicts_.end()) {
+      return cached_dict->second;
+    }
+
+    auto result = DictNode(dict_creation_node);
+    cached_dicts_.emplace(dict_creation_node, result);
+    return result;
+  }
+
+  c10::optional<Value*> getValueFromDict(Node* dict_creation_node, Value* key) {
+    auto dict_node = dictNodeToMap(dict_creation_node);
+
+    if (!dict_node.has_overlap) {
+      auto value = dict_node.dict.find(key);
+      if (value != dict_node.dict.end()) {
+        return value->second;
+      }
+    }
+    return c10::nullopt;
+  }
+
+  bool optimizeGetItem(Node* getitem_node, Node* creation_node) {
+    auto creation_node_kind = creation_node->kind();
+    if (creation_node_kind == prim::ListConstruct) {
+      if (auto index = toIValue(getitem_node->input(1))) {
+        size_t list_size = creation_node->inputs().size();
+        if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
+          getitem_node->output()->replaceAllUsesWith(
+              creation_node->input(*norm_index));
+          return true;
+        }
+      }
+    } else if (creation_node_kind == prim::DictConstruct) {
+      auto key = getitem_node->input(1);
+      if (auto value = getValueFromDict(creation_node, key)) {
+        getitem_node->output()->replaceAllUsesWith(*value);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   bool runBlock(Block* block) {
@@ -198,38 +294,22 @@ struct PeepholeOptimizeListIdiomsImpl {
         changed |= runBlock(b);
       }
 
-      // only optimizing list ops
-      if (node->inputs().size() == 0 ||
-          !node->input(0)->type()->cast<ListType>()) {
+      // only optimizing list or dict ops
+      if (node->inputs().size() == 0 || !isListOrDict(node->input(0))) {
         continue;
       }
 
       auto first_input = node->input(0);
 
-      // only optimizing ops with unmutated lists
-      if (mutated_lists_.count(first_input)) {
+      // only optimizing ops with unmutated inputs
+      if (mutated_inputs_.count(first_input)) {
         continue;
       }
 
       if (node->kind() == aten::len) {
-        if (first_input->node()->kind() == prim::ListConstruct) {
-          WithInsertPoint guard(node);
-          node->output()->replaceAllUsesWith(graph_->insertConstant(
-              static_cast<int64_t>(first_input->node()->inputs().size())));
-          changed = true;
-        }
+        changed |= optimizeLen(node, first_input->node());
       } else if (node->kind() == aten::__getitem__) {
-        auto list_creation_node = first_input->node();
-        if (list_creation_node->kind() == prim::ListConstruct) {
-          if (auto index = toIValue(node->input(1))) {
-            size_t list_size = list_creation_node->inputs().size();
-            if (auto norm_index = normalizeIndex(index->toInt(), list_size)) {
-              node->output()->replaceAllUsesWith(
-                  list_creation_node->input(*norm_index));
-              changed = true;
-            }
-          }
-        }
+        changed |= optimizeGetItem(node, first_input->node());
       } else if (node->kind() == prim::ListUnpack) {
         auto list_creation_node = first_input->node();
         if (list_creation_node->kind() == prim::ListConstruct) {
@@ -248,7 +328,7 @@ struct PeepholeOptimizeListIdiomsImpl {
         }
         auto second_input = node->input(1);
         // already checked first, need to check second
-        if (mutated_lists_.count(second_input)) {
+        if (mutated_inputs_.count(second_input)) {
           continue;
         }
         if (first_input->node()->kind() != prim::ListConstruct ||
@@ -266,8 +346,8 @@ struct PeepholeOptimizeListIdiomsImpl {
           list_construct->addInput(v);
         }
         node->output()->replaceAllUsesWith(list_construct->output());
-        if (mutated_lists_.count(node->output())) {
-          mutated_lists_.insert(list_construct->output());
+        if (mutated_inputs_.count(node->output())) {
+          mutated_inputs_.insert(list_construct->output());
         }
         changed = true;
       }
@@ -275,7 +355,8 @@ struct PeepholeOptimizeListIdiomsImpl {
     return changed;
   }
 
-  std::unordered_set<Value*> mutated_lists_;
+  std::unordered_set<Value*> mutated_inputs_;
+  std::unordered_map<Node*, DictNode> cached_dicts_;
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_;
   bool refine_list_len_;

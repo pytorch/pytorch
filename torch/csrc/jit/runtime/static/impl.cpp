@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
@@ -63,7 +64,12 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
-  EliminateDeadCode(graph);
+  // PeepholeOptimize will call EliminateDeadCode if it changes
+  // the graph.
+  if (!PeepholeOptimize(graph)) {
+    EliminateDeadCode(graph);
+  }
+
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
 
