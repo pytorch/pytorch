@@ -630,6 +630,9 @@ class DistributedDataParallel(Module, Joinable):
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
             param_to_name_mapping,
+            # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
+            # bucket.
+            dist._DEFAULT_FIRST_BUCKET_BYTES
         )
 
         self.logger = dist.Logger(self.reducer)
