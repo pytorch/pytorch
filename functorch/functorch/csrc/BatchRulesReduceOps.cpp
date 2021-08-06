@@ -323,7 +323,6 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
     const Tensor& output, optional<int64_t> output_bdim,
     int64_t dim,
     const Tensor& self, optional<int64_t> self_bdim) {
-  TORCH_INTERNAL_ASSERT(false);
   TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
     "output_bdim and self_bdim must be the same");
   // NB: It turns out that expanding + calling log_softmax_backward is generally
