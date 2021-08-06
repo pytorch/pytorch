@@ -1,15 +1,15 @@
 import torch
 from typing import Callable, Any
 
-def set_saved_tensors_default_hooks(pack_hook: Callable[[torch.Tensor], Any], unpack_hook: Callable[[Any], torch.Tensor]):
-    """Sets a pair of pack / unpack hooks for saved tensors.
+class saved_tensors_hooks():
+    """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
-    Use these hooks to define how intermediary results of an operation
+    Use this context-manager to define how intermediary results of an operation
     should be packed before saving, and unpacked on retrieval.
 
-    When default hooks are set, the ``pack_hook`` function will be called
-    everytime an operation saves a tensor for backward (this includes
-    intermediary results saved using
+    In that context, the ``pack_hook`` function will be called everytime an
+    operation saves a tensor for backward (this includes intermediary results
+    saved using
     :func:`~torch.autograd.function._ContextMethodMixin.save_for_backward` but
     also those recorded by a PyTorch-defined operation). The output of
     ``pack_hook`` is then stored in the computation graph instead of the
@@ -45,11 +45,10 @@ def set_saved_tensors_default_hooks(pack_hook: Callable[[torch.Tensor], Any], un
         >>>
         >>> a = torch.ones(5, requires_grad=True)
         >>> b = torch.ones(5, requires_grad=True) * 2
-        >>> torch.autograd.graph.set_saved_tensors_default_hooks(pack_hook, unpack_hook)
-        >>> y = a * b
+        >>> with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+        ...     y = a * b
         Packing tensor([1., 1., 1., 1., 1.])
         Packing tensor([2., 2., 2., 2., 2.])
-        >>> torch.autograd.graph.reset_saved_tensors_default_hooks()
         >>> y.sum().backward()
         Unpacking tensor([1., 1., 1., 1., 1.])
         Unpacking tensor([2., 2., 2., 2., 2.])
@@ -59,26 +58,18 @@ def set_saved_tensors_default_hooks(pack_hook: Callable[[torch.Tensor], Any], un
         to undefined behavior.
 
     .. warning ::
-        Only one pair of hooks is allowed at a time. To register a different
-        pair of hooks, call :func:`~torch.autograd.graph.reset_saved_tensors_default_hooks()`
-        first.
-
+        Only one pair of hooks is allowed at a time. Recursively nesting this
+        context-manager is not yet supported.
     """
-    torch._C._autograd._register_default_hooks(pack_hook, unpack_hook)
+    def __init__(self, pack_hook: Callable[[torch.Tensor], Any], unpack_hook: Callable[[Any], torch.Tensor]):
+        self.pack_hook = pack_hook
+        self.unpack_hook = unpack_hook
 
-def reset_saved_tensors_default_hooks():
-    """Removes the current pair of default pack / unpack hooks for saved tensors.
+    def __enter__(self):
+        torch._C._autograd._register_default_hooks(self.pack_hook, self.unpack_hook)
 
-    Intermediary values that are saved after this function is called won't be
-    packed / unpacked with the default hooks previously defined.
-
-    This does not affect previously saved tensors: intermediary values that
-    were saved before this function is called are still stored in their *packed* form
-    and will be unpacked using the corresponding ``unpack_hook``.
-
-    Also see :func:`~torch.autograd.graph.set_saved_tensors_default_hooks()`.
-    """
-    torch._C._autograd._reset_default_hooks()
+    def __exit__(self, *args: Any):
+        torch._C._autograd._reset_default_hooks()
 
 
 class save_on_cpu():
