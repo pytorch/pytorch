@@ -64,12 +64,14 @@ for lib in libs do
 end
 # link system frameworks
 frameworks = options[:framework]
-frameworks.each do |framework|
-    path = "System/Library/Frameworks/#{framework}.framework"
-    framework_ref = project.frameworks_group.new_reference(path)
-    framework_ref.name = "#{framework}.framework"
-    framework_ref.source_tree = 'SDKROOT'
-    target.frameworks_build_phases.add_file_reference(framework_ref)
+if frameworks
+    frameworks.each do |framework|
+        path = "System/Library/Frameworks/#{framework}.framework"
+        framework_ref = project.frameworks_group.new_reference(path)
+        framework_ref.name = "#{framework}.framework"
+        framework_ref.source_tree = 'SDKROOT'
+        target.frameworks_build_phases.add_file_reference(framework_ref)
+    end
 end
 project.save
 
