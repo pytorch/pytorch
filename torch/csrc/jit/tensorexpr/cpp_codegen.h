@@ -28,35 +28,35 @@ class TORCH_API CppPrinter : public IRPrinter {
   using IRPrinter::visit;
 
   // Binary expressions.
-  void visit(const Mod*) override;
-  void visit(const Max*) override;
-  void visit(const Min*) override;
+  void visit(Mod*) override;
+  void visit(Max*) override;
+  void visit(Min*) override;
 
   // Conditional expressions.
-  void visit(const CompareSelect*) override;
-  void visit(const IfThenElse*) override;
+  void visit(CompareSelect*) override;
+  void visit(IfThenElse*) override;
 
   // Tensor operations.
-  void visit(const Allocate*) override;
-  void visit(const Free*) override;
-  void visit(const Load*) override;
-  void visit(const Store*) override;
+  void visit(Allocate*) override;
+  void visit(Free*) override;
+  void visit(Load*) override;
+  void visit(Store*) override;
 
   // Casts.
-  void visit(const Cast*) override;
-  void visit(const BitCast*) override;
+  void visit(Cast*) override;
+  void visit(BitCast*) override;
 
   // Calls.
-  void visit(const Intrinsics*) override;
-  void visit(const ExternalCall*) override;
+  void visit(Intrinsics*) override;
+  void visit(ExternalCall*) override;
 
   // Vars.
-  void visit(const Let*) override;
-  void visit(const Var*) override;
+  void visit(Let*) override;
+  void visit(Var*) override;
 
   // Vector data types.
-  void visit(const Ramp*) override;
-  void visit(const Broadcast*) override;
+  void visit(Ramp*) override;
+  void visit(Broadcast*) override;
 
  private:
   int lane_;
@@ -74,6 +74,7 @@ class TORCH_API CppCodeGen : public CodeGen {
   ~CppCodeGen() override;
 
   void call(const std::vector<CallArg>& args) override;
+  void call_raw(const std::vector<void*>& args) override;
 
   template <typename... Ts>
   void operator()(const Ts&... ts) {

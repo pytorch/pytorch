@@ -16,7 +16,7 @@ namespace tensorexpr {
 // with '_'.
 class CppVarNameRewriter : public IRVisitor {
  public:
-  void visit(const Var* v) override {
+  void visit(Var* v) override {
     constexpr char kDot = '.';
     constexpr char kUnderscore = '_';
     if (v->name_hint().find(kDot) == std::string::npos) {
@@ -27,7 +27,7 @@ class CppVarNameRewriter : public IRVisitor {
     const_cast<Var*>(v)->set_name_hint(std::move(name));
   }
 
-  void visit(const Buf* v) override {
+  void visit(Buf* v) override {
     v->base_handle()->accept(this);
   }
 };
@@ -156,38 +156,38 @@ void dispatch_binary_op(std::ostream& os, const BinaryOpNode<Op>* v) {
   }
 }
 
-void CppPrinter::visit(const Ramp* v) {
+void CppPrinter::visit(Ramp* v) {
   visit(new Add(v->base(), new Mul(new IntImm(lane_), v->stride())));
 }
 
-void CppPrinter::visit(const Broadcast* v) {
+void CppPrinter::visit(Broadcast* v) {
   v->value()->accept(this);
 }
 
-void CppPrinter::visit(const Mod* v) {
+void CppPrinter::visit(Mod* v) {
   dispatch_binary_op(os(), v);
 }
 
-void CppPrinter::visit(const Max* v) {
+void CppPrinter::visit(Max* v) {
   dispatch_binary_op(os(), v);
 }
 
-void CppPrinter::visit(const Min* v) {
+void CppPrinter::visit(Min* v) {
   dispatch_binary_op(os(), v);
 }
 
-void CppPrinter::visit(const CompareSelect* v) {
+void CppPrinter::visit(CompareSelect* v) {
   os() << "((" << *v->lhs() << " "
        << IRPrinter::to_string(v->compare_select_op()) << " " << *v->rhs()
        << ") ? " << *v->ret_val1() << " : " << *v->ret_val2() << ")";
 }
 
-void CppPrinter::visit(const IfThenElse* v) {
+void CppPrinter::visit(IfThenElse* v) {
   os() << "((" << *v->condition() << ") ? " << *v->true_value() << " : "
        << *v->false_value() << ")";
 }
 
-void CppPrinter::visit(const Allocate* v) {
+void CppPrinter::visit(Allocate* v) {
   size_t size = v->dtype().byte_size();
   for (auto dim : v->dims()) {
     const IntImm* d = dynamic_cast<const IntImm*>(dim);
@@ -204,7 +204,7 @@ void CppPrinter::visit(const Allocate* v) {
        << "));" << std::endl;
 }
 
-void CppPrinter::visit(const Free* v) {
+void CppPrinter::visit(Free* v) {
   emitIndent();
   os() << "free(" << *v->buffer_var() << ");" << std::endl;
 }
@@ -221,54 +221,33 @@ static bool isMaskIntImm(const Expr* mask, int v) {
   return true;
 }
 
-void CppPrinter::visit(const Load* v) {
+void CppPrinter::visit(Load* v) {
   auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
-  if (isMaskIntImm(v->mask(), 0)) {
-    os() << "0";
-  } else if (isMaskIntImm(v->mask(), 1)) {
-    os() << *v->base_handle() << "[" << *flat_idx << "]";
-  } else {
-    os() << "((" << *v->mask() << ") ? " << *v->base_handle() << "["
-         << *flat_idx << "] : 0)";
-  }
+  os() << *v->base_handle() << "[" << *flat_idx << "]";
 }
 
-void CppPrinter::visit(const Store* v) {
+void CppPrinter::visit(Store* v) {
   auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
   const int lanes = v->value()->dtype().lanes();
   for (int lane = 0; lane < lanes; lane++) {
-    if (isMaskIntImm(v->mask(), 0)) {
-      continue;
-    }
     lane_ = lane;
     emitIndent();
-    if (isMaskIntImm(v->mask(), 1)) {
-      os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
-           << ";" << std::endl;
-    } else {
-      os() << "if (" << *v->mask() << ") {" << std::endl;
-      indent_++;
-      emitIndent();
-      os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
-           << ";" << std::endl;
-      indent_--;
-      emitIndent();
-      os() << "}" << std::endl;
-    }
+    os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
+          << ";" << std::endl;
   }
 }
 
-void CppPrinter::visit(const Cast* v) {
+void CppPrinter::visit(Cast* v) {
   os() << "static_cast<" << v->dtype().ToCppString() << ">(" << *v->src_value()
        << ")";
 }
 
-void CppPrinter::visit(const BitCast* v) {
+void CppPrinter::visit(BitCast* v) {
   os() << "std::bitcast<" << v->src_value()->dtype().ToCppString() << ", "
        << v->dtype().ToCppString() << ">(" << *v->src_value() << ")";
 }
 
-void CppPrinter::visit(const Intrinsics* v) {
+void CppPrinter::visit(Intrinsics* v) {
   if (v->op_type() == kRand || v->op_type() == kSigmoid) {
     throw std::runtime_error("kRand and kSigmoid are not supported");
   }
@@ -283,7 +262,7 @@ void CppPrinter::visit(const Intrinsics* v) {
   os() << ")";
 }
 
-void CppPrinter::visit(const ExternalCall* v) {
+void CppPrinter::visit(ExternalCall* v) {
   // The generated code needs to link against functions defined
   // in external_functions.cpp.
 
@@ -292,7 +271,7 @@ void CppPrinter::visit(const ExternalCall* v) {
     throw unimplemented_lowering(v);
   }
 
-  std::vector<const Buf*> bufs(v->buf_args());
+  std::vector<Buf*> bufs(v->buf_args());
   bufs.insert(bufs.begin(), v->buf());
   auto for_buf = [&](const std::function<void(const Buf*)>& print_buf) {
     for (size_t i = 0; i < bufs.size(); i++) {
@@ -368,7 +347,7 @@ void CppPrinter::visit(const ExternalCall* v) {
   os() << "}" << std::endl;
 }
 
-void CppPrinter::visit(const Let* v) {
+void CppPrinter::visit(Let* v) {
   if (v->dtype().lanes() == 1) {
     emitIndent();
     os() << v->dtype().ToCppString() << " " << *v->var() << " = " << *v->value()
@@ -378,7 +357,7 @@ void CppPrinter::visit(const Let* v) {
   }
 }
 
-void CppPrinter::visit(const Var* v) {
+void CppPrinter::visit(Var* v) {
   if (v->dtype().lanes() == 1) {
     os() << name_manager()->get_unique_name(v);
   } else {
@@ -421,6 +400,12 @@ void CppCodeGen::init() {
 CppCodeGen::~CppCodeGen() = default;
 
 void CppCodeGen::call(const std::vector<CallArg>& args) {
+  // TODO: compile the generated C++ kernel into a library,
+  // and call the library here.
+  os() << "int main() {}" << std::endl;
+}
+
+void CppCodeGen::call_raw(const std::vector<void*>& args) {
   // TODO: compile the generated C++ kernel into a library,
   // and call the library here.
   os() << "int main() {}" << std::endl;

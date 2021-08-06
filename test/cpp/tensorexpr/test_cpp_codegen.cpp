@@ -278,22 +278,5 @@ TEST(CppPrinter, ExternalCall) {
   FILE_CHECK(call, pattern);
 }
 
-TEST(CppPrinter, LoadStoreVecWithMask) {
-  KernelScope kernel_scope;
-  Placeholder a(BufHandle("A", {3}, kInt));
-  Placeholder b(BufHandle("B", {3}, kInt));
-  auto store = b.storeWithMask(
-      {Ramp::make(0, 1, 3)},
-      a.loadWithMask(
-          {Ramp::make(0, 1, 3)}, Broadcast::make(IntImm::make(1), 3)),
-      Broadcast::make(IntImm::make(1), 3));
-  const std::string pattern = R"(
-   # CHECK: B[0 + 0 * 1] = A[0 + 0 * 1];
-   # CHECK: B[0 + 1 * 1] = A[0 + 1 * 1];
-   # CHECK: B[0 + 2 * 1] = A[0 + 2 * 1];
-  )";
-  FILE_CHECK(store, pattern);
-}
-
 } // namespace jit
 } // namespace torch
