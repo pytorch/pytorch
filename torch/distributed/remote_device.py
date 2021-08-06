@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional, Union
 
 import torch
 
@@ -27,7 +27,7 @@ class _RemoteDevice(object):
             "'<workername>/<device>' or 'rank:<rank>/<device>' or '<device>'"
         )
         self._remote_worker = None
-        self._device = None
+        self._device: Optional[Union[str, int, torch.device]] = None
 
         if isinstance(remote_device, torch.device):
             self._device = remote_device
@@ -75,7 +75,7 @@ class _RemoteDevice(object):
         except Exception:
             return False
 
-    def remote_worker(self) -> Union[int, str]:
+    def remote_worker(self) -> Optional[Union[int, str]]:
         """
         Returns the remote worker representing the remote device
         (could be name or rank).
@@ -86,7 +86,7 @@ class _RemoteDevice(object):
         """
         Returns the local device on the remote worker.
         """
-        return self._device
+        return self._device  # type: ignore[return-value]
 
     def __repr__(self):
         if self._remote_worker is None:
