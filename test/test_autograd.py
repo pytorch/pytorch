@@ -9352,12 +9352,14 @@ class TestMultithreadAutograd(TestCase):
             warnings.warn("pack")
             return x
 
+        _self = self
+
         class Model(torch.nn.Module):
-            def forward(_self, x):
+            def forward(self, x):
                 warnings.simplefilter('always')
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
-                    self.assertEqual(len(w), 2)
+                    _self.assertEqual(len(w), 2)
 
         x = torch.ones(5, 5, requires_grad=True)
         model = torch.nn.DataParallel(Model())
