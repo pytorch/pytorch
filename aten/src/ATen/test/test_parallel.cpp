@@ -8,6 +8,7 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
+#include<thread>
 
 struct NumThreadsGuard {
   int old_num_threads_;
@@ -48,6 +49,19 @@ TEST(TestParallel, NestedParallel) {
     }
   });
 }
+
+#ifdef TH_BLAS_MKL
+TEST(TestParallel, LocalMKLThreadNumber) {
+  auto master_thread_num = mkl_get_max_threads();
+  auto f = [](int nthreads){
+    set_num_threads(nthreads);
+    ASSERT_TRUE(mkl_get_max_threads(), nthreads);
+  };
+  std::thread t(set_local_threads, 1);
+  t.join();
+  ASSERT_EQ(master_thread_num, mkl_get_max_threads());
+}
+#endif
 
 TEST(TestParallel, NestedParallelThreadId) {
   // check that thread id within a nested parallel block is accurate
