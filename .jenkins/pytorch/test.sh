@@ -11,7 +11,6 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
-TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
 
@@ -127,7 +126,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it to be loaded globally.  This isn't really a good idea though, because
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
-    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
@@ -313,27 +312,12 @@ test_distributed() {
 
 test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Testing RPC C++ tests with the install folder"
-      # Rename the build folder when running test to ensure it
-      # is not depended on the folder
-      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_BIN_DIR"
-    else
-      echo "Testing RPC C++ tests with the build folder"
-      TEST_BASE_DIR="$BUILD_BIN_DIR"
-    fi
-
+    echo "Testing RPC C++ tests"
     # NB: the ending test_rpc must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
     mkdir -p $TEST_REPORTS_DIR
-    "$TEST_BASE_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      # Restore the build folder to avoid any impact on other tests
-      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
-    fi
+    build/bin/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
   fi
 }
 
