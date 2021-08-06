@@ -1082,7 +1082,7 @@ def _run_slow_mode_and_get_error(func, tupled_inputs, outputs, input_idx, output
         def new_fn(inp):
             new_inputs = list(tupled_inputs)
             new_inputs[input_idx] = inp
-            return func(*new_inputs)[output_idx]
+            return _as_tuple(func(*new_inputs))[output_idx]
         slow_analytical = _get_analytical_jacobian_forward_ad(new_fn, (tupled_inputs[input_idx],), (outputs[output_idx],))[0][0]
     else:
         slow_analytical = _get_analytical_jacobian(tupled_inputs, outputs, input_idx, output_idx)
@@ -1360,7 +1360,7 @@ def gradgradcheck(
         # If grad_outputs is not specified, create random Tensors of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            y = torch.testing.randn_like(
+            y = torch.randn_like(
                 x if (x.is_floating_point() or x.is_complex()) else x.double(), memory_format=torch.legacy_contiguous_format)
             if gen_non_contig_grad_outputs:
                 y = torch.testing.make_non_contiguous(y)
