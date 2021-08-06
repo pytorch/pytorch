@@ -65,7 +65,7 @@ class TestReductions(TestCase):
     def test_dim_default(self, device, dtype, op: ReductionOpInfo):
         """Tests that the default behavior is to reduce all dimensions."""
         t = make_tensor((2, 3), device, dtype)
-        args, kwargs = next(op.args_kwargs_generator(t))
+        args, kwargs = next(op.generate_args_kwargs(t))
         self.assertEqual(op(t, *args, **kwargs).ndim, 0)
 
     ###########################################################################

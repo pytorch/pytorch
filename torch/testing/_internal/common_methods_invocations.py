@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Dict, Generator, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -865,12 +865,12 @@ class ReductionOpInfo(OpInfo):
         # Whether the operator can reduce multiple dimensions.
         supports_multiple_dims: bool = True,
 
-        # A generator function that takes the input tensor and optional dim
-        # and keepdim kwargs and generates tuples of args and kwargs to use
-        # when calling the operator and reference implementation with the given
-        # dim and keepdim kwargs. Note that some tests will only use the first
-        # generated args and kwargs.
-        args_kwargs_generator: Generator = lambda x, *, dim=None, keepdim=False: (yield tuple(), {}),
+        # A function that takes the input tensor and optional dim and keepdim
+        # kwargs and generates tuples of args and kwargs to use when calling
+        # the operator and reference implementation with the given dim and
+        # keepdim kwargs. Note that some tests will only use the first generated
+        # args and kwargs.
+        generate_args_kwargs: Callable = lambda *args, **kwargs: (yield tuple(), {}),
 
         # Operators are expected to work with all dtypes unless documented
         # otherwise. It is often easier and clearer to specify the dtypes
@@ -884,7 +884,7 @@ class ReductionOpInfo(OpInfo):
         **kwargs,
     ):
         # ReductionOpInfo tests generate their own input tensors and the dim
-        # and keepdim parameters. Operators can provide a `args_kwargs_generator`
+        # and keepdim parameters. Operators can provide a `generate_args_kwargs`
         # to augment the arguments to the operator and the reference implementation
         # or specify `sample_inputs_func` to provide their own sample inputs for
         # the OpInfo base class. However, the test_reductions.py file will still
@@ -893,7 +893,7 @@ class ReductionOpInfo(OpInfo):
             result: list[SampleInput] = []
             f = sample_inputs_reduction_wrapper(supports_multiple_dims)
             for sample in f(*args, **kwargs):
-                for args, kwargs in args_kwargs_generator(sample.input, **sample.kwargs):
+                for args, kwargs in generate_args_kwargs(sample.input, **sample.kwargs):
                     kwargs.update(sample.kwargs)
                     result.append(SampleInput(sample.input, args=args, kwargs=kwargs))
             return result
@@ -912,7 +912,7 @@ class ReductionOpInfo(OpInfo):
         self.identity = identity
         self.result_dtype = result_dtype
         self.supports_multiple_dims = supports_multiple_dims
-        self.args_kwargs_generator = args_kwargs_generator
+        self.generate_args_kwargs = generate_args_kwargs
 
 
 def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
