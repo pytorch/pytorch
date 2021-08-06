@@ -380,6 +380,7 @@ Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
 
   for (const auto i : c10::irange(numPushed)) {
+    (void)i;
     LEGACY_moduleStack_.pop_back();
   }
   return module;

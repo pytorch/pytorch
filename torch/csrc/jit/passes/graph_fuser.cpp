@@ -829,8 +829,8 @@ struct GraphFuser {
     }
 
     bchunk->removeInput(producer_index);
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
     for (const auto i : c10::irange(nchunks)) {
+      (void)i;
       bchunk->eraseOutput(nchunks * producer_index);
     }
 
