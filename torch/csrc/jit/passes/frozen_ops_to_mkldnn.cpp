@@ -462,7 +462,6 @@ Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
 // add, etc - did not benchmark as speeding up models noticeably. the additional
 // overhead of `convolution` warrants the custom operator.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         // XXX: this follows the schema convention of conv2d/conv3d, not

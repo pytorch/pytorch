@@ -38,7 +38,7 @@ LoopNest::LoopNest(const LoopNest& other)
   verify(root_stmt_);
 }
 
-LoopNest::LoopNest(Stmt* stmt, std::unordered_set<const Buf*> output_bufs)
+LoopNest::LoopNest(Stmt* stmt, std::unordered_set<Buf*> output_bufs)
     : root_stmt_(stmt), output_bufs_(std::move(output_bufs)) {
   verify(root_stmt_);
 }
@@ -57,8 +57,8 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   verify(root_stmt_);
 }
 
-const std::unordered_set<const Buf*> LoopNest::getIntermediateBufs() const {
-  std::unordered_set<const Buf*> result;
+const std::unordered_set<Buf*> LoopNest::getIntermediateBufs() const {
+  std::unordered_set<Buf*> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (auto* buf : bufs) {
@@ -69,12 +69,12 @@ const std::unordered_set<const Buf*> LoopNest::getIntermediateBufs() const {
   return result;
 }
 
-const std::unordered_set<const Buf*> LoopNest::getInputBufs() const {
-  std::unordered_set<const Buf*> result;
+const std::unordered_set<Buf*> LoopNest::getInputBufs() const {
+  std::unordered_set<Buf*> result;
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
-  for (const auto& kv : buf_load_store_uses) {
+  for (auto& kv : buf_load_store_uses) {
     bool has_store = false;
-    for (const auto& use : kv.second) {
+    for (auto& use : kv.second) {
       if (use.isStore) {
         has_store = true;
         break;
@@ -93,7 +93,7 @@ class IndexFlattener : public IRMutator {
     return s->accept_mutator(this);
   }
 
-  const Expr* mutate(const Load* v) override {
+  Expr* mutate(Load* v) override {
     if (v->indices().size() == 1) {
       return v;
     }
@@ -101,9 +101,9 @@ class IndexFlattener : public IRMutator {
         v->dtype(), v->buf(), {flatten_index(v->buf()->dims(), v->indices())});
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Expr* value = v->value();
-    const Expr* new_value = value->accept_mutator(this);
+  Stmt* mutate(Store* v) override {
+    Expr* value = v->value();
+    Expr* new_value = value->accept_mutator(this);
     if (v->indices().size() == 1 && value == new_value) {
       return (Stmt*)v;
     }
@@ -114,14 +114,14 @@ class IndexFlattener : public IRMutator {
 
 class Vectorizer : public IRMutator {
  public:
-  Stmt* vectorize(const For* v) {
+  Stmt* vectorize(For* v) {
     Stmt* body = v->body();
-    const Var* var = v->var();
-    const Expr* start = v->start();
-    const Expr* stop = v->stop();
+    Var* var = v->var();
+    Expr* start = v->start();
+    Expr* stop = v->stop();
 
-    const IntImm* start_imm = dynamic_cast<const IntImm*>(start);
-    const IntImm* stop_imm = dynamic_cast<const IntImm*>(stop);
+    IntImm* start_imm = dynamic_cast<IntImm*>(start);
+    IntImm* stop_imm = dynamic_cast<IntImm*>(stop);
     if (!start_imm) {
       throw std::runtime_error(
           "Can't vectorize due to non-constant loop start!");
@@ -144,87 +144,87 @@ class Vectorizer : public IRMutator {
     return new_body;
   }
 
-  const Expr* mutate(const Add* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Add* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) + ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Sub* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Sub* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) - ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Mul* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Mul* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) * ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Div* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Div* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) / ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const And* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(And* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) & ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Or* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Or* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) | ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Xor* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Xor* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) ^ ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Lshift* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Lshift* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) << ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Rshift* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Rshift* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) >> ExprHandle(inputs[1]);
     });
   }
 
-  const Expr* mutate(const Max* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Max* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return Max::make(
           ExprHandle(inputs[0]), ExprHandle(inputs[1]), v->propagate_nans());
     });
   }
 
-  const Expr* mutate(const Min* v) override {
-    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+  Expr* mutate(Min* v) override {
+    std::vector<Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return Min::make(
           ExprHandle(inputs[0]), ExprHandle(inputs[1]), v->propagate_nans());
     });
   }
 
-  const Expr* mutate(const CompareSelect* v) override {
-    std::vector<const Expr*> inputs = {
+  Expr* mutate(CompareSelect* v) override {
+    std::vector<Expr*> inputs = {
         v->lhs(), v->rhs(), v->ret_val1(), v->ret_val2()};
     return try_vectorize(v, inputs, [&]() {
       return CompareSelect::make(
@@ -237,23 +237,23 @@ class Vectorizer : public IRMutator {
     });
   }
 
-  const Expr* mutate(const BitCast* v) override {
-    std::vector<const Expr*> inputs = {v->src_value()};
+  Expr* mutate(BitCast* v) override {
+    std::vector<Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
       return BitCast::make(
           Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
     });
   }
 
-  const Expr* mutate(const Cast* v) override {
-    std::vector<const Expr*> inputs = {v->src_value()};
+  Expr* mutate(Cast* v) override {
+    std::vector<Expr*> inputs = {v->src_value()};
     return try_vectorize(v, inputs, [&]() {
       return Cast::make(
           Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
     });
   }
 
-  const Expr* mutate(const Var* v) override {
+  Expr* mutate(Var* v) override {
     if (v == var_) {
       return Ramp::make(ExprHandle(start_), 1, lanes_).node();
     }
@@ -261,12 +261,12 @@ class Vectorizer : public IRMutator {
     return v;
   }
 
-  const Expr* mutate(const Ramp* v) override {
-    const Expr* base = v->base();
-    const Expr* stride = v->stride();
+  Expr* mutate(Ramp* v) override {
+    Expr* base = v->base();
+    Expr* stride = v->stride();
 
-    const Expr* base_new = base->accept_mutator(this);
-    const Expr* stride_new = stride->accept_mutator(this);
+    Expr* base_new = base->accept_mutator(this);
+    Expr* stride_new = stride->accept_mutator(this);
 
     if (base_new == base && stride_new == stride) {
       return v;
@@ -275,19 +275,19 @@ class Vectorizer : public IRMutator {
     throw std::runtime_error("Can't vectorize a Ramp!");
   }
 
-  const Expr* mutate(const Load* v) override {
+  Expr* mutate(Load* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
-    const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {v->flat_index()};
+    Buf* buf = v->buf();
+    std::vector<Expr*> inputs = {v->flat_index()};
     return try_vectorize(v, inputs, [&]() {
       return Load::make(dtype, BufHandle(buf), {ExprHandle(inputs[0])});
     });
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
+  Expr* mutate(ReduceOp* v) override {
     Dtype dtype(v->dtype().scalar_type(), lanes_);
 
-    std::vector<const Expr*> inputs = {v->body()};
+    std::vector<Expr*> inputs = {v->body()};
 
     auto* out = try_vectorize(v, inputs, [&]() {
       return ExprHandle(
@@ -296,9 +296,9 @@ class Vectorizer : public IRMutator {
     return out;
   }
 
-  const Expr* mutate(const Broadcast* v) override {
-    const Expr* val = v->value();
-    const Expr* new_val = val->accept_mutator(this);
+  Expr* mutate(Broadcast* v) override {
+    Expr* val = v->value();
+    Expr* new_val = val->accept_mutator(this);
     if (new_val == val) {
       return v;
     }
@@ -306,44 +306,44 @@ class Vectorizer : public IRMutator {
     throw std::runtime_error("Can't vectorize a Broadcast!");
   }
 
-  const Expr* mutate(const IfThenElse* v) override {
-    const Expr* condition = v->condition();
-    const Expr* new_condition = condition->accept_mutator(this);
+  Expr* mutate(IfThenElse* v) override {
+    Expr* condition = v->condition();
+    Expr* new_condition = condition->accept_mutator(this);
     if (new_condition != condition) {
       throw std::runtime_error("Can't vectorize an IfThenElse condition!");
     }
 
-    std::vector<const Expr*> inputs = {v->true_value(), v->false_value()};
+    std::vector<Expr*> inputs = {v->true_value(), v->false_value()};
     return try_vectorize(v, inputs, [&]() {
       return IfThenElse::make(
           ExprHandle(condition), ExprHandle(inputs[0]), ExprHandle(inputs[1]));
     });
   }
 
-  const Expr* mutate(const Intrinsics* v) override {
-    std::vector<const Expr*> inputs = v->params();
+  Expr* mutate(Intrinsics* v) override {
+    std::vector<Expr*> inputs = v->params();
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(new Intrinsics(v->op_type(), inputs));
     });
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Buf* buf = v->buf();
-    std::vector<const Expr*> inputs = {v->flat_index(), v->value()};
+  Stmt* mutate(Store* v) override {
+    Buf* buf = v->buf();
+    std::vector<Expr*> inputs = {v->flat_index(), v->value()};
     return try_vectorize(v, inputs, [&]() {
       return Store::make(
           BufHandle(buf), {ExprHandle(inputs[0])}, ExprHandle(inputs[1]));
     });
   }
 
-  Stmt* mutate(const For* v) override {
-    const Var* var = v->var();
-    const Expr* start = v->start();
-    const Expr* stop = v->stop();
+  Stmt* mutate(For* v) override {
+    Var* var = v->var();
+    Expr* start = v->start();
+    Expr* stop = v->stop();
     LoopOptions loop_options = v->loop_options();
 
-    const Expr* new_start = start->accept_mutator(this);
-    const Expr* new_stop = stop->accept_mutator(this);
+    Expr* new_start = start->accept_mutator(this);
+    Expr* new_stop = stop->accept_mutator(this);
 
     if (new_start != start || new_stop != stop) {
       throw std::runtime_error(
@@ -361,10 +361,7 @@ class Vectorizer : public IRMutator {
   }
 
   template <typename T>
-  const Expr* try_vectorize(
-      const Expr* e,
-      std::vector<const Expr*>& inputs,
-      T&& vec_ctor) {
+  Expr* try_vectorize(Expr* e, std::vector<Expr*>& inputs, T&& vec_ctor) {
     bool vectorize = vectorize_inputs(inputs);
     if (vectorize) {
       return vec_ctor().node();
@@ -374,10 +371,7 @@ class Vectorizer : public IRMutator {
   }
 
   template <typename T>
-  Stmt* try_vectorize(
-      const Stmt* s,
-      std::vector<const Expr*>& inputs,
-      T&& vec_ctor) {
+  Stmt* try_vectorize(Stmt* s, std::vector<Expr*>& inputs, T&& vec_ctor) {
     bool vectorize = vectorize_inputs(inputs);
     if (vectorize) {
       return vec_ctor();
@@ -386,13 +380,13 @@ class Vectorizer : public IRMutator {
     return (Stmt*)s;
   }
 
-  bool vectorize_inputs(std::vector<const Expr*>& inputs) {
+  bool vectorize_inputs(std::vector<Expr*>& inputs) {
     bool any_vectorized = false;
-    std::vector<const Expr*> new_inputs;
+    std::vector<Expr*> new_inputs;
 
     // Attempt to vectorize each input.
-    for (const Expr*& in : inputs) {
-      const Expr* new_in = in->accept_mutator(this);
+    for (Expr*& in : inputs) {
+      Expr* new_in = in->accept_mutator(this);
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
@@ -417,9 +411,9 @@ class Vectorizer : public IRMutator {
     return true;
   }
 
-  const Var* var_ = nullptr;
+  Var* var_ = nullptr;
   int lanes_ = 0;
-  const Expr* start_ = nullptr;
+  Expr* start_ = nullptr;
 };
 
 bool LoopNest::vectorize(For* f) {
@@ -491,19 +485,19 @@ void LoopNest::initialize(
 
 class FunctionInliner : public IRMutator {
  public:
-  FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)
+  FunctionInliner(Store* producer, std::unordered_set<Buf*> outputs)
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
-      if (auto index_var = dynamic_cast<const Var*>(i)) {
+      if (auto index_var = dynamic_cast<Var*>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
-      } else if (dynamic_cast<const IntImm*>(i) != nullptr) {
+      } else if (dynamic_cast<IntImm*>(i) != nullptr) {
         // If the index can be a constant, then that dimension must have size 1
         // (since we don't support in-place writes). Resolves issue 52581.
         TORCH_INTERNAL_ASSERT(
-            dynamic_cast<const IntImm*>(i)->value() == 0,
+            dynamic_cast<IntImm*>(i)->value() == 0,
             "Constant index impression should always be zero");
         producer_index_vars_.push_back(nullptr);
       } else {
@@ -513,16 +507,16 @@ class FunctionInliner : public IRMutator {
   }
 
  private:
-  const Expr* mutate_loads(const Buf* buf, std::vector<const Expr*> dims) {
-    std::vector<const Var*> index_vars;
+  Expr* mutate_loads(Buf* buf, std::vector<Expr*> dims) {
+    std::vector<Var*> index_vars;
     TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
-    for (const auto i : c10::irange(buf->ndim())) {
-      const Var* func_callee_arg = producer_index_vars_.at(i);
-      const Expr* func_caller_param = dims.at(i);
+    for (auto i : c10::irange(buf->ndim())) {
+      Var* func_callee_arg = producer_index_vars_.at(i);
+      Expr* func_caller_param = dims.at(i);
       if (func_callee_arg == nullptr) {
         TORCH_INTERNAL_ASSERT(
-            dynamic_cast<const IntImm*>(func_caller_param) != nullptr &&
-                dynamic_cast<const IntImm*>(func_caller_param)->value() == 0,
+            dynamic_cast<IntImm*>(func_caller_param) != nullptr &&
+                dynamic_cast<IntImm*>(func_caller_param)->value() == 0,
             "We are implicitly assuming that if you have an index of 0, that must also be inlined into an index of 0");
         continue;
       }
@@ -539,14 +533,14 @@ class FunctionInliner : public IRMutator {
     }
 
     // Call the actual replacement.
-    const Expr* body = producer_->value();
-    const Expr* result = body->accept_mutator(this);
+    Expr* body = producer_->value();
+    Expr* result = body->accept_mutator(this);
 
     // Remove the mappings we created for this function parameters.
     for (auto* v : index_vars) {
       for (auto& pair : random_bindings_) {
         if (pair.second.erase(v)) {
-          const Expr* inlined = inline_mapping_[v];
+          Expr* inlined = inline_mapping_[v];
           for (auto* nv : VarFinder::find(inlined)) {
             pair.second.insert(nv);
           }
@@ -557,8 +551,8 @@ class FunctionInliner : public IRMutator {
     return result;
   }
 
-  const Expr* mutate(const Load* v) override {
-    const Buf* buf = v->buf();
+  Expr* mutate(Load* v) override {
+    Buf* buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
@@ -571,19 +565,19 @@ class FunctionInliner : public IRMutator {
   }
 
   // Replace the target variable with the caller expressions.
-  const Expr* mutate(const Var* v) override {
+  Expr* mutate(Var* v) override {
     auto iter = inline_mapping_.find(v);
     if (iter == inline_mapping_.end()) {
       return v;
     } else {
-      const Expr* expr = iter->second;
+      Expr* expr = iter->second;
       // Continue to transform the value from the lookup table.
       return expr->accept_mutator(this);
     }
   }
 
   // Handle random intrinsics which should be cached.
-  const Expr* mutate(const Intrinsics* v) override {
+  Expr* mutate(Intrinsics* v) override {
     if (!in_producer_ || v->op_type() != kRand) {
       return IRMutator::mutate(v);
     }
@@ -598,12 +592,12 @@ class FunctionInliner : public IRMutator {
   }
 
   // Remove the buffer write from the inlined function.
-  Stmt* mutate(const Store* v) override {
+  Stmt* mutate(Store* v) override {
     // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
     // remove it.
     if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
-      producer_ = dynamic_cast<const Store*>(IRMutator::mutate(v));
+      producer_ = dynamic_cast<Store*>(IRMutator::mutate(v));
       TORCH_INTERNAL_ASSERT(producer_ != nullptr);
       in_producer_ = false;
       return nullptr;
@@ -613,7 +607,7 @@ class FunctionInliner : public IRMutator {
   }
 
   // Any Random Instrinsics that were turned into vars must be inserted here.
-  Stmt* mutate(const Block* v) override {
+  Stmt* mutate(Block* v) override {
     std::vector<Stmt*> stmts;
     for (Stmt* stmt : *v) {
       Stmt* stmt_new = stmt->accept_mutator(this);
@@ -631,7 +625,7 @@ class FunctionInliner : public IRMutator {
     return Block::make(stmts);
   }
 
-  Stmt* mutate(const For* v) override {
+  Stmt* mutate(For* v) override {
     For* res = dynamic_cast<For*>(IRMutator::mutate(v));
     if (!res) {
       return nullptr;
@@ -639,7 +633,7 @@ class FunctionInliner : public IRMutator {
 
     // Find any random bindings that should be defined in this loops body.
     std::vector<Let*> bindings_this_loop;
-    const Var* fv = v->var();
+    Var* fv = v->var();
     for (auto& pair : random_bindings_) {
       auto& index_var = pair.second;
       if (index_var.erase(fv)) {
@@ -655,19 +649,19 @@ class FunctionInliner : public IRMutator {
   }
 
  private:
-  const Buf* buf_;
-  const Store* producer_;
+  Buf* buf_;
+  Store* producer_;
 
   // Index Vars present in the producer.
-  std::unordered_set<const Var*> index_vars_;
-  std::vector<const Var*> producer_index_vars_;
+  std::unordered_set<Var*> index_vars_;
+  std::vector<Var*> producer_index_vars_;
 
-  std::unordered_map<const Var*, const Expr*> inline_mapping_;
+  std::unordered_map<Var*, Expr*> inline_mapping_;
 
   // In the producer's scope - we need to bind any calls to rand().
   bool in_producer_ = false;
-  std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
-  std::unordered_set<const Buf*> outputs_;
+  std::unordered_map<Let*, std::unordered_set<Var*>> random_bindings_;
+  std::unordered_set<Buf*> outputs_;
 };
 
 bool LoopNest::computeInline(Stmt* s) {
@@ -678,10 +672,10 @@ bool LoopNest::computeInline(Stmt* s) {
   return computeInline(s_store->buf());
 }
 
-bool LoopNest::computeInline(const Buf* b) {
+bool LoopNest::computeInline(Buf* b) {
   // If buf is used or defined in an ExternalCall, we cannot inline it
   auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
-  for (const auto& use : buf_load_store_uses.at(b)) {
+  for (auto& use : buf_load_store_uses.at(b)) {
     Stmt* s = use.s;
     if (dynamic_cast<ExternalCall*>(s)) {
       return false;
@@ -719,7 +713,7 @@ bool LoopNest::computeInline(const Buf* b) {
 // difficult synchronization logic across blocks. Inlining trivial reads does
 // not duplicate work
 void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
-  std::unordered_set<const Buf*> bufs_to_inline;
+  std::unordered_set<Buf*> bufs_to_inline;
 
   auto intermediate_bufs = getIntermediateBufs();
   if (allow_duplicated_work) {
@@ -739,7 +733,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
       // and avoiding an intermediary buffer
       if (stores.size() == 1) {
         if (auto store = dynamic_cast<Store*>(stores[0].s)) {
-          auto input_as_load = dynamic_cast<const Load*>(store->value());
+          auto input_as_load = dynamic_cast<Load*>(store->value());
           if (input_as_load && input_bufs.count(input_as_load->buf())) {
             bufs_to_inline.insert(buf);
             continue;
@@ -772,15 +766,14 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
 // TODO: Unify with DepTracker
 class LoadOrStoreUseFinder : public IRVisitor {
  public:
-  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> findUses(
-      Stmt* s) {
+  std::unordered_map<Buf*, std::vector<BufLoadOrStoreUse>> findUses(Stmt* s) {
     uses_.clear();
     s->accept(this);
     return uses_;
   }
 
  private:
-  void visit(const Store* v) override {
+  void visit(Store* v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({(Stmt*)v, true});
     }
@@ -788,13 +781,13 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const ExternalCall* v) override {
+  void visit(ExternalCall* v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({(Stmt*)v, true});
     }
     last_stmt_ = (Stmt*)v;
 
-    for (const Buf* input_buf : v->buf_args()) {
+    for (Buf* input_buf : v->buf_args()) {
       if (loads_[input_buf].insert(last_stmt_).second) {
         uses_[input_buf].push_back({last_stmt_, false});
       }
@@ -803,7 +796,7 @@ class LoadOrStoreUseFinder : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const Load* v) override {
+  void visit(Load* v) override {
     if (loads_[v->buf()].insert(last_stmt_).second) {
       uses_[v->buf()].push_back({last_stmt_, false});
     }
@@ -811,15 +804,15 @@ class LoadOrStoreUseFinder : public IRVisitor {
   }
 
   Stmt* last_stmt_ = nullptr;
-  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses_;
+  std::unordered_map<Buf*, std::vector<BufLoadOrStoreUse>> uses_;
 
   // Sets of loads and stores in order to keep the results unique
-  std::unordered_map<const Buf*, std::unordered_set<Stmt*>> loads_;
-  std::unordered_map<const Buf*, std::unordered_set<Stmt*>> stores_;
+  std::unordered_map<Buf*, std::unordered_set<Stmt*>> loads_;
+  std::unordered_map<Buf*, std::unordered_set<Stmt*>> stores_;
 };
 
-std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
-findLoadOrStoreUses(Stmt* s) {
+std::unordered_map<Buf*, std::vector<BufLoadOrStoreUse>> findLoadOrStoreUses(
+    Stmt* s) {
   LoadOrStoreUseFinder uf;
   return uf.findUses(s);
 }
@@ -834,15 +827,15 @@ class ContainedStmtsFinder : public IRVisitor {
   }
 
  private:
-  void visit(const Store* v) override {
+  void visit(Store* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const ExternalCall* v) override {
+  void visit(ExternalCall* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
-  void visit(const Block* v) override {
+  void visit(Block* v) override {
     contained_.insert((Stmt*)v);
     IRVisitor::visit(v);
   }
@@ -895,10 +888,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b = new Block({stmt});
   }
 
-  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
+  std::unordered_map<Buf*, std::vector<BufLoadOrStoreUse>> uses =
       findLoadOrStoreUses(stmt);
   // Insert allocations and frees for temporary buffers at global scope.
-  for (const Buf* buf : intermediate_bufs) {
+  for (Buf* buf : intermediate_bufs) {
     b->prepend_stmt(new Allocate(buf));
     b->append_stmt(new Free(buf));
   }
@@ -908,11 +901,10 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 
 class StmtDeleter : public IRMutator {
  public:
-  StmtDeleter(const std::unordered_set<const Stmt*>& targets)
-      : targets_(targets) {}
+  StmtDeleter(const std::unordered_set<Stmt*>& targets) : targets_(targets) {}
 
  private:
-  Stmt* mutate(const Block* v) override {
+  Stmt* mutate(Block* v) override {
     std::vector<Stmt*> stmts;
 
     for (auto* s : v->stmts()) {
@@ -927,7 +919,7 @@ class StmtDeleter : public IRMutator {
     return Block::make(stmts);
   }
 
-  const std::unordered_set<const Stmt*>& targets_;
+  const std::unordered_set<Stmt*>& targets_;
 };
 
 void LoopNest::eliminateDeadStores() {
@@ -935,7 +927,7 @@ void LoopNest::eliminateDeadStores() {
   MemDependencyChecker checker(getInputBufs(), getOutputBufs());
   root_stmt_->accept(&checker);
 
-  std::unordered_set<const Stmt*> deadStores;
+  std::unordered_set<Stmt*> deadStores;
   std::vector<std::shared_ptr<AccessInfo>> outputAccesses;
   for (auto* o : getOutputBufs()) {
     outputAccesses.push_back(checker.output(o));
@@ -978,10 +970,10 @@ namespace {
 
 class IfThenElseReplacer : public IRMutator {
  public:
-  IfThenElseReplacer(const IfThenElse* to_replace, const Expr* new_expr)
+  IfThenElseReplacer(IfThenElse* to_replace, Expr* new_expr)
       : to_replace_(to_replace), new_expr_(new_expr) {}
 
-  const Expr* mutate(const IfThenElse* i) override {
+  Expr* mutate(IfThenElse* i) override {
     if (i == to_replace_) {
       return new_expr_;
     }
@@ -989,8 +981,8 @@ class IfThenElseReplacer : public IRMutator {
   }
 
  private:
-  const IfThenElse* to_replace_;
-  const Expr* new_expr_;
+  IfThenElse* to_replace_;
+  Expr* new_expr_;
 };
 
 // Check if the given condition is optimizable.
@@ -1002,12 +994,12 @@ class IfThenElseReplacer : public IRMutator {
 //   * sets `compared_value` to `expr`, and
 //   * returns true.
 bool isConditionOptimizable(
-    const Expr* condition,
-    const Var** cond_var,
-    const Expr** compared_value) {
-  auto cs = dynamic_cast<const CompareSelect*>(condition);
+    Expr* condition,
+    Var** cond_var,
+    Expr** compared_value) {
+  auto cs = dynamic_cast<CompareSelect*>(condition);
   if (cs && cs->compare_select_op() == kLT) {
-    auto var = dynamic_cast<const Var*>(cs->lhs());
+    auto var = dynamic_cast<Var*>(cs->lhs());
     if (var) {
       *cond_var = var;
       *compared_value = cs->rhs();
@@ -1035,13 +1027,13 @@ bool isConditionOptimizable(
 //   * sub_exprs to the list of sub-expressions that are the result of this
 //     if-then-else expression.
 bool isConditionalFromCat(
-    const IfThenElse* ite,
-    const Var** cond_var,
-    std::vector<const Expr*>* comp_values,
-    std::vector<const Expr*>* sub_exprs) {
-  const Var* var = nullptr;
+    IfThenElse* ite,
+    Var** cond_var,
+    std::vector<Expr*>* comp_values,
+    std::vector<Expr*>* sub_exprs) {
+  Var* var = nullptr;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  const Expr* comp_value;
+  Expr* comp_value;
   if (isConditionOptimizable(ite->condition(), &var, &comp_value)) {
     if (*cond_var == nullptr) {
       *cond_var = var;
@@ -1050,7 +1042,7 @@ bool isConditionalFromCat(
       // expressions. Can not optimize such cases.
       return false;
     }
-    auto true_ite = dynamic_cast<const IfThenElse*>(ite->true_value());
+    auto true_ite = dynamic_cast<IfThenElse*>(ite->true_value());
     if (true_ite) {
       if (!isConditionalFromCat(true_ite, cond_var, comp_values, sub_exprs)) {
         return false;
@@ -1058,7 +1050,7 @@ bool isConditionalFromCat(
     } else {
       sub_exprs->push_back(ite->true_value());
     }
-    auto false_ite = dynamic_cast<const IfThenElse*>(ite->false_value());
+    auto false_ite = dynamic_cast<IfThenElse*>(ite->false_value());
     if (false_ite) {
       return false;
     }
@@ -1069,7 +1061,7 @@ bool isConditionalFromCat(
   return false;
 }
 
-bool areConstantsAndSorted(const std::vector<const Expr*>& comp_values) {
+bool areConstantsAndSorted(const std::vector<Expr*>& comp_values) {
   std::vector<int> comp_consts;
   comp_consts.reserve(comp_values.size());
   for (auto c : comp_values) {
@@ -1089,14 +1081,14 @@ bool LoopNest::optimizeConditionals() {
   auto stores = NodeFinder<Store>::find(root_stmt_);
   std::unordered_set<For*> split_fors;
   for (auto store : stores) {
-    const Var* cond_var = nullptr;
+    Var* cond_var = nullptr;
     // `comp_values` represent the list of compared values that will be
     // collected as we check for the expected pattern. Since that will
     // only include the RHS of the conditions in the if-then-else expressions
     // we need to start with `0` which is the initial bound, given that we
     // only handle normalized loops (check for this is done below).
-    std::vector<const Expr*> comp_values = {new IntImm(0)};
-    std::vector<const Expr*> sub_exprs;
+    std::vector<Expr*> comp_values = {new IntImm(0)};
+    std::vector<Expr*> sub_exprs;
     auto ifthenelse_exprs = NodeFinder<IfThenElse>::find(store);
     if (ifthenelse_exprs.empty()) {
       continue;
@@ -1245,10 +1237,9 @@ void LoopNest::vectorizeInnerLoops() {
 }
 
 void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
-  if (dynamic_cast<const IntImm*>(f->start()) &&
-      dynamic_cast<const IntImm*>(f->stop())) {
-    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
-    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+  if (dynamic_cast<IntImm*>(f->start()) && dynamic_cast<IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<IntImm*>(f->stop())->value();
     int size_val = stop_val - start_val;
     if (factor >= size_val) {
       *head = f;
@@ -1266,7 +1257,7 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
     throw malformed_input("sliceHead attempted on loop with no parent", p);
   }
 
-  const Expr* head_end =
+  Expr* head_end =
       new Min(new Add(f->start(), new IntImm(factor)), f->stop(), true);
   *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
   *tail = new For(
@@ -1287,10 +1278,9 @@ void LoopNest::sliceHead(For* f, int factor) {
 }
 
 void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
-  if (dynamic_cast<const IntImm*>(f->start()) &&
-      dynamic_cast<const IntImm*>(f->stop())) {
-    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
-    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+  if (dynamic_cast<IntImm*>(f->start()) && dynamic_cast<IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<IntImm*>(f->stop())->value();
     int size_val = stop_val - start_val;
     if (factor >= size_val) {
       *head = nullptr;
@@ -1308,7 +1298,7 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
     throw malformed_input("sliceTail attempted on loop with no parent", p);
   }
 
-  const Expr* tail_start =
+  Expr* tail_start =
       new Max(f->start(), new Sub(f->stop(), new IntImm(factor)), true);
   *head = new For(
       f->var(),
@@ -1349,10 +1339,9 @@ void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
   }
 
   bool tail_is_needed = true;
-  if (dynamic_cast<const IntImm*>(f->start()) &&
-      dynamic_cast<const IntImm*>(f->stop())) {
-    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
-    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+  if (dynamic_cast<IntImm*>(f->start()) && dynamic_cast<IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<IntImm*>(f->stop())->value();
     int size_val = stop_val - start_val;
     int tail_size = size_val % factor;
     if (tail_size == 0) {
@@ -1360,25 +1349,24 @@ void LoopNest::splitWithTail(For* f, int factor, For** inner, For** tail) {
     }
   }
 
-  const IntImm* factor_expr = new IntImm(factor);
-  const Expr* size = new Sub(f->stop(), f->start());
-  const Expr* split_count = new Div(size, factor_expr);
-  const Expr* tail_size = new Mod(size, factor_expr);
+  IntImm* factor_expr = new IntImm(factor);
+  Expr* size = new Sub(f->stop(), f->start());
+  Expr* split_count = new Div(size, factor_expr);
+  Expr* tail_size = new Mod(size, factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
-  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
+  Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  const Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
+  Expr* combined_index1 = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   if (tail_is_needed) {
-    const Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
+    Var* i_tail = new Var(loop_var_name + "_tail", loop_var_dtype);
     // x -> x.tail + outer.size * inner.size
-    const Expr* combined_index2 =
-        new Add(i_tail, new Mul(split_count, factor_expr));
+    Expr* combined_index2 = new Add(i_tail, new Mul(split_count, factor_expr));
 
     Stmt* body_tail =
         Substitute(Stmt::clone(f->body()), {{f->var(), combined_index2}});
@@ -1413,8 +1401,8 @@ void LoopNest::splitWithMask(For* f, int factor, For** inner) {
   }
 
   bool tail_is_needed = true;
-  const Expr* start = IRSimplifier::simplify(f->start());
-  const Expr* stop = IRSimplifier::simplify(f->stop());
+  Expr* start = IRSimplifier::simplify(f->start());
+  Expr* stop = IRSimplifier::simplify(f->stop());
   if (start->isConstant() && stop->isConstant()) {
     int start_val = immediateAs<int>(start);
     int stop_val = immediateAs<int>(stop);
@@ -1425,31 +1413,31 @@ void LoopNest::splitWithMask(For* f, int factor, For** inner) {
     }
   }
 
-  const IntImm* factor_expr = new IntImm(factor);
-  const Expr* size = new Sub(f->stop(), f->start());
+  IntImm* factor_expr = new IntImm(factor);
+  Expr* size = new Sub(f->stop(), f->start());
   // split_count = (size + factor - 1) / factor
-  const Expr* split_count =
+  Expr* split_count =
       new Div(new Sub(new Add(size, factor_expr), new IntImm(1)), factor_expr);
 
   const std::string& loop_var_name = f->var()->name_hint();
   Dtype loop_var_dtype = f->var()->dtype();
 
-  const Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
-  const Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
+  Var* i_inner = new Var(loop_var_name + "_inner", loop_var_dtype);
+  Var* i_outer = new Var(loop_var_name + "_outer", loop_var_dtype);
 
   // x -> x.outer * inner.size + x.inner
-  const Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
+  Expr* combined_index = new Add(new Mul(i_outer, factor_expr), i_inner);
 
   Stmt* body_inner = f->removeBody();
   // TODO: is it ok that we're doing it eagerly? In the other implementation we
   // are only materializing predicates at the last, lowering, step.
   if (tail_is_needed) {
-    const IntImm* start = dynamic_cast<const IntImm*>(f->start());
+    IntImm* start = dynamic_cast<IntImm*>(f->start());
     if (!start || start->value() != 0) {
       throw unimplemented_lowering();
     }
 
-    const Expr* predicate =
+    Expr* predicate =
         CompareSelect::make(ExprHandle(f->var()), ExprHandle(f->stop()), kLT)
             .node();
     body_inner = Cond::make(ExprHandle(predicate), body_inner, nullptr);
@@ -1539,14 +1527,12 @@ std::vector<For*> LoopNest::distributeLoopAndParentsOverInnerLoops(For* loop) {
   return result;
 }
 
-bool areEqual(const Expr* expr1, const Expr* expr2) {
+bool areEqual(Expr* expr1, Expr* expr2) {
   auto diff = IRSimplifier::simplify(new Sub(expr1, expr2));
   return diff->isConstant() && (immediateAs<int>(diff) == 0);
 };
 
-bool doesExprContainAnyVar(
-    const Expr* expr,
-    const std::unordered_set<const Var*>& vars) {
+bool doesExprContainAnyVar(Expr* expr, const std::unordered_set<Var*>& vars) {
   for (auto* v : VarFinder::find(expr)) {
     if (vars.count(v)) {
       return true;
@@ -1559,9 +1545,9 @@ bool doesExprContainAnyVar(
 // that are loop-independent w.r.t. the given list of outer loop
 // variables.
 bool areIndicesLoopIndependent(
-    const std::vector<const Expr*>& expr_list1,
-    const std::vector<const Expr*>& expr_list2,
-    const std::unordered_set<const Var*>& outer_loop_vars) {
+    const std::vector<Expr*>& expr_list1,
+    const std::vector<Expr*>& expr_list2,
+    const std::unordered_set<Var*>& outer_loop_vars) {
   if (expr_list1.size() != expr_list2.size()) {
     return false;
   }
@@ -1582,7 +1568,7 @@ bool LoopNest::hasLoopCarriedDependence(For* loop) {
   analysis::MemDependencyChecker analyzer;
   loop->accept(&analyzer);
 
-  std::unordered_set<const Var*> outer_loop_vars = {loop->var()};
+  std::unordered_set<Var*> outer_loop_vars = {loop->var()};
   auto outer_loops = LoopNest::getEnclosingLoopNest(loop);
   for (auto l : outer_loops) {
     outer_loop_vars.insert(l->var());
@@ -1764,7 +1750,7 @@ bool LoopNest::fuseLoops(const std::vector<For*>& loops, For** fused) {
   std::vector<For*> loops_copy;
   loops_copy.reserve(loops.size());
   Block* parent = new Block({});
-  for (const auto& l : loops) {
+  for (auto& l : loops) {
     auto l_copy = Stmt::clone(l);
     loops_copy.push_back(dynamic_cast<For*>(l_copy));
     parent->append_stmt(l_copy);
@@ -2091,7 +2077,7 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   int start_val = immediateAs<int>(start_expr);
   int stop_val = immediateAs<int>(stop_expr);
   for (int current = start_val; current < stop_val; ++current) {
-    for (const auto stmt : f->body()->stmts()) {
+    for (auto stmt : f->body()->stmts()) {
       auto stmt_copy = Stmt::clone(stmt);
       unrolled_stmts.push_back(Substitute(
           stmt_copy,
@@ -2254,7 +2240,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   auto reads = StmtsReadingBuf::find(stmt, buf);
 
   // Find the parent common to all the buffer accesses.
-  const Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
+  Block* parent = dynamic_cast<Block*>(writes.front()->get_parent());
   TORCH_INTERNAL_ASSERT(parent);
   for (auto w : writes) {
     parent = Block::getSharedParent(parent, w);
@@ -2265,7 +2251,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
 
   // Collect all the loops that are above the common parent.
   auto loops = LoopNest::getEnclosingLoopNest(parent);
-  std::unordered_set<const Var*> loop_vars;
+  std::unordered_set<Var*> loop_vars;
   for (auto l : loops) {
     loop_vars.insert(l->var());
   }
@@ -2276,7 +2262,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
 
   // Vector to indicate which dimensions could be compressed away.
   std::vector<bool> dims(buf->dims().size(), true);
-  auto check_indices = [&](const std::vector<const Expr*>& indices) {
+  auto check_indices = [&](const std::vector<Expr*>& indices) {
     TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
     for (size_t i = 0; i < indices.size(); ++i) {
       auto index_vars = NodeFinder<Var>::find(indices[i]);
@@ -2309,7 +2295,7 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   }
 
   // Compress buffer by removing the marked dims.
-  std::vector<const Expr*> new_dims(buf->dims());
+  std::vector<Expr*> new_dims(buf->dims());
   for (size_t i = 0; i < dims.size(); ++i) {
     if (dims[i]) {
       new_dims[i] = new IntImm(1);
@@ -2318,9 +2304,9 @@ void LoopNest::compressBuffer(Buf* buf, Stmt* stmt) {
   buf->set_dims(new_dims);
 
   // Modify all access to reflect the removed dims.
-  auto get_new_indices = [&](const std::vector<const Expr*>& indices) {
+  auto get_new_indices = [&](const std::vector<Expr*>& indices) {
     TORCH_INTERNAL_ASSERT(indices.size() == dims.size());
-    std::vector<const Expr*> new_indices(indices);
+    std::vector<Expr*> new_indices(indices);
     for (size_t i = 0; i < dims.size(); ++i) {
       if (dims[i]) {
         new_indices[i] = new IntImm(0);
@@ -2351,7 +2337,7 @@ std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   return getLoopStmtsFor(cur_stmt);
 }
 
-std::vector<For*> LoopNest::getLoopStmtsFor(const Buf* buf) const {
+std::vector<For*> LoopNest::getLoopStmtsFor(Buf* buf) const {
   Stmt* cur_stmt = getLoopBodyFor(buf);
   return getLoopStmtsFor(cur_stmt);
 }
@@ -2373,21 +2359,21 @@ Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t->buf());
 }
 
-Stmt* LoopNest::getLoopBodyFor(const Buf* buf) const {
+Stmt* LoopNest::getLoopBodyFor(Buf* buf) const {
   auto writes = WritesToBuf::find(root_stmt_, buf);
 
   // special case for reduction Tensors, ignore the initializer if it's the only
   // op:
   if (writes.size() == 2) {
-    if (const Store* s = dynamic_cast<const Store*>(writes.back())) {
-      if (const ReduceOp* r = dynamic_cast<const ReduceOp*>(s->value())) {
+    if (Store* s = dynamic_cast<Store*>(writes.back())) {
+      if (ReduceOp* r = dynamic_cast<ReduceOp*>(s->value())) {
         return (Stmt*)s; // NOLINT
       }
     }
   }
 
-  const Stmt* res = nullptr;
-  for (const auto* s : writes) {
+  Stmt* res = nullptr;
+  for (auto* s : writes) {
     if (!res) {
       res = s;
       continue;
@@ -2399,7 +2385,7 @@ Stmt* LoopNest::getLoopBodyFor(const Buf* buf) const {
   return (Stmt*)res; // NOLINT
 }
 
-For* LoopNest::getParentLoop(const Stmt* st) {
+For* LoopNest::getParentLoop(Stmt* st) {
   if (st == nullptr) {
     return nullptr;
   }
@@ -2410,7 +2396,7 @@ For* LoopNest::getParentLoop(const Stmt* st) {
   return getParentLoop(par);
 }
 
-std::vector<For*> LoopNest::getEnclosingLoopNest(const Stmt* st) {
+std::vector<For*> LoopNest::getEnclosingLoopNest(Stmt* st) {
   std::vector<For*> loops;
   auto f = getParentLoop(st);
   while (f) {
@@ -2421,12 +2407,11 @@ std::vector<For*> LoopNest::getEnclosingLoopNest(const Stmt* st) {
   return loops;
 }
 
-std::vector<const Stmt*> LoopNest::getAllWritesToBuf(const Buf* buf) const {
+std::vector<Stmt*> LoopNest::getAllWritesToBuf(Buf* buf) const {
   return WritesToBuf::find(root_stmt_, buf);
 }
 
-std::vector<For*> LoopNest::getAllInnermostLoopsWritingToBuf(
-    const Buf* buf) const {
+std::vector<For*> LoopNest::getAllInnermostLoopsWritingToBuf(Buf* buf) const {
   auto writes = getAllWritesToBuf(buf);
   std::vector<For*> innermost_loops;
   innermost_loops.reserve(writes.size());
@@ -2437,7 +2422,7 @@ std::vector<For*> LoopNest::getAllInnermostLoopsWritingToBuf(
 }
 
 std::vector<std::vector<For*>> LoopNest::getAllLoopNestsWritingToBuf(
-    const Buf* buf) const {
+    Buf* buf) const {
   auto writes = getAllWritesToBuf(buf);
   std::vector<std::vector<For*>> loopnests;
   loopnests.reserve(writes.size());
@@ -2461,23 +2446,20 @@ Stmt* FlattenIndexes(Stmt* s) {
 // LoopNest::computeAt for more details.
 class LoopComputeAtRewriter : public IRMutator {
  public:
-  LoopComputeAtRewriter(
-      const Buf* buf,
-      const Buf* new_buf,
-      std::vector<const Expr*> offsets)
+  LoopComputeAtRewriter(Buf* buf, Buf* new_buf, std::vector<Expr*> offsets)
       : buf_(buf), new_buf_(new_buf), offsets_(std::move(offsets)) {}
 
  private:
-  const Buf* buf_;
-  const Buf* new_buf_;
-  std::vector<const Expr*> offsets_;
+  Buf* buf_;
+  Buf* new_buf_;
+  std::vector<Expr*> offsets_;
 
-  const Expr* mutate(const Load* v) override {
+  Expr* mutate(Load* v) override {
     if (v->buf() != buf_) {
       return v;
     }
-    std::vector<const Expr*> new_indices(v->indices().size());
-    for (const auto i : c10::irange(v->indices().size())) {
+    std::vector<Expr*> new_indices(v->indices().size());
+    for (auto i : c10::irange(v->indices().size())) {
       new_indices[i] =
           IRSimplifier::simplify(new Sub(v->indices()[i], offsets_[i]));
     }
@@ -2499,8 +2481,8 @@ static Store* getStoreStmtOfProducer(Stmt* s) {
   return nullptr;
 }
 
-static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
-  std::vector<const Var*> res;
+static std::vector<Var*> getOuterLoopIndexes(Stmt* s) {
+  std::vector<Var*> res;
   Stmt* cur = s;
   while (cur) {
     if (auto l = dynamic_cast<For*>(cur)) {
@@ -2513,66 +2495,63 @@ static std::vector<const Var*> getOuterLoopIndexes(Stmt* s) {
 
 class CacheReplacer : public IRMutator {
  public:
-  CacheReplacer(
-      const Buf* buffer,
-      const Buf* cache,
-      std::vector<const Expr*>& offsets)
+  CacheReplacer(Buf* buffer, Buf* cache, std::vector<Expr*>& offsets)
       : buf_(buffer), cache_(cache), offsets_(offsets) {}
 
  private:
-  const Expr* mutate(const Load* v) override {
-    const Buf* buf = v->buf();
+  Expr* mutate(Load* v) override {
+    Buf* buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
 
     // Map indices to call-parameters.
-    std::vector<const Expr*> newIndices;
+    std::vector<Expr*> newIndices;
     TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
     for (size_t i = 0; i < v->indices().size(); ++i) {
-      const Expr* index = v->indices()[i]->accept_mutator(this);
-      const Expr* offset = offsets_[i];
-      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      Expr* index = v->indices()[i]->accept_mutator(this);
+      Expr* offset = offsets_[i];
+      Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
       newIndices.push_back(sub);
     }
 
     return new Load(cache_, newIndices);
   }
 
-  Stmt* mutate(const Store* v) override {
-    const Buf* buf = v->buf();
+  Stmt* mutate(Store* v) override {
+    Buf* buf = v->buf();
     if (buf != buf_) {
       return IRMutator::mutate(v);
     }
 
-    const Expr* newValue = v->value()->accept_mutator(this);
+    Expr* newValue = v->value()->accept_mutator(this);
 
     // Map indices to call-parameters.
-    std::vector<const Expr*> newIndices;
+    std::vector<Expr*> newIndices;
     TORCH_INTERNAL_ASSERT(offsets_.size() == v->indices().size());
     for (size_t i = 0; i < v->indices().size(); ++i) {
-      const Expr* index = v->indices()[i]->accept_mutator(this);
-      const Expr* offset = offsets_[i];
-      const Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
+      Expr* index = v->indices()[i]->accept_mutator(this);
+      Expr* offset = offsets_[i];
+      Expr* sub = IRSimplifier::simplify(new Sub(index, offset));
       newIndices.push_back(sub);
     }
 
     return new Store(cache_, newIndices, newValue);
   }
 
-  const Buf* buf_;
-  const Buf* cache_;
-  std::vector<const Expr*>& offsets_;
+  Buf* buf_;
+  Buf* cache_;
+  std::vector<Expr*>& offsets_;
 };
 
 LoopNest::AccessResult LoopNest::cacheAccesses(
-    const Buf* producer,
+    Buf* producer,
     const std::string& name,
     Stmt* consumer) {
-  const ReduceOp* reduceOp{nullptr};
+  ReduceOp* reduceOp{nullptr};
   auto stores = NodeFinder<Store>::find(consumer);
   for (auto* store : stores) {
-    if (auto ro = dynamic_cast<const ReduceOp*>(store->value())) {
+    if (auto ro = dynamic_cast<ReduceOp*>(store->value())) {
       if (store->buf() != producer) {
         continue;
       }
@@ -2601,13 +2580,13 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   bool hasWrites = info.kind == kStore || info.kind == kMutate;
 
   std::vector<std::string> var_names = {"i", "j", "k", "l", "m", "n", "o", "p"};
-  std::vector<const Expr*> tmp_dims;
+  std::vector<Expr*> tmp_dims;
   std::vector<Var*> new_loop_vars;
-  std::vector<const Expr*> new_loop_vars_expr;
+  std::vector<Expr*> new_loop_vars_expr;
 
   // Determine the size of the cache, and create a loop var for each dimension.
   for (size_t i = 0; i < info.start.size(); ++i) {
-    const Expr* dim = IRSimplifier::simplify(
+    Expr* dim = IRSimplifier::simplify(
         new Add(new Sub(info.stop[i], info.start[i]), new IntImm(1)));
 
     tmp_dims.push_back(dim);
@@ -2621,7 +2600,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
 
   // determine the offsets for calls into the cache based off the loop start of
   // each axis.
-  std::vector<const Expr*> tmp_params;
+  std::vector<Expr*> tmp_params;
   for (size_t i = 0; i < new_loop_vars.size(); ++i) {
     tmp_params.push_back(new Add(new_loop_vars[i], info.start[i]));
   }
@@ -2649,9 +2628,9 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   // Instead we need to create a new ReduceOp.
   bool on_reduce_axis = false;
   if (reduceOp) {
-    std::set<const Var*> reduce_args(
+    std::set<Var*> reduce_args(
         reduceOp->reduce_args().begin(), reduceOp->reduce_args().end());
-    std::set<const Var*> enclosing_vars;
+    std::set<Var*> enclosing_vars;
     for (auto enclosing_for_stmt : NodeFinder<For>::find(consumer)) {
       enclosing_vars.insert(enclosing_for_stmt->var());
     }
@@ -2850,14 +2829,14 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   }
 
   // Compute dimensions of the temp buffer we would need to allocate
-  std::vector<const Expr*> dims = getBoundExtents(bounds_it->second);
+  std::vector<Expr*> dims = getBoundExtents(bounds_it->second);
 
   // TODO: Use name-hint of the producer instead of "temp"
-  const Buf* temp_buf = new Buf("temp", dims, st->value()->dtype());
+  Buf* temp_buf = new Buf("temp", dims, st->value()->dtype());
 
   // Generate index variables for 'temp'
-  std::vector<const Expr*> temp_indices(dims.size());
-  for (const auto i : c10::irange(dims.size())) {
+  std::vector<Expr*> temp_indices(dims.size());
+  for (auto i : c10::irange(dims.size())) {
     // TODO: Use name-hint of the producer indices instead of 'idx'
     temp_indices[i] = new Var(std::string("idx") + c10::to_string(i), kInt);
   }
@@ -2869,11 +2848,11 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // modified (e.g. split or merged) so that the loop indices no longer
   // correspond to the indices of the original expression and even their number
   // might be different. In that case, the loop below would crash.
-  std::vector<const Var*> prod_indices = getOuterLoopIndexes(s);
-  std::vector<std::pair<const Var*, const Expr*>> rewrite_indices_map;
-  std::vector<const Expr*> offsets;
+  std::vector<Var*> prod_indices = getOuterLoopIndexes(s);
+  std::vector<std::pair<Var*, Expr*>> rewrite_indices_map;
+  std::vector<Expr*> offsets;
   for (const TensorAccessBoundsInfo& p : bounds_it->second) {
-    for (const auto i : c10::irange(p.start.size())) {
+    for (auto i : c10::irange(p.start.size())) {
       if (offsets.size() <= i) {
         offsets.push_back(p.start[i]);
       } else {
@@ -2883,7 +2862,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
     }
   }
 
-  for (const auto i : c10::irange(prod_indices.size())) {
+  for (auto i : c10::irange(prod_indices.size())) {
     rewrite_indices_map.push_back(
         {prod_indices[i], new Add(temp_indices[i], offsets[i])});
   }
@@ -2893,12 +2872,12 @@ void LoopNest::computeAt(Stmt* s, For* f) {
       temp_buf, temp_indices, Substitute(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
-  for (const auto i : c10::irange(dims.size())) {
+  for (auto i : c10::irange(dims.size())) {
     // We're creating loops from innermost to outermost, so we need to access
     // dimensions in reversed order.
     size_t dim_idx = dims.size() - 1 - i;
     bd = new For(
-        dynamic_cast<const Var*>(temp_indices[dim_idx]),
+        dynamic_cast<Var*>(temp_indices[dim_idx]),
         new IntImm(0),
         dims[dim_idx],
         bd);
@@ -2919,10 +2898,10 @@ void LoopNest::computeAt(Stmt* s, For* f) {
 class RfactorStoreRewriter : public IRMutator {
  public:
   RfactorStoreRewriter(
-      const Buf* old_buf,
-      const std::vector<const Expr*>& old_indices,
-      const Buf* new_buf,
-      const Var* reduction_var)
+      Buf* old_buf,
+      const std::vector<Expr*>& old_indices,
+      Buf* new_buf,
+      Var* reduction_var)
       : old_buf_(old_buf),
         old_indices_(old_indices),
         new_buf_(new_buf),
@@ -2931,7 +2910,7 @@ class RfactorStoreRewriter : public IRMutator {
     new_indices_.push_back(reduction_var_);
   }
 
-  const Expr* mutate(const Load* v) override {
+  Expr* mutate(Load* v) override {
     if (v->buf() != old_buf_) {
       return IRMutator::mutate(v);
     }
@@ -2952,10 +2931,10 @@ class RfactorStoreRewriter : public IRMutator {
     return new Load(new_buf_, new_indices_);
   }
 
-  const Expr* mutate(const ReduceOp* v) override {
-    const Expr* body_new = v->body()->accept_mutator(this);
+  Expr* mutate(ReduceOp* v) override {
+    Expr* body_new = v->body()->accept_mutator(this);
 
-    std::vector<const Var*> new_reduce_args;
+    std::vector<Var*> new_reduce_args;
     for (auto* r : v->reduce_args()) {
       if (r != reduction_var_) {
         new_reduce_args.push_back(r);
@@ -2965,7 +2944,7 @@ class RfactorStoreRewriter : public IRMutator {
     return new ReduceOp(body_new, new_reduce_args, v->reducer());
   }
 
-  Stmt* mutate(const Store* v) override {
+  Stmt* mutate(Store* v) override {
     if (v->buf() != old_buf_) {
       return IRMutator::mutate(v);
     }
@@ -2983,16 +2962,16 @@ class RfactorStoreRewriter : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    const Expr* new_value = v->value()->accept_mutator(this);
+    Expr* new_value = v->value()->accept_mutator(this);
     return new Store(new_buf_, new_indices_, new_value);
   }
 
  private:
-  const Buf* old_buf_;
-  const std::vector<const Expr*>& old_indices_;
-  const Buf* new_buf_;
-  const Var* reduction_var_;
-  std::vector<const Expr*> new_indices_;
+  Buf* old_buf_;
+  const std::vector<Expr*>& old_indices_;
+  Buf* new_buf_;
+  Var* reduction_var_;
+  std::vector<Expr*> new_indices_;
 };
 
 bool LoopNest::rfactor(Stmt* st, For* target_for) {
@@ -3002,8 +2981,7 @@ bool LoopNest::rfactor(Stmt* st, For* target_for) {
 
 bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   Store* reduction_store = dynamic_cast<Store*>(st);
-  const ReduceOp* reduce_op =
-      dynamic_cast<const ReduceOp*>(reduction_store->value());
+  ReduceOp* reduce_op = dynamic_cast<ReduceOp*>(reduction_store->value());
   if (!reduce_op) {
     // Not a reduction store
     return false;
@@ -3011,9 +2989,9 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
 
   auto orig_buf = reduction_store->buf();
   auto orig_buf_indices = reduction_store->indices();
-  const Var* reduction_var = outer_reduction_for->var();
+  Var* reduction_var = outer_reduction_for->var();
 
-  std::set<const Var*> reduce_args = {
+  std::set<Var*> reduce_args = {
       reduce_op->reduce_args().begin(), reduce_op->reduce_args().end()};
 
   if (reduce_args.size() < 2) {
@@ -3050,11 +3028,11 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   // assert: reduce_axis match loop vars from outer_reduction_for and inside
   // assert: no other stmts in outer_reduction_for or its child loops
 
-  std::vector<const Expr*> rfac_dims = orig_buf->dims();
-  const Expr* extra_dim = IRSimplifier::simplify(
+  std::vector<Expr*> rfac_dims = orig_buf->dims();
+  Expr* extra_dim = IRSimplifier::simplify(
       new Sub(outer_reduction_for->stop(), outer_reduction_for->start()));
   rfac_dims.push_back(extra_dim);
-  const Expr* rfac_init =
+  Expr* rfac_init =
       new Cast(reduce_op->dtype(), reduce_op->reducer().initializer());
 
   *rfac_buf_ptr = new Buf(
@@ -3082,7 +3060,7 @@ bool LoopNest::rfactor(Stmt* st, For* outer_reduction_for, Buf** rfac_buf_ptr) {
   auto rfac_buf_indices = orig_buf_indices;
   rfac_buf_indices.emplace_back(reduction_var);
 
-  const Expr* final_reduce_load = new Load(rfac_buf, rfac_buf_indices);
+  Expr* final_reduce_load = new Load(rfac_buf, rfac_buf_indices);
   outer_reduction_for->body()->insert_stmt_after(
       new Store(
           orig_buf,

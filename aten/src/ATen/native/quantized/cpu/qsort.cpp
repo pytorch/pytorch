@@ -58,7 +58,6 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
   return quantized_topk_out_cpu(values, indices, self, k, dim, largest, sorted);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qtopk_stub);
 
 }}  // namespace at::native
