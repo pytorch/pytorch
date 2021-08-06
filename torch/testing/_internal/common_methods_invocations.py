@@ -2221,6 +2221,24 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_adaptive_avg_pool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as (input shape, output size)
+    cases = (
+        ((1, 8, 8, 8), (5, 7)),
+        ((2, 8, 8, 8), (None, 7)),
+        ((1, 8, 4, 3), (5, None)),
+        ((1, 8, 4, 3), (None, None)),
+        ((1, 8, 4, 3), (5)),
+    )
+
+    def generator():
+        for input_shape, output_size in cases:
+            yield SampleInput(make_arg(input_shape), args=(output_size,))
+
+    return list(generator())
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -2639,6 +2657,26 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(SampleInput(tensor, args=(axis,),))
 
     return samples
+
+
+def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
+    shapes = ((0, 1, 5, 5), (1, 1, 5, 5), (2, 3, 5, 5))
+    kernel_sizes = (2, (2, 2), (3, 3))
+    dilations = (1, 2, (1, 2))
+    paddings = (0, 1, (1, 1))
+    strides = (1, 2, (1, 2))
+
+    def generator():
+        cases = product(shapes, kernel_sizes, dilations, paddings, strides)
+        for shape, kernel_size, dilation, padding, stride in cases:
+            tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+            yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
+
+        # With default args
+        yield SampleInput(make_tensor((1, 1, 5, 5), device, dtype, requires_grad=requires_grad),
+                          args=((3, 3),))
+
+    return list(generator())
 
 
 def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
@@ -6609,7 +6647,7 @@ op_db: List[OpInfo] = [
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
@@ -6617,6 +6655,14 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.adaptive_avg_pool2d',
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
@@ -6634,6 +6680,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
+    OpInfo('nn.functional.unfold',
+           aten_name='im2col',
+           dtypes=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_nn_unfold,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
            aten_name="leaky_relu",
