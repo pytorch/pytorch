@@ -1067,12 +1067,26 @@ Arguments:
               py::arg("input_tensor"),
               py::call_guard<py::gil_scoped_release>())
 
-          .def(
+           .def(
               "allgather_coalesced",
               &::c10d::ProcessGroup::allgather_coalesced,
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allgather_coalesced",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<std::vector<at::Tensor>>& output,
+                 std::vector<at::Tensor>& input) {
+//                std::vector<std::vector<at::Tensor>> outputs = {output};
+//                std::vector<at::Tensor> inputs = {input};
+                return pg.allgather_coalesced(
+                    output, input, ::c10d::AllgatherOptions());
+              },
+              py::arg("output_lists"),
+              py::arg("input_list"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(

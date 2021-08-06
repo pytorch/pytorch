@@ -457,6 +457,37 @@ class ProcessGroupNCCLTest(TestCase):
             allgather_base(output_t, tensor)
 
     @requires_nccl()
+    def test_allgather_coalesced_basics_nccl(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allgather_coalesced_base(output_t, input_t):
+            work = pg.allgather(output_t, input_t)
+            work.wait()
+
+        # init input
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([self.rank + 2]).cuda(i))
+
+        # init golden output
+        golden_ts = [[] for _ in range(self.num_gpus)]
+        for idx, ls in enumerate(golden_ts):
+            for _ in range(self.num_gpus):
+                ls.append(torch.tensor([idx + 2]).cuda(self.rank))
+
+        # init output
+        output_ts = [[] for _ in range(self.num_gpus)]
+        for idx, ls in enumerate(output_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.tensor([0]).cuda(idx))
+ 
+        allgather_coalesced_base(output_ts, tensors)
+        for result_tensor, expected in zip(output_ts, golden_ts):
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(result_tensor, expected)
+
+    @requires_nccl()
     def test_gather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)

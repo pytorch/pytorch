@@ -1476,11 +1476,66 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::allgather_coalesced(
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    std::vector<at::Tensor>& /* unused */,
-    const AllgatherOptions& /* unused */) {
-  TORCH_CHECK(false,
-      "ProcessGroupNCCL does not support allgather_coalesced");
+    std::vector<std::vector<at::Tensor>>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const AllgatherOptions& opts) {
+  check_gpu_tensors(inputTensors);
+
+  auto outputFlattened =
+      flatten_for_scatter_gather(outputTensors, inputTensors, size_);
+  check_gpu_tensors(outputFlattened);
+
+  auto inputFlattenedTensor =
+      newLikeFlat(inputTensors);
+
+  auto outputFlattened2 = newLikeFlat(outputFlattened);
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = inputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                    // rank
+      "allgather_coalesced",             // colName
+      tensor.numel(),           // inSize
+      tensor.numel() *          // outSize
+        this->getSize(),        // dType
+      tensor.scalar_type(),
+      std::vector<int64_t>(),   // inSplitSizes
+      std::vector<int64_t>());  // outSplitSize
+
+  return collective(
+      inputTensors,
+//      inputFlattenedTensor,
+      outputFlattened,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        return ncclAllGather(
+            input.data_ptr(),
+            output.data_ptr(),
+            input.numel(),
+            getNcclDataType(input.scalar_type()),
+            comm,
+            stream.stream());
+      },
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {
+        // Copy the flattened output tensors to the outputs.
+        for (const auto i : c10::irange(outputTensors.size())) {
+          at::cuda::CUDAStreamGuard guard(ncclStreams[i]);
+          for (size_t j = 0; j < outputTensors[0].size(); ++j) {
+            // See [Sync Streams].
+            c10::cuda::CUDACachingAllocator::recordStream(
+                outputTensors[i][j].storage().data_ptr(), ncclStreams[i]);
+
+            outputTensors[i][j].copy_(outputFlattened[i][j], true);
+          }
+        }
+     },
+     OpType::ALLGATHER_COALESCED,
+     "nccl:allgather_coalesced");
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
@@ -1968,7 +2023,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
         }
       },
       [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
- 
+
       OpType::SCATTER,
       "nccl:scatter");
 }
