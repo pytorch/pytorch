@@ -1999,7 +1999,7 @@ class DistributedDataParallelTest(
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
-            fut.set_result([bucket.get_tensor()])
+            fut.set_result([bucket.buffer()])
             return fut
 
         model.register_comm_hook(None, dummy_hook)
@@ -2036,7 +2036,7 @@ class DistributedDataParallelTest(
                 return fut.wait()[0] / self.world_size
 
             # Prepare allreduced grad bucket tensors by running an async work.
-            fut = process_group.allreduce([bucket.get_tensor()]).get_future()
+            fut = process_group.allreduce([bucket.buffer()]).get_future()
             return fut.then(div_by_world_size)
 
         ddp_model.register_comm_hook(None, allreduce_hook_gloo)
