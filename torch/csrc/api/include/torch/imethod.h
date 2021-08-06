@@ -4,7 +4,7 @@
 
 namespace torch {
 
-class TORCH_API IMethod {
+class IMethod {
   /*
   IMethod provides a portable interface for torch methods, whether
   they are backed by torchscript or python/deploy.
