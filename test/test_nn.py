@@ -13312,6 +13312,7 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
+    @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_zero_batch(self, dtype):
         # The device parameter does not accept device objects.
@@ -13320,15 +13321,15 @@ class TestNNDeviceType(NNTestCase):
             device_list.append('cuda')
 
         for device in device_list:
-            inp = torch.ones(0, 10, dtype=dtype).to(device)
+            inp = torch.ones(0, 10, dtype=dtype, device=device)
             mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
             self._test_module_empty_input(mod, inp, check_size=False)
 
-            inp = torch.ones(0, 10, 10, dtype=dtype).to(device)
+            inp = torch.ones(0, 10, 10, dtype=dtype, device=device)
             mod = torch.nn.AdaptiveAvgPool2d((5, 5)).to(device)
             self._test_module_empty_input(mod, inp, check_size=False)
 
-            inp = torch.ones(0, 10, 10, 10, dtype=dtype).to(device)
+            inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
             mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
             self._test_module_empty_input(mod, inp, check_size=False)
 
