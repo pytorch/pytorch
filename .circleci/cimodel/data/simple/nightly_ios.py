@@ -38,7 +38,6 @@ class IOSNightlyJob:
             "requires": extra_requires,
             "context": "org-member",
             "use_metal": miniutils.quote(str(int(True))),
-            # "filters": {"branches": {"only": "nightly"}},
         }
 
         if not self.is_upload:
