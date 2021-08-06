@@ -8498,7 +8498,17 @@ reduction_op_db: List[ReductionOpInfo] = [
         promotes_int_to_int64=True,
         supports_out=False,
         supports_forward_ad=True,
-        ref=lambda x, dim=None, keepdim=False: np.sum(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim)
+        ref=lambda x, dim=None, keepdim=False: np.sum(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim),
+        skips=(
+            # FIXME: sum does not support passing keepdim without passing dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: sum reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: sum does not support passing None to dim
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
     ),
 ]
 
