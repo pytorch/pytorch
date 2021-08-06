@@ -1520,7 +1520,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
-    for (auto i: c10::irange(1, n->inputs().size())) {
+    for (auto i : c10::irange(1, n->inputs().size())) {
       n->input(i)->node()->moveBefore(if_node);
     }
     // replace all uses of the quantized node with the output of if node
