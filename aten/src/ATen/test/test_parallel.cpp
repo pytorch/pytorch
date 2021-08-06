@@ -55,7 +55,7 @@ TEST(TestParallel, LocalMKLThreadNumber) {
   auto master_thread_num = mkl_get_max_threads();
   auto f = [](int nthreads){
     set_num_threads(nthreads);
-    ASSERT_TRUE(mkl_get_max_threads(), nthreads);
+    ASSERT_EQ(mkl_get_max_threads(), nthreads);
   };
   std::thread t(set_local_threads, 1);
   t.join();
