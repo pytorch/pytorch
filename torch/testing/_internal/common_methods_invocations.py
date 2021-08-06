@@ -12,7 +12,7 @@ import numpy as np
 from torch._six import inf
 import collections.abc
 
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, Union
 
 from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
@@ -853,17 +853,19 @@ class ReductionOpInfo(OpInfo):
         # The identity value of the operator.
         identity: Optional[float] = None,
 
-        # The result dtype for the operator. A single dtype value indicates
-        # that the operator always returns that dtype regardless of the input
-        # dtype. A dictionary maps input dtypes to output dtypes as follows:
-        # passing dtypes without precision as the key indicates any dtype of
-        # that category (e.g. torch.int indicates any integral dtype), whereas
-        # passing them as the value indicates the default value for that
-        # category. Dtypes with precision take precedence over dtypes without.
-        result_dtype: Optional[Union[torch.dtype, Dict[torch.dtype, torch.dtype]]] = None,
-
         # Whether the operator can reduce multiple dimensions.
         supports_multiple_dims: bool = True,
+
+        # Whether the operator promotes integral dtypes to floating point dtypes
+        promotes_int_to_float: bool = False,
+
+        # Whether the operator promotes all integral dtypes to int64
+        promotes_int_to_int64: bool = False,
+
+        # If a specific dtype is given, then the operator always returns that
+        # dtype irrespective of the input dtype. If None, the operator returns
+        # the dtype according to the type promotion rules above.
+        result_dtype: Optional[torch.dtype] = None,
 
         # A function that takes the input tensor and optional dim and keepdim
         # kwargs and generates tuples of args and kwargs to use when calling
@@ -883,6 +885,11 @@ class ReductionOpInfo(OpInfo):
         # Options from the OpInfo base class
         **kwargs,
     ):
+        # These are mutually exclusive options
+        assert not (promotes_int_to_float and promotes_int_to_int64)
+        assert not (result_dtype and promotes_int_to_float)
+        assert not (result_dtype and promotes_int_to_int64)
+
         # ReductionOpInfo tests generate their own input tensors and the dim
         # and keepdim parameters. Operators can provide a `generate_args_kwargs`
         # to augment the arguments to the operator and the reference implementation
@@ -910,8 +917,10 @@ class ReductionOpInfo(OpInfo):
         super(ReductionOpInfo, self).__init__(name, **kwargs)
 
         self.identity = identity
-        self.result_dtype = result_dtype
         self.supports_multiple_dims = supports_multiple_dims
+        self.promotes_int_to_float = promotes_int_to_float
+        self.promotes_int_to_int64 = promotes_int_to_int64
+        self.result_dtype = result_dtype
         self.generate_args_kwargs = generate_args_kwargs
 
 
@@ -8486,7 +8495,7 @@ reduction_op_db: List[ReductionOpInfo] = [
     ReductionOpInfo(
         'sum',
         identity=0,
-        result_dtype={torch.int: torch.int64},
+        promotes_int_to_int64=True,
         supports_out=False,
         supports_forward_ad=True,
         ref=lambda x, dim=None, keepdim=False: np.sum(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim)
