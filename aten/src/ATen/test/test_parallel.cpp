@@ -8,7 +8,10 @@
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
-#include<thread>
+#ifdef TH_BLAS_MKL
+#include <mkl.h>
+#include <thread>
+#endif
 
 struct NumThreadsGuard {
   int old_num_threads_;
@@ -55,9 +58,8 @@ TEST(TestParallel, LocalMKLThreadNumber) {
   auto master_thread_num = mkl_get_max_threads();
   auto f = [](int nthreads){
     set_num_threads(nthreads);
-    ASSERT_EQ(mkl_get_max_threads(), nthreads);
   };
-  std::thread t(set_local_threads, 1);
+  std::thread t(f, 1);
   t.join();
   ASSERT_EQ(master_thread_num, mkl_get_max_threads());
 }
