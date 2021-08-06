@@ -13312,6 +13312,25 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
+    @onlyOnCPUAndCUDA
+    def test_FractionalMaxPool2d_zero_batch(self, device):
+        mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
+        inp = torch.ones(0, 16, 50, 32, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_FractionalMaxPool3d_zero_batch(self, device):
+        mod = nn.FractionalMaxPool3d(3, output_ratio=(0.5, 0.5, 0.5)).to(device)
+        inp = torch.ones(0, 16, 50, 32, 32, device=device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected input"):
+            inp = torch.randn(1, 0, 50, 32, 32, device=device)
+            mod(inp)
 
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
@@ -16854,16 +16873,6 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError,
                                     r'lambda must be greater or equal to 0, but found to be -1\.'):
             m(input)
-
-    def test_unfold(self, device):
-        def func(x):
-            return F.unfold(x, kernel_size=(3, 3))
-        seeds = (13, 256, 811, 43, 7)
-        for sd in seeds:
-            torch.manual_seed(sd)
-            x = torch.randn(1, 1, 5, 5, device=device, requires_grad=True)
-            gradcheck(func, [x])
-            gradgradcheck(func, [x])
 
     def test_fold(self, device):
         def func(x):
