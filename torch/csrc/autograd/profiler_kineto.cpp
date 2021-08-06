@@ -21,11 +21,13 @@ __attribute__((weak)) int acc_get_device_type() {
   throw std::runtime_error("Dummy implementation of acc_get_device_type is not supposed to be called!");
 }
 } // extern "C"
-#endif
+#endif // _MSC_VER
+#endif // USE_KINETO
 
 namespace torch { namespace autograd { namespace profiler {
 
 namespace {
+const std::string kMemoryEventName = "[memory]";
 // TODO: consider TLS (tid + tls counter)
 uint64_t next_correlation_id() {
   static std::atomic<uint64_t> corr_id_ {1};
@@ -33,7 +35,11 @@ uint64_t next_correlation_id() {
 }
 
 inline int64_t getTimeUs() {
+#ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
+#else
+  return getTime() / 1000;
+#endif // USE_KINETO
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
@@ -45,10 +51,12 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   explicit KinetoThreadLocalState(const ProfilerConfig& config)
     : ProfilerThreadLocalState(config) {
     start_time_ = getTimeUs();
+#ifdef USE_KINETO
     cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
     cpu_trace->span.startTime = start_time_;
     cpu_trace->gpuOpCount = -1;
     cpu_trace->span.name = "PyTorch Profiler";
+#endif // USE_KINETO
   }
   ~KinetoThreadLocalState() override = default;
 
@@ -58,16 +66,18 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     if (!ctx) {
       return;
     }
-
+    std::string evt_name(fn.name().str());
+    auto end_time = getTimeUs();
+#ifdef USE_KINETO
     libkineto::GenericTraceActivity op(
         cpu_trace->span,
         libkineto::ActivityType::CPU_OP,
-        std::string(fn.name().str()));
+        evt_name);
     op.device = libkineto::processId();
     op.resource = libkineto::systemThreadId();
     op.id = ctx->correlationId;
     op.startTime = ctx->startUs;
-    op.endTime = getTimeUs();
+    op.endTime = end_time;
     // optimization - postpone shapesToStr till finalizeCPUTrace
     // is called from disableProfiler
     // if (ctx->shapes && !ctx->shapes->empty()) {
@@ -75,12 +85,16 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     // }
 
     libkineto::api().activityProfiler().recordThreadInfo();
-
+#endif // USE_KINETO
     {
       std::lock_guard<std::mutex> guard(state_mutex_);
       kineto_events_.emplace_back();
       kineto_events_.back()
-          .activity(op)
+          .name(evt_name)
+          .startUs(ctx->startUs)
+          .durationUs(end_time - ctx->startUs)
+          .correlationId(ctx->correlationId)
+          .deviceType(c10::DeviceType::CPU)
           .startThreadId(ctx->startThreadId)
           .endThreadId(ctx->endThreadId)
           .sequenceNr(ctx->sequenceNr)
@@ -101,7 +115,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       }
       kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
       kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
+#ifdef USE_KINETO
       cpu_trace->activities.emplace_back(std::move(op));
+#endif // USE_KINETO
     }
   }
 
@@ -112,43 +128,82 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       c10::Device device) override {
     if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
       std::lock_guard<std::mutex> guard(state_mutex_);
+      auto start_time = getTimeUs();
+#ifdef USE_KINETO
       libkineto::api().activityProfiler().recordThreadInfo();
 
       cpu_trace->activities.emplace_back(
           libkineto::GenericTraceActivity(
             cpu_trace->span,
             libkineto::ActivityType::CPU_INSTANT_EVENT,
-            "[memory]"));
+            kMemoryEventName));
       auto& act = cpu_trace->activities.back();
       act.device = libkineto::processId();
       act.resource = libkineto::systemThreadId();
 
-      act.startTime = getTimeUs();
+      act.startTime = start_time;
       act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
       act.addMetadata("Device Id", std::to_string(device.index()));
       act.addMetadata("Bytes", std::to_string(alloc_size));
+#endif // USE_KINETO
 
       kineto_events_.emplace_back();
       auto& evt = kineto_events_.back();
-      evt.activity(act)
-        .deviceType(device.type())
+      evt.name(kMemoryEventName)
+        .startUs(start_time)
         .deviceIndex(device.index())
+        .deviceType(device.type())
         .nBytes(alloc_size)
         .startThreadId(at::RecordFunction::currentThreadId());
+    }
+  }
+
+#ifdef USE_KINETO
+  c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
+    // fallthrough
+    switch (activity_type) {
+      case libkineto::ActivityType::GPU_MEMCPY:
+      case libkineto::ActivityType::GPU_MEMSET:
+      case libkineto::ActivityType::CONCURRENT_KERNEL:
+      case libkineto::ActivityType::GPU_USER_ANNOTATION:
+        return c10::DeviceType::CUDA;
+      case libkineto::ActivityType::CPU_OP:
+      case libkineto::ActivityType::USER_ANNOTATION:
+      case libkineto::ActivityType::EXTERNAL_CORRELATION:
+      case libkineto::ActivityType::CUDA_RUNTIME:
+      case libkineto::ActivityType::CPU_INSTANT_EVENT:
+      case libkineto::ActivityType::GLOW_RUNTIME:
+        return c10::DeviceType::CPU;
+      default: {
+        LOG(WARNING) << "Unknown activity type (" << (uint8_t)activity_type
+                    << "), assuming CPU device";
+        return c10::DeviceType::CPU;
+      }
     }
   }
 
   void addTraceEvents(libkineto::ActivityTraceInterface& trace) {
     const auto& events = *(trace.activities());
     for (const auto& ev_ptr : events) {
+      const auto& activity = *ev_ptr;
       // These events are already processed
-      if (ev_ptr->type() != libkineto::ActivityType::CPU_OP &&
-          ev_ptr->type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
-          ev_ptr->type() != libkineto::ActivityType::USER_ANNOTATION
+      if (activity.type() != libkineto::ActivityType::CPU_OP &&
+          activity.type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
+          activity.type() != libkineto::ActivityType::USER_ANNOTATION
       ) {
         kineto_events_.emplace_back();
-        kineto_events_.back()
-            .activity(*ev_ptr);
+        auto& kineto_event = kineto_events_.back();
+        kineto_event.name(activity.name())
+          .deviceIndex(activity.deviceId())
+          .deviceResourceId(activity.resourceId())
+          .startUs(activity.timestamp())
+          .durationUs(activity.duration())
+          .activityType((uint8_t)activity.type());
+        if (activity.linkedActivity()) {
+          kineto_event.linkedCorrelationId(
+              activity.linkedActivity()->correlationId());
+        }
+        kineto_event.deviceType(deviceTypeFromActivity(activity.type()));
       }
     }
   }
@@ -182,9 +237,10 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
+  std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
+#endif // USE_KINETO
   uint64_t start_time_;
   std::vector<KinetoEvent> kineto_events_;
-  std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -227,7 +283,9 @@ void pushProfilingCallbacks() {
         if (config.state == ProfilerState::KINETO ||
             config.state == ProfilerState::KINETO_GPU_FALLBACK) {
           auto corr_id = next_correlation_id();
+#ifdef USE_KINETO
           libkineto::api().activityProfiler().pushCorrelationId(corr_id);
+#endif // USE_KINETO
 
           auto ctx_ptr = std::make_unique<KinetoObserverContext>();
           ctx_ptr->startUs = getTimeUs();
@@ -263,8 +321,7 @@ void pushProfilingCallbacks() {
             try {
               cudaStubs()->record(nullptr, &ctx_ptr->cuda_event_start_, nullptr);
             } catch (const std::exception& e) {
-              C10_LOG_EVERY_N(WARNING, 1000) << "Failed to record CUDA event. "
-                                            << e.what();
+              LOG(WARNING) << "Failed to record CUDA event. " << e.what();
             }
           }
           return ctx_ptr;
@@ -296,13 +353,14 @@ void pushProfilingCallbacks() {
               cudaStubs()->record(
                   nullptr, &kineto_ctx_ptr->cuda_event_end_, nullptr);
             } catch (const std::exception& e) {
-              C10_LOG_EVERY_N(WARNING, 1000) << "Failed to record CUDA event. "
-                                            << e.what();
+              LOG(WARNING) << "Failed to record CUDA event. " << e.what();
             }
           }
 
           state_ptr->reportClientActivity(fn, kineto_ctx_ptr);
+#ifdef USE_KINETO
           libkineto::api().activityProfiler().popCorrelationId();
+#endif // USE_KINETO
         } else if (config.state == ProfilerState::NVTX) {
           cudaStubs()->nvtxRangePop();
         }
@@ -378,7 +436,7 @@ void prepareProfiler(
       config.state == ProfilerState::KINETO ||
       config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
-
+#ifdef USE_KINETO
   std::set<libkineto::ActivityType> cpuTypes = {
     libkineto::ActivityType::CPU_OP,
     libkineto::ActivityType::CPU_INSTANT_EVENT,
@@ -413,6 +471,7 @@ void prepareProfiler(
   }
 
   libkineto::api().activityProfiler().prepareTrace(k_activities);
+#endif // USE_KINETO
 }
 
 void enableProfiler(
@@ -437,9 +496,11 @@ void enableProfiler(
     pushProfilingCallbacks();
   }
 
+#ifdef USE_KINETO
   if (config.state != ProfilerState::NVTX) {
     libkineto::api().activityProfiler().startTrace();
   }
+#endif // USE_KINETO
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
@@ -462,8 +523,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
+#ifdef USE_KINETO
   state_ptr->cpu_trace->span.endTime = getTimeUs();
-
   state_ptr->finalizeCPUTrace();
   libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
@@ -474,33 +535,20 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       state_ptr->start_time_,
       std::move(state_ptr->kineto_events_),
       std::move(trace));
+#else
+  return std::make_unique<ProfilerResult>(
+      std::move(state_ptr->kineto_events_));
+#endif // USE_KINETO
 }
 
 void addMetadataJson(const std::string& key, const std::string& value) {
+#ifdef USE_KINETO
   if (libkineto::api().isProfilerInitialized()) {
     libkineto::api().activityProfiler().addMetadata(key, value);
   } else {
     LOG(WARNING) << "Profiler is not initialized: skipping profiling metadata";
   }
-}
-
-KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
-  name_ = activity.name();
-  device_index_ = activity.deviceId();
-  device_resource_id_ = activity.resourceId();
-  start_us_ = activity.timestamp();
-  duration_us_ = activity.duration();
-  // Set the correlation id for the PyTorch CPU ops.
-  // Note: skip setting the correlation ids for other activities to avoid
-  // an incorrect attribution of CUDA kernels.
-  if (activity.type() == libkineto::ActivityType::CPU_OP) {
-    correlation_id_ = activity.correlationId();
-  }
-  activity_type_ = (uint8_t)activity.type();
-  if (activity.linkedActivity()) {
-    linked_correlation_id_ = activity.linkedActivity()->correlationId();
-  }
-  return *this;
+#endif // USE_KINETO
 }
 
 int64_t KinetoEvent::cudaElapsedUs() const {
@@ -510,35 +558,13 @@ int64_t KinetoEvent::cudaElapsedUs() const {
   try {
     return (int64_t)cudaStubs()->elapsed(&cuda_event_start_, &cuda_event_end_);
   } catch (std::exception& e) {
-    C10_LOG_EVERY_N(WARNING, 1000)
-        << "Failed to measure time between two CUDA events. "
+    LOG(WARNING) << "Failed to measure time between two CUDA events. "
         << e.what();
   }
   return -1;
 }
 
-c10::DeviceType KinetoEvent::deviceType() const {
-  if (device_type_ >= 0) {
-    return (c10::DeviceType)device_type_;
-  }
-  // determine device type from the activity type;
-  // fallthrough
-  switch (activity_type_) {
-    case (uint8_t)libkineto::ActivityType::GPU_MEMCPY:
-    case (uint8_t)libkineto::ActivityType::GPU_MEMSET:
-    case (uint8_t)libkineto::ActivityType::CONCURRENT_KERNEL:
-    case (uint8_t)libkineto::ActivityType::GPU_USER_ANNOTATION:
-      return c10::DeviceType::CUDA;
-    case (uint8_t)libkineto::ActivityType::CPU_OP:
-    case (uint8_t)libkineto::ActivityType::USER_ANNOTATION:
-    case (uint8_t)libkineto::ActivityType::EXTERNAL_CORRELATION:
-    case (uint8_t)libkineto::ActivityType::CUDA_RUNTIME:
-    case (uint8_t)libkineto::ActivityType::CPU_INSTANT_EVENT:
-      return c10::DeviceType::CPU;
-  }
-  TORCH_CHECK(false, "Unknown activity type");
-}
-
+#ifdef USE_KINETO
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
@@ -546,15 +572,20 @@ ProfilerResult::ProfilerResult(
   : trace_start_us_(start_time),
     events_(std::move(events)),
     trace_(std::move(trace)) {}
+#else
+ProfilerResult::ProfilerResult(std::vector<KinetoEvent> events)
+  : events_(std::move(events)) {}
+#endif // USE_KINETO
 ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
+#ifdef USE_KINETO
 void ProfilerResult::save(const std::string& path) {
   // Kineto's save is destructive
   TORCH_CHECK(!saved_, "Trace is already saved");
   trace_->save(path);
   saved_ = true;
 }
+#endif // USE_KINETO
 
 }}} // namespace torch::autograd::profiler
-#endif /* USE_KINETO */
