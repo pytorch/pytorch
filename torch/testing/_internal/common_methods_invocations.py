@@ -1066,6 +1066,22 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
+def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    cases = (
+        (()),
+        ((S, )),
+        ((S, S)),
+        ((S, M, S))
+    )
+
+    def generator():
+        for shape in cases:
+            yield SampleInput(make_arg(shape))
+
+    return list(generator())
+
 def sample_inputs_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2315,6 +2331,26 @@ def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad):
     tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
+
+def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+    cases = (((1, 3, 9, 9), 3, 1, 1, True, False, 2),
+             ((1, 3, 9, 9), (4, 4), (2, 3), 1, True, False, 2),
+             ((1, 3, 9, 9), (6, 6), (3, 3), (2, 3), True, True, 2),
+             ((2, 3, 9, 9), (3, 3), (1, 1), (1, ), True, False, 2),
+             ((1, 1, 4, 4), (2, 2), (), (0, ), False, True, -2),
+             ((1, 2, 6, 6), (4, 4), (2, 2), (2, ), True, True, None))
+
+    def generator():
+        for input_shape, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override in cases:
+            yield SampleInput(make_arg(input_shape),
+                              args=(kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override))
+        # Case with just input_shape and kernel_size
+        yield SampleInput(make_arg((1, 3, 9, 9)), args=((3, 3)))
+
+    return list(generator())
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
     def get_tensor_input(size):
@@ -4711,6 +4747,37 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         for shape, kwargs in shapes_and_kwargs
     ]
 
+def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    batch_size = 2
+    num_channels = 3
+    modes = ("bilinear", "nearest")
+    align_cornerss = (False, True)
+    padding_modes = ("zeros", "border", "reflection")
+
+    sample_inputs = []
+    for dim in (2, 3):
+        input = _make_tensor((batch_size, num_channels, *[S] * dim))
+        grid = _make_tensor((batch_size, *[S] * dim, dim))
+
+        modes_ = (*modes, "bicubic") if dim == 2 else modes
+
+        for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
+            sample_inputs.append(
+                SampleInput(
+                    input,
+                    args=(grid,),
+                    kwargs=dict(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                )
+            )
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -6550,6 +6617,13 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.relu',
+           aten_name="relu",
+           supports_autograd=True,
+           dtypesIfCPU=all_types_and(torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_nn_activation_relu,
+           supports_out=False),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
@@ -6572,6 +6646,13 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            autodiff_nonfusible_nodes=["aten::leaky_relu"]),
+    OpInfo('nn.functional.avg_pool2d',
+           aten_name='avg_pool2d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types_and(torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_avgpool2d),
     UnaryUfuncInfo(
         'nn.functional.logsigmoid',
         aten_name="log_sigmoid",
@@ -8214,6 +8295,23 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.grid_sample",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sample,
+        supports_gradgrad=False,
+        gradcheck_nondet_tol=1e-15,
         skips=(
             SkipInfo(
                 "TestJit",
