@@ -263,6 +263,24 @@ def _save_weight_qparams(self, destination, prefix, keep_vars):
             weight_qparams = getattr(self, attr_name)
             destination[prefix + attr_name] = weight_qparams
 
+
+def _to_reference(float_module, weight_qparams):
+    """ Make a weighted float module (e.g. conv and linear )a reference module by
+    attaching _weight_qparams that records the qparams for weight
+    and change the name for the module so that it's recognized
+    when people print the model
+    """
+    float_module._weight_qparams = weight_qparams
+    float_module._register_state_dict_hook(_save_weight_qparams)
+    float_module._register_load_state_dict_pre_hook(_load_weight_qparams, with_module=True)
+
+    float_module_name = float_module._get_name()
+
+    def _get_name():
+        return float_module_name + "(Reference)"
+
+    float_module._get_name = _get_name
+
 @register_quant_pattern(operator.add)
 @register_quant_pattern(operator.sub)
 @register_quant_pattern(operator.mul)
@@ -643,9 +661,8 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                     weight_post_process = qconfig.weight()
                     # run weight observer
                     weight_post_process(float_conv.weight)
-                float_conv._weight_qparams = get_qparam_dict(weight_post_process)
-                float_conv._register_state_dict_hook(_save_weight_qparams)
-                float_conv._register_load_state_dict_pre_hook(_load_weight_qparams, with_module=True)
+                weight_qparams = get_qparam_dict(weight_post_process)
+                _to_reference(float_conv, weight_qparams)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.conv_node.target,
@@ -865,9 +882,8 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # Run weight observer
                     weight_post_process(float_linear.weight)  # type: ignore[operator]
 
-                float_linear._weight_qparams = get_qparam_dict(weight_post_process)
-                float_linear._register_state_dict_hook(_save_weight_qparams)
-                float_linear._register_load_state_dict_pre_hook(_load_weight_qparams, with_module=True)
+                weight_qparams = get_qparam_dict(weight_post_process)
+                _to_reference(float_linear, weight_qparams)
                 op_out = quantized_graph.create_node(
                     'call_module',
                     self.linear_node.target,
