@@ -659,42 +659,22 @@ void Unpickler::rebuildSparseCooTensor() {
     std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
     bool requires_grad = elements.at(idx++).toBool();
     bool pinned_memory = elements.at(idx++).toBool();
-    auto data_type = static_cast<c10::ScalarType>(elements.at(idx++).toInt());
+    c10::ScalarType data_type =
+        static_cast<c10::ScalarType>(elements.at(idx++).toInt());
+    c10::Device device(elements.at(idx++).toStringRef());
     auto options = c10::TensorOptions()
                        .dtype(data_type)
                        .layout(c10::Layout::Sparse)
-                       .device(c10::DeviceType::CPU)
+                       .device(device)
                        .pinned_memory(pinned_memory)
                        .requires_grad(requires_grad);
     // rebuild indices
-    auto& indices_storage = elements.at(idx++).toTensor();
-    at::Tensor indices_result = at::empty({0}, indices_storage.options());
-    int64_t indices_offset = elements.at(idx++).toInt();
-    std::vector<int64_t> indices_size = tupleToIntList(elements.at(idx++));
-    std::vector<int64_t> indices_stride = tupleToIntList(elements.at(idx++));
-    bool indices_requires_grad = elements.at(idx++).toBool();
-    at::TensorImpl* indices_impl = indices_result.unsafeGetTensorImpl();
-    indices_impl->set_storage_keep_dtype(indices_storage.storage());
-    indices_impl->set_storage_offset(indices_offset);
-    indices_impl->set_sizes_and_strides(indices_size, indices_stride);
-    indices_result =
-        autograd::make_variable(indices_result, indices_requires_grad);
+    auto& indices_tensor = elements.at(idx++).toTensor();
     // rebuild values
-    auto& values_storage = elements.at(idx++).toTensor();
-    at::Tensor values_result = at::empty({0}, values_storage.options());
-    int64_t values_offset = elements.at(idx++).toInt();
-    std::vector<int64_t> values_size = tupleToIntList(elements.at(idx++));
-    std::vector<int64_t> values_stride = tupleToIntList(elements.at(idx++));
-    bool values_requires_grad = elements.at(idx++).toBool();
-    at::TensorImpl* values_impl = values_result.unsafeGetTensorImpl();
-    values_impl->set_storage_keep_dtype(values_storage.storage());
-    values_impl->set_storage_offset(values_offset);
-    values_impl->set_sizes_and_strides(values_size, values_stride);
-    values_result =
-        autograd::make_variable(values_result, values_requires_grad);
+    auto& values_tensor = elements.at(idx++).toTensor();
     // rebuild result tensor
     at::Tensor result = at::_sparse_coo_tensor_unsafe(
-        indices_result, values_result, size, options);
+        indices_tensor, values_tensor, size, options);
     result = autograd::make_variable(result, requires_grad);
     stack_.emplace_back(std::move(result));
   });
