@@ -598,8 +598,7 @@ namespace {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
         TORCH_CHECK(input.ndimension() == 4,
-                    "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor with optional 0-dim batch size, but got",
-                    input.sizes());
+                    "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got", input.ndimension());
 
         int sizeB = input.size(0);
         int sizeC = input.size(1);

@@ -13353,7 +13353,6 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(1, 0, 50, 32, 32, device=device)
             mod(inp)
 
-
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)

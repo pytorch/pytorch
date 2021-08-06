@@ -24,7 +24,7 @@ namespace {
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
@@ -60,7 +60,7 @@ namespace {
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
       "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),
