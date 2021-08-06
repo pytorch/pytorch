@@ -2221,6 +2221,54 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
                   for input_tensor, other_tensor in args_for_binary_op)
     return inputs
 
+def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for: input, weight, bias, stride, padding, output_padding, groups
+    cases = (((1, 3, 4, 4), (3, 3, 3, 3), (3), (2, 2), 2, (1, 1), 1),
+             ((2, 2, 4, 4), (2, 2, 4, 5), (4), (3, 3), 1, (2, 2), 2),
+             ((1, 1, 4, 5), (1, 1, 4, 3), (1), 2, 1, 1, 1),
+             ((1, 1, 4, 3), (1, 2, 3, 4), None, (2), 1, 1, 1),
+             )
+
+    def generator():
+        for input_shape, weight, bias, stride, padding, output_padding, groups in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias,
+                stride,
+                padding,
+                output_padding,
+                groups
+            ))
+        yield SampleInput(make_arg((1, 4, 5, 5)), args=(make_arg((4, 8, 3, 3)), None))
+
+    return list(generator())
+
+def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as shapes for: input, weight, bias, stride, padding, output_padding, groups
+    cases = (((1, 3, 4, 4), (3, 3, 3, 3), (3), (2, 2), 2, (1, 1), 1),
+             ((2, 2, 4, 4), (2, 2, 4, 5), (4), (3, 3), 1, (2, 2), 2),
+             ((1, 1, 4, 5), (1, 1, 4, 3), (1), 2, 1, 1, 1),
+             ((1, 1, 4, 3), (1, 2, 3, 4), None, (2), 1, 1, 1),
+             )
+
+    def generator():
+        for input_shape, weight, bias, stride, padding, output_padding, groups in cases:
+            yield SampleInput(make_arg(input_shape), args=(
+                make_arg(weight),
+                make_arg(bias) if bias is not None else bias,
+                stride,
+                padding,
+                output_padding,
+                groups
+            ))
+        yield SampleInput(make_arg((1, 4, 5, 5)), args=(make_arg((4, 8, 3, 3)), None))
+
+    return list(generator())
+
 def sample_inputs_hardswish(self, device, dtype, requires_grad):
     N = 5
     # make sure we are testing -3 -> 3 range. default is -10 -> 10 so maybe unnecessary ?
@@ -6624,6 +6672,26 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_activation_relu,
            supports_out=False),
+    OpInfo('nn.functional.conv_transpose2d',
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_conv_transpose2d,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False,
+           assert_autodiffed=True),
+    OpInfo('nn.functional.conv_transpose2d',
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_conv_transpose2d,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_out=False,
+           assert_autodiffed=True),
     OpInfo('nn.functional.hardswish',
            aten_name="hardswish",
            supports_autograd=True,
