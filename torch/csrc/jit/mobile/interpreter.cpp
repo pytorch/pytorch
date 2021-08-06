@@ -83,7 +83,8 @@ bool InterpreterState::run(Stack& stack) {
             // enable only for the RecordFunction
             enableRecordFunction(true);
           }
-          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(code_->op_names_[inst.X].name, debug_handle, stack);
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              code_->op_names_[inst.X].name, debug_handle, stack);
           if (!prev_value) {
             enableRecordFunction(false);
           }

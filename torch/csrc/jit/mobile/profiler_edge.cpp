@@ -1,4 +1,6 @@
 #include <torch/csrc/jit/mobile/profiler_edge.h>
+#include <string>
+#include <vector>
 
 namespace profiler = torch::autograd::profiler;
 namespace torch {
@@ -12,8 +14,8 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
     const bool profile_memory,
     const bool with_stack,
     const bool with_flops,
-    const bool with_module_hierarchy) :
-  m_(m), trace_file_name_(fname) {
+    const bool with_module_hierarchy)
+    : m_(m), trace_file_name_(fname) {
   profiler::ProfilerConfig config(
       profiler::ProfilerState::KINETO,
       report_input_shapes,
@@ -23,19 +25,32 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
       with_module_hierarchy);
   profiler::prepareProfiler(config, {profiler::ActivityType::CPU});
   if (with_module_hierarchy || with_stack) {
-    auto post_processing = [this, with_stack, with_module_hierarchy](std::vector<profiler::KinetoEvent>& events) {
-      for(auto& e : events) {
+    auto post_processing = [this, with_stack, with_module_hierarchy](
+                               std::vector<profiler::KinetoEvent>& events) {
+      for (auto& e : events) {
         if (with_module_hierarchy) {
-          e.moduleHierarchy(this->m_.getModuleHierarchy(e.debugHandle()));
+          // Since KinetoEvents's module hierarchy takes vector of strings we
+          // just construct a temporary vector using one string element
+          e.moduleHierarchy(std::vector<std::string>(
+              {this->m_.getModuleHierarchy(e.debugHandle())}));
         } else if (with_stack) {
-          e.moduleHierarchy(this->m_.getCallStack(e.debugHandle()));
+          // Since KinetoEvents's stack trace takes vector of strings we just
+          // construct a temporary vector using one string element
+          e.stack(std::vector<std::string>(
+              {this->m_.getCallStack(e.debugHandle())}));
         }
       }
     };
     profiler::enableProfilerWithEventPostProcess(
-        config, {profiler::ActivityType::CPU}, post_processing, {at::RecordScope::LITE_INTERPRETER});
+        config,
+        {profiler::ActivityType::CPU},
+        post_processing,
+        {at::RecordScope::LITE_INTERPRETER});
   } else {
-    profiler::enableProfiler(config, {profiler::ActivityType::CPU}, {at::RecordScope::LITE_INTERPRETER});
+    profiler::enableProfiler(
+        config,
+        {profiler::ActivityType::CPU},
+        {at::RecordScope::LITE_INTERPRETER});
   }
   trace_file_name_ = fname;
 }

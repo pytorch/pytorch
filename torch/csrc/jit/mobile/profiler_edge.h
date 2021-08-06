@@ -10,13 +10,13 @@ class TORCH_API KinetoEdgeCPUProfiler {
   // This profiler only profiler KINETO events
   // No GPU_FALLBACK or NVTX
   KinetoEdgeCPUProfiler(
-    const torch::jit::mobile::Module& m,
-    const std::string& fname,
-    const bool report_input_shapes = false,
-    const bool profile_memory = false,
-    const bool with_stack = false,
-    const bool with_flops = false,
-    const bool with_module_hierarchy = false);
+      const torch::jit::mobile::Module& m,
+      const std::string& fname,
+      const bool report_input_shapes = false,
+      const bool profile_memory = false,
+      const bool with_stack = false,
+      const bool with_flops = false,
+      const bool with_module_hierarchy = false);
 
   ~KinetoEdgeCPUProfiler();
 
