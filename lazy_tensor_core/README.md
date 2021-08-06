@@ -1,7 +1,8 @@
 # Lazy Tensors Core
 
 Provides infrastructure to connect the [PyTorch deep learning framework](https://pytorch.org/)
-to deep learning acelerators, with a focus on training. This project is derived from [PyTorch/XLA](https://github.com/pytorch/xla), which introduced the approach for training on Google TPUs, but instead aims for generality across vendors.
+to deep learning accelerators, with a focus on training. This project is derived from [PyTorch/XLA](https://github.com/pytorch/xla),
+which introduced the approach for training on Google TPUs, but instead aims for generality across vendors.
 
 ## <a name="API"></a> API & Best Practices
 
@@ -19,7 +20,7 @@ computation will fail with an error message indicating the missing implementatio
 
 The `BackendImplInterface` coordinates the several major pieces required to implement
 a vendor backend. A `BackendRegistrar` helper is provided to register the backend
-once it's implemented. The forementioned major pieces of a backend are defined by
+once it's implemented. The aforementioned major pieces of a backend are defined by
 the following interfaces:
 
 * `NodeLowering`, which provides a way to lower PyTorch tensor operations to code
@@ -32,7 +33,7 @@ The current interfaces are subject to frequent changes and improvements as we le
 from vendor needs. We recommend tracking them and adjusting as needed until we
 achieve a high degree of stability.
 
-A re-implementation of PyTorch/XLA using this arhitecture [is available](https://github.com/pytorch/xla/tree/asuhan/xla_ltc_plugin),
+A re-implementation of PyTorch/XLA using this architecture [is available](https://github.com/pytorch/xla/tree/asuhan/xla_ltc_plugin),
 reusing large parts of upstream PyTorch/XLA. Besides the in-line documentation
 in the interfaces mentioned above, it provides a realistic example of a vendor
 plug-in.
