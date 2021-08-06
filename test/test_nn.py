@@ -9195,10 +9195,9 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_PReLU_backward_requires_grad_false(self):
-        m = nn.PReLU().to('cuda')
-        x = torch.randn(2, 3, 4, 5, requires_grad=False, device='cuda')
+        m = nn.PReLU()
+        x = torch.randn(2, 3, 4, 5, requires_grad=False)
         y = m(x)
         y.mean().backward()
         self.assertEqual(x.grad, None)

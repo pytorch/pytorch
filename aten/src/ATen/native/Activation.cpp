@@ -16,6 +16,8 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #endif
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at {
 namespace meta {
@@ -599,61 +601,41 @@ TORCH_IMPL_FUNC(threshold_backward_out)(const Tensor& grad, const Tensor& self, 
 // prelu forward
 // -----------------------------------
 template <typename scalar_t>
-void inline prelu_cpu_kernel_share_weights(
+void inline prelu_cpu_kernel(
   Tensor& result,
   const Tensor& input,
   const Tensor& weight) {
 
-  int64_t input_numel = input.numel();
-  auto result_data = result.data_ptr<scalar_t>();
-  auto input_data = input.data_ptr<scalar_t>();
-  auto weight_val = weight.data_ptr<scalar_t>()[0];
-
-  at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      scalar_t input_data_val = input_data[i];
-      // to allow for compiler optimization, here splitting into two lines:
-      scalar_t r = (input_data_val > 0) ? scalar_t(1) : weight_val;
-      result_data[i] = r * input_data_val;
-    }
-  });
-}
-
-template <typename scalar_t>
-void inline prelu_cpu_kernel_multi_weights(
-  Tensor& result,
-  const Tensor& input,
-  const Tensor& weight,
-  int64_t input_dim0_size,
-  int64_t channel_size,
-  int64_t input_stride0,
-  int64_t input_stride1) {
-
-  scalar_t* result_data = result.data_ptr<scalar_t>();
-  scalar_t* input_data = input.data_ptr<scalar_t>();
-  scalar_t* weight_data = weight.data_ptr<scalar_t>();
-
-  auto loop = [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      int64_t offset = i * channel_size * input_stride1;
-      scalar_t* n_input_data = input_data + offset;
-      scalar_t* n_result_data = result_data + offset;
-      for (const auto j : c10::irange(channel_size)) {
-        for (const auto k : c10::irange(input_stride1)) {
-          // to allow for compiler optimization, here splitting into two lines:
-          scalar_t w = (n_input_data[k] > 0) ? scalar_t(1) : weight_data[j];
-          n_result_data[k] = w * n_input_data[k];
-        }
-        n_input_data += input_stride1;
-        n_result_data += input_stride1;
-      }
-    }
+  const int64_t ndim = input.dim();
+  // Helper to convert 1d tensors to an nd tensor that broadcasts with input
+  // All elements go into the channel dimension
+  DimVector sizes(ndim, 1), strides(ndim, 0);
+  auto as_nd = [&](const Tensor& t) {
+    TORCH_INTERNAL_ASSERT(t.defined() && t.dim() == 1);
+    sizes[1] = t.sizes()[0];
+    strides[1] = t.strides()[0];
+    return t.as_strided(sizes, strides);
   };
-  if (input.numel() > 1000) {
-    at::parallel_for(0, input_dim0_size, 0, loop);
-  } else {
-    loop(0, input_dim0_size);
-  }
+  auto w = weight.defined() ? as_nd(weight) :
+      at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  auto iter = TensorIteratorConfig()
+    .add_output(result)
+    .add_input(input)
+    .add_input(w)
+    .build();
+  using Vec = Vectorized<scalar_t>;
+  auto zero_vec = Vec((scalar_t)(0));
+  auto one_vec = Vec((scalar_t)(1));
+  cpu_kernel_vec(
+    iter,
+    [=](scalar_t input, scalar_t weight) {
+      return (input > scalar_t(0)) ? input : weight * input;
+    },
+    [=](Vec input, Vec weight) {
+      auto r = Vec::blendv(weight, one_vec, input > zero_vec);
+      return input * r;
+    }
+  );
 }
 
 Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
@@ -665,12 +647,11 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
 
   int64_t weight_num = weight.numel();
   Tensor result = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto strides = input.strides();
 
   // case1: shared weight for all channels
   if (weight_num == 1) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
-      prelu_cpu_kernel_share_weights<scalar_t>(result, input, weight);
+      prelu_cpu_kernel<scalar_t>(result, input, weight);
     });
   }
   else { // case2: multiple weights, one for each channel
@@ -678,27 +659,15 @@ Tensor prelu_cpu(const Tensor& self, const Tensor& weight_) {
     TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
-
     if (input_ndim > 1) {
       channel_size = input.size(1); // channel is the 2nd dim of input
-      input_dim0_size = input.size(0);
-      input_stride0 = strides[0];
-      input_stride1 = strides[1];
     }
     TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_cpu", [&] {
-      prelu_cpu_kernel_multi_weights<scalar_t>(
-        result,
-        input,
-        weight,
-        input_dim0_size,
-        channel_size,
-        input_stride0,
-        input_stride1);
+      prelu_cpu_kernel<scalar_t>(result, input, weight);
     });
   }
   return result;
@@ -713,74 +682,39 @@ void inline prelu_cpu_backward_kernel_share_weights(
   const Tensor& weight,
   const Tensor& grad_out,
   Tensor& input_grad,
-  Tensor& weight_grad) {
+  Tensor& weight_grad_collector) {
 
-  int64_t input_numel = input.numel();
-  auto input_data = input.data_ptr<scalar_t>();
-  auto weight_val = weight.data_ptr<scalar_t>()[0];
-  auto grad_out_data = grad_out.data_ptr<scalar_t>();
-  auto input_grad_data = input_grad.data_ptr<scalar_t>();
-  auto weight_grad_data = weight_grad.data_ptr<scalar_t>();
-
-  scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
-      [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
-    scalar_t partial_sum = ident;
-    for (const auto i : c10::irange(start, end)) {
-      scalar_t input_data_val = input_data[i];
-      scalar_t grad_out_data_val = grad_out_data[i];
-      // to allow for compiler optimization, here splitting into two lines:
-      scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_val;
-      input_grad_data[i] = w * grad_out_data_val;
-      // to allow for compiler optimization, here splitting into two lines:
-      scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
-      partial_sum += mask * input_data_val * grad_out_data_val;
-    }
-    return partial_sum;
-  }, std::plus<scalar_t>());
-  weight_grad_data[0] = sum;
-}
-
-template <typename scalar_t>
-void inline prelu_cpu_backward_kernel_multi_weights(
-  const Tensor& input,
-  const Tensor& weight,
-  const Tensor& grad_out,
-  Tensor& input_grad,
-  Tensor& weight_grad_collector,
-  int64_t input_dim0_size,
-  int64_t channel_size,
-  int64_t input_stride0,
-  int64_t input_stride1) {
-
-  auto input_data = input.data_ptr<scalar_t>();
-  auto weight_data = weight.data_ptr<scalar_t>();
-  auto grad_out_data = grad_out.data_ptr<scalar_t>();
-  auto input_grad_data = input_grad.data_ptr<scalar_t>();
-  auto weight_grad_collector_data = weight_grad_collector.data_ptr<scalar_t>();
-
-  auto loop = [&](int64_t start, int64_t end) {
-    for (const auto i : c10::irange(start, end)) {
-      for (const auto j : c10::irange(channel_size)) {
-        for (const auto k : c10::irange(input_stride1)) {
-          int64_t pos = i * input_stride0 + j * input_stride1 + k;
-          scalar_t weight_data_val = weight_data[j];
-          scalar_t input_data_val = input_data[pos];
-          scalar_t grad_out_data_val = grad_out_data[pos];
-          // to allow for compiler optimization, here splitting into two lines:
-          scalar_t w = (input_data_val > 0) ? scalar_t(1) : weight_data_val;
-          input_grad_data[pos] = w * grad_out_data_val;
-          // to allow for compiler optimization, here splitting into two lines:
-          scalar_t mask = (input_data_val > 0) ? scalar_t(0) : scalar_t(1);
-          weight_grad_collector_data[pos] = mask * input_data_val * grad_out_data_val;
-        }
-      }
-    }
+  const int64_t ndim = input.dim();
+  // Helper to convert 1d tensors to an nd tensor that broadcasts with input
+  // All elements go into the channel dimension
+  DimVector sizes(ndim, 1), strides(ndim, 0);
+  auto as_nd = [&](const Tensor& t) {
+    TORCH_INTERNAL_ASSERT(t.defined() && t.dim() == 1);
+    sizes[1] = t.sizes()[0];
+    strides[1] = t.strides()[0];
+    return t.as_strided(sizes, strides);
   };
-  if (input.numel() > 1000) {
-    at::parallel_for(0, input_dim0_size, 0, loop);
-  } else {
-    loop(0, input_dim0_size);
-  }
+  auto w = weight.defined() ? as_nd(weight) :
+      at::detail::scalar_tensor_static(1, input.scalar_type(), kCPU);
+  auto iter = TensorIteratorConfig()
+    .add_output(input_grad)
+    .add_output(weight_grad_collector)
+    .add_input(input)
+    .add_input(grad_out)
+    .add_input(w)
+    .build();
+
+  using Vec = Vectorized<scalar_t>;
+  auto zero_vec = Vec((scalar_t)(0));
+  auto one_vec = Vec((scalar_t)(1));
+  cpu_kernel_multiple_outputs(
+    iter,
+    [=](scalar_t input, scalar_t grad_out, scalar_t weight) -> std::tuple<scalar_t, scalar_t> {
+      scalar_t input_grad = (input > scalar_t(0)) ? grad_out : weight * grad_out;
+      scalar_t weight_grad_collector = (input > scalar_t(0)) ? scalar_t(0) : input * grad_out;
+      return {input_grad, weight_grad_collector};
+    }
+  );
 }
 
 std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Tensor& self, const Tensor& weight_) {
@@ -793,8 +727,6 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   TORCH_CHECK(weight.is_contiguous());
 
   int64_t weight_num = weight.numel();
-  auto strides = input.strides();
-  auto dims = input.dim();
 
   Tensor input_grad = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor weight_grad = at::empty_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -803,45 +735,31 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
   // case1: shared parameter for all channels
   if (weight_num == 1) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
-      prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad);
+      prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad_collector);
     });
+    // update weight_grad
+    weight_grad.fill_(weight_grad_collector.sum());
   }
   else { // case2: multiple parameters, one for each channel
     int64_t input_ndim = input.dim();
     TORCH_CHECK(input_ndim > 0, "Not allow zero-dim input tensor.");
 
     int64_t channel_size = 1; // channel_size default to 1
-    int64_t input_dim0_size = 1, input_stride0 = 1, input_stride1 = 1;
-
     if (input_ndim > 1) {
       channel_size = input.size(1); // channel is the 2nd dim of input
-      input_dim0_size = input.size(0);
-      input_stride0 = strides[0];
-      input_stride1 = strides[1];
     }
     TORCH_CHECK(channel_size == weight_num,
       "Mismatch of parameter numbers and input channel size. Found parameter numbers = ", weight_num,
       " and channel size = ", channel_size, ".");
 
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "prelu_backward_cpu", [&] {
-      prelu_cpu_backward_kernel_multi_weights<scalar_t>(
-        input,
-        weight,
-        grad_out,
-        input_grad,
-        weight_grad_collector,
-        input_dim0_size,
-        channel_size,
-        input_stride0,
-        input_stride1);
+      prelu_cpu_backward_kernel_share_weights<scalar_t>(input, weight, grad_out, input_grad, weight_grad_collector);
     });
     // update weight_grad
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
-    if (dims > 2) {
-      for (const auto i : c10::irange(2, dims)) {
-        reduce_dims.push_back(i);
-      }
+    if (input_ndim > 2) {
+      for(int64_t i = 2; i < input_ndim; i++) reduce_dims.push_back(i);
     }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
