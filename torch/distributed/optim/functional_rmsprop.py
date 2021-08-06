@@ -24,7 +24,7 @@ class _FunctionalRMSprop(object):
         weight_decay: float = 0.0,
         momentum: float = 0.0,
         centered: bool = False,
-        allow_empty_param_list: bool = False,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -35,7 +35,7 @@ class _FunctionalRMSprop(object):
         }
         self.centered = centered
 
-        if len(params) == 0 and not allow_empty_param_list:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
