@@ -867,13 +867,6 @@ class ReductionOpInfo(OpInfo):
         # the dtype according to the type promotion rules above.
         result_dtype: Optional[torch.dtype] = None,
 
-        # A function that takes the input tensor and optional dim and keepdim
-        # kwargs and generates tuples of args and kwargs to use when calling
-        # the operator and reference implementation with the given dim and
-        # keepdim kwargs. Note that some tests will only use the first generated
-        # args and kwargs.
-        generate_args_kwargs: Callable = lambda *args, **kwargs: (yield tuple(), {}),
-
         # Operators are expected to work with all dtypes unless documented
         # otherwise. It is often easier and clearer to specify the dtypes
         # an operator does not support.
@@ -881,6 +874,16 @@ class ReductionOpInfo(OpInfo):
         unsupported_dtypes_cpu: _dispatch_dtypes = empty_types(),
         unsupported_dtypes_cuda: _dispatch_dtypes = empty_types(),
         unsupported_dtypes_rocm: _dispatch_dtypes = empty_types(),
+
+        # A function that takes the input tensor and optional dim kwarg and
+        # generates tuples of args and kwargs to use when calling the operator
+        # and reference implementation with the given dim kwarg. Note that some
+        # tests will only use the first generated args and kwargs.
+        generate_args_kwargs: Callable = lambda *args, **kwargs: (yield tuple(), {}),
+
+        # A reference implementation called with the same arguments as the
+        # operator to compare the results against.
+        reference: Optional[Callable] = None,
 
         # Options from the OpInfo base class
         **kwargs,
@@ -912,6 +915,7 @@ class ReductionOpInfo(OpInfo):
         kwargs["dtypesIfROCM"] = _dispatch_dtypes(all_types - set(unsupported_dtypes_rocm))
 
         # Override OpInfo defaults and call base class __init__
+        kwargs['ref'] = None
         kwargs.setdefault('inplace_variant', None)
         kwargs.setdefault('sample_inputs_func', sample_inputs_func)
         super(ReductionOpInfo, self).__init__(name, **kwargs)
@@ -922,6 +926,7 @@ class ReductionOpInfo(OpInfo):
         self.promotes_int_to_int64 = promotes_int_to_int64
         self.result_dtype = result_dtype
         self.generate_args_kwargs = generate_args_kwargs
+        self.reference = reference
 
 
 def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
@@ -5235,6 +5240,18 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     return op(input.triu() if upper else input.tril(), upper)
 
 
+def reference_reduction_numpy(f):
+    @wraps(f)
+    def wrapper(t: torch.Tensor, *args, dim=None, keepdim=False, **kwargs):
+        # NumPy reductions don't accept dim=0 for scalar inputs
+        if t.ndim == 0 and (dim == 0 or dim == -1):
+            dim = None
+
+        return f(t.cpu().numpy(), *args, axis=dim, keepdims=keepdim, **kwargs)
+
+    return wrapper
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -8498,7 +8515,7 @@ reduction_op_db: List[ReductionOpInfo] = [
         promotes_int_to_int64=True,
         supports_out=False,
         supports_forward_ad=True,
-        ref=lambda x, dim=None, keepdim=False: np.sum(x, axis=dim if x.ndim > 0 else None, keepdims=keepdim),
+        reference=reference_reduction_numpy(np.sum),
         skips=(
             # FIXME: sum does not support passing keepdim without passing dim
             SkipInfo('TestReductions', 'test_dim_default_keepdim'),
@@ -8508,6 +8525,12 @@ reduction_op_db: List[ReductionOpInfo] = [
             # FIXME: sum does not support passing None to dim
             SkipInfo('TestReductions', 'test_dim_none'),
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: difference of 0.00390625
+            SkipInfo('TestReductions', 'test_ref_random_input_small',
+                     dtypes=[torch.float16]),
+            # FIXME: difference of 128.0
+            SkipInfo('TestReductions', 'test_ref_random_input_large',
+                     dtypes=[torch.float16]),
         ),
     ),
 ]

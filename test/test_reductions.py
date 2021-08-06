@@ -9,7 +9,8 @@ from itertools import product, combinations, permutations
 import warnings
 
 from torch._six import inf, nan
-from torch.testing import integral_types_and, floating_and_complex_types_and
+from torch.testing import (
+    integral_types_and, floating_and_complex_types_and, get_all_dtypes)
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS, make_tensor)
@@ -17,7 +18,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
     onlyOnCPUAndCUDA, onlyCUDA, largeTensorTest, ops, precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
-    ReductionOpInfo, reduction_op_db)
+    ReductionOpInfo, reduction_op_db, _generate_reduction_kwargs)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -70,6 +71,7 @@ def reduced_shape(shape, dim=None, keepdim=False):
             result.append(1)
 
     return result
+
 
 class TestReductions(TestCase):
 
@@ -236,6 +238,56 @@ class TestReductions(TestCase):
         args, kwargs = next(op.generate_args_kwargs(t))
         result: torch.Tensor = op(t, *args, **kwargs)
         self.assertEqual(result, torch.nan)
+
+    # NumPy does not support BFloat16
+    @ops(filter(lambda op: op.reference is not None, reduction_op_db),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing a scalar input"""
+        t = make_tensor([], device, dtype)
+        for args, kwargs in op.generate_args_kwargs(t, dim=0):
+            res = op(t, *args, **kwargs)
+            ref = op.reference(t, *args, **kwargs)
+            self.assertEqual(res, ref)
+
+    @ops(filter(lambda op: op.reference is not None, reduction_op_db),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_random_input_small(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing many small tensors for correctness"""
+        for ndim in range(1, 5):
+            shape = list(torch.randint(1, 5, (ndim,)))
+            t = make_tensor(shape, device, dtype)
+            for kwargs in _generate_reduction_kwargs(ndim, op.supports_multiple_dims):
+                dim = kwargs.pop('dim')
+                keepdim = kwargs.pop('keepdim')
+                for args, kwargs in op.generate_args_kwargs(t, dim=dim):
+                    res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+                    ref = op.reference(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+                    self.assertEqual(res, ref)
+
+    @ops(filter(lambda op: op.reference is not None, reduction_op_db),
+         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+    def test_ref_random_input_large(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing large tensors for accuracy"""
+        t = make_tensor([10000000], device, dtype)
+        for args, kwargs in op.generate_args_kwargs(t):
+            res = op(t, *args, **kwargs)
+            ref = op.reference(t, *args, **kwargs)
+            self.assertEqual(res, ref, atol=1e-03, rtol=1e-03)
+
+    @ops(reduction_op_db)
+    def test_non_contiguous_input(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along non contiguous dimensions"""
+        for ndim in range(1, 4):
+            shape = list(torch.randint(1, 5, (ndim,)))
+            t = make_tensor(shape, device, dtype, noncontiguous=True)
+            for kwargs in _generate_reduction_kwargs(ndim, op.supports_multiple_dims):
+                dim = kwargs.pop('dim')
+                keepdim = kwargs.pop('keepdim')
+                for args, kwargs in op.generate_args_kwargs(t, dim=dim):
+                    res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+                    ref = op(t.contiguous(), *args, dim=dim, keepdim=keepdim, **kwargs)
+                    self.assertEqual(res, ref)
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
