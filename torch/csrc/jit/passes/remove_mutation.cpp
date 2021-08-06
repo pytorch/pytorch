@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
