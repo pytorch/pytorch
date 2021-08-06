@@ -18,12 +18,14 @@ from .ns.weight_utils import (
 )
 
 from .ns.graph_passes import (
-    remove_observers_add_loggers,
+    add_loggers_to_model,
     create_a_shadows_b,
 )
 
 from .ns.utils import (
     rekey_logger_info_on_node_name_of_model,
+    maybe_add_missing_fqns,
+    get_target_type_str,
 )
 
 from .ns.ns_types import (
@@ -47,9 +49,11 @@ class OutputLogger(nn.Module):
         model_name: str,
         ref_name: str,
         prev_node_target_type: str,
+        ref_node_target_type: str,
         results_type: str,
         index_within_arg: int,
         index_of_arg: int,
+        fqn: Optional[str],
     ):
         super().__init__()
         self.stats: List[torch.Tensor] = []
@@ -80,6 +84,9 @@ class OutputLogger(nn.Module):
         self.ref_name = ref_name
         # type of the target of the node whose output this logger is logging
         self.prev_node_target_type = prev_node_target_type
+        # type of the target of the node which was respondible for adding this
+        # logger
+        self.ref_node_target_type = ref_node_target_type
         # what kind of values are inside of stats
         self.results_type = results_type
         # index of this node within the arg of the input/output node
@@ -88,6 +95,8 @@ class OutputLogger(nn.Module):
         # index of this node within the args of the input/output node
         # for example, in add(x1, x2), x2 would have index_of_arg == 1
         self.index_of_arg = index_of_arg
+        # fully qualified name
+        self.fqn = fqn
 
     # Note: cannot annotate the type of x because TorchScript does not support
     #   the Union type.
@@ -102,8 +111,9 @@ class OutputLogger(nn.Module):
     def __repr__(self):
         return f"""OutputLogger(ref_name={self.ref_name}, model_name={self.model_name},
 prev_node_name={self.prev_node_name}, ref_node_name={self.ref_node_name},
+ref_node_target_type={self.ref_node_target_type}
 results_type={self.results_type}, index_within_arg={self.index_within_arg},
-index_of_arg={self.index_of_arg})"""
+index_of_arg={self.index_of_arg}, fqn={self.fqn})"""
 
 
 class NSTracer(quantize_fx.QuantizationTracer):
@@ -124,16 +134,13 @@ def _extract_weights_one_model(
     model: GraphModule,
     nodes_and_names_to_instrument: List[Tuple[Node, str]],
     results: NSResultsType,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> None:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_one_model")
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = \
-        get_type_a_related_to_b(base_name_to_sets_of_related_ops)
-
     for node, ref_name in nodes_and_names_to_instrument:
         res_type = NSSingleResultValuesType.WEIGHT.value
-        extracted_weight = \
-            extract_weight_from_node(node, model, type_a_related_to_b)
+        extracted_weight = extract_weight_from_node(
+            node, model, op_to_type_to_weight_extraction_fn)
         if extracted_weight:
             if ref_name not in results:
                 results[ref_name] = {res_type: {}}
@@ -147,6 +154,7 @@ def _extract_weights_impl(
     gm_b: GraphModule,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._extract_weights_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
@@ -164,9 +172,14 @@ def _extract_weights_impl(
     # populate the results, one model at a time
     results: NSResultsType = {}
     _extract_weights_one_model(
-        model_name_a, gm_a, nodes_and_names_to_instrument_a, results)
+        model_name_a, gm_a, nodes_and_names_to_instrument_a, results,
+        op_to_type_to_weight_extraction_fn)
     _extract_weights_one_model(
-        model_name_b, gm_b, nodes_and_names_to_instrument_b, results)
+        model_name_b, gm_b, nodes_and_names_to_instrument_b, results,
+        op_to_type_to_weight_extraction_fn)
+
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
 
     # rekey on names of nodes in gm_b
     results = rekey_logger_info_on_node_name_of_model(results, model_name_b)
@@ -181,9 +194,12 @@ def extract_weights(
     model_b: nn.Module,
     base_name_to_sets_of_related_ops: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
     unmatchable_types_map: Optional[Dict[str, Set[NSNodeTargetType]]] = None,
+    op_to_type_to_weight_extraction_fn: Optional[Dict[str, Dict[Callable, Callable]]] = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
-    base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    if base_name_to_sets_of_related_ops is None:
+        base_name_to_sets_of_related_ops = \
+            get_base_name_to_sets_of_related_ops()
     type_a_related_to_b = \
         get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
@@ -193,31 +209,35 @@ def extract_weights(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _extract_weights_impl(
         model_name_a, gm_a, model_name_b, gm_b, base_name_to_sets_of_related_ops,
-        unmatchable_types_map)
+        unmatchable_types_map, op_to_type_to_weight_extraction_fn)
 
 
 def _add_loggers_one_model(
     model_name: str,
     model: GraphModule,
-    nodes_and_names_to_instrument_inputs: List[Tuple[Node, str]],
-    nodes_and_names_to_instrument_outputs: List[Tuple[Node, str]],
+    nodes_and_names_to_instrument_inputs: List[Tuple[Node, str, str]],
+    nodes_and_names_to_instrument_outputs: List[Tuple[Node, str, str]],
     logger_cls: Callable,
 ) -> nn.Module:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_one_model")
 
     # TODO(future PR): do not observe nodes we do not care
     #   about (both fp32, denylist, etc)
-    node_to_instrument_inputs_to_ref_name: Dict[Node, str] = {}
-    node_to_instrument_outputs_to_ref_name: Dict[Node, str] = {}
-    for node, ref_name in nodes_and_names_to_instrument_inputs:
-        node_to_instrument_inputs_to_ref_name[node] = ref_name
-    for node, ref_name in nodes_and_names_to_instrument_outputs:
-        node_to_instrument_outputs_to_ref_name[node] = ref_name
+    node_to_instrument_inputs_to_ref_name: Dict[Node, Tuple[str, str]] = {}
+    node_to_instrument_outputs_to_ref_name: Dict[Node, Tuple[str, str]] = {}
+    for node, ref_name, ref_node_type in nodes_and_names_to_instrument_inputs:
+        node_to_instrument_inputs_to_ref_name[node] = (ref_name, ref_node_type)
+    for node, ref_name, ref_node_type in nodes_and_names_to_instrument_outputs:
+        node_to_instrument_outputs_to_ref_name[node] = (ref_name, ref_node_type)
 
-    model = remove_observers_add_loggers(
+    model = add_loggers_to_model(
         model, node_to_instrument_inputs_to_ref_name,
         node_to_instrument_outputs_to_ref_name, logger_cls, model_name)
     return model
@@ -242,15 +262,21 @@ def _add_loggers_impl(
     nodes_and_names_to_instrument_outputs_a = []
     nodes_and_names_to_instrument_outputs_b = []
     for match_name, (subgraph_a, subgraph_b) in matched_subgraph_pairs.items():
+        ref_node_type_a = get_target_type_str(subgraph_a.base_op_node, gm_a)
+        ref_node_type_b = get_target_type_str(subgraph_b.base_op_node, gm_b)
         # Note: for matching inputs we use start_node, such as observing
         # the input of linear in linear-relu
         if should_log_inputs:
-            nodes_and_names_to_instrument_inputs_a.append((subgraph_a.start_node, match_name))
-            nodes_and_names_to_instrument_inputs_b.append((subgraph_b.start_node, match_name))
+            nodes_and_names_to_instrument_inputs_a.append(
+                (subgraph_a.start_node, match_name, ref_node_type_a))
+            nodes_and_names_to_instrument_inputs_b.append(
+                (subgraph_b.start_node, match_name, ref_node_type_b))
         # Note: for matching activations we always use end_node,
         # such as observing the output of relu in linear-relu
-        nodes_and_names_to_instrument_outputs_a.append((subgraph_a.end_node, match_name))
-        nodes_and_names_to_instrument_outputs_b.append((subgraph_b.end_node, match_name))
+        nodes_and_names_to_instrument_outputs_a.append(
+            (subgraph_a.end_node, match_name, ref_node_type_a))
+        nodes_and_names_to_instrument_outputs_b.append(
+            (subgraph_b.end_node, match_name, ref_node_type_b))
 
     new_model_a = _add_loggers_one_model(
         name_a, gm_a, nodes_and_names_to_instrument_inputs_a,
@@ -278,7 +304,11 @@ def add_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _add_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -318,10 +348,12 @@ def _extract_logger_info_one_model(
                 'type': mod.results_type,
                 'values': stats_to_use,
                 'ref_node_name': mod.ref_node_name,
+                'ref_node_target_type': mod.ref_node_target_type,
                 'prev_node_name': mod.prev_node_name,
                 'prev_node_target_type': mod.prev_node_target_type,
                 'index_within_arg': mod.index_within_arg,
                 'index_of_arg': mod.index_of_arg,
+                'fqn': mod.fqn,
             })
             # ensure the list stays sorted
             results[key][mod.results_type][mod.model_name].sort(
@@ -350,6 +382,8 @@ def extract_logger_info(
     results: NSResultsType = {}
     for model in (model_a, model_b):
         _extract_logger_info_one_model(model, results, logger_cls)
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
     # rekey on the name of model b
     results = rekey_logger_info_on_node_name_of_model(
         results, model_name_to_use_for_layer_names)
@@ -400,7 +434,11 @@ def add_shadow_loggers(
     tracer_a = NSTracer(skipped_module_names, skipped_module_classes)
     tracer_b = NSTracer(skipped_module_names, skipped_module_classes)
     gm_a = GraphModule(model_a, tracer_a.trace(model_a))
+    if hasattr(model_a, '_node_name_to_scope'):
+        gm_a._node_name_to_scope = model_a._node_name_to_scope
     gm_b = GraphModule(model_b, tracer_b.trace(model_b))
+    if hasattr(model_b, '_node_name_to_scope'):
+        gm_b._node_name_to_scope = model_b._node_name_to_scope
     return _add_shadow_loggers_impl(
         name_a, gm_a, name_b, gm_b, logger_cls,
         should_log_inputs=should_log_inputs,
@@ -421,6 +459,8 @@ def extract_shadow_logger_info(
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_shadow_logger_info")
     results: NSResultsType = collections.defaultdict(dict)
     _extract_logger_info_one_model(model_a_shadows_b, results, logger_cls)
+    # fill in missing fqn entries
+    maybe_add_missing_fqns(results)
     # rekey on the name of model b
     results = rekey_logger_info_on_node_name_of_model(
         results, model_name_to_use_for_layer_names)

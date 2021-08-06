@@ -195,7 +195,7 @@ class TestCommon(TestCase):
     #   values on the tensors from sample_inputs func for the corresponding op.
     @onlyOnCPUAndCUDA
     @suppress_warnings
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
@@ -640,18 +640,30 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    @_gradcheck_ops(op_db)
-    def test_forward_mode_AD(self, device, dtype, op):
-        self._skip_helper(op, device, dtype)
-
+    def _forward_grad_helper(self, device, dtype, op, variant):
         if op.supports_forward_ad:
-            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+            self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True)
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+                self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True)
+
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        self._forward_grad_helper(device, dtype, op, op.get_op())
+
+    @_gradcheck_ops(op_db)
+    def test_inplace_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if not op.inplace_variant or not op.supports_inplace_autograd:
+            self.skipTest("Skipped! Operation does not support inplace autograd.")
+
+        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
 
 # Tests operators for consistency between JIT and eager, also checks

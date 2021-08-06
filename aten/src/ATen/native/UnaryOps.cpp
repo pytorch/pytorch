@@ -113,6 +113,13 @@ TORCH_META_FUNC(sign) (const Tensor& self) {
   build_unary_op(maybe_get_output(), self);
 }
 
+TORCH_META_FUNC(signbit) (const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
+              "signbit does not support non-boolean outputs.");
+  build_unary_force_boolean_op(maybe_get_output(), self);
+}
+
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
@@ -181,6 +188,15 @@ CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
 TORCH_IMPL_FUNC(polygamma_out)
 (int64_t n, const Tensor& self, const Tensor& result) {
   polygamma_stub(device_type(), *this, n);
+}
+
+TORCH_IMPL_FUNC(signbit_out) (const Tensor& self, const Tensor& result) {
+  at::native::resize_output(result, self.sizes());
+  if (self.dtype() == at::kBool) {
+    result.fill_(false);
+  } else {
+    signbit_stub(device_type(), *this);
+  }
 }
 
 // since polygamma_ has different signature from its
@@ -472,6 +488,10 @@ Tensor special_erfc(const Tensor& self) { return self.erfc(); }
 Tensor& special_erfinv_out(const Tensor& self, Tensor& result) { return at::erfinv_out(result, self); }
 Tensor special_erfinv(const Tensor& self) { return self.erfinv(); }
 
+// special_polygamma, alias for polygamma
+Tensor& special_polygamma_out(int64_t n, const Tensor& self, Tensor& result) { return at::polygamma_out(result, n, self); }
+Tensor special_polygamma(int64_t n, const Tensor& self) { return self.polygamma(n); }
+
 // special_psi, alias for digamma
 Tensor& special_psi_out(const Tensor& self, Tensor& result) { return at::digamma_out(result, self); }
 Tensor special_psi(const Tensor& self) { return self.digamma(); }
@@ -659,29 +679,6 @@ Tensor& logical_not_out(const Tensor& self, Tensor& result) {
   return result;
 }
 
-Tensor& signbit_out(const Tensor& self, Tensor& result) {
-  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
-  TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
-  at::native::resize_output(result, self.sizes());
-
-  if (self.dtype() == at::kBool) {
-    return result.fill_(false);
-  } else {
-    TensorIterator iter = TensorIteratorConfig()
-      .check_all_same_dtype(false)
-      .add_output(result)
-      .add_input(self)
-      .build();
-    signbit_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
-Tensor signbit(const Tensor& self) {
-  Tensor result = at::empty({0}, self.options().dtype(kBool));
-  return at::signbit_out(result, self);
-}
-
 namespace {
 constexpr double HALF = 0.5;
 constexpr double QUARTER = 0.25;
@@ -727,6 +724,26 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   const auto p2_sub_p = static_cast<double>(p * (p - 1));
   return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
 }
+
+Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
+  auto out = self.mvlgamma(p);
+  TORCH_CHECK(
+      at::can_cast(out.scalar_type(), result.scalar_type()),
+      "mvlgamma: result type ",
+      self.scalar_type(),
+      " can't be cast to the desired output type ",
+      out.scalar_type());
+  at::native::resize_output(result, out.sizes());
+  return result.copy_(out);
+}
+
+Tensor special_multigammaln(const Tensor& self, int64_t p) {
+  return self.mvlgamma(p);
+};
+
+Tensor& special_multigammaln_out(const Tensor& self, int64_t p, Tensor& result) {
+  return at::mvlgamma_out(result, self, p);
+};
 
 std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   Tensor mantissa = at::empty_like(self);
