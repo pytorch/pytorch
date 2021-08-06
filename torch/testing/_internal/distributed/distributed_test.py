@@ -6895,7 +6895,7 @@ class DistributedTest:
 
             dist.barrier()
 
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
@@ -6905,7 +6905,7 @@ class DistributedTest:
             for grad_as_bucket_view in [True, False]:
                 self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
 
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
@@ -6915,7 +6915,7 @@ class DistributedTest:
             for grad_as_bucket_view in [True, False]:
                 self._test_output_unused_in_loss(module_cls, grad_as_bucket_view)
 
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
@@ -7614,7 +7614,7 @@ class DistributedTest:
                         self.assertEqual(p, p_static)
 
         @skip_if_lt_x_gpu(2)
-        @unittest.skipIf(
+        @sandcastle_skip_if(
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
