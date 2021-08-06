@@ -1,4 +1,5 @@
 import abc
+import ast
 import typing
 
 
@@ -75,3 +76,21 @@ class WorkerBase(abc.ABC):
         the abstraction of a purely remote worker.
         """
         ...
+
+    def load_stmt(self, stmt: str) -> typing.Any:
+        """Convenience wrapper to extract simple bits of computation.
+
+        Suppose we have an object `my_object` which implements a property `foo`.
+        It is much more convenient and more readable to write:
+            `foo = worker.lambda("my_object.foo")`
+        than to manually save the property and extract it in user code.
+        """
+        try:
+            ast.parse(stmt, mode="single")
+        except SyntaxError:
+            raise SyntaxError(f"Invalid stmt: {stmt}")
+
+        self.run(f"__worker_lambda_result = ({stmt})")
+        result = self.load("__worker_lambda_result")
+        self.run("del __worker_lambda_result")
+        return result
