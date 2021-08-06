@@ -254,8 +254,8 @@ inline void _vec_softmax(
             Vec sum_vec_o1 = Vec(0.0);
             Vec sum_vec_o2 = Vec(0.0);
             for (int64_t d = 0; d < dim_size; d++) {
-              Vec output_vec_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2);
-              Vec output_vec_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step);
+              Vec output_vec_o1 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2) - max_vec_o1;
+              Vec output_vec_o2 = Vec::loadu(temp_vec_input_data + d*vectorized_step*2 + vectorized_step) - max_vec_o2;
               output_vec_o1 = output_vec_o1.exp();
               output_vec_o2 = output_vec_o2.exp();
 
