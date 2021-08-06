@@ -2,7 +2,7 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode
+from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
@@ -688,15 +688,14 @@ class TestUtilityFuns(TestCase):
         def gelu(g, self):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
-        from torch.onnx import register_custom_op_symbolic
         register_custom_op_symbolic("::gelu", gelu, 1)
-
         model = torch.nn.GELU()
         x = torch.randn(3, 3)
-        torch.onnx.export(model, (x, ), "test.onnx",
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f,
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
-        graph = onnx.load(file_name)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
         assert graph.graph.node[0].op_type == "Gelu"
         assert graph.opset_import[0].version == self.opset_version
         assert graph.opset_import[1].domain == 'com.microsoft'
@@ -710,15 +709,14 @@ class TestUtilityFuns(TestCase):
         def inverse(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        from torch.onnx import register_custom_op_symbolic
         register_custom_op_symbolic('::inverse', inverse, 1)
-
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
-        torch.onnx.export(model, (x, ), "test.onnx",
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f,
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
-        graph = onnx.load(file_name)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
         assert graph.graph.node[0].op_type == "Inverse"
         assert graph.opset_import[0].version == self.opset_version
         assert graph.opset_import[1].domain == 'com.microsoft'
