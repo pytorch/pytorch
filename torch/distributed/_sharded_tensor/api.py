@@ -69,7 +69,7 @@ class ShardedTensorMetadata(object):
     shards_metadata: List[ShardMetadata] = field(default_factory=list)
 
     # Size of each dim of the overall Tensor.
-    size: torch.Size = field(default_factory=list)
+    size: torch.Size = field(default=torch.Size([]))
 
     # Regular tensor fields
     dtype: torch.dtype = field(default=torch.get_default_dtype())
