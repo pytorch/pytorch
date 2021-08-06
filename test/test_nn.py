@@ -16661,6 +16661,7 @@ class TestNNDeviceType(NNTestCase):
                         inp = inp.to(memory_format=memory_format)
                         w = w.to(memory_format=memory_format)
                         cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+                        self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
                         self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
@@ -16677,6 +16678,7 @@ class TestNNDeviceType(NNTestCase):
                         inp = inp.to(memory_format=memory_format)
                         w = w.to(memory_format=memory_format)
                         cudnn_out = torch.cudnn_convolution_add_relu(inp, w, inp, 1.0, None, (1, 1), (1, 1), (1, 1), 1)
+                        self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
                         self.assertEqual(conv2d_out.add(inp).relu(), cudnn_out)
 
     @onlyCUDA
