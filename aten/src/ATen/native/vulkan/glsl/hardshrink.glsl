@@ -20,7 +20,7 @@ void main() {
   if (all(lessThan(pos, uBlock.size.xyz))) {
     const vec4 inval = texelFetch(uInput, pos, 0);
     const vec4 mask = vec4(greaterThanEqual(inval, vec4(-uBlock.lambd)))*vec4(lessThanEqual(inval, vec4(uBlock.lambd)));
-    const vec4 outval = (vec4(1.0, 1.0, 1.0, 1.0) - mask)*inval;
+    const vec4 outval = (vec4(1.0) - mask)*inval;
     imageStore(uOutput, pos, outval);
   }
 }
