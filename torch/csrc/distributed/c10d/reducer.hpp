@@ -69,12 +69,14 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<std::vector<at::Tensor>> replicas,
       std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<std::vector<bool>> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
       bool find_unused_parameters,
       bool gradient_as_bucket_view,
-      std::unordered_map<size_t, std::string> paramNames);
+      std::unordered_map<size_t, std::string> paramNames,
+      int64_t first_bucket_bytes_cap);
 
   ~Reducer() noexcept(false);
 
@@ -82,7 +84,9 @@ class TORCH_API Reducer {
   // of which is specified by a list of indices in the variables list.
   // This function performs validation that the variables within a bucket
   // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  void initialize_buckets(
+      std::vector<std::vector<size_t>> bucket_indices,
+      std::vector<size_t> per_bucket_sizes);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -385,6 +389,10 @@ class TORCH_API Reducer {
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
     bool expect_sparse_gradient = false;
+    // "Limit" of cumulative parameter sizes that this bucket manages. It is
+    // actually a soft limit because we don't shard parameters across buckets
+    // so a single parameter may push it over the cap.
+    size_t bucket_size_limit;
   };
 
   std::vector<Bucket> buckets_;
@@ -516,6 +524,11 @@ class TORCH_API Reducer {
   // Mapping of variable index to fully qualified name of model to notify users
   // about errors when certain parameters do not get gradient.
   std::unordered_map<size_t, std::string> param_names_;
+  // Variable indices stored sequentially in order of when the gradient is ready
+  // for the current backwards pass.
+  std::vector<int> grad_ready_order_indices_;
+  // Bytes capacity of first bucket, can be configured by user
+  int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.
   std::unordered_set<size_t> perIterationReadyParams_;
   // Retrieves parameter names that have not been marked as ready as part of

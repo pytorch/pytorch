@@ -78,6 +78,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     for (int i = 0; i < tensorInp.size(); i++) {
       int fmt = inp_mem_fmts[i];
       // These constants match the values in DimOrder in serializer.py
+      // 0: NCHW, 1: NHWC
       // TODO: See if it's possible to use those directly.
       if (fmt == 0) {
         fixed_inputs.push_back(tensorInp.get(i).contiguous());
@@ -98,6 +99,7 @@ class NnapiBackend : public PyTorchBackendInterface {
     for (int i = 0; i < outputs.size(); i++) {
       int fmt = out_mem_fmts[i];
       // These constants match the values in DimOrder in serializer.py
+      // 0: NCHW, 1: NHWC
       // TODO: See if it's possible to use those directly.
       if (fmt == 1) {
         c10::IntArrayRef order = {0, 3, 1, 2};

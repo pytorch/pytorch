@@ -7,7 +7,6 @@
 #include <torch/custom_class.h>
 
 #include <ATen/nnapi/nnapi_wrapper.h>
-#include <ATen/nnapi/nnapi_model_loader.h>
 
 namespace torch {
 namespace nnapi {

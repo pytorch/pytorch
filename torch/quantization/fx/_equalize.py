@@ -248,6 +248,11 @@ def is_equalization_observer(observer: nn.Module) -> bool:
     return (isinstance(observer, _InputEqualizationObserver) or
             isinstance(observer, _WeightEqualizationObserver))
 
+
+###############################################################################
+# Functions for equalization during convert                                   #
+###############################################################################
+
 def get_op_node_and_weight_eq_obs(
     input_eq_obs_node: Node,
     model: GraphModule,
@@ -698,3 +703,88 @@ def _convert_equalization_ref(model: GraphModule):
     convert_eq_obs(model, modules, weight_eq_obs_dict)
 
     return GraphModule(model, model.graph)
+
+
+###############################################################################
+# Functions for running the equalized model on the Numeric Suite              #
+###############################################################################
+
+def get_layer_sqnr_dict(model_a: nn.Module, model_b: nn.Module, x: torch.Tensor) -> Dict[str, float]:
+    """ Runs the Numeric Suite on model_a and model_b and returns a dictionary
+    containing the SQNR between layers in model_a and model_b.
+
+    Note: In order to support equalized models, this function has a hacky fix in
+    which we do not match any torch.mul operators. This is because equalized
+    models contain extra mul operators to scale the input by the equalization
+    scale, but this edge case has not been resolved yet within the numeric suite code.
+
+    Args:
+        model_a: A float model
+        model_b: A quantized model
+        x: Inputs to use during calibration
+    """
+    import torch.quantization._numeric_suite_fx as ns
+    from torch.quantization.ns.mappings import get_unmatchable_types_map
+
+    unmatchable_types_map = get_unmatchable_types_map()
+    unmatchable_types_map["funs_unmatchable"].add(torch.mul)
+
+    model_a_ns, model_b_ns = ns.add_loggers(
+        'fp32', model_a,
+        'int8', model_b,
+        ns.OutputLogger,
+        unmatchable_types_map=unmatchable_types_map
+    )
+
+    model_a_ns(x)
+    model_b_ns(x)
+
+    activation_comparison_dict = ns.extract_logger_info(
+        model_a_ns,
+        model_b_ns,
+        ns.OutputLogger,
+        'int8')
+    ns.extend_logger_results_with_comparison(
+        activation_comparison_dict,
+        'fp32', 'int8',
+        torch.quantization.ns.utils.compute_sqnr, 'sqnr'
+    )
+
+    # Construct a dictionary mapping layer names to the SQNR values
+    layer_sqnr_dict = {}
+    for key in activation_comparison_dict:
+        layer = activation_comparison_dict[key]['node_output']['int8'][0]['fqn']
+        sqnr = activation_comparison_dict[key]['node_output']['int8'][0]['sqnr'][0]
+        layer_sqnr_dict[layer] = sqnr
+
+    return layer_sqnr_dict
+
+def get_equalization_qconfig_dict(
+    layer_sqnr_dict: Dict[str, float],
+    num_layers_to_equalize: int
+) -> Any:
+    """ Given the layer to SQNR dictionary, find the layers with the highest
+    quantization errors, and return an equalization_qconfig_dict
+    specifying to only equalize those top layers.
+
+    Args:
+        layer_sqnr_dict: Dictionary mapping layer names to SQNR values (found
+            when comparing an equalized model against a float model)
+        model_b: The equalized model used to construct the layer_sqnr_dict
+        num_layers_to_equalize: Number of layers with the highest quantization
+           errors to equalize
+    """
+
+    # Sort the layer_sqnr_dictionary values and get the layers with the lowest
+    # SQNR values (aka highest quantization errors)
+    layer_sqnr_sorted = sorted(layer_sqnr_dict.items(), key=lambda item: item[1])
+    layers_to_equalize = layer_sqnr_sorted[:num_layers_to_equalize]
+
+    # Constructs an equalization_qconfig_dict that specifies to only equalize
+    # the layers with the highest quantization errors
+    module_to_qconfig_list = list(
+        map(lambda item: (item[0], default_equalization_qconfig), layers_to_equalize)
+    )
+
+    equalization_qconfig_dict = {"module_name": module_to_qconfig_list}
+    return equalization_qconfig_dict
