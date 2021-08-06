@@ -714,11 +714,4 @@ TORCH_API void bumpRecordAllFunctions();
 TORCH_API void releaseRecordAllFunctions();
 TORCH_API bool checkRecordAllFunctions();
 
-// TODO: Move to its own file
-struct TORCH_API DefaultSavedVariableHooks {
-  static void set_hooks(PyObject* pack_hook, PyObject* unpack_hook);
-  static std::pair<PyObject*, PyObject*> get_hooks();
-  static void enable();
-};
-
 } // namespace at
