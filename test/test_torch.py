@@ -2962,34 +2962,6 @@ class TestTorchDeviceType(TestCase):
             shape.append(random.randint(min_size, max_size))
         return tuple(shape)
 
-    @onlyCPU
-    def test_set_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling set_deterministic throws a warning about deprecation once
-            # per process but testing this is tricky here since we actually get
-            # two warnings: one for the deprecated use of `set_deterministic`
-            # and one for the 'beta' use of `use_deterministic_algorithms`.
-            # The assertWarnsOnceRegex cannot handle two different warnings
-            with warnings.catch_warnings(record=True) as ws:
-                warnings.simplefilter("always")  # allow any warning to be raised
-                prev = torch.is_warn_always_enabled()
-                torch.set_warn_always(True)
-                try:
-                    torch.set_deterministic(True)
-                finally:
-                    torch.set_warn_always(prev)
-                for w in ws:
-                    txt = str(w.message)
-                    assert ("torch.use_deterministic_algorithms is in beta" in txt or
-                            "torch.set_deterministic is deprecated" in txt)
-
-    @onlyCPU
-    def test_is_deterministic_deprecated_warning(self, device):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
-            # Calling is_deterministic throws a warning about deprecation once per process
-            with self.assertWarnsOnceRegex(UserWarning, "torch.is_deterministic is deprecated"):
-                torch.is_deterministic()
-
     # Validates that mathematical constants are defined properly, as required by
     # the Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html)
     @onlyCPU
