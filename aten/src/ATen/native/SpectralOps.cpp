@@ -208,7 +208,8 @@ ShapeAndDims canonicalize_fft_shape_and_dim_args(
 
   if (shape) {
     // Has shape, may have dim
-    TORCH_CHECK(!dim || dim->size() == static_cast<int64_t>(shape->size()),
+    TORCH_CHECK(!dim ||
+                dim->size() == shape->size(),
                 "When given, dim and shape arguments must have the same length");
     TORCH_CHECK(static_cast<int64_t>(shape->size()) <= input_dim,
                 "Got shape with ", shape->size(), " values but input tensor "
