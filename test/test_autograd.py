@@ -9329,6 +9329,45 @@ class TestMultithreadAutograd(TestCase):
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
 
+    def test_multithread_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        def registers_hooks_for_each_thread():
+            try:
+                torch.autograd.graph.set_saved_tensors_default_hooks(pack, lambda x: x)
+                x = torch.ones(5, 5, requires_grad=True)
+                warnings.simplefilter('always')
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    # should raise two warnings from x being saved twice
+                    self.assertEqual(len(w), 2)
+            finally:
+                torch.autograd.graph.reset_saved_tensors_default_hooks()
+            y.sum().backward()
+
+    def test_dataparallel_saved_tensors_hooks(self):
+        def pack(x):
+            warnings.warn("pack")
+            return x
+
+        class Model(torch.nn.Module):
+            def forward(_self, x):
+                warnings.simplefilter('always')
+                with warnings.catch_warnings(record=True) as w:
+                    y = x * x
+                    self.assertEqual(len(w), 2)
+
+        x = torch.ones(5, 5, requires_grad=True)
+        model = torch.nn.DataParallel(Model())
+
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(pack, lambda x: x)
+            model(x)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
     def test_python_thread_in_middle(self):
         # User might write a network that starts on one CPU thread, then runs its second half
         # concurrently with other threads (either via python threading or fork/join calls),
