@@ -17340,6 +17340,38 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyCPU
+    def test_grid_sample_bfloat16(self, device):
+        def test_dtype(input, grid, dtype, mode, padding_mode, align_corners):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            grid = grid.detach().clone().to(dtype=dtype).requires_grad_(True)
+            grid2 = grid.detach().clone().float().requires_grad_(True)
+            out = torch.nn.functional.grid_sample(input=input, grid=grid, mode=mode,
+                                                  padding_mode=padding_mode, align_corners=align_corners)
+            out2 = torch.nn.functional.grid_sample(input=input2, grid=grid2, mode=mode,
+                                                   padding_mode=padding_mode, align_corners=align_corners)
+            grad_input = torch.randn_like(out, dtype=dtype)
+            grad_input2 = grad_input.detach().clone().float()
+            out.backward(grad_input)
+            out2.backward(grad_input2)
+
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, atol=0.05, rtol=0.016, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, atol=0.05, rtol=0.016, exact_dtype=False)
+
+        torch.manual_seed(123)
+        for align_corners in (True, False):
+            for mode in ('bilinear', 'nearest', 'bicubic'):
+                for padding_mode in ('reflection', 'border', 'zeros'):
+                    shapes = [[1, 2, 1, 1], [2, 2, 20, 20], [2, 3, 50, 50]]
+                    grid_shapes = [[1, 1, 1, 2], [2, 10, 10, 2], [2, 40, 40, 2]]
+                    for shape, grid_shape in zip(shapes, grid_shapes):
+                        input = torch.randn(shape, device=device)
+                        grid = torch.rand(grid_shape, device=device)
+                        test_dtype(input, grid, torch.bfloat16, mode, padding_mode, align_corners)
+
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     @onlyNativeDeviceTypes
     def test_fractional_max_pool2d(self, device):
