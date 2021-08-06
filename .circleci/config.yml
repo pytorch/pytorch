@@ -1368,7 +1368,6 @@ jobs:
   pytorch_macos_10_15_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.15-py3-arm64-build
-      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.3.0"
     steps:
@@ -1381,6 +1380,7 @@ jobs:
             set -e
             export IN_CI=1
             export CROSS_COMPILE_ARM64=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -1406,12 +1406,10 @@ jobs:
   pytorch_macos_10_13_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
-      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
       - checkout
-      - run: echo "JOB_BASE_NAME is $JOB_BASE_NAME"
       - run_brew_for_macos_build
       - run:
           name: Build
@@ -1419,6 +1417,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
             sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
@@ -1442,7 +1441,6 @@ jobs:
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
-      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
@@ -1456,6 +1454,7 @@ jobs:
           command: |
             set -e
             export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
             unbuffer .jenkins/pytorch/macos-test.sh 2>&1 | ts
@@ -1466,6 +1465,9 @@ jobs:
             set -ex
             source /Users/distiller/workspace/miniconda3/bin/activate
             pip install boto3
+
+            export IN_CI=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
             export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}
@@ -1478,7 +1480,6 @@ jobs:
   pytorch_macos_10_13_py3_lite_interpreter_build_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
-      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
@@ -1493,6 +1494,7 @@ jobs:
             set -e
             export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
+            export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
             unbuffer ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh 2>&1 | ts
       - store_test_results:
