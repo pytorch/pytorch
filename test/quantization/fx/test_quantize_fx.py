@@ -593,6 +593,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
                         self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
+                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
 
             def checkSerDeser(model):
                 for module_name in ("linear", "conv"):
