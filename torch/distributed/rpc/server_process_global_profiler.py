@@ -3,7 +3,7 @@
 import itertools
 
 import torch
-from torch.autograd.profiler import profile
+from torch.autograd.profiler_legacy import profile
 
 from . import (
     _disable_server_process_global_profiler,
@@ -146,7 +146,7 @@ class _server_process_global_profile(profile):
         process_global_function_events = []
         for thread_local_events in process_global_events:
             # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = torch.autograd.profiler.parse_legacy_records(
+            thread_local_function_events = torch.autograd.profiler_legacy._parse_legacy_records(
                 thread_local_events
             )
             thread_local_function_events.sort(
@@ -160,7 +160,7 @@ class _server_process_global_profile(profile):
         flattened_function_events = list(
             itertools.chain(*process_global_function_events)
         )
-        self.function_events = torch.autograd.profiler.EventList(
+        self.function_events = torch.autograd.profiler_util.EventList(
             flattened_function_events,
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory,
