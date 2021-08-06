@@ -290,7 +290,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     def extra_repr(self) -> str:
         return (
             "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
-            "dtype={}, quant_min={}, quant_max={}, qscheme={}".format(
+            "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
                 self.fake_quant_enabled,
                 self.observer_enabled,
                 self.scale,
@@ -299,6 +299,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
                 self.quant_min,
                 self.quant_max,
                 self.qscheme,
+                self.activation_post_process.reduce_range,
             )
         )
 
@@ -357,6 +358,11 @@ default_fused_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=M
                                                                       dtype=torch.qint8,
                                                                       qscheme=torch.per_tensor_symmetric)
 
+default_fused_per_channel_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
+                                                                                  quant_min=-128,
+                                                                                  quant_max=127,
+                                                                                  dtype=torch.qint8,
+                                                                                  qscheme=torch.per_channel_symmetric)
 
 def _is_fake_quant_script_module(mod):
     ''' Returns true if given mod is an instance of FakeQuantize script module.

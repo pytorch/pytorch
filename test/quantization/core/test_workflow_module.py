@@ -1114,24 +1114,37 @@ class TestFusedObsFakeQuantModule(TestCase):
                 x = self.relu(x)
                 return x
 
-        model = Model()
-        model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
-        sample_input = torch.randn(2, 2)
-        model.qconfig = torch.quantization.default_qat_qconfig_v2
-        ref_model = torch.quantization.QuantWrapper(model)
-        ref_model = torch.quantization.prepare_qat(ref_model)
-        ref_model(sample_input)
-        count_fake_quant = 0
-        for name, mod in ref_model.named_modules():
-            if name.endswith('weight_fake_quant'):
-                count_fake_quant += 1
-                self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+        for qengine in ["fbgemm", "qnnpack"]:
+            model = Model()
+            model.linear.weight = torch.nn.Parameter(torch.randn(2, 2))
+            sample_input = torch.randn(2, 2)
+            model.qconfig = torch.quantization.get_default_qat_qconfig(qengine, version=1)
+            ref_model = torch.quantization.QuantWrapper(model)
+            ref_model = torch.quantization.prepare_qat(ref_model)
+            ref_model(sample_input)
+            count_fake_quant = 0
+            for name, mod in ref_model.named_modules():
+                if name.endswith('weight_fake_quant'):
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
 
-            if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
-                count_fake_quant += 1
-                self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
+                if name.count('activation_post_process') == 1 and 'weight_fake_quant' not in name:
+                    count_fake_quant += 1
+                    self.assertEqual(type(mod), FusedMovingAvgObsFakeQuantize)
 
-        self.assertEqual(count_fake_quant, 3)
+            self.assertEqual(count_fake_quant, 3)
+
+            if qengine == "fbgemm":
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 127)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAveragePerChannelMinMaxObserver)
+            else:
+                self.assertEqual(ref_model.quant.activation_post_process.quant_min, 0)
+                self.assertEqual(ref_model.quant.activation_post_process.quant_max, 255)
+                self.assertEqual(type(ref_model.module.linear.weight_fake_quant.activation_post_process),
+                                 MovingAverageMinMaxObserver)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

@@ -7,7 +7,8 @@ from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
                        default_placeholder_observer, default_weight_observer)
 from .fake_quantize import (FakeQuantize, default_fake_quant,
                             default_per_channel_weight_fake_quant,
-                            default_weight_fake_quant, default_fused_act_fake_quant, default_fused_wt_fake_quant)
+                            default_weight_fake_quant, default_fused_act_fake_quant, default_fused_wt_fake_quant,
+                            FusedMovingAvgObsFakeQuantize, default_fused_per_channel_wt_fake_quant)
 import torch
 import torch.nn as nn
 
@@ -108,22 +109,39 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-def get_default_qat_qconfig(backend='fbgemm'):
+def get_default_qat_qconfig(backend='fbgemm', version=None):
     # Histogram observer is too slow for quantization aware training
-    if backend == 'fbgemm':
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=True),
-                          weight=default_per_channel_weight_fake_quant)
-    elif backend == 'qnnpack':
-        qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                            quant_min=0,
-                                                            quant_max=255,
-                                                            reduce_range=False),
-                          weight=default_weight_fake_quant)
-    else:
-        qconfig = default_qat_qconfig
+    if version is None:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255,
+                                                                reduce_range=True),
+                              weight=default_per_channel_weight_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                quant_min=0,
+                                                                quant_max=255,
+                                                                reduce_range=False),
+                              weight=default_weight_fake_quant)
+        else:
+            qconfig = default_qat_qconfig
+    # Use the fused observer + fake_quant modules for doing QAT.
+    if version == 1:
+        if backend == 'fbgemm':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
+                              weight=default_fused_per_channel_wt_fake_quant)
+        elif backend == 'qnnpack':
+            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                                                 quant_min=0,
+                                                                                 quant_max=255,
+                                                                                 reduce_range=False),
+                              weight=default_fused_wt_fake_quant)
+        else:
+            qconfig = default_qat_qconfig_v2
     return qconfig
 
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
