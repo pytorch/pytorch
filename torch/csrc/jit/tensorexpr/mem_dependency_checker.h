@@ -40,8 +40,8 @@ class TORCH_API AccessInfo {
   AccessInfo(
       size_t id,
       AccessType type,
-      const Stmt* stmt,
-      const Var* var,
+      Stmt* stmt,
+      Var* var,
       IndexBounds bounds)
       : id_(id),
         type_(type),
@@ -53,9 +53,9 @@ class TORCH_API AccessInfo {
   AccessInfo(
       size_t id,
       AccessType type,
-      const Expr* expr,
-      const Stmt* stmt,
-      const Var* var,
+      Expr* expr,
+      Stmt* stmt,
+      Var* var,
       IndexBounds bounds)
       : id_(id),
         type_(type),
@@ -77,18 +77,18 @@ class TORCH_API AccessInfo {
   // The enclosing Stmt this access represents. E.g. if this is a Store then
   // Stmt is the Store itself, while if the access is caused by an Expr, this is
   // the most immediate parent Stmt.
-  const Stmt* stmt() const {
+  Stmt* stmt() const {
     return stmt_;
   }
 
   // If the access is represented by an Expr (such as Load or Call) then this is
   // it, otherwise it's nullptr.
-  const Expr* expr() const {
+  Expr* expr() const {
     return expr_;
   }
 
   // The Var representing the underlying Buffer.
-  const Var* var() const {
+  Var* var() const {
     return var_;
   }
 
@@ -114,7 +114,7 @@ class TORCH_API AccessInfo {
   }
 
   // Returns the symbolic expression of the indices of this access.
-  std::vector<const Expr*> getIndices() const;
+  std::vector<Expr*> getIndices() const;
 
   // Establishes a dependency or dependent relationship with another access.
   void addDependency(const std::shared_ptr<AccessInfo>& write);
@@ -149,9 +149,9 @@ class TORCH_API AccessInfo {
  private:
   size_t id_;
   AccessType type_;
-  const Stmt* stmt_;
-  const Expr* expr_;
-  const Var* var_;
+  Stmt* stmt_;
+  Expr* expr_;
+  Var* var_;
   IndexBounds bounds_;
 
   // Yes these should be sorted.
@@ -159,7 +159,7 @@ class TORCH_API AccessInfo {
   std::map<size_t, std::shared_ptr<AccessInfo>> dependents_;
 };
 
-using VarBoundMap = std::unordered_map<const Var*, Bound>;
+using VarBoundMap = std::unordered_map<Var*, Bound>;
 
 /* MemDepedencyChecker analyses a IR fragment and builds a dependency graph of
  * accesses contained within.
@@ -176,8 +176,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
  public:
   MemDependencyChecker();
   MemDependencyChecker(
-      const std::unordered_set<const Buf*>& inputs,
-      const std::unordered_set<const Buf*>& outputs);
+      const std::unordered_set<Buf*>& inputs,
+      const std::unordered_set<Buf*>& outputs);
   MemDependencyChecker(
       const std::vector<BufHandle>& inputs,
       const std::vector<BufHandle>& outputs);
@@ -193,15 +193,15 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // about it.
 
   // Returns true if any read in A has a direct dependence on a write in B.
-  bool dependsDirectly(const Stmt* A, const Stmt* B);
-  bool dependsDirectly(const Expr* A, const Stmt* B);
+  bool dependsDirectly(Stmt* A, Stmt* B);
+  bool dependsDirectly(Expr* A, Stmt* B);
 
   // Returns true of the output depends directly on a write contained in B.
-  bool dependsDirectly(const Buf* output, const Stmt* B);
+  bool dependsDirectly(Buf* output, Stmt* B);
 
   // Returns true if a read in A depends directly on the provided input.
-  bool dependsDirectly(const Stmt* A, const Buf* input);
-  bool dependsDirectly(const Expr* A, const Buf* input);
+  bool dependsDirectly(Stmt* A, Buf* input);
+  bool dependsDirectly(Expr* A, Buf* input);
 
   // Outputs/inputs cannot depend directly.
 
@@ -211,18 +211,18 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::shared_ptr<AccessInfo>& B);
 
   // Returns true if any read in A has an ancestor write contained in B.
-  bool dependsIndirectly(const Stmt* A, const Stmt* B);
-  bool dependsIndirectly(const Expr* A, const Stmt* B);
+  bool dependsIndirectly(Stmt* A, Stmt* B);
+  bool dependsIndirectly(Expr* A, Stmt* B);
 
   // Returns true of the output depends indirectly on a write contained in B.
-  bool dependsIndirectly(const Buf* output, const Stmt* B);
+  bool dependsIndirectly(Buf* output, Stmt* B);
 
   // Returns true if a read in A depends indirectly on the provided input.
-  bool dependsIndirectly(const Stmt* A, const Buf* input);
-  bool dependsIndirectly(const Expr* A, const Buf* input);
+  bool dependsIndirectly(Stmt* A, Buf* input);
+  bool dependsIndirectly(Expr* A, Buf* input);
 
   // returns true if the output uses any load of the input.
-  bool dependsIndirectly(const Buf* output, const Buf* input);
+  bool dependsIndirectly(Buf* output, Buf* input);
 
   // Returns true if the access A has a dependency chain to access B.
   bool dependsIndirectly(
@@ -230,21 +230,19 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::shared_ptr<AccessInfo>& B);
 
   // Returns the AccessInfo
-  std::shared_ptr<AccessInfo> accessFor(const Stmt* A) const;
-  std::shared_ptr<AccessInfo> accessFor(const Expr* A) const;
+  std::shared_ptr<AccessInfo> accessFor(Stmt* A) const;
+  std::shared_ptr<AccessInfo> accessFor(Expr* A) const;
 
   // Returns all AccessInfos.
-  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
-      const Stmt* A) const;
+  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(Stmt* A) const;
   // TODO: this will return only the AccessInfo for A. It's included for
   // completeness but be aware it wont return accesses used in the computation
   // of A.
-  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
-      const Expr* A) const;
+  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(Expr* A) const;
 
   // Accesses relating to input and output buffers.
-  std::shared_ptr<AccessInfo> input(const Buf* B) const;
-  std::shared_ptr<AccessInfo> output(const Buf* B) const;
+  std::shared_ptr<AccessInfo> input(Buf* B) const;
+  std::shared_ptr<AccessInfo> output(Buf* B) const;
 
   // Returns the full history of reads and writes.
   const std::vector<std::shared_ptr<AccessInfo>>& getHistory() const;
@@ -254,17 +252,17 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
  private:
   // Node visitors.
-  void visit(const Store* v) override;
-  void visit(const Load* v) override;
-  void visit(const For* v) override;
-  void visit(const Cond* v) override;
-  void visit(const IfThenElse* v) override;
-  void visit(const CompareSelect* v) override;
-  void visit(const Block* v) override;
-  void visit(const Let* v) override;
-  void visit(const AtomicAdd* v) override;
-  void visit(const Allocate* v) override;
-  void visit(const Free* v) override;
+  void visit(Store* v) override;
+  void visit(Load* v) override;
+  void visit(For* v) override;
+  void visit(Cond* v) override;
+  void visit(IfThenElse* v) override;
+  void visit(CompareSelect* v) override;
+  void visit(Block* v) override;
+  void visit(Let* v) override;
+  void visit(AtomicAdd* v) override;
+  void visit(Allocate* v) override;
+  void visit(Free* v) override;
 
   using BoundRelationship = std::pair<IndexBounds, std::shared_ptr<AccessInfo>>;
 
@@ -276,29 +274,27 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     Block* block;
     std::shared_ptr<Scope> parent;
 
-    std::unordered_map<const Var*, Bound> shadowedVarBounds;
-    std::unordered_set<const Var*> localVars;
+    std::unordered_map<Var*, Bound> shadowedVarBounds;
+    std::unordered_set<Var*> localVars;
 
     std::vector<std::shared_ptr<AccessInfo>> accesses_;
 
-    std::unordered_map<const Var*, std::list<BoundRelationship>> openWrites_;
+    std::unordered_map<Var*, std::list<BoundRelationship>> openWrites_;
   };
   std::shared_ptr<Scope> currentScope_;
 
   bool allowExecutionOrderAnalysis_{false};
 
-  std::unordered_multimap<const Stmt*, std::shared_ptr<AccessInfo>>
-      stmtToAccess_;
-  std::unordered_multimap<const Expr*, std::shared_ptr<AccessInfo>>
-      exprToAccess_;
-  std::unordered_map<const Stmt*, std::vector<std::shared_ptr<AccessInfo>>>
+  std::unordered_multimap<Stmt*, std::shared_ptr<AccessInfo>> stmtToAccess_;
+  std::unordered_multimap<Expr*, std::shared_ptr<AccessInfo>> exprToAccess_;
+  std::unordered_map<Stmt*, std::vector<std::shared_ptr<AccessInfo>>>
       scopeToAccesses_;
 
   VarBoundMap knownVarBounds_;
 
   // Finds all accesses that are reads within the scope of v.
   template <typename StmtOrExpr>
-  DependencySet getAllReadsWithin(const StmtOrExpr* v) {
+  DependencySet getAllReadsWithin(StmtOrExpr* v) {
     DependencySet reads;
     auto insertAllReads = [&](const auto& nodes) {
       for (auto* l : nodes) {
@@ -321,7 +317,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // Finds all accesses that are writes within the scope of v.
   // Writes cannot occur in Exprs, so this is a little simpler.
-  DependencySet getAllWritesWithin(const Stmt* v) {
+  DependencySet getAllWritesWithin(Stmt* v) {
     DependencySet writes;
 
     // writes just Store currently.
@@ -339,7 +335,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
 
   // Templated helpers to work on either Exprs or Stmts.
   template <typename StmtOrExpr>
-  bool dependsDirectlyHelper(const StmtOrExpr* A, const Stmt* B) {
+  bool dependsDirectlyHelper(StmtOrExpr* A, Stmt* B) {
     auto aReads = getAllReadsWithin(A);
     auto bWrites = getAllWritesWithin(B);
 
@@ -355,7 +351,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   }
 
   template <typename StmtOrExpr>
-  bool dependsIndirectlyHelper(const StmtOrExpr* A, const Stmt* B) {
+  bool dependsIndirectlyHelper(StmtOrExpr* A, Stmt* B) {
     auto aReads = getAllReadsWithin(A);
     auto bWrites = getAllWritesWithin(B);
 
@@ -373,13 +369,13 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   DependencySet getAllWriteDependencies(const DependencySet& products);
 
   // Maps for inputs and outputs, since they aren't present directly in the IR.
-  std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> inputs_;
-  std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> outputs_;
-  std::unordered_map<const Var*, std::shared_ptr<AccessInfo>> intermediates_;
+  std::unordered_map<Buf*, std::shared_ptr<AccessInfo>> inputs_;
+  std::unordered_map<Buf*, std::shared_ptr<AccessInfo>> outputs_;
+  std::unordered_map<Var*, std::shared_ptr<AccessInfo>> intermediates_;
 
   // Inserts accesses for Buf's: specifically for inputs and outputs.
   void insertBuffers(
-      std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>>& bufs,
+      std::unordered_map<Buf*, std::shared_ptr<AccessInfo>>& bufs,
       AccessType type);
 
   // Update the write history with a new write, adding dependencies and closing
@@ -399,10 +395,10 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       bool closeOverlapped = true);
 
   // Binds symbolic vars in indices with the low and high bound for those vars.
-  std::vector<Bound> getIndicesBounds(const std::vector<const Expr*>& indices);
+  std::vector<Bound> getIndicesBounds(const std::vector<Expr*>& indices);
 
   size_t nextAccess_{0};
-  const Stmt* lastStmt_{nullptr};
+  Stmt* lastStmt_{nullptr};
 };
 
 } // namespace analysis

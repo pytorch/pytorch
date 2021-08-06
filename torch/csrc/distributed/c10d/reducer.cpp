@@ -109,12 +109,14 @@ C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 Reducer::Reducer(
     std::vector<std::vector<at::Tensor>> replicas,
     std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<std::vector<bool>> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
-    std::unordered_map<size_t, std::string> paramNames)
+    std::unordered_map<size_t, std::string> paramNames,
+    int64_t first_bucket_bytes_cap)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -134,13 +136,19 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
-      param_names_(std::move(paramNames)) {
+      param_names_(std::move(paramNames)),
+      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_INTERNAL_ASSERT(
       replicas_[0].size() >= 1, "Expected at least one parameter.");
 
+  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+    LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
+              << bucket_bytes_cap_
+              << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
+  }
   // Check whether the module is multi_device_module
   {
     std::set<int> unique_devices;
@@ -174,7 +182,8 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(std::move(bucket_indices));
+    initialize_buckets(
+        std::move(bucket_indices), std::move(per_bucket_size_limits));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -595,6 +604,8 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
+  grad_ready_order_indices_.push_back(index);
+
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
     // Since it gets here, this param has been used for this iteration. We want
@@ -939,7 +950,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices) {
+    std::vector<std::vector<size_t>> bucket_indices,
+    std::vector<size_t> per_bucket_sizes) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -970,8 +982,10 @@ void Reducer::initialize_buckets(
   const auto bucket_count = bucket_indices.size();
   const auto replica_count = replicas_.size();
   buckets_.reserve(bucket_count);
+  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
+    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -1301,6 +1315,8 @@ void Reducer::prepare_for_backward(
 
   // Reset accounting.
   expect_autograd_hooks_ = true;
+  // Clear gradient ready order as it can be different in the next iteration.
+  grad_ready_order_indices_.clear();
 
   reset_bucket_counting();
 
@@ -1666,7 +1682,7 @@ bool Reducer::rebuild_buckets() {
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(kDefaultFirstBucketBytes);
+  bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
@@ -1675,6 +1691,15 @@ bool Reducer::rebuild_buckets() {
           bucket_size_limits,
           expect_sparse_gradients_[0],
           rebuilt_param_indices_);
+
+  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+    TORCH_INTERNAL_ASSERT(
+        rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
+    LOG(INFO) << rebuilt_bucket_indices.size()
+              << " buckets rebuilt with size limits: "
+              << c10::Join(", ", per_bucket_size_limits)
+              << " bytes.";
+  }
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // Broadcast the newly rebuilt bucket indices from rank 0 in default.
@@ -1685,7 +1710,8 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(std::move(rebuilt_bucket_indices));
+  initialize_buckets(
+      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
   return true;
 }
 
@@ -1936,7 +1962,6 @@ compute_bucket_assignment_by_size(
       c10::hash<BucketKey>>
       bucket_size_limit_iterators;
 
-
   // Keep vector of indices and size accumulator by tensor type and device.
   std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
       buckets;
@@ -2005,11 +2030,14 @@ compute_bucket_assignment_by_size(
     std::sort(
         result.begin(),
         result.end(),
-        [](const std::tuple<std::vector<size_t>, size_t>& a, const std::tuple<std::vector<size_t>, size_t>& b) {
+        [](const std::tuple<std::vector<size_t>, size_t>& a,
+           const std::tuple<std::vector<size_t>, size_t>& b) {
           auto indices_a = std::get<0>(a);
           auto indices_b = std::get<0>(b);
-          const auto amin = std::min_element(indices_a.begin(), indices_a.end());
-          const auto bmin = std::min_element(indices_b.begin(), indices_b.end());
+          const auto amin =
+              std::min_element(indices_a.begin(), indices_a.end());
+          const auto bmin =
+              std::min_element(indices_b.begin(), indices_b.end());
           return *amin < *bmin;
         });
   }
