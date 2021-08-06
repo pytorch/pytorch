@@ -6,6 +6,7 @@ from torch.fx.node import map_arg
 import torch.fx as fx
 from functools import partial
 import os
+import torch.utils._pytree as pytree
 
 def partition_backwards(fx_module: fx.GraphModule):
     bw_nodes = set()
@@ -108,24 +109,25 @@ def tvm_compile(fx_module, example_inputs, name = None):
     return exec_tvm
 
 def compiled_function(fn, fw_compiler, bw_compiler):
+    fw_module = None
     compiled_fw = None
+    bw_module = None
     compiled_bw = None
     class CompiledFunction(torch.autograd.Function):
         @staticmethod
         def forward(ctx, *args):
-            nonlocal compiled_fw, compiled_bw
+            nonlocal compiled_fw, compiled_bw, fw_module, bw_module
             if compiled_fw is None:
                 out = fn(*args)
                 with torch.enable_grad():
                     fx_g = make_fx(vjpfull)(fn, args, (torch.ones_like(out),))
                 fw_module, bw_module = partition_backwards(fx_g)
-                print(fw_module.code, bw_module.code)
 
                 garbage_hack = torch.randn(())
                 fw_args = (garbage_hack,) + args
 
                 compiled_fw = fw_compiler(fw_module, fw_args)
-                fw_outs = compiled_fw(*fw_args)
+                fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
 
                 if not isinstance(fw_outs, list):
                     fw_outs = [fw_outs]
@@ -133,7 +135,9 @@ def compiled_function(fn, fw_compiler, bw_compiler):
                 bw_args = fw_outs[1:] + [torch.ones_like(fw_outs[0])]
                 compiled_bw = bw_compiler(bw_module, bw_args)
             garbage_hack = torch.randn(())
-            fw_outs = compiled_fw(garbage_hack, *args)
+            fw_outs = compiled_fw(*fw_module.graph.flatten_inps(fw_args))
+            if not isinstance(fw_outs, list):
+                fw_outs = [fw_outs]
             ctx.activations = fw_outs[1:]
             return fw_outs[0]
 
