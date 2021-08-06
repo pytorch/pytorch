@@ -104,101 +104,6 @@ static void threshold_kernel(
   });
 }
 
-#if AT_MKL_ENABLED()
-
-template <typename T>
-void MKLCdfNorm(int64_t N, const T* X, T* Y);
-
-template <>
-void MKLCdfNorm<float>(int64_t N, const float* X, float* Y) {
-  vsCdfNorm(N, X, Y);
-}
-
-template <>
-void MKLCdfNorm<double>(int64_t N, const double* X, double* Y) {
-  vdCdfNorm(N, X, Y);
-}
-
-template <typename T>
-void MKLMul(int64_t N, const T* A, const T* B, T* Y);
-
-template <>
-void MKLMul<float>(int64_t N, const float* A, const float* B, float* Y) {
-  vsMul(N, A, B, Y);
-}
-
-template <>
-void MKLMul<double>(int64_t N, const double* A, const double* B, double* Y) {
-  vdMul(N, A, B, Y);
-}
-
-template <typename T>
-void MKLExp(int64_t N, const T* X, T* Y);
-
-template <>
-void MKLExp<float>(int64_t N, const float* X, float* Y) {
-  vsExp(N, X, Y);
-}
-
-template <>
-void MKLExp<double>(int64_t N, const double* X, double* Y) {
-  vdExp(N, X, Y);
-}
-
-template <typename T>
-void GeluMKLKernelImpl(TensorIteratorBase* it) {
-  if (!it->can_use_32bit_indexing()) {
-    for (auto& sub_it : it->with_32bit_indexing()) {
-      GeluMKLKernelImpl<T>(&sub_it);
-    }
-    return;
-  }
-  const int64_t N = it->numel();
-  const T* X_data = static_cast<T*>(it->data_ptr(1));
-  T* Y_data = static_cast<T*>(it->data_ptr(0));
-  MKLCdfNorm<T>(N, X_data, Y_data);
-  MKLMul<T>(N, X_data, Y_data, Y_data);
-}
-
-template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIteratorBase* it) {
-  if (!it->can_use_32bit_indexing()) {
-    for (auto& sub_it : it->with_32bit_indexing()) {
-      GeluBackwardMKLKernelImpl<T>(&sub_it);
-    }
-    return;
-  }
-  constexpr T kBeta = M_2_SQRTPI * M_SQRT1_2 * T(0.5);
-  const int64_t N = it->numel();
-  const T* dY_data = static_cast<T*>(it->data_ptr(1));
-  const T* X_data = static_cast<T*>(it->data_ptr(2));
-  T* dX_data = static_cast<T*>(it->data_ptr(0));
-  Tensor cdf = at::empty({N}, it->input(1).options());
-  T* cdf_data = cdf.template data_ptr<T>();
-  MKLCdfNorm<T>(N, X_data, cdf_data);
-  for (int64_t i = 0; i < N; ++i) {
-    dX_data[i] = T(-0.5) * X_data[i] * X_data[i];
-  }
-  MKLExp(N, dX_data, dX_data);
-  for (int64_t i = 0; i < N; ++i) {
-    dX_data[i] = dY_data[i] * (cdf_data[i] + kBeta * X_data[i] * dX_data[i]);
-  }
-}
-
-#else // AT_MKL_ENABLED()
-
-template <typename T>
-void GeluMKLKernelImpl(TensorIteratorBase* /* it */) {
-  TORCH_CHECK(false, "ATen not compiled with MKL");
-}
-
-template <typename T>
-void GeluBackwardMKLKernelImpl(TensorIteratorBase* /* it */) {
-  TORCH_CHECK(false, "ATen not compiled with MKL");
-}
-
-#endif // AT_MKL_ENABLED()
-
 void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES(it.dtype(), "elu_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -265,83 +170,73 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
 // y = 0.5x * (1 + tanh(sqrt(2/Pi) * (x + 0.044715x^3)))
 // and the fast tanh impl from Eigen.
 void GeluKernelImpl(TensorIteratorBase& it) {
-  if (at::hasMKL() && it.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
-      GeluMKLKernelImpl<scalar_t>(&it);
-    });
-  } else {
-    auto grain_size = at::internal::GRAIN_SIZE;
-    // Numbers based on benchmarking.
-    // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
+  auto grain_size = at::internal::GRAIN_SIZE;
+  // Numbers based on benchmarking.
+  // Benchmark: benchmarks/operator_benchmarks/pt/gelu_test.py
 #ifdef C10_MOBILE
-    // Benchmarked on S8 US phone.
-    // Internal benchmarking that converts operator benchmark into
-    // a torchscript module and run that on mobile.
-    // Same benchmark as server side.
-    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
+  // Benchmarked on S8 US phone.
+  // Internal benchmarking that converts operator benchmark into
+  // a torchscript module and run that on mobile.
+  // Same benchmark as server side.
+  constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{6144};
 #else
-    // Benchmarked on i9 8 core 16 thread machine.
-    // 1 thread: cd benchmark/operator_benchmarks;
-    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
-    // 2 threads: cd benchmark/operator_benchmarks;
-    //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
-    constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
+  // Benchmarked on i9 8 core 16 thread machine.
+  // 1 thread: cd benchmark/operator_benchmarks;
+  //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+  // 2 threads: cd benchmark/operator_benchmarks;
+  //           python -m pt.gelu_test --tag_filter long --omp_num_threads 1
+  constexpr int64_t GELU_MIN_ELEMENTS_FOR_MULTI_THREADING{16384};
 #endif
-    if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
-      grain_size = it.numel() / at::get_num_threads();
-    }
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluKernelImpl", [&]() {
-      using Vec = vec::Vectorized<scalar_t>;
-      const Vec kAlphaVec(M_SQRT1_2);
-      const Vec kOneVec(1);
-      const Vec kPointFiveVec(0.5);
-      cpu_kernel_vec(
-          it,
-          [](scalar_t x) {
-            constexpr scalar_t kAlpha = M_SQRT1_2;
-            return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
-          },
-          [&](Vec x_vec) {
-            return x_vec * kPointFiveVec *
-                (kOneVec + (x_vec * kAlphaVec).erf());
-          },
-          grain_size);
-    });
+  if (it.numel() > GELU_MIN_ELEMENTS_FOR_MULTI_THREADING) {
+    grain_size = it.numel() / at::get_num_threads();
   }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, it.dtype(), "GeluKernelImpl", [&]() {
+    using Vec = vec::Vectorized<scalar_t>;
+    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+    const Vec kOneVec(scalar_t(1));
+    const Vec kPointFiveVec(scalar_t(0.5));
+    cpu_kernel_vec(
+        it,
+        [](scalar_t x) {
+          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+          return x * scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+        },
+        [&](Vec x_vec) {
+          return x_vec * kPointFiveVec *
+              (kOneVec + (x_vec * kAlphaVec).erf());
+        },
+        grain_size);
+  });
 }
 
 void GeluBackwardKernelImpl(TensorIteratorBase& it) {
-  if (hasMKL() && it.is_contiguous()) {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
-      GeluBackwardMKLKernelImpl<scalar_t>(&it);
-    });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES(it.dtype(), "GeluBackwardKernelImpl", [&]() {
-      using Vec = vec::Vectorized<scalar_t>;
-      const Vec kAlphaVec(M_SQRT1_2);
-      const Vec kBetaVec(M_2_SQRTPI * M_SQRT1_2 * 0.5);
-      const Vec kOneVec(1);
-      const Vec kPointFiveVec(0.5);
-      const Vec kMinusPointFiveVec(-0.5);
-      cpu_kernel_vec(
-          it,
-          [](scalar_t dy, scalar_t x) {
-            constexpr scalar_t kAlpha = M_SQRT1_2;
-            constexpr scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5;
-            const scalar_t cdf =
-                scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
-            const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
-            return dy * (cdf + x * pdf);
-          },
-          [&](Vec dy_vec, Vec x_vec) {
-            const Vec cdf_vec =
-                kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
-            const Vec pdf_vec =
-                kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
-            return dy_vec * (cdf_vec + x_vec * pdf_vec);
-          });
-    });
-  }
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, it.dtype(), "GeluBackwardKernelImpl", [&]() {
+    using Vec = vec::Vectorized<scalar_t>;
+    const Vec kAlphaVec(scalar_t(M_SQRT1_2));
+    const Vec kBetaVec(scalar_t(M_2_SQRTPI * M_SQRT1_2 * 0.5));
+    const Vec kOneVec(scalar_t(1));
+    const Vec kPointFiveVec(scalar_t(0.5));
+    const Vec kMinusPointFiveVec(scalar_t(-0.5));
+    cpu_kernel_vec(
+        it,
+        [](scalar_t dy, scalar_t x) {
+          const scalar_t kAlpha = scalar_t(M_SQRT1_2);
+          const scalar_t kBeta = M_2_SQRTPI * M_SQRT1_2 * scalar_t(0.5);
+          const scalar_t cdf =
+              scalar_t(0.5) * (scalar_t(1) + std::erf(x * kAlpha));
+          const scalar_t pdf = kBeta * std::exp(x * x * scalar_t(-0.5));
+          return dy * (cdf + x * pdf);
+        },
+        [&](Vec dy_vec, Vec x_vec) {
+          const Vec cdf_vec =
+              kPointFiveVec * (kOneVec + (x_vec * kAlphaVec).erf());
+          const Vec pdf_vec =
+              kBetaVec * (x_vec * x_vec * kMinusPointFiveVec).exp();
+          return dy_vec * (cdf_vec + x_vec * pdf_vec);
+        });
+  });
 }
 
 void hardsigmoid_kernel(TensorIteratorBase& iter) {

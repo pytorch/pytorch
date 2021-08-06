@@ -483,17 +483,17 @@ private:
   void processEvents(const std::vector<LegacyEvent*>& events);
 };
 
-// A guard that enables the profiler, taking in an optional callback to process
+// A guard that enables the legacy profiler, taking in an optional callback to process
 // the results
 // Usage:
 // {
-//   TLSProfilerGuard g([](thread_event_lists profilerResults) {
+//   TLSLegacyProfilerGuard g([](thread_event_lists profilerResults) {
 //     // process profilerResults
 //   });
 //   Code to profile
 // }
-struct TORCH_API TLSProfilerGuard {
-  explicit TLSProfilerGuard(
+struct TORCH_API TLSLegacyProfilerGuard {
+  explicit TLSLegacyProfilerGuard(
       const ProfilerConfig& cfg,
       c10::optional<std::function<void(const thread_event_lists&)>>
           resultCallback = c10::nullopt,
@@ -504,7 +504,7 @@ struct TORCH_API TLSProfilerGuard {
         profilerDisableOptions_(std::move(profilerDisableOptions)) {
     enableProfilerLegacy(cfg);
   }
-  ~TLSProfilerGuard() {
+  ~TLSLegacyProfilerGuard() {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     thread_event_lists event_lists = disableProfilerLegacy(profilerDisableOptions_);
     if (cb_) {
