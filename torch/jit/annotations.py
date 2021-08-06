@@ -16,7 +16,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
 
 
 from textwrap import dedent
-from torch._utils_internal import get_source_lines_and_file
+from torch._sources import get_source_lines_and_file
 from typing import Type
 
 if torch.distributed.rpc.is_available():

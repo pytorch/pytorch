@@ -18,13 +18,12 @@ import builtins
 import typing
 import io
 import pickle
-import functools
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
 import torch.distributed.rpc
-from torch._utils_internal import get_source_lines_and_file
 from torch._C import Future as CFuture
+from torch._sources import get_source_lines_and_file, parse_def, fake_range
 from torch.futures import Future
 import torch.package._mangling as package_mangling
 from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, Type, TypeVar, Union  # noqa: F401
@@ -716,7 +715,50 @@ def copy_torchscript_modifier(orig, new) -> None:
 # qualified_name => list[overload_functions]
 _overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
+
+_OVERLOAD_EXAMPLE = '''
+Example usage of overload function:
+@torch.jit._overload
+def my_function(x: type0) -> type0: # decl 1
+    pass
+
+@torch.jit._overload
+def my_function(x: type1) -> type1: # decl 2
+    pass
+
+def my_function(x):                 # implementation
+    if isinstance(x, type0):
+        return x
+    elif isinstance(x, type1):
+        return x
+'''
+
+def get_overload_no_implementation_error_message(kind, obj):
+    sourcelines, file_lineno, filename = get_source_lines_and_file(obj)
+    return (
+        f'Implementation for the {kind} "{_qualified_name(obj)}" is missing. Please make '
+        f'sure a definition is provided and defined after all overload declarations.\n'
+        f'File "{filename}", line {file_lineno}:\n' + ''.join(sourcelines) + "\n" + _OVERLOAD_EXAMPLE
+    )
+
+def _check_overload_body(func):
+    parsed_def = parse_def(func)
+    body = parsed_def.ast.body[0].body
+
+    def is_pass(x):
+        return isinstance(x, ast.Pass)
+
+    def is_ellipsis(x):
+        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+
+    if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
+        msg = "Only `pass` statement or `...` can be the body of overload declaration:\n"
+        msg += '\n'.join(parsed_def.source.split("\n")[:3])
+        msg += " <- Expecting `pass` or `...` here!\n" + _OVERLOAD_EXAMPLE
+        raise RuntimeError(msg)
+
 def _overload(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_fns
     fn_overload_list = _overloaded_fns.get(qual_name)
@@ -762,6 +804,7 @@ _overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 _overloaded_method_class_fileno = {}
 
 def _overload_method(func):
+    _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
     class_name_map = _overloaded_methods.get(qual_name, None)
@@ -992,22 +1035,6 @@ def _qualified_name(obj) -> str:
                            f"'{name}' is not a valid identifier")
 
     return module_name + "." + name
-
-
-# Thin wrapper around SourceRangeFactory to store extra metadata
-# about the function-to-be-compiled.
-class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len, uses_true_division=True):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
-        self.uses_true_division = uses_true_division
-        self.filename = filename
-
-@functools.lru_cache(maxsize=None)
-def make_source_context(*args):
-    return SourceContext(*args)
-
-def fake_range():
-    return SourceContext('', None, 0, 0).make_raw_range(0, 1)
 
 
 def _try_get_dispatched_fn(fn):
