@@ -154,9 +154,7 @@ class IDEEPConvTransposeGradientOp final : public IDEEPConvTransposeUnpoolBase {
   OUTPUT_TAGS(FILTER_GRAD, BIAS_OR_INPUT_GRAD, INPUT_GRAD);
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ConvTranspose, IDEEPConvTransposeOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(ConvTransposeGradient, IDEEPConvTransposeGradientOp);
 
 } // namespace

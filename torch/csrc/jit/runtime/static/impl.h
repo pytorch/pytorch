@@ -12,7 +12,8 @@
 namespace torch {
 namespace jit {
 
-bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph);
+TORCH_API bool canEnableStaticRuntime(
+    const std::shared_ptr<torch::jit::Graph>& graph);
 
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
@@ -85,6 +86,7 @@ class TORCH_API StaticModule {
 
   explicit StaticModule(
       const torch::jit::Module& m,
+      bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
   typedef enum {
@@ -364,7 +366,7 @@ class MemoryPlanner {
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class ProcessedNode {
+class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
