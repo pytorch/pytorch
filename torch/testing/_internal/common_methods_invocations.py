@@ -4945,7 +4945,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            backward_dtypes=(torch.bfloat16, torch.float32, torch.float64),
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
-                                                    *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
+                                                    *[torch.bfloat16] if (SM53OrLater and CUDA11OrLater) else []),
            supports_out=False,
            sample_inputs_func=sample_attn),
     OpInfo('mul',

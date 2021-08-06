@@ -3626,7 +3626,7 @@ std::tuple <Tensor, Tensor> attn_backward_qk(const Tensor& q, const Tensor& k, c
     return std::make_tuple(grad_q_1, grad_k_1);
   }
 
-  Tensor grad_q = grad_q_1 + grad_q_2; // It throws an error in one of them is undefined?
+  Tensor grad_q = grad_q_1 + grad_q_2;
   Tensor grad_k = grad_k_1 + grad_k_2;
   return std::make_tuple(grad_q, grad_k);
 }
