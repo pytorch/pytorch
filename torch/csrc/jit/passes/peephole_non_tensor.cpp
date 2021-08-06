@@ -3,7 +3,6 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -210,7 +209,7 @@ struct PeepholeOptimizeNonTensorImpl {
         // Tensor or list of Tensor might throw on aten::eq
         auto immut_type = [&](const TypePtr& type) {
           auto kind = type->kind();
-          std::vector<TypeKind> handled_immutable_types = {
+          static const std::vector<TypeKind> handled_immutable_types = {
               TypeKind::BoolType,
               TypeKind::IntType,
               TypeKind::FloatType,
