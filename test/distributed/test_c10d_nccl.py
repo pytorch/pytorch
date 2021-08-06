@@ -1544,7 +1544,7 @@ class DistributedDataParallelTest(
         def allreduce_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future[torch.Tensor]:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [bucket.buffer() / self.world_size]
             return (
                 process_group.allreduce(tensors)
                 .get_future()
@@ -1818,7 +1818,7 @@ class DistributedDataParallelTest(
         def allreduce_with_then_hook(
             state: object, bucket: dist.GradBucket
         ) -> torch.futures.Future[torch.Tensor]:
-            tensors = [bucket.get_tensor() / self.world_size]
+            tensors = [bucket.buffer() / self.world_size]
             fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
