@@ -1368,6 +1368,7 @@ jobs:
   pytorch_macos_10_15_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.15-py3-arm64-build
+      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.3.0"
     steps:
@@ -1405,6 +1406,7 @@ jobs:
   pytorch_macos_10_13_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-build
+      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
@@ -1439,6 +1441,7 @@ jobs:
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
@@ -1474,6 +1477,7 @@ jobs:
   pytorch_macos_10_13_py3_lite_interpreter_build_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
+      JOB_BASE_NAME: $CIRCLE_JOB
     macos:
       xcode: "12.0"
     steps:
