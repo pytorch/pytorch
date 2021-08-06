@@ -200,66 +200,6 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
 }
 
-static Tensor expand_bdim(const Tensor& a, bool a_has_bdim, int64_t bdim_size) {
-  if (a_has_bdim) {
-    return a;
-  }
-  DimVector expanded_shape(a.sizes().begin(), a.sizes().end());
-  expanded_shape.insert(expanded_shape.begin(), bdim_size);
-  return a.expand(expanded_shape);
-}
-
-static std::tuple<Tensor, Tensor, Tensor> expand_bdims(
-    const Tensor& a, bool a_has_bdim,
-    const Tensor& b, bool b_has_bdim,
-    const Tensor& c, bool c_has_bdim) {
-  int64_t bdim_size = -1;
-  if (a_has_bdim) {
-    bdim_size = a.size(0);
-  } else if (b_has_bdim) {
-    bdim_size = b.size(0);
-  } else if (c_has_bdim) {
-    bdim_size = c.size(0);
-  } else {
-    TORCH_INTERNAL_ASSERT(false);
-  }
-  auto a_ = expand_bdim(a, a_has_bdim, bdim_size);
-  auto b_ = expand_bdim(b, b_has_bdim, bdim_size);
-  auto c_ = expand_bdim(c, b_has_bdim, bdim_size);
-  return std::make_tuple(a_, b_, c_);
-}
-
-std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& output, optional<int64_t> output_bdim,
-    int64_t dim,
-    const Tensor& self, optional<int64_t> self_bdim) {
-  // NB: self only gets used for its dtype. We handle it anyways just in case.
-  // softmax_backward's decomposition is y * gy - y * (y * gy).sum(dim, keepdim=True)
-  // NB: the CUDA kernel handles strides so we can just expand
-  // all of the tensors and call it a day. The CPU kernel is not as good but
-  // idk if the perf on that really matters
-  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
-  auto output_ = moveBatchDimToFront(output, output_bdim);
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-
-  // Expand out that extra dimension for everyone
-  std::tie(grad_output_, output_, self_) = expand_bdims(
-      grad_output_, grad_output_bdim.has_value(),
-      output_, output_bdim.has_value(),
-      self_, self_bdim.has_value());
-
-  // Scalar tensor case. softmax turns into the identity when this happens.
-  // I don't know why the output is zeros, though, but that's what softmax tells me...
-  if (self_.dim() == 1 && (dim == 0 || dim == -1)) {
-    return std::make_tuple(at::zeros_like(grad_output_), 0);
-  }
-
-  dim = getPhysicalDim(self_, true, dim);
-
-  return std::make_tuple(at::_softmax_backward_data(grad_output_, output_, dim, self_), 0);
-}
-
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batching_rule);
   m.impl("conv1d", convNd_decomp);
@@ -270,8 +210,6 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
   OP_DECOMPOSE(dropout);
-
-  VMAP_SUPPORT("_softmax_backward_data", _softmax_backward_batch_rule);
 
   VMAP_SUPPORT("constant_pad_nd", BASIC_UNARY_BATCH_RULE(at::constant_pad_nd));
   VMAP_SUPPORT("reflection_pad1d", EXISTING_BDIM_BATCH_RULE(at::reflection_pad1d));
