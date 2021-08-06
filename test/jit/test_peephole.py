@@ -512,8 +512,7 @@ class TestPeephole(JitTestCase):
         def foo2(x: List[int]):
             return x == x, x != x
 
-        inps = 1, [2, 3]
-        for func, inp in zip([foo, foo2], inps):
+        for func, inp in zip([foo, foo2], [1, [2, 3]]):
             func_s = torch.jit.script(func)
             self.run_pass("peephole", func_s.graph)
             FileCheck().check_not("aten::eq").check_not("aten::neq").run(func_s.graph)
