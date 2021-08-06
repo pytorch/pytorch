@@ -1,6 +1,6 @@
 import collections
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Dict,
     List
@@ -66,17 +66,17 @@ class ShardedTensorMetadata(object):
     """
 
     # Metadata about each shard of the Tensor
-    shards_metadata: List[ShardMetadata]
+    shards_metadata: List[ShardMetadata] = field(default_factory=list)
 
     # Size of each dim of the overall Tensor.
-    size: torch.Size
+    size: torch.Size = field(default_factory=list)
 
     # Regular tensor fields
-    dtype: torch.dtype
-    layout: torch.layout
-    requires_grad: bool
-    memory_format: torch.memory_format
-    pin_memory: bool
+    dtype: torch.dtype = field(default=torch.get_default_dtype())
+    layout: torch.layout = field(default=torch.strided)
+    requires_grad: bool = False
+    memory_format: torch.memory_format = field(default=torch.contiguous_format)
+    pin_memory: bool = False
 
     def __getstate__(self):
         # Since torch.memory_format cannot be pickled!
