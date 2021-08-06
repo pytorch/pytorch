@@ -8,7 +8,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 from torch._six import string_classes
 
-class autocast(torch.autocast):
+class autocast(torch.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``
