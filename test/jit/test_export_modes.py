@@ -71,7 +71,7 @@ class TestExportModes(JitTestCase):
         class ModelWithAtenNotONNXOp(nn.Module):
             def forward(self, x, y):
                 abcd = x + y
-                defg = torch.qr(abcd)
+                defg = torch.linalg.qr(abcd)
                 return defg
 
         x = torch.rand(3, 4)

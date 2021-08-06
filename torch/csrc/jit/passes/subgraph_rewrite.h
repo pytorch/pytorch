@@ -78,12 +78,17 @@ class TORCH_API SubgraphRewriter {
    * The method takes two parameters specifying the pattern:
    * \p PATTERN - IR string representing the pattern subgraph.
    * \p REPLACEMENT - IR string representing the replacement subgraph.
+   * \p value name map - vector of pairs mapping values in the replacement graph
+   * to the values in the pattern graph. Used for preserving source range info
+   * across graph rewrite.
    *
    * See examples of pattern registering in `RegisterDefaultPatterns`.
    */
   void RegisterRewritePattern(
       const std::string& pattern,
-      const std::string& replacement);
+      const std::string& replacement,
+      const std::vector<std::pair<std::string, std::string>>& value_name_pair =
+          {});
 
  private:
   std::vector<RewritePatternDescr> patterns_;
@@ -105,6 +110,7 @@ class TORCH_API SubgraphRewriter {
 struct RewritePatternDescr {
   std::string pattern;
   std::string replacement;
+  std::unordered_map<std::string, std::string> value_name_map;
 };
 
 } // namespace jit

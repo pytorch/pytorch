@@ -101,14 +101,12 @@ void ROIAlignBackwardFeature(
 
     const T* offset_bottom_rois = bottom_rois + n * rois_cols;
     int roi_batch_ind = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (rois_cols == 5) {
       roi_batch_ind = offset_bottom_rois[0];
       offset_bottom_rois++;
     }
 
     // Do not using rounding; this implementation detail is critical
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     T roi_offset = continuous_coordinate ? T(0.5) : 0;
     T roi_start_w = offset_bottom_rois[0] * spatial_scale - roi_offset;
     T roi_start_h = offset_bottom_rois[1] * spatial_scale - roi_offset;
@@ -237,12 +235,10 @@ C10_EXPORT bool RoIAlignGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(RoIAlignGradient, RoIAlignGradientOp<float, CPUContext>);
 
 // Input: X, rois, dY (aka "gradOutput");
 // Output: dX (aka "gradInput")
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(RoIAlignGradient)
     .NumInputs(3)
     .NumOutputs(1)
@@ -266,7 +262,6 @@ class GetRoIAlignGradient : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(RoIAlign, GetRoIAlignGradient);
 
 template <typename T>

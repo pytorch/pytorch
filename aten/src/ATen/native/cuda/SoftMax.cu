@@ -4,7 +4,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 #include <c10/macros/Macros.h>
 
@@ -736,7 +735,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto output_ptr = output.data_ptr<accscalar_t>();
             auto input_ptr = input.data_ptr<scalar_t>();
             int64_t remaining = outer_size;
-            int64_t chunk_size = (1<<31 - 1) / dim_size;
+            int64_t chunk_size = (1<<30) / dim_size;
             while(remaining > 0) {
               dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
                   output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
@@ -819,7 +818,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         auto grad_ptr = grad.data_ptr<scalar_t>();
         auto output_ptr = output.data_ptr<scalar_t>();
         int64_t remaining = outer_size;
-        int64_t chunk_size = (1<<31 - 1) / dim_size;
+        int64_t chunk_size = (1<<30) / dim_size;
         while(remaining > 0) {
           dispatch_softmax_backward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
@@ -843,7 +842,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
         auto grad_ptr = grad.data_ptr<accscalar_t>();
         auto output_ptr = output.data_ptr<accscalar_t>();
         int64_t remaining = outer_size;
-        int64_t chunk_size = (1<<31 - 1) / dim_size;
+        int64_t chunk_size = (1<<30) / dim_size;
         while(remaining > 0) {
           dispatch_softmax_backward<accscalar_t, scalar_t, accscalar_t, is_log_softmax>(
             gI_ptr, grad_ptr, output_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));

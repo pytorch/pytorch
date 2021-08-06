@@ -72,6 +72,7 @@ Tensor max_unpooling2d_forward_out_cpu_frame(
           oheight,
           "x",
           owidth);
+      (void)error_index;
     }
   }
   return output;
@@ -142,7 +143,6 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
   int64_t dimh = 2;
   int64_t dimt = 1;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.ndimension() == 5) {
     nBatch = input.size(0);
     dimw++;
@@ -204,6 +204,7 @@ Tensor max_unpooling3d_forward_out_cpu_frame(
             oH,
             "x",
             oW);
+        (void)error_index;
       }
     }
   }
@@ -252,7 +253,6 @@ static void max_unpooling3d_shape_check(
   int dimt = 1;
   int dimn = 0;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (input.ndimension() == 5) {
     dimw++;
     dimh++;
@@ -303,7 +303,6 @@ Tensor& max_unpooling3d_forward_out_cpu(const Tensor& self_,
   max_unpooling3d_shape_check(
       self_, Tensor(), indices_, output_size, stride, padding);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (self_.ndimension() == 5) {
     output.resize_({self.size(0), self.size(1), oT, oH, oW});
   } else {
@@ -385,6 +384,7 @@ static void max_unpooling2d_backward_out_cpu_frame(
         owidth,
         ", oheight= ",
         oheight);
+    (void)error_index;
   }
 }
 
@@ -529,6 +529,7 @@ static void max_unpooling3d_backward_out_cpu_frame(
         oW,
         ",oH= ",
         oH);
+    (void)error_index;
   }
 }
 
@@ -567,7 +568,6 @@ Tensor& max_unpooling3d_backward_out_cpu(const Tensor& grad_output_,
   /* resize */
   grad_input.resize_as_(self);
   grad_input.zero_();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (self.ndimension() == 5) {
     nbatch = self.size(0);
     dimt++;

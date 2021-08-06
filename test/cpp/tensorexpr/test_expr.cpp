@@ -23,7 +23,6 @@ using namespace torch::jit::tensorexpr;
 
 using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest) {
   KernelScope kernel_scope;
   ExprHandle a = IntImm::make(2), b = IntImm::make(3);
@@ -32,51 +31,38 @@ TEST(Expr, BasicValueTest) {
   ASSERT_EQ(eval.value<int>(), 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BasicValueTest02) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(2.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(3.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(4.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle d(5.0f);
   ExprHandle f = (a + b) - (c + d);
   SimpleIRExprEval eval(f);
   ASSERT_EQ(eval.value<float>(), -4.0f);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest01) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   SimpleIRExprEval eval(body);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(x, ExprHandle(3.f));
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetTest02) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
   ExprHandle body =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f) * y);
   SimpleIRExprEval eval(body);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(x, ExprHandle(3.f));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(y, ExprHandle(6.f));
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4 * 6));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LetStmtTest01) {
   KernelScope kernel_scope;
   Placeholder a_buf("a", kFloat, {1});
@@ -94,16 +80,13 @@ TEST(Expr, LetStmtTest01) {
   PaddedBuffer<float> b_v(1);
   PaddedBuffer<float> b_ref(1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   a_v(0) = 23;
   b_ref(0) = a_v(0);
   eval(a_v, b_v);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(b_v, b_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kInt);
@@ -113,19 +96,15 @@ TEST(Expr, IntTest) {
   ASSERT_EQ(eval.value<int>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, FloatTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle body = ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f));
   SimpleIRExprEval eval(body);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   eval.bindVar(x, ExprHandle(3.f));
   ASSERT_EQ(eval.value<float>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ByteTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kByte);
@@ -136,7 +115,6 @@ TEST(Expr, ByteTest) {
   ASSERT_EQ(eval.value<uint8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CharTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kChar);
@@ -147,7 +125,6 @@ TEST(Expr, CharTest) {
   ASSERT_EQ(eval.value<int8_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, ShortTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kShort);
@@ -158,7 +135,6 @@ TEST(Expr, ShortTest) {
   ASSERT_EQ(eval.value<int16_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, LongTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kLong);
@@ -169,7 +145,6 @@ TEST(Expr, LongTest) {
   ASSERT_EQ(eval.value<int64_t>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, HalfTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kHalf);
@@ -180,7 +155,6 @@ TEST(Expr, HalfTest) {
   ASSERT_EQ(eval.value<at::Half>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DoubleTest) {
   KernelScope kernel_scope;
   VarHandle x("x", kDouble);
@@ -191,7 +165,6 @@ TEST(Expr, DoubleTest) {
   ASSERT_EQ(eval.value<double>(), 2 + (3 * 3 + 4));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, VectorAdd01) {
   KernelScope kernel_scope;
   const int kVectorSize = 8;
@@ -235,11 +208,9 @@ TEST(Expr, VectorAdd01) {
   }
   SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(c_v, c_ref, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectEQ) {
   KernelScope kernel_scope;
   constexpr int N = 1024;
@@ -273,7 +244,6 @@ TEST(Expr, CompareSelectEQ) {
   assertAllEqual(c_buffer, 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, CompareSelectDtypes) {
   // LHS and RHS expressions should have the same dtype, but this dtype could
   // differ from the dtype of the return values (but dtypes of true and false
@@ -289,7 +259,6 @@ TEST(Expr, CompareSelectDtypes) {
   std::vector<int> a_buffer(N, 1);
   std::vector<int> b_buffer(N, 1);
   std::vector<float> c_buffer(N, 0.0f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> c_ref(N, 3.14f);
 
   VarHandle i("i", kInt);
@@ -304,9 +273,7 @@ TEST(Expr, CompareSelectDtypes) {
           CompareSelect::make(
               a.load(i),
               b.load(i),
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               FloatImm::make(3.14f),
-              // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
               FloatImm::make(2.78f),
               CompareSelectOperation::kEQ)));
 
@@ -319,20 +286,16 @@ TEST(Expr, CompareSelectDtypes) {
 
   assertAllEqual(a_buffer, 1);
   assertAllEqual(b_buffer, 1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(c_buffer, c_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, IntrinsicsDtypes) {
   KernelScope kernel_scope;
   constexpr int N = 256;
   Placeholder a(BufHandle("A", {N}, kDouble));
   Placeholder b(BufHandle("B", {N}, kDouble));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<double> a_buffer(N, -10.0);
   std::vector<double> b_buffer(N, 0.0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<double> b_ref(N, 10.0);
 
   VarHandle i("i", kInt);
@@ -344,26 +307,20 @@ TEST(Expr, IntrinsicsDtypes) {
   ASSERT_EQ(a_buffer.size(), N);
   ASSERT_EQ(b_buffer.size(), N);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertAllEqual(a_buffer, -10.0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(b_buffer, b_ref, 1e-7);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Substitute01) {
   KernelScope kernel_scope;
-  const Var* x = new Var("x", kFloat);
-  const Var* y = new Var("y", kFloat);
-  const Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
+  Var* x = new Var("x", kFloat);
+  Var* y = new Var("y", kFloat);
+  Expr* e = new Mul(new Sub(x, new FloatImm(1.0f)), new Add(x, y));
 
-  const Var* z = new Var("z", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  const Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
-  const Expr* e2_ref = new Mul(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  Var* z = new Var("z", kFloat);
+  Expr* e2 = Substitute(e, {{x, new Add(z, new FloatImm(5.0f))}});
+  Expr* e2_ref = new Mul(
       new Sub(new Add(z, new FloatImm(5.0f)), new FloatImm(1.0f)),
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       new Add(new Add(z, new FloatImm(5.0f)), y));
   std::ostringstream oss;
   oss << *e2;
@@ -375,7 +332,6 @@ TEST(Expr, Substitute01) {
   ASSERT_EQ(e2_str, e2_ref_str);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, Math01) {
   KernelScope kernel_scope;
   ExprHandle v = sin(ExprHandle(1.0f));
@@ -390,7 +346,6 @@ TEST(Expr, Math01) {
   ASSERT_NEAR(res, v_ref, 1e-6);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, UnaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -459,7 +414,6 @@ TEST(Expr, UnaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, BinaryMath01) {
   KernelScope kernel_scope;
   struct TestConfig {
@@ -476,7 +430,6 @@ TEST(Expr, BinaryMath01) {
 
   for (const TestConfig& test_config : test_configs) {
     const float v1 = 0.8765f;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     float v2 = 1.2345f;
     ExprHandle v_expr = test_config.func(ExprHandle(v1), ExprHandle(v2));
     float v_ref = test_config.ref_func(v1, v2);
@@ -485,14 +438,120 @@ TEST(Expr, BinaryMath01) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+TEST(Expr, LogicalOps01) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+  ExprHandle f1 = (a > b) && (c > d);
+  ExprHandle f2 = (a > b) && (c < d);
+  ExprHandle f3 = (a < b) && (c > d);
+  ExprHandle f4 = (a < b) && (c < d);
+  ExprHandle f5 = (a < b) || (c > d);
+  ExprHandle f6 = (a < b) || (c < d);
+  ExprHandle f7 = (a > b) || (c < d);
+  ExprHandle f8 = (a > b) || (c > d);
+
+  SimpleIRExprEval eval1(f1);
+  SimpleIRExprEval eval2(f2);
+  SimpleIRExprEval eval3(f3);
+  SimpleIRExprEval eval4(f4);
+  SimpleIRExprEval eval5(f5);
+  SimpleIRExprEval eval6(f6);
+  SimpleIRExprEval eval7(f7);
+  SimpleIRExprEval eval8(f8);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 0);
+  ASSERT_EQ(eval3.value<int>(), 0);
+  ASSERT_EQ(eval4.value<int>(), 0);
+  ASSERT_EQ(eval5.value<int>(), 1);
+  ASSERT_EQ(eval6.value<int>(), 0);
+  ASSERT_EQ(eval7.value<int>(), 1);
+  ASSERT_EQ(eval8.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps02) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.72f);
+
+  ExprHandle f1 = (a > b) || (c > d);
+  ExprHandle f2 = (a > b) && (c <= d);
+  ExprHandle f3 = (a > b) && (c > d);
+  ExprHandle ff1 = f1 && f2;
+  ExprHandle ff2 = f2 || f3;
+
+  SimpleIRExprEval eval1(ff1);
+  SimpleIRExprEval eval2(ff2);
+  ASSERT_EQ(eval1.value<int>(), 1);
+  ASSERT_EQ(eval2.value<int>(), 1);
+}
+
+TEST(Expr, LogicalOps03) {
+  KernelScope kernel_scope;
+  ExprHandle a(23);
+  ExprHandle b(11);
+  ExprHandle c(0.72f);
+  ExprHandle d(0.69f);
+
+  // Bool types
+  ExprHandle bool_f1 = (a > b) && BoolImm::make(true);
+  ExprHandle bool_f2 = (c <= d) || BoolImm::make(true);
+
+  // Int types
+  ExprHandle int_f1 = (a > b) && IntImm::make(1);
+  ExprHandle int_f2 = (c <= d) || IntImm::make(1);
+
+  // Short types
+  ExprHandle short_f1 = (a > b) && ShortImm::make(1);
+  ExprHandle short_f2 = (c <= d) || ShortImm::make(1);
+
+  // Long types
+  ExprHandle long_f1 = (a > b) && LongImm::make(1);
+  ExprHandle long_f2 = (c <= d) || LongImm::make(1);
+
+  // Char types
+  ExprHandle char_f1 = (a > b) && CharImm::make(1);
+  ExprHandle char_f2 = (c <= d) || CharImm::make(1);
+
+  // Byte types
+  ExprHandle byte_f1 = (a > b) && ByteImm::make(1);
+  ExprHandle byte_f2 = (c <= d) || ByteImm::make(1);
+
+  SimpleIRExprEval eval1(bool_f1);
+  SimpleIRExprEval eval2(bool_f2);
+  SimpleIRExprEval eval3(int_f1);
+  SimpleIRExprEval eval4(int_f2);
+  SimpleIRExprEval eval5(short_f1);
+  SimpleIRExprEval eval6(short_f2);
+  SimpleIRExprEval eval7(long_f1);
+  SimpleIRExprEval eval8(long_f2);
+  SimpleIRExprEval eval9(char_f1);
+  SimpleIRExprEval eval10(char_f2);
+  SimpleIRExprEval eval11(byte_f1);
+  SimpleIRExprEval eval12(byte_f2);
+
+  ASSERT_EQ(eval1.value<bool>(), true);
+  ASSERT_EQ(eval2.value<bool>(), true);
+  ASSERT_EQ(eval3.value<int>(), 1);
+  ASSERT_EQ(eval4.value<int>(), 1);
+  ASSERT_EQ(eval5.value<int16_t>(), 1);
+  ASSERT_EQ(eval6.value<int16_t>(), 1);
+  ASSERT_EQ(eval7.value<int64_t>(), 1);
+  ASSERT_EQ(eval8.value<int64_t>(), 1);
+  ASSERT_EQ(eval9.value<int8_t>(), 1);
+  ASSERT_EQ(eval10.value<int8_t>(), 1);
+  ASSERT_EQ(eval11.value<uint8_t>(), 1);
+  ASSERT_EQ(eval12.value<uint8_t>(), 1);
+}
+
 TEST(Expr, BitwiseOps) {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle a(59);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle b(11);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle c(101);
   ExprHandle d(2);
   ExprHandle f = (((a ^ (b << 1)) & c) >> 2) | d;
@@ -501,7 +560,6 @@ TEST(Expr, BitwiseOps) {
   ASSERT_EQ(eval.value<int>(), 11);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Expr, DynamicShapeAdd) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t size) {
@@ -512,17 +570,13 @@ TEST(Expr, DynamicShapeAdd) {
     VarHandle i("i", kInt);
     Stmt* s = For::make(i, 0, n, c.store({i}, a.load(i) + b.load(i)));
     std::vector<float> aData(size, 1.0f);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     std::vector<float> bData(size, 2.0f);
     std::vector<float> cData(size, 0.0f);
     SimpleIREvaluator(s, {a, b, c, n})(aData, bData, cData, size);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     ExpectAllNear(cData, std::vector<float>(size, 3.0f), 1e-7);
   };
   testWithSize(1);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithSize(16);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   testWithSize(37);
 }
 
@@ -547,13 +601,11 @@ void testCond01() {
       a_ref(i) = i * 3;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(a_v, a_ref, 1e-5);
 }
 
 void testIfThenElse01() {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle v = ifThenElse(ExprHandle(1), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
@@ -566,7 +618,6 @@ void testIfThenElse01() {
 
 void testIfThenElse02() {
   KernelScope kernel_scope;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExprHandle v = ifThenElse(ExprHandle(0), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
@@ -580,7 +631,6 @@ void testIfThenElse02() {
 void testIfThenElse03() {
   KernelScope kernel_scope;
   ExprHandle v =
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       ifThenElse(BoolImm::make(false), ExprHandle(1.0f), ExprHandle(2.0f));
 
   std::ostringstream oss;
@@ -597,7 +647,6 @@ void testStmtClone() {
 
   Placeholder a_buf("a", kInt, {N});
   VarHandle index = VarHandle("index", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* body = a_buf.store({index}, 5);
   Stmt* loop = For::make(index, 0, N, body);
 
@@ -607,17 +656,14 @@ void testStmtClone() {
   SimpleIREvaluator(loop, {a_buf})(orig_loop_results);
   SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertAllEqual(orig_loop_results, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertAllEqual(cloned_loop_results, 5);
 
   // Let's add another assign to the body in the cloned loop and verify that the
   // original statement hasn't changed while the cloned one has.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Stmt* body_addition = a_buf.store({index}, 33);
   Block* cloned_body =
-      static_cast<Block*>(static_cast<const For*>(cloned_loop)->body());
+      static_cast<Block*>(static_cast<For*>(cloned_loop)->body());
   cloned_body->append_stmt(body_addition);
 
   std::vector<int> orig_loop_results_after_mutation(N);
@@ -625,9 +671,7 @@ void testStmtClone() {
   SimpleIREvaluator(loop, {a_buf})(orig_loop_results_after_mutation);
   SimpleIREvaluator(cloned_loop, {a_buf})(cloned_loop_results_after_mutation);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertAllEqual(orig_loop_results_after_mutation, 5);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   assertAllEqual(cloned_loop_results_after_mutation, 33);
 }
 

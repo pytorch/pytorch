@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Any, Optional, overload, Union, TypeVar, Tuple, Sequence
+from typing import Any, List, Optional, overload, Union, TypeVar, Tuple, Sequence
 from torch import Tensor
 from torch.types import _dtype, _device
 
@@ -65,7 +65,7 @@ def pad_packed_sequence(sequence: PackedSequence, batch_first: bool = ..., paddi
                         total_length: Optional[int] = ...) -> Tuple[Tensor, ...]: ...
 
 
-def pad_sequence(sequences: Sequence[Tensor], batch_first: bool = ..., padding_value: int = ...) -> Tensor: ...
+def pad_sequence(sequences: List[Tensor], batch_first: bool = False, padding_value: float = ...) -> Tensor: ...
 
 
 def pack_sequence(sequences: Sequence[Tensor], enforce_sorted: bool = ...) -> PackedSequence: ...

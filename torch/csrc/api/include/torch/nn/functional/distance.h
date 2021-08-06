@@ -82,7 +82,6 @@ inline Tensor pairwise_distance(
 
 /// Computes the p-norm distance between every pair of row vectors in the input.
 /// This function will be faster if the rows are contiguous.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
 inline Tensor pdist(const Tensor& input, double p = 2.0) {
   return torch::pdist(input, p);
 }

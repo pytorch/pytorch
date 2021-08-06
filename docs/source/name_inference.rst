@@ -467,7 +467,7 @@ A tensor specified as an ``out=`` tensor has the following behavior:
   must be exactly equal to the existing names. Otherwise, the operation errors.
 
 All in-place methods modify inputs to have names equal to the computed names
-from name inference. For example,
+from name inference. For example:
 
 ::
 

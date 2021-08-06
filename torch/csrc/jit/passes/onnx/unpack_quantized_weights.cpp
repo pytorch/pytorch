@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <stack>
@@ -81,7 +83,6 @@ double getScaleFromInput(Node* input_node) {
   } else if (input_name == "aten::sigmoid") {
     // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
     // And output zero_point is set to 0 (quint8 type).
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     return 1.0L / 256;
   }
   // For the ops below the scale is not part of the op signature, so we traverse
@@ -190,6 +191,67 @@ void unpackQuantizedWeightsHelper(
       auto ser_tup = itr->second.toTuple();
 
       if (params_type == QuantizedParamsType::CONV &&
+          ser_tup->elements()[0].isInt()) {
+        auto elements = ser_tup->elements();
+        auto version = elements[0].toInt();
+        TORCH_INTERNAL_ASSERT(version == 3, "Unknown serialization version");
+        TORCH_INTERNAL_ASSERT(elements.size() == 3, "Wrong tuple size.");
+
+        auto config_vals = elements[1].to<std::vector<int64_t>>();
+        auto tensors = elements[2].to<std::vector<c10::optional<at::Tensor>>>();
+
+        c10::optional<at::Tensor> weight = tensors[1];
+        TORCH_INTERNAL_ASSERT(
+            weight, "Weight should always be present in serialized qconv.");
+        unpacked_weight = *weight;
+        bias = tensors[2];
+
+        const int64_t kSpatialDim = config_vals.at(0);
+        // skip kSpatialDim
+        int idx = 1;
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
+          stride_int.emplace_back(config_vals.at(idx));
+          idx++;
+        }
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
+          padding_int.emplace_back(config_vals.at(idx));
+          idx++;
+        }
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
+          dilation_int.emplace_back(config_vals.at(idx));
+          idx++;
+        }
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
+          output_padding_int.emplace_back(config_vals.at(idx));
+          idx++;
+        }
+        int64_t groups_int = config_vals.at(idx);
+        idx++;
+        int64_t flags = config_vals.at(idx);
+        idx++;
+        TORCH_INTERNAL_ASSERT(
+            idx == config_vals.size(),
+            "Unexpected length of config_vals, expected ",
+            idx,
+            " got ",
+            config_vals.size());
+
+        bool transpose_int = flags & (1 << 0);
+
+        int64_t other_flags = flags & ~(1 << 0);
+        TORCH_CHECK(other_flags == 0, "Unexpected flags set in ", flags, ".");
+
+        stride = stride_int;
+        padding = padding_int;
+        dilation = dilation_int;
+        groups = groups_int;
+        transpose = transpose_int;
+      } else if (
+          params_type == QuantizedParamsType::CONV &&
           ser_tup->elements()[0].isString()) {
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
@@ -202,19 +264,23 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
         // skip kSpatialDim
         int64_t idx = 1;
-        for (int i = 0; i < kSpatialDim; ++i) {
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
           stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (int i = 0; i < kSpatialDim; ++i) {
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
           padding_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (int i = 0; i < kSpatialDim; ++i) {
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
           dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        for (int i = 0; i < kSpatialDim; ++i) {
+        for (const auto i : c10::irange(kSpatialDim)) {
+          (void)i; // Suppress unused variable warning
           output_padding_int.emplace_back(
               conv_params_packed[idx].item<int64_t>());
           idx++;
@@ -296,8 +362,7 @@ void unpackQuantizedWeightsHelper(
 
     // Create caffe2::Int8GivenTensorFill node
     std::ostringstream os;
-    for (int64_t i = 0; i < wt_numel; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    for (const auto i : c10::irange(wt_numel)) {
       os << static_cast<char>(inp_data[i] + 128);
     }
 
@@ -336,7 +401,7 @@ void unpackQuantizedWeightsHelper(
     std::vector<int64_t> bias_values;
     bias_values.reserve(q_bias.numel());
     auto bias_data = (int32_t*)q_bias.data_ptr<c10::qint32>();
-    for (int64_t i = 0; i < q_bias.numel(); ++i) {
+    for (const auto i : c10::irange(q_bias.numel())) {
       bias_values.push_back(bias_data[i]);
     }
     Node* c2_bias = CreateQuantizedBias(
@@ -356,7 +421,7 @@ void unpackQuantizedWeightsHelper(
       conv_ints_args.push_back(padding);
       conv_ints_args.push_back(dilation);
       const size_t arg_offset = 3;
-      for (size_t i = 0; i < conv_ints_args.size(); ++i) {
+      for (const auto i : c10::irange(conv_ints_args.size())) {
         Node* ints_node =
             createIntTuple(conv_ints_args[i].value().vec(), graph);
         ints_node->insertBefore(qlinear_node);
@@ -424,6 +489,7 @@ void UnpackQuantizedWeights(
       qconv3d_relu,
       "quantized::conv3d_unpack",
       QuantizedParamsType::CONV);
+  GRAPH_DUMP("After UnpackQuantizedWeights: ", graph);
 }
 
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in
@@ -480,6 +546,7 @@ void insertPermutes(
   insertPermutesHelper(graph, paramsDict, qconv);
   insertPermutesHelper(graph, paramsDict, qconv_relu);
   insertPermutesHelper(graph, paramsDict, qconv_transpose);
+  GRAPH_DUMP("After insertPermutes: ", graph);
 }
 
 } // namespace jit

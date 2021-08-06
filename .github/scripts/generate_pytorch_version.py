@@ -16,12 +16,12 @@ LEGACY_BASE_VERSION_SUFFIX_PATTERN = re.compile("a0$")
 class NoGitTagException(Exception):
     pass
 
-def get_pytorch_root():
+def get_pytorch_root() -> Path:
     return Path(subprocess.check_output(
         ['git', 'rev-parse', '--show-toplevel']
     ).decode('ascii').strip())
 
-def get_tag():
+def get_tag() -> str:
     root = get_pytorch_root()
     # We're on a tag
     am_on_tag = (
@@ -46,7 +46,7 @@ def get_tag():
         tag = re.sub(TRAILING_RC_PATTERN, "", tag)
     return tag
 
-def get_base_version():
+def get_base_version() -> str:
     root = get_pytorch_root()
     dirty_version = open(root / 'version.txt', 'r').read().strip()
     # Strips trailing a0 from version.txt, not too sure why it's there in the
@@ -54,37 +54,44 @@ def get_base_version():
     return re.sub(LEGACY_BASE_VERSION_SUFFIX_PATTERN, "", dirty_version)
 
 class PytorchVersion:
-    def __init__(self, gpu_arch_type, gpu_arch_version, no_build_suffix):
+    def __init__(
+        self,
+        gpu_arch_type: str,
+        gpu_arch_version: str,
+        no_build_suffix: bool,
+    ) -> None:
         self.gpu_arch_type = gpu_arch_type
         self.gpu_arch_version = gpu_arch_version
         self.no_build_suffix = no_build_suffix
 
-    def get_post_build_suffix(self):
+    def get_post_build_suffix(self) -> str:
+        if self.no_build_suffix:
+            return ""
         if self.gpu_arch_type == "cuda":
             return f"+cu{self.gpu_arch_version.replace('.', '')}"
         return f"+{self.gpu_arch_type}{self.gpu_arch_version}"
 
-    def get_release_version(self):
+    def get_release_version(self) -> str:
         if not get_tag():
             raise NoGitTagException(
                 "Not on a git tag, are you sure you want a release version?"
             )
         return f"{get_tag()}{self.get_post_build_suffix()}"
 
-    def get_nightly_version(self):
+    def get_nightly_version(self) -> str:
         date_str = datetime.today().strftime('%Y%m%d')
         build_suffix = self.get_post_build_suffix()
         return f"{get_base_version()}.dev{date_str}{build_suffix}"
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate pytorch version for binary builds"
     )
     parser.add_argument(
         "--no-build-suffix",
-        type=strtobool,
+        action="store_true",
         help="Whether or not to add a build suffix typically (+cpu)",
-        default=os.environ.get("NO_BUILD_SUFFIX", False)
+        default=strtobool(os.environ.get("NO_BUILD_SUFFIX", "False"))
     )
     parser.add_argument(
         "--gpu-arch-type",

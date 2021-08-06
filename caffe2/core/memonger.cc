@@ -264,7 +264,6 @@ class ComputeBlobRecyclingForDag {
               << mapped_blobs_set.size() << " shared blobs.";
     if (floats_saved_ > 0) {
       LOG(INFO) << "Memonger saved approximately : "
-                // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
                 << (floats_saved_ * 4.0 / 1024.0 / 1024.0) << " MB.";
     }
 

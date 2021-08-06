@@ -7,13 +7,9 @@ const CpuId& GetCpuId() {
   return cpuid_singleton;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1c_ = 0;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f1d_ = 0;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7b_ = 0;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TORCH_API uint32_t CpuId::f7c_ = 0;
 
 CpuId::CpuId() {
@@ -73,13 +69,11 @@ CpuId::CpuId() {
     uint32_t f1a;
     __asm__("cpuid" : "=a"(f1a), "=c"(f1c_), "=d"(f1d_) : "a"(1) : "ebx");
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   if (n >= 7) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t f7a;
     __asm__("cpuid"
             : "=a"(f7a), "=b"(f7b_), "=c"(f7c_)
-            // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
             : "a"(7), "c"(0)
             : "edx");
   }

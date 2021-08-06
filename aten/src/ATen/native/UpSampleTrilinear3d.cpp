@@ -42,7 +42,6 @@ TORCH_META_FUNC(upsample_trilinear3d_backward) (
       grad_output.dim() == 5,
       "Expected grad_output to be a tensor of dimension 5 but got: dimension ", grad_output.dim());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 5; ++i) {
     TORCH_CHECK(
         grad_output.size(i) == full_output_size[i],
@@ -113,9 +112,7 @@ Tensor upsample_trilinear3d_backward(
   return at::upsample_trilinear3d_backward(grad_output, osize, input_size, align_corners, scale_d, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_trilinear3d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_trilinear3d_backward_kernel);
 
 } // namespace native

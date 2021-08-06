@@ -33,7 +33,6 @@ static void stateful_conv1d(benchmark::State& state) {
   )");
 
   std::vector<std::vector<torch::jit::IValue>> inputs;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 10; ++i) {
     std::vector<torch::jit::IValue> input;
     // NOLINTNEXTLINE(modernize-use-emplace)
@@ -69,15 +68,10 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
                "Width",
                "Optimized"});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (size_t input_channels = 32; input_channels < 256; input_channels *= 2) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (size_t output_channels = 32; output_channels < 256; output_channels *= 2) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       for (size_t kernel = 3; kernel < 8; ++kernel) {
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         for (size_t batch_size = 1; batch_size < 5; ++batch_size) {
-          // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           for (size_t width = 32; width < 256; width *= 2) {
             b->Args({input_channels, output_channels, kernel, batch_size, width, true});
             b->Args({input_channels, output_channels, kernel, batch_size, width, false});
@@ -88,6 +82,5 @@ static void GenerateSizes(benchmark::internal::Benchmark* b) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(stateful_conv1d)->Apply(GenerateSizes);
 BENCHMARK_MAIN();

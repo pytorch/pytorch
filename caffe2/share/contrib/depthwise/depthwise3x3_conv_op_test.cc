@@ -23,17 +23,14 @@ void AddNoiseInput(
   tensor->Resize(shape);
 
   math::RandGaussian<float, CPUContext>(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       tensor->size(), 0.0f, 3.0f, tensor->mutable_data<float>(), &context);
   for (auto i = 0; i < tensor->size(); ++i) {
     tensor->mutable_data<float>()[i] =
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         std::min(-5.0f, std::max(5.0f, tensor->mutable_data<float>()[i]));
   }
 }
 
 inline float relativeError(float a, float b) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return std::abs(a - b) / (0.5f * (std::abs(a) + std::abs(b)));
 }
 
@@ -110,7 +107,6 @@ void compare(
   unique_ptr<OperatorBase> referenceOp(CreateOperator(referenceOpDef, &ws));
   EXPECT_NE(nullptr, referenceOp.get());
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(depthwiseOp->Run());
   }
@@ -118,7 +114,6 @@ void compare(
   EXPECT_NE(nullptr, depthwiseOutputBlob);
   auto& depthwiseOutput = depthwiseOutputBlob->Get<TensorCPU>();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (auto i = 0; i < 10; ++i) {
     EXPECT_TRUE(referenceOp->Run());
   }
@@ -173,14 +168,10 @@ void runConv(
     int strideH,
     int strideW,
     int group = 1,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int planesIn = randInt(1, 6),
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     int planesOut = randInt(1, 6),
     int n = randInt(1, 2)) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int h = randInt(20, 100);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   int w = randInt(20, 100);
   // This pad restriction is imposed by NNPACK
   int padT = std::min(randInt(0, 3), kernelH - 1);
@@ -203,9 +194,7 @@ void runConv(
       padB,
       padR,
       group,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.05f,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       0.1f);
 }
 
@@ -213,7 +202,6 @@ void runConv(
 
 constexpr size_t kIters = 20;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DEPTHWISE3x3, Conv) {
   for (int i = 0; i < kIters; ++i) {
     int channel = 2;

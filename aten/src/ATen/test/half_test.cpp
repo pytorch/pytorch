@@ -10,7 +10,6 @@
 
 using namespace at;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Arithmetic) {
   Half zero = 0;
   Half one = 1;
@@ -26,7 +25,6 @@ TEST(TestHalf, Arithmetic) {
   ASSERT_EQ(one + one, 2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Comparisions) {
   Half zero = 0;
   Half one = 1;
@@ -40,9 +38,7 @@ TEST(TestHalf, Comparisions) {
   ASSERT_EQ(zero, -zero);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Cast) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Half value = 1.5f;
   ASSERT_EQ((int)value, 1);
   ASSERT_EQ((short)value, 1);
@@ -53,7 +49,6 @@ TEST(TestHalf, Cast) {
   ASSERT_EQ((bool)Half(0.0f), false);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Construction) {
   ASSERT_EQ(Half((short)3), Half(3.0f));
   ASSERT_EQ(Half((unsigned short)3), Half(3.0f));
@@ -70,13 +65,11 @@ static std::string to_string(const Half& h) {
   return ss.str();
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, Half2String) {
   ASSERT_EQ(to_string(Half(3.5f)), "3.5");
   ASSERT_EQ(to_string(Half(-100.0f)), "-100");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, HalfNumericLimits) {
   using limits = std::numeric_limits<Half>;
   ASSERT_EQ(limits::lowest(), -65504.0f);
@@ -124,9 +117,7 @@ ASSERT_SAME_TYPE(max_exponent10);
 ASSERT_SAME_TYPE(traps);
 ASSERT_SAME_TYPE(tinyness_before);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TestHalf, CommonMath) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   float threshold = 0.00001;
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);

@@ -63,7 +63,11 @@ _builtin_ops = [
     (math.isinf, "aten::isinf"),
     (math.degrees, "aten::degrees"),
     (math.radians, "aten::radians"),
+    (cmath.isnan, "aten::isnan"),
+    (cmath.isfinite, "aten::isfinite"),
+    (cmath.isinf, "aten::isinf"),
     (cmath.phase, "aten::angle"),
+    (cmath.rect, "aten::polar"),
     (cmath.log, "aten::log"),
     (cmath.log10, "aten::log10"),
     (cmath.sqrt, "aten::sqrt"),
@@ -113,7 +117,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "lu_unpack", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
+    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()

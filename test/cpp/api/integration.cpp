@@ -16,24 +16,17 @@ const double kPi = 3.1415926535898;
 class CartPole {
   // Translated from openai/gym's cartpole.py
  public:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double gravity = 9.8;
   double masscart = 1.0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double masspole = 0.1;
   double total_mass = (masspole + masscart);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double length = 0.5; // actually half the pole's length;
   double polemass_length = (masspole * length);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double force_mag = 10.0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double tau = 0.02; // seconds between state updates;
 
   // Angle at which to fail the episode
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double theta_threshold_radians = 12 * 2 * kPi / 360;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double x_threshold = 2.4;
   int steps_beyond_done = -1;
 
@@ -55,7 +48,6 @@ class CartPole {
   }
 
   void reset() {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     state = torch::empty({4}).uniform_(-0.05, 0.05);
     steps_beyond_done = -1;
     step_ = 0;
@@ -78,7 +70,6 @@ class CartPole {
     auto temp = (force + polemass_length * theta_dot * theta_dot * sintheta) /
         total_mass;
     auto thetaacc = (gravity * sintheta - costheta * temp) /
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         (length * (4.0 / 3.0 - masspole * costheta * costheta / total_mass));
     auto xacc = temp - polemass_length * thetaacc * costheta / total_mass;
 
@@ -90,7 +81,6 @@ class CartPole {
 
     done = x < -x_threshold || x > x_threshold ||
         theta < -theta_threshold_radians || theta > theta_threshold_radians ||
-        // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
         step_ > 200;
 
     if (!done) {
@@ -154,23 +144,17 @@ bool test_mnist(
 
   auto result = std::get<1>(forward_op(images).max(/*dim=*/1));
   torch::Tensor correct = (result == targets).to(torch::kFloat32);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   return correct.sum().item<float>() > (test_dataset.size().value() * 0.8);
 }
 
 struct IntegrationTest : torch::test::SeedingFixture {};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, CartPole) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto linear = model->add(Linear(4, 128), "linear");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto policyHead = model->add(Linear(128, 2), "policy");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto valueHead = model->add(Linear(128, 1), "action");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto optimizer = torch::optim::Adam(model->parameters(), 1e-3);
 
   std::vector<torch::Tensor> saved_log_probs;
@@ -203,13 +187,11 @@ TEST_F(IntegrationTest, CartPole) {
     auto R = 0.;
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     for (int i = rewards.size() - 1; i >= 0; i--) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
     }
     auto r_t = torch::from_blob(
         rewards.data(), {static_cast<int64_t>(rewards.size())});
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
 
     std::vector<torch::Tensor> policy_loss;
@@ -234,13 +216,11 @@ TEST_F(IntegrationTest, CartPole) {
   };
 
   auto env = CartPole();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   double running_reward = 10.0;
   for (size_t episode = 0;; episode++) {
     env.reset();
     auto state = env.getState();
     int t = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (; t < 10000; t++) {
       auto action = selectAction(state);
       env.step(action);
@@ -253,7 +233,6 @@ TEST_F(IntegrationTest, CartPole) {
         break;
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     running_reward = running_reward * 0.99 + t * 0.01;
     finishEpisode();
     /*
@@ -262,7 +241,6 @@ TEST_F(IntegrationTest, CartPole) {
               episode, t, running_reward);
     }
     */
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     if (running_reward > 150) {
       break;
     }
@@ -270,21 +248,14 @@ TEST_F(IntegrationTest, CartPole) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNIST_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto drop = Dropout(0.3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto drop2d = Dropout2d(0.3);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
@@ -293,7 +264,6 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
     x = drop2d->forward(x);
     x = torch::max_pool2d(x, {2, 2}).relu();
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
     x = drop->forward(x);
@@ -303,7 +273,6 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
   };
 
   auto optimizer = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
   ASSERT_TRUE(test_mnist(
@@ -315,21 +284,14 @@ TEST_F(IntegrationTest, MNIST_CUDA) {
       optimizer));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   torch::manual_seed(0);
   auto model = std::make_shared<SimpleContainer>();
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto batchnorm2d = model->add(BatchNorm2d(10), "batchnorm2d");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto batchnorm1 = model->add(BatchNorm1d(50), "batchnorm1");
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
@@ -338,7 +300,6 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
     x = conv2->forward(x);
     x = torch::max_pool2d(x, {2, 2}).relu();
 
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
     x = batchnorm1->forward(x);
@@ -348,7 +309,6 @@ TEST_F(IntegrationTest, MNISTBatchNorm_CUDA) {
   };
 
   auto optimizer = torch::optim::SGD(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       model->parameters(), torch::optim::SGDOptions(1e-2).momentum(0.5));
 
   ASSERT_TRUE(test_mnist(

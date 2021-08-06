@@ -23,23 +23,66 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+TEST(Reductions, ReduceSum0D_1) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {M}, kFloat));
+  std::vector<float> in(M);
+  for (int j = 0; j < M; ++j) {
+    in[j] = j;
+  }
+
+  std::vector<float> out(M, -1.f);
+
+  Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  for (int i = 0; i < M; ++i) {
+    ASSERT_EQ(out[i], in[i]);
+  }
+}
+
+TEST(Reductions, ReduceSum0D_2) {
+  KernelScope kernel_scope;
+  const int M = 10;
+
+  Placeholder b(BufHandle("b", {}, kFloat));
+  std::vector<float> in(1);
+  in[0] = 77.7;
+
+  std::vector<float> out(1, -1.f);
+
+  Tensor* c = Reduce("sum", {}, Sum(), b, {});
+  LoopNest loop({c});
+  loop.prepareForCodegen();
+  Stmt* s = loop.root_stmt();
+  s = IRSimplifier::simplify(s);
+
+  SimpleIREvaluator cg(s, {b, c});
+
+  cg.call({in, out});
+  ASSERT_EQ(out[0], in[0]);
+}
+
 // Sum an array to a single value.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum1D) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {10}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
   }
 
   std::vector<float> out(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* c = Reduce("sum", {}, Sum(), b, {{10, "m"}});
   LoopNest loop({c});
   loop.prepareForCodegen();
@@ -52,7 +95,6 @@ TEST(Reductions, ReduceSum1D) {
   ASSERT_EQ(out[0], 45);
 }
 // Sum a 2D tensor to a 1D tensor with dynamic shapes.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum2D) {
   KernelScope kernel_scope;
 
@@ -80,7 +122,6 @@ TEST(Reductions, ReduceSum2D) {
 
   SimpleIREvaluator cg(s, {b, c, n, m});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 5, 7});
 
   float expected = 0;
@@ -96,7 +137,6 @@ TEST(Reductions, ReduceSum2D) {
 
 // Sum a 3D tensor to both a 2D and 1D tensor, then reduce the 2D tensor flat to
 // check our work.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum3D) {
   KernelScope kernel_scope;
 
@@ -114,7 +154,6 @@ TEST(Reductions, ReduceSum3D) {
   SimpleIREvaluator cg(s, {b, c, m});
 
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> cData(2 * 3, 6.0f);
   std::vector<float> dData(2, 1.0f);
   std::vector<float> eData(2, 1.0f);
@@ -169,7 +208,6 @@ TEST(Reductions, ReduceSum3D) {
 }
 
 // Sum a large (10 D) Tensor 5 dimensions in.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSum10D) {
   KernelScope kernel_scope;
 
@@ -204,7 +242,6 @@ TEST(Reductions, ReduceSum10D) {
 }
 
 // Reduce via Mul rather than Add using a custom Reducer.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceProduct) {
   KernelScope kernel_scope;
 
@@ -246,22 +283,17 @@ TEST(Reductions, ReduceProduct) {
 }
 
 // Maximum reductions.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMax) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
     in[j] = j;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* dm1 = Reduce("max", {}, Maximum(kFloat), in_, {{10, "m"}});
 
   LoopNest loop({dm1});
@@ -274,11 +306,9 @@ TEST(Reductions, ReduceMax) {
 
   ASSERT_EQ(out[0], 9);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in2_(BufHandle("b", {2, 5}, kFloat));
   std::vector<float> out2(2, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
 
   LoopNest loop2({m2d});
@@ -294,20 +324,15 @@ TEST(Reductions, ReduceMax) {
 }
 
 // Minimum reduction, with custom initialization.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMinCustomInitializer) {
   KernelScope kernel_scope;
 
   VarHandle minInit("minInit", kFloat);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("b", {10}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in(10);
   std::vector<float> out(1, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int j = 0; j < 10; ++j) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     in[j] = 10 + j;
   }
 
@@ -316,7 +341,6 @@ TEST(Reductions, ReduceMinCustomInitializer) {
       {},
       Minimum(ExprHandle(minInit)),
       [&](ParameterList& v) { return in_.load(v); },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "m"}});
 
   LoopNest loop({min});
@@ -332,19 +356,16 @@ TEST(Reductions, ReduceMinCustomInitializer) {
   ASSERT_EQ(out[0], 10);
 
   // With an initalizer lower than the min, that's the min.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 5.f});
   ASSERT_EQ(out[0], 5);
 }
 
 // Example implementation of Any/All.
 // TODO: this is very awkward without logical And/Or operators.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAnyAll) {
   KernelScope kernel_scope;
 
   VarHandle searchValue("searchValue", kInt);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {4, 10}, kInt));
 
   Reducer anyEqSV(ExprHandle(0), [](ExprHandle a, ExprHandle b) {
@@ -358,7 +379,6 @@ TEST(Reductions, ReduceAnyAll) {
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kEQ);
       },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "j"}});
 
   LoopNest loop({any});
@@ -368,12 +388,10 @@ TEST(Reductions, ReduceAnyAll) {
 
   SimpleIREvaluator cg(s, {b, any, searchValue});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<int> in(40, 0);
   std::vector<int> out(4, 0);
 
   // input has 0-39 in 4 rows.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 40; ++i) {
     in[i] = i;
   }
@@ -385,7 +403,6 @@ TEST(Reductions, ReduceAnyAll) {
   ASSERT_EQ(out[2], 0);
   ASSERT_EQ(out[3], 0);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg.call({in, out, 15});
 
   // 15 in the 3rd row
@@ -405,7 +422,6 @@ TEST(Reductions, ReduceAnyAll) {
       [&](const auto& i, const auto& j) {
         return CompareSelect::make(b.load(i, j), searchValue, kGT);
       },
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{10, "j"}});
 
   LoopNest loop2({allGreaterThan});
@@ -415,7 +431,6 @@ TEST(Reductions, ReduceAnyAll) {
 
   SimpleIREvaluator cg2(s, {b, allGreaterThan, searchValue});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   cg2.call({in, out, 11});
 
   // 11 is in row 2.
@@ -433,19 +448,15 @@ TEST(Reductions, ReduceAnyAll) {
   ASSERT_EQ(out[3], 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceMatmul2D) {
   KernelScope kernel_scope;
 
   Placeholder tA(BufHandle("tA", {3, 2}, kFloat));
   Placeholder tB(BufHandle("tB", {2, 3}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> tA_(6);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> tB_(6);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(9, -1.f);
   for (int i = 0; i < 3; ++i) {
     for (int j = 0; j < 2; ++j) {
@@ -472,36 +483,27 @@ TEST(Reductions, ReduceMatmul2D) {
   cg.call({tA_, tB_, out});
 
   std::vector<float> expected(
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {1.f, 3.f, 5.f, 3.f, 13.f, 23.f, 5.f, 23.f, 41.f});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 9; ++i) {
     ASSERT_EQ(out[i], expected[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRfactorLike) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {10, 10}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(100);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 100; ++i) {
     in_[i] = i;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_rf_(10, -2.f);
   std::vector<float> out(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* l1 = Reduce("l1", {{10, "i"}}, Sum(), in, {{10, "j"}});
   Placeholder in_rf(BufHandle(l1->buf()));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* l2 = Reduce("l2", {}, Sum(), in_rf, {{10, "i"}});
 
   LoopNest loop({l1, l2});
@@ -515,7 +517,6 @@ TEST(Reductions, ReduceRfactorLike) {
   ASSERT_EQ(out[0], 99 * 50);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAsProducer) {
   KernelScope kernel_scope;
 
@@ -541,11 +542,9 @@ TEST(Reductions, ReduceAsProducer) {
 
   std::vector<float> aData(2 * 3, 0);
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> dData(2 * 3, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     aData[i] = 6 - i;
     for (int j = 0; j < M; ++j) {
       bData[i * M + j] = j;
@@ -563,7 +562,6 @@ TEST(Reductions, ReduceAsProducer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceAsConsumer) {
   KernelScope kernel_scope;
 
@@ -589,13 +587,11 @@ TEST(Reductions, ReduceAsConsumer) {
 
   std::vector<float> aData(2 * 3 * M, 0);
   std::vector<float> bData(2 * 3 * M, 0);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> dData(2, 6.0f);
 
   for (int i = 0; i < 2 * 3; ++i) {
     for (int j = 0; j < M; ++j) {
       bData[i * M + j] = j + 1;
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       aData[i * M + j] = 6 - i;
     }
   }
@@ -617,31 +613,23 @@ TEST(Reductions, ReduceAsConsumer) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, SplitReduceAxis) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(16 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(16, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[1], 2);
+  LoopNest::splitWithTail(loops[1], 2);
 
   l.prepareForCodegen();
 
@@ -651,50 +639,28 @@ TEST(Reductions, SplitReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, SplitNonReduceAxis) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {16, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(16 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out(16, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{16, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_inner;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.splitWithTail(loops[0], 2, &x_outer, &x_inner, &x_tail);
-
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_2;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_1;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* x_tail_2;
-  l.splitWithTail(x_outer, 2, &x_2, &x_1, &x_tail_2);
+  LoopNest::splitWithTail(loops[0], 2);
+  LoopNest::splitWithTail(loops[0], 2);
 
   l.prepareForCodegen();
 
@@ -704,13 +670,11 @@ TEST(Reductions, SplitNonReduceAxis) {
   SimpleIREvaluator cg(s, {in, tensor});
   cg.call({in_, out});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out[i], i * 8);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReorderedReductionInitializer) {
   KernelScope kernel_scope;
   /* From the quip:
@@ -720,12 +684,9 @@ TEST(Reductions, ReorderedReductionInitializer) {
         SumOp(c(k, n), 0, a(k, m, n), {m})
   */
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {1, 12, 6}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(12 * 6, 1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor_ = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
   LoopNest l_({tensor_});
 
@@ -733,15 +694,14 @@ TEST(Reductions, ReorderedReductionInitializer) {
   Stmt* s_ = Stmt::clone(l_.root_stmt());
   s_ = IRSimplifier::simplify(s_);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{1, "k"}, {12, "n"}}, Sum(), in, {{6, "m"}});
   LoopNest l({tensor});
 
   auto loops = l.getLoopStmtsFor(tensor);
-  l.setGPUBlockIndex(loops[0], 0);
-  l.setGPUThreadIndex(loops[1], 0);
+  loops[0]->set_gpu_block_index(0);
+  loops[1]->set_gpu_thread_index(0);
 
-  l.reorderAxis(loops[1], loops[2]);
+  LoopNest::reorderAxis(loops[1], loops[2]);
 
   Stmt* s = l.root_stmt();
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -752,23 +712,19 @@ TEST(Reductions, ReorderedReductionInitializer) {
   s = l.root_stmt();
   s = IRSimplifier::simplify(s);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out1(16, -1.f);
   SimpleIREvaluator cg(s_, {in, tensor_});
   cg.call({in_, out1});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out2(16, -1.f);
   SimpleIREvaluator cg2(s, {in, tensor});
   cg2.call({in_, out2});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 16; ++i) {
     ASSERT_EQ(out1[i], out2[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRfactor) {
   KernelScope kernel_scope;
 
@@ -803,7 +759,6 @@ TEST(Reductions, ReduceRfactor) {
   ASSERT_EQ(out[0], 4950);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, Reduce3DRfactorInner) {
   KernelScope kernel_scope;
 
@@ -840,7 +795,6 @@ TEST(Reductions, Reduce3DRfactorInner) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, Reduce3DRfactorOuter) {
   KernelScope kernel_scope;
 
@@ -876,11 +830,9 @@ TEST(Reductions, Reduce3DRfactorOuter) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceRepeatedInternalRfactor) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in_(BufHandle("in_", {2, 3, 4, 5, 6}, kFloat));
   const int InputSize = 2 * 3 * 4 * 5 * 6;
 
@@ -893,12 +845,10 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
       {},
       Sum(),
       in_,
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{2, "a"}, {3, "b"}, {4, "c"}, {5, "d"}, {6, "e"}});
   LoopNest orig_loop({c});
 
   // Try rfactoring N outer loops
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int rfac_number = 1; rfac_number < 5; rfac_number++) {
     LoopNest refloop(orig_loop);
     LoopNest loop(orig_loop);
@@ -929,7 +879,6 @@ TEST(Reductions, ReduceRepeatedInternalRfactor) {
 }
 
 // Split a reduction axis with a tail loop.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitTail) {
   KernelScope kernel_scope;
 
@@ -949,8 +898,7 @@ TEST(Reductions, ReduceSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithTail(loops[i], 8);
+    LoopNest::splitWithTail(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -964,7 +912,6 @@ TEST(Reductions, ReduceSplitTail) {
 }
 
 // Split a reduction axis cleanly so there is no tail loop.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitNoTail) {
   KernelScope kernel_scope;
 
@@ -983,8 +930,7 @@ TEST(Reductions, ReduceSplitNoTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithTail(loops[i], 5);
+    LoopNest::splitWithTail(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -999,7 +945,6 @@ TEST(Reductions, ReduceSplitNoTail) {
 
 // Split a reduction axis with only a tail loop (the split loop will be size 0
 // and eliminated out).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitTail) {
   KernelScope kernel_scope;
 
@@ -1019,8 +964,7 @@ TEST(Reductions, ReduceOverSplitTail) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithTail(loops[i], 16);
+    LoopNest::splitWithTail(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1034,7 +978,6 @@ TEST(Reductions, ReduceOverSplitTail) {
 }
 
 // Split a reduction axis with a mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitMask) {
   KernelScope kernel_scope;
 
@@ -1054,8 +997,7 @@ TEST(Reductions, ReduceSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithMask(loops[i], 8);
+    LoopNest::splitWithMask(loops[i], 8);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1069,7 +1011,6 @@ TEST(Reductions, ReduceSplitMask) {
 }
 
 // Split a reduction axis cleanly not requiring a mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitNoMask) {
   KernelScope kernel_scope;
 
@@ -1088,8 +1029,7 @@ TEST(Reductions, ReduceSplitNoMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithMask(loops[i], 5);
+    LoopNest::splitWithMask(loops[i], 5);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1103,7 +1043,6 @@ TEST(Reductions, ReduceSplitNoMask) {
 }
 
 // Split a reduction axis with all logic in the mask.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitMask) {
   KernelScope kernel_scope;
 
@@ -1123,8 +1062,7 @@ TEST(Reductions, ReduceOverSplitMask) {
     Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
     LoopNest loop({c});
     std::vector<For*> loops = loop.getLoopStmtsFor(c);
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-    loop.splitWithMask(loops[i], 16);
+    LoopNest::splitWithMask(loops[i], 16);
 
     loop.prepareForCodegen();
     Stmt* s = loop.root_stmt();
@@ -1139,7 +1077,6 @@ TEST(Reductions, ReduceOverSplitMask) {
 
 // Test an rfactor when there are two ReduceOps in the graph due to a
 // splitWithTail.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceSplitRfactor) {
   KernelScope kernel_scope;
 
@@ -1161,13 +1098,13 @@ TEST(Reductions, ReduceSplitRfactor) {
   Tensor* c = Reduce("sum", {{M, "m"}}, Sum(), b, {{N, "n"}, {K, "k"}});
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  loop.splitWithTail(loops[2], SPLIT_FACTOR);
+  LoopNest::splitWithTail(loops[2], SPLIT_FACTOR);
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[2]);
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
-  loop.reorderAxis(all_loops[2][1], all_loops[2][2]);
+  LoopNest::reorderAxis(all_loops[2][1], all_loops[2][2]);
   all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(2).size() == 3);
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[2][1]));
@@ -1185,7 +1122,6 @@ TEST(Reductions, ReduceSplitRfactor) {
 
 // Test an rfactor which ends up being eliminated since the total loop size is
 // smaller than the split factor.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceOverSplitRfactor) {
   KernelScope kernel_scope;
 
@@ -1205,16 +1141,16 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *o, *i, *t;
-  loop.splitWithTail(loops[1], SPLIT_FACTOR, &o, &i, &t);
-  loop.reorderAxis(loops[0], i);
+  For *i, *t;
+  LoopNest::splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
+  LoopNest::reorderAxis(loops[0], i);
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(c->buf());
   ASSERT_TRUE(all_loops.size() == 3 && all_loops.at(1).size() == 3);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
   ASSERT_TRUE(loop.rfactor(c_body, all_loops[1][0]));
-  loop.reorderAxis(all_loops[1][0], all_loops[1][2]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][2]);
 
   loop.prepareForCodegen();
   loop.simplify();
@@ -1244,7 +1180,6 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   // torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineReduction) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1278,7 +1213,6 @@ TEST(Reductions, ReduceInlineReduction) {
   ASSERT_FALSE(l1.computeInline(x->buf()));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineConsumer) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1326,7 +1260,6 @@ TEST(Reductions, ReduceInlineConsumer) {
 
   eval1(a_v, b_v, y_1);
   eval2(a_v, b_v, y_2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -1334,7 +1267,6 @@ TEST(Reductions, ReduceInlineConsumer) {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReduceInlineReducerInternal) {
   KernelScope kernel_scope;
   const int M = 4;
@@ -1386,7 +1318,6 @@ TEST(Reductions, ReduceInlineReducerInternal) {
 
   eval1(a_v, b_v, y_1);
   eval2(a_v, b_v, y_2);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   ExpectAllNear(y_1, y_2, 1e-5);
   std::ostringstream oss1, oss2;
   oss1 << *stmt1;
@@ -1394,8 +1325,7 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   ASSERT_GT(oss1.str().size(), oss2.str().size());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(Reductions, ReductionCacheAccessesOuter) {
+TEST(Reductions, ReductionCacheAccessesOperatorAxis) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1418,12 +1348,93 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
   });
 
   LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
+
+  Stmt* d_loop = l.getLoopStmtsFor(d)[0];
+  l.cacheAccesses(d->buf(), "d_local", d_loop);
+  l.prepareForCodegen();
+
+  Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
+
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+#CHECK: Allocate(d_local); // dtype=float, dims=[4]
+#CHECK: for (int l1
+#CHECK:   d_local[l1] = 0.f
+#CHECK:   for (int n1
+#CHECK:     for (int m1
+#CHECK:       d_local[l1] = (d_local[l1]) + (scale[
+#CHECK:     }
+#CHECK:   }
+#CHECK: }
+#CHECK: for (int i
+#CHECK:   sum[i] = d_local[i]
+#CHECK: Free(d_local);
+#CHECK-NOT: d_local
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
+}
+
+TEST(Reductions, ReductionCacheAccessesOuterReduceAxis) {
+  KernelScope kernel_scope;
+
+  int L = 4;
+  int N = 3;
+  int M = 2;
+
+  Placeholder a(BufHandle("a", {L, N, M}, kFloat));
+  Placeholder b(BufHandle("b", {L, N, M}, kFloat));
+
+  Tensor* c = Compute(
+      "scale",
+      {{L, "l2"}, {N, "n1"}, {M, "m1"}},
+      [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
+        return b.load(l, n, m) * a.load(l, n, m);
+      });
+  Tensor* d = Reduce("sum", {{L, "l1"}}, Sum(), c, {{N, "n1"}, {M, "m1"}});
+
+  Tensor* e = Compute("scale", {{L, "l"}}, [&](const VarHandle& l) {
+    return b.load(0, 0, l) * d->load(l);
+  });
+
+  LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[1];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
   Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
   oss << *result;
@@ -1431,21 +1442,42 @@ TEST(Reductions, ReductionCacheAccessesOuter) {
       R"IR(
 #CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
-#CHECK: d_local[0] = 0
+#CHECK: d_local[0] = sum[l1]
 #CHECK: for (int n1
 #CHECK:   for (int m1
 #CHECK: d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK: }
-#CHECK: sum[l1] = (sum[l1]) + (d_local[0])
+#CHECK: sum[l1] = d_local[0]
 #CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-TEST(Reductions, ReductionCacheAccessesInner) {
+TEST(Reductions, ReductionCacheAccessesInnerReduceAxis) {
   KernelScope kernel_scope;
 
   int L = 4;
@@ -1468,52 +1500,72 @@ TEST(Reductions, ReductionCacheAccessesInner) {
   });
 
   LoopNest l({e}, {c, d, e});
+  LoopNest l_before(l);
+  l_before.prepareForCodegen();
+  SimpleIREvaluator cg_before(l_before.root_stmt(), {a, b, e});
 
   Stmt* d_loop = l.getLoopStmtsFor(d)[2];
   l.cacheAccesses(d->buf(), "d_local", d_loop);
   l.prepareForCodegen();
 
   Stmt* result = IRSimplifier::simplify(l.root_stmt());
+  SimpleIREvaluator cg_after(result, {a, b, e});
 
   std::ostringstream oss;
   oss << *result;
   const std::string& expected_ir =
       R"IR(
+#CHECK: Allocate(d_local); // dtype=float, dims=[1]
 #CHECK: sum[l1] = 0
 #CHECK: for (int n1
-#CHECK:   Allocate(d_local); // dtype=float, dims=[1]
 #CHECK:   d_local[0] = 0
 #CHECK:   for (int m1
 #CHECK:     d_local[0] = (d_local[0]) + (scale[
 #CHECK:   }
 #CHECK:   sum[l1] = (sum[l1]) + (d_local[0])
-#CHECK:   Free(d_local);
 #CHECK: }
+#CHECK: Free(d_local);
 #CHECK-NOT: d_local
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+
+  PaddedBuffer<float> a_v(L, M, N, "a");
+  PaddedBuffer<float> b_v(L, M, N, "b");
+  PaddedBuffer<float> c_v(L, M, N, "c");
+  PaddedBuffer<float> d_v(L, "d");
+  PaddedBuffer<float> e_before(L, "e_before");
+  PaddedBuffer<float> e_after(L, "e_after");
+
+  for (int l = 0; l < L; l++) {
+    for (int m = 0; m < M; m++) {
+      for (int n = 0; n < N; n++) {
+        a_v(l, m, n) = at::randn({1}).item().to<float>();
+        b_v(l, m, n) = at::randn({1}).item().to<float>();
+      }
+    }
+  }
+
+  cg_before.call({a_v, b_v, e_before});
+  cg_after.call({a_v, b_v, e_after});
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  ExpectAllNear(e_before, e_after, 1e-5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheBodyAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1535,39 +1587,33 @@ TEST(Reductions, ReductionCacheBodyAccess) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];
 #CHECK: sum[l1] = (sum[l1]) + (scale_local[12 * n1_1 + m1_1]);
-#CHECK: Free(scale_local);
 #CHECK: scale_1[l] = (b[l]) * (sum[l]);
+#CHECK: Free(scale_local);
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
 
   LoopNest l({e}, {c, d, e});
 
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4);
 
   Stmt* e_loop = l.getLoopStmtsFor(e)[1];
   l.cacheAccesses(d->buf(), "sum_local", e_loop);
@@ -1579,8 +1625,8 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1588,26 +1634,20 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1615,15 +1655,13 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // Split outer reduction axis.
-  l.splitWithMask(l.getLoopStmtsFor(d)[0], 4, &outer, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(d)[0], 4, &inner);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1635,8 +1673,8 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((12 * n1_1 + 384 * l1_inner) + m1_1) + 1536 * l1_outer]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK:   scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1644,26 +1682,20 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder a(BufHandle("a", {24, 32, 12}, kFloat));
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder b(BufHandle("b", {24, 32, 12}, kFloat));
 
   Tensor* c = Compute(
       "scale",
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       {{24, "l2"}, {32, "n1"}, {12, "m1"}},
       [&](const VarHandle& l, const VarHandle& n, const VarHandle& m) {
         return b.load(l, n, m) * a.load(l, n, m);
       });
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* d = Reduce("sum", {{24, "l1"}}, Sum(), c, {{32, "n1"}, {12, "m1"}});
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* e = Compute("scale", {{24, "l"}}, [&](const VarHandle& l) {
     return b.load(0, 0, l) * d->load(l);
   });
@@ -1671,16 +1703,14 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   LoopNest l({e}, {c, d, e});
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For* outer;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   For* inner;
 
   // reorder outer reduction axes.
   auto loops = l.getLoopStmtsFor(d);
-  l.reorderAxis(loops[0], loops[1]);
+  LoopNest::reorderAxis(loops[0], loops[1]);
 
   // Split reduction consumer.
-  l.splitWithMask(l.getLoopStmtsFor(e)[0], 4, &outer, &inner);
+  LoopNest::splitWithMask(l.getLoopStmtsFor(e)[0], 4, &inner);
 
   l.cacheAccesses(d->buf(), "sum_local", inner);
   l.prepareForCodegen();
@@ -1692,8 +1722,8 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
 #CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: sum[l1] = (sum[l1]) + (scale[(12 * n1_1 + m1_1) + 384 * l1]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
 #CHECK: scale_1[l_inner + 4 * l_outer] = (b[l_inner + 4 * l_outer]) * (sum_local[l_inner]);
@@ -1701,7 +1731,6 @@ TEST(Reductions, ReductionReorderCacheConsumerAccess) {
   torch::jit::testing::FileCheck().run(expected_ir, oss.str());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionRfactorCacheTempOuter) {
   KernelScope kernel_scope;
 
@@ -1724,7 +1753,7 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   LoopNest loop({c});
 
   std::vector<For*> loops = loop.getLoopStmtsFor(c);
-  loop.reorderAxis(loops.at(0), loops.at(1));
+  LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
@@ -1735,10 +1764,10 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
 
   auto all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.reorderAxis(all_loops[1][0], all_loops[1][1]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][1]);
 
   all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
-  loop.cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
+  LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][1]);
   loop.simplify();
   loop.prepareForCodegen();
   Stmt* s = loop.root_stmt();
@@ -1748,8 +1777,8 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[n]
 #CHECK: for (int a = 0; a < m
-#CHECK:   Allocate(tmp); // dtype=float, dims=[n]
 #CHECK:   for (int i = 0; i < n
 #CHECK:     tmp[i] = 0
 #CHECK:   }
@@ -1772,7 +1801,6 @@ TEST(Reductions, ReductionRfactorCacheTempOuter) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionRfactorCacheTempInner) {
   KernelScope kernel_scope;
 
@@ -1797,7 +1825,7 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto c_body = const_cast<Stmt*>(loop.getAllWritesToBuf(c->buf())[1]);
 
-  loop.reorderAxis(loops.at(0), loops.at(1));
+  LoopNest::reorderAxis(loops.at(0), loops.at(1));
   loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   Buf* rfac_buf;
@@ -1805,11 +1833,11 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   loop.distributeLoop(loops.at(0));
   auto all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.reorderAxis(all_loops[1][0], all_loops[1][1]);
+  LoopNest::reorderAxis(all_loops[1][0], all_loops[1][1]);
 
   all_loops = loop.getAllLoopNestsWritingToBuf(rfac_buf);
   ASSERT_TRUE(all_loops.size() == 2 && all_loops.at(1).size() == 3);
-  loop.cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
+  LoopNest::cacheAccesses(rfac_buf, "tmp", all_loops[1][2]);
   loop.prepareForCodegen();
   loop.simplify();
   Stmt* s = loop.root_stmt();
@@ -1819,9 +1847,9 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   const std::string& expected_ir =
       R"IR(
 #CHECK: Allocate(sum_rfac); // dtype=float, dims=[n]
+#CHECK: Allocate(tmp); // dtype=float, dims=[1]
 #CHECK: for (int a = 0; a < m
 #CHECK:   for (int b = 0; b < n
-#CHECK:     Allocate(tmp); // dtype=float, dims=[1]
 #CHECK:     tmp[0] = 0
 #CHECK:     for (int c
 #CHECK:       tmp[0] = (tmp[0]) + (B[
@@ -1838,29 +1866,20 @@ TEST(Reductions, ReductionRfactorCacheTempInner) {
   ASSERT_EQ(out[0], 499500);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorize) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(8 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out_before(8, -1.f);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> out_after(8, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l_before({tensor});
   LoopNest l(l_before);
@@ -1868,7 +1887,7 @@ TEST(Reductions, ReductionVectorize) {
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  l.vectorize(l.getLoopStmtsFor(tensor)[0]);
+  ASSERT_TRUE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[0]));
 
   Stmt* s = l.root_stmt();
   s = IRSimplifier::simplify(s);
@@ -1889,48 +1908,36 @@ TEST(Reductions, ReductionVectorize) {
   s = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg_after(s, {in, tensor});
   cg_after.call({in_, out_after});
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
     ASSERT_EQ(out_before[i], out_after[i]);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorizeInner) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {{8, "m"}}, Sum(), in, {{8, "n"}});
   LoopNest l({tensor});
 
-  ASSERT_THROWS_WITH(
-      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+  ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, ReductionVectorizeRfactor) {
   KernelScope kernel_scope;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   std::vector<float> in_(8 * 8);
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   for (int i = 0; i < 8; ++i) {
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
     for (int j = 0; j < 8; ++j) {
-      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
       in_[i * 8 + j] = i;
     }
   }
   std::vector<float> out_before(1, -1.f);
   std::vector<float> out_after(1, -1.f);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Placeholder in(BufHandle("in", {8, 8}, kFloat));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   Tensor* tensor = Reduce("sum", {}, Sum(), in, {{8, "m"}, {8, "n"}});
 
   LoopNest l_before({tensor});
@@ -1939,23 +1946,22 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   SimpleIREvaluator cg_before(l_before.root_stmt(), {in, tensor});
   cg_before.call({in_, out_before});
 
-  ASSERT_THROWS_WITH(
-      l.vectorize(l.getLoopStmtsFor(tensor)[1]), "reduction axis");
+  ASSERT_FALSE(LoopNest::vectorize(l.getLoopStmtsFor(tensor)[1]));
 
   // But if we rfactor this so it's not a reduce axis we can vectorize that
   // loop.
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.reorderAxis(loops[0], loops[1]);
+  LoopNest::reorderAxis(loops[0], loops[1]);
   loops = l.getLoopStmtsFor(tensor);
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto tensor_body = const_cast<Stmt*>(l.getAllWritesToBuf(tensor->buf())[1]);
   Buf* rfac_buf = nullptr;
-  ASSERT_TRUE(l.rfactor(tensor_body, loops.at(0), &rfac_buf));
+  ASSERT_TRUE(LoopNest::rfactor(tensor_body, loops.at(0), &rfac_buf));
 
-  l.distributeLoop(loops.at(0));
+  LoopNest::distributeLoop(loops.at(0));
   auto rfac_loops = l.getAllLoopNestsWritingToBuf(rfac_buf);
 
-  l.vectorize(rfac_loops[1][0]);
+  ASSERT_TRUE(LoopNest::vectorize(rfac_loops[1][0]));
   l.simplify();
 
   Stmt* s = l.root_stmt();
@@ -1986,7 +1992,6 @@ TEST(Reductions, ReductionVectorizeRfactor) {
   ASSERT_EQ(out_before[0], out_after[0]);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(Reductions, InitFunction) {
   KernelScope ks;
   constexpr int M = 32;

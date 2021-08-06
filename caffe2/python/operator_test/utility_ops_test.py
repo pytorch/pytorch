@@ -332,7 +332,7 @@ class TestUtilityOps(serial.SerializedTestCase):
             )
         ),
         **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_lengths_gather(self, inputs, gc, dc):
         items = inputs[0]
         lengths = inputs[1]
@@ -359,7 +359,7 @@ class TestUtilityOps(serial.SerializedTestCase):
     @given(
         inputs=hu.lengths_tensor(),
         **hu.gcs_cpu_only)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_lengths_to_ranges(self, inputs, gc, dc):
         _, lengths = inputs
 

@@ -1,4 +1,9 @@
+from typing import Tuple, List, Dict
+
 import torch
+import torch.nn as nn
+from torch import Tensor
+
 
 class Simple(torch.nn.Module):
     def __init__(self, N, M):
@@ -9,17 +14,22 @@ class Simple(torch.nn.Module):
         output = self.weight + input
         return output
 
-import torch.nn as nn
+
+def load_library():
+    torch.ops.load_library("my_so.so")
 
 
 def conv1x1(in_planes, out_planes, stride=1):
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
+
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                     padding=1, bias=False)
+    return nn.Conv2d(
+        in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False
+    )
+
 
 class BasicBlock(nn.Module):
     expansion = 1
@@ -52,12 +62,12 @@ class BasicBlock(nn.Module):
 
         return out
 
+
 class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000):
         super(ResNet, self).__init__()
         self.inplanes = 64
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
-                               bias=False)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
@@ -70,7 +80,7 @@ class ResNet(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -108,5 +118,152 @@ class ResNet(nn.Module):
 
         return x
 
+
 def resnet18():
     return ResNet(BasicBlock, [2, 2, 2, 2])
+
+
+class BatchedModel(nn.Module):
+    def forward(self, input1: Tensor, input2: Tensor) -> Tuple[Tensor, Tensor]:
+        return (input1 * -1, input2 * -1)
+
+    def make_prediction(
+        self, input: List[Tuple[Tensor, Tensor]]
+    ) -> List[Tuple[Tensor, Tensor]]:
+        return [self.forward(i[0], i[1]) for i in input]
+
+    def make_batch(
+        self, mega_batch: List[Tuple[Tensor, Tensor, int]], goals: Dict[str, str]
+    ) -> List[List[Tuple[Tensor, Tensor, int]]]:
+        max_bs = int(goals["max_bs"])
+        return [
+            mega_batch[start_idx : start_idx + max_bs]
+            for start_idx in range(0, len(mega_batch), max_bs)
+        ]
+
+
+class MultiReturn(torch.nn.Module):
+    def __init__(self):
+        super(MultiReturn, self).__init__()
+
+    def forward(self, t):
+        # type: (Tuple[Tensor, Tensor]) -> Tuple[Tuple[Tensor, Tensor], Tuple[Tensor, Tensor]]
+        a, b = t
+        result = ((a.masked_fill_(b, 0.1), b), (torch.ones_like(a), b))
+        return result
+
+
+multi_return_metadata = r"""
+{
+ "metadata_container": {
+  "forward": {
+   "named_input_metadata": {
+    "t": {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_1",
+          "feature_id": 1
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    }
+   },
+   "positional_output_metadata": [
+    {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_1",
+          "feature_id": 1
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    },
+    {
+     "argument_type": {
+      "tuple": {
+       "tuple_elements": [
+        {
+         "tensor": 1
+        },
+        {
+         "tensor": 6
+        }
+       ]
+      }
+     },
+     "optional_argument": false,
+     "metadata": {
+      "dense_features": {
+       "feature_desc": [
+        {
+          "feature_name": "test_feature_3",
+          "feature_id": 3
+        }
+       ],
+       "expected_shape": {
+        "dims": [
+         -1,
+         1
+        ],
+        "unknown_rank": false
+       },
+       "data_type": 1,
+       "feature_store_feature_type": 0
+      }
+     }
+    }
+   ]
+  }
+ }
+}
+"""
