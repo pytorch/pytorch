@@ -101,7 +101,7 @@ const std::string shape_compute_functions =
           assert self[0] == tensor[0]
           # TODO: return self
           out: List[int] = []
-          return []
+          return out
 
         def mv(self: List[int], vec: List[int]):
           assert len(self) == 2 and len(vec) == 1
