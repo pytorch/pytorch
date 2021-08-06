@@ -63,7 +63,7 @@ class ForeachFuncWrapper:
         if (
             is_cuda and
             torch.autograd.kineto_available() and
-            torch.profiler.ProfilerActivity.CUDA in torch.profiler._supported_kineto_activities()
+            torch.profiler.ProfilerActivity.CUDA in torch.profiler.supported_activities()
         ):
             with torch.profiler.profile(activities=(torch.profiler.ProfilerActivity.CPU,)) as p:
                 actual = self.func(*inputs, **kwargs)
