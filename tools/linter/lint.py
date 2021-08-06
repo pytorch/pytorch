@@ -1,3 +1,21 @@
+"""
+Linter driver script
+====================
+
+This script manages instantiating and running linters. Every linter extends the Linter base class (defined below).
+
+Registering a new linter
+------------------------
+
+- Create a new module with an __init__.py file. The module name must be the
+  linter name in snake_case.
+- In __init__.py, add a class that extends the Linter base class. The class
+  name must be the linter name in PascalCase
+- Add the linter name (in kebab-case) to SUPPORTED_LINTERS
+- Follow the instructions on extending the Linter base class below
+"""
+
+
 import argparse
 import asyncio
 import importlib
@@ -40,6 +58,43 @@ class LinterBinaryNotFound(Exception):
 
 
 class Linter:
+    """
+    Base class for linters
+
+    Extending this class
+    --------------------
+
+    Required Methods
+    ~~~~~~~~~~~~~~~~
+    * `run`             Runs the linter
+    * `build_parser`    Adds arguments to the provided parser. Used for
+                        implementing the subparser logic of the driver script
+
+    Required Attributes
+    ~~~~~~~~~~~~~~~~~~~
+    * `name`            Name of the linter
+    * `exe`             Path to the linter ibinary
+    * `options`         Linter options. Every linter must define default values
+                        for all the options it uses. See below.
+
+    Linter options
+    --------------
+
+    Each linter can define options that are used to configure its
+    functionality. These options are basically fields on a `Namespace` object.
+
+    Every linter has to provide a default value for these common linter options:
+    - `path`            List of paths to lint on
+    - `glob`            List of glob filters
+    - `regex`           List of regex filters
+
+    In addition to these, the linter must also provide default values for any
+    other options it uses. If you wish to expose an option as a command-line
+    flag, be sure to set its default value by accessing the field of the
+    `options` object (and not inline it). This is purely to ensure consistency
+    and correctness
+    """
+
     name = ""
     exe = ""
     options = argparse.Namespace()
