@@ -45,6 +45,8 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 )
 from torch.testing._internal.common_utils import TemporaryFileName
 
+from torch.autograd.profiler_legacy import profile as _profile
+
 
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
@@ -1280,7 +1282,7 @@ class RpcTest(RpcAgentTestFixture):
         dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
         t1, t2 = torch.ones(100), torch.ones(100)
-        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+        with _profile(record_shapes=True) as prof:
             rpc.rpc_sync(dst_worker, torch.add, args=(t1, t2))
 
         function_events = prof.function_events
@@ -1290,7 +1292,7 @@ class RpcTest(RpcAgentTestFixture):
         ][0]
         remote_add_input_shapes = remote_add_event.input_shapes
         # Run profiler on equivalent local op and validate shapes are the same.
-        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+        with _profile(record_shapes=True) as prof:
             torch.add(t1, t2)
 
         local_function_events = prof.function_events
@@ -1306,7 +1308,7 @@ class RpcTest(RpcAgentTestFixture):
             return
         dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
-        with torch.autograd.profiler.profile(profile_memory=True) as p:
+        with _profile(profile_memory=True) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
@@ -1316,7 +1318,7 @@ class RpcTest(RpcAgentTestFixture):
         # only contain 0 (indicates no memory being profiled)
         self.assertNotEqual({0}, event_cpu_mem_usages)
         # No memory profiled if profile_memory=False
-        with torch.autograd.profiler.profile(profile_memory=False) as p:
+        with _profile(profile_memory=False) as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
@@ -1330,7 +1332,7 @@ class RpcTest(RpcAgentTestFixture):
             return
         dst = (self.rank + 1) % self.world_size
         dst_worker = worker_name(dst)
-        with torch.autograd.profiler.profile() as p:
+        with _profile() as p:
             fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
             res = fut.wait()
 
@@ -1357,7 +1359,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
 
         def rpc_with_profiling(dst_worker):
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
                 fut.wait()
 
@@ -1423,7 +1425,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
         for dst in dst_ranks:
             dst_worker = worker_name(dst)
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=())
                 ret = fut.wait()
 
@@ -1500,7 +1502,7 @@ class RpcTest(RpcAgentTestFixture):
         dst2 = worker_name((self.rank + 2) % self.world_size)
         x = torch.ones(2)
         y = torch.ones(2)
-        with torch.autograd.profiler.profile() as prof:
+        with _profile() as prof:
             ret = rpc.rpc_async(
                 dst1, slow_async_add, args=(dst2, x, y, device), timeout=20
             )
@@ -1561,7 +1563,7 @@ class RpcTest(RpcAgentTestFixture):
         dst_ranks = [i for i in range(self.world_size) if i != self.rank]
         for dst_rank in dst_ranks:
             dst_worker = worker_name(dst_rank)
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=(-1, True))
                 fut.wait()
 
@@ -1585,7 +1587,7 @@ class RpcTest(RpcAgentTestFixture):
 
             remote_children = get_cpu_children(record_function_remote_event)
             # Get local children and verify parity.
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 udf_with_torch_ops(-1, True)
 
             local_function_events = prof.function_events
@@ -1636,14 +1638,14 @@ class RpcTest(RpcAgentTestFixture):
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
             with dist_autograd.context() as context_id:
-                with torch.autograd.profiler.profile() as prof:
+                with _profile() as prof:
                     self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
 
             # Ensure that flipped order of ctx managers results in events being
             # recorded as expected.
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 with dist_autograd.context() as context_id:
                     self.run_profiling_workload(dst)
 
@@ -1662,7 +1664,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # only run profiler on rank 1.
         if self.rank == 1:
-            with torch.autograd.profiler.profile() as prof:
+            with _profile() as prof:
                 record_function_ctx_mgr = (
                     contextlib.suppress()
                     if not use_record_function
@@ -1932,7 +1934,7 @@ class RpcTest(RpcAgentTestFixture):
         num_sleep_seconds = 1
         if self.rank == 1:
             # Validate that calling the function twice results in an error.
-            with torch.autograd.profiler.profile() as pf:
+            with _profile() as pf:
                 with torch.autograd.profiler.record_function("foo") as rf:
                     fut = rpc.rpc_async(
                         worker_name(0), my_sleep_func, args=(num_sleep_seconds,)
@@ -1947,7 +1949,7 @@ class RpcTest(RpcAgentTestFixture):
     @dist_init
     def test_async_record_function_cbs_jit_call(self):
         if self.rank == 1:
-            with torch.autograd.profiler.profile() as pf:
+            with _profile() as pf:
                 key = _build_rpc_profiling_key(
                     RPCExecMode.ASYNC,
                     torch._jit_internal._qualified_name(my_script_func),
@@ -2446,7 +2448,7 @@ class RpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
 
-        with torch.autograd.profiler.profile() as p:
+        with _profile() as p:
             t = rref._get_type(blocking=blocking)
             if not blocking:
                 t = t.wait()
@@ -2460,7 +2462,7 @@ class RpcTest(RpcAgentTestFixture):
         def verify(fut):
             self.assertEqual(fut.value(), expected_type)
 
-        with torch.autograd.profiler.profile() as p:
+        with _profile() as p:
             for _ in range(10):
                 t = rref._get_type(blocking=blocking)
                 if not blocking:
@@ -4108,7 +4110,7 @@ class CudaRpcTest(RpcAgentTestFixture):
         dst_worker_cuda_0 = worker_name(dst_cuda_0)
         dst_worker_cuda_1 = worker_name(dst_cuda_1)
 
-        with torch.autograd.profiler.profile(use_cuda=True) as p:
+        with _profile(use_cuda=True) as p:
             fut1 = rpc.rpc_async(dst_worker_cuda_0, udf_with_torch_ops, args=(0, ))
             fut2 = rpc.rpc_async(dst_worker_cuda_1, udf_with_torch_ops, args=(1, ))
             fut1.wait()
