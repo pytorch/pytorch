@@ -4248,7 +4248,7 @@ class DistributedTest:
             def allreduce_hook(
                 group_id: object, bucket: dist.GradBucket
             ) -> torch.futures.Future[torch.Tensor]:
-                tensors = [bucket.get_tensor() / world_size]
+                tensors = [bucket.buffer() / world_size]
                 return (
                     group_id.allreduce(tensors)
                     .get_future()
@@ -4277,7 +4277,7 @@ class DistributedTest:
             def allreduce_with_then_hook(
                 group_id: object, bucket: dist.GradBucket
             ) -> torch.futures.Future[torch.Tensor]:
-                fut = group_id.allreduce([bucket.get_tensor()]).get_future()
+                fut = group_id.allreduce([bucket.buffer()]).get_future()
 
                 def mult(fut):
                     # Multiply the result by 2.

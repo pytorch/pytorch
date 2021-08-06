@@ -1159,6 +1159,16 @@ def container_checker(obj, target_type) -> bool:
 
 
 def _isinstance(obj, target_type) -> bool:
+    if isinstance(target_type, collections.abc.Container):
+        if not isinstance(target_type, tuple):
+            raise RuntimeError("The second argument to "
+                               "`torch.jit.isinstance` must be a type "
+                               "or a tuple of types")
+        for t_type in target_type:
+            if _isinstance(obj, t_type):
+                return True
+        return False
+
     origin_type = get_origin(target_type)
     if origin_type:
         return container_checker(obj, target_type)
