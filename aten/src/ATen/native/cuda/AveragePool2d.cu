@@ -232,41 +232,33 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
 
 } // anonymous namespace
 
-TORCH_IMPL_FUNC(avg_pool2d_out_cuda) (
-  const Tensor& input_,
-  IntArrayRef kernel_size,
-  IntArrayRef stride,
-  IntArrayRef padding,
-  bool ceil_mode,
-  bool count_include_pad,
-  c10::optional<int64_t> divisor_override,
-  const Tensor& output
-) {
+TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
+(const Tensor& input_,
+ int kH,
+ int kW,
+ int dH,
+ int dW,
+ int padH,
+ int padW,
+ bool ceil_mode,
+ bool count_include_pad,
+ c10::optional<int64_t> divisor_override,
+ const Tensor& output) {
   TensorArg output_arg{ output, "output", 1 };
   TensorArg input_arg{ input_, "input_", 2 };
 
   checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
 
-  kH_ = safe_downcast<int, int64_t>(kernel_size[0]);
-  kW_ = kernel_size.size() == 1 ? kH_ : safe_downcast<int, int64_t>(kernel_size[1]);
-
-  dH_ = stride.empty() ? kH_ : safe_downcast<int, int64_t>(stride[0]);
-  dW_ = stride.empty() ? kW_ :
-                 stride.size() == 1 ? dH_ : safe_downcast<int, int64_t>(stride[1]);
-
-  padH_ = safe_downcast<int, int64_t>(padding[0]);
-  padW_ = padding.size() == 1 ? padH_ : safe_downcast<int, int64_t>(padding[1]);
-
   /* sizes */
-  nbatch_ = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  nInputPlane_ = input_.size(-3);
-  inputHeight_ = input_.size(-2);
-  inputWidth_ = input_.size(-1);
+  nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
+  nInputPlane = input_.size(-3);
+  inputHeight = input_.size(-2);
+  inputWidth = input_.size(-1);
 
-  outputWidth_ =
-      pooling_output_shape<int64_t>(inputWidth_, kW_, padW_, dW_, 1, ceil_mode);
-  outputHeight_ = pooling_output_shape<int64_t>(
-      inputHeight_, kH_, padH_, dH_, 1, ceil_mode);
+  int64_t outputWidth =
+      pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  int64_t outputHeight = pooling_output_shape<int64_t>(
+      inputHeight, kH, padH, dH, 1, ceil_mode);
   const auto memory_format = input_.suggest_memory_format();
 
   Tensor input = input_.contiguous(memory_format);
@@ -297,18 +289,18 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda) (
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch_,
-                    nInputPlane_,
-                    inputHeight_,
-                    inputWidth_,
-                    outputHeight_,
-                    outputWidth_,
-                    kH_,
-                    kW_,
-                    dH_,
-                    dW_,
-                    padH_,
-                    padW_,
+                    nbatch,
+                    nInputPlane,
+                    inputHeight,
+                    inputWidth,
+                    outputHeight,
+                    outputWidth,
+                    kH,
+                    kW,
+                    dH,
+                    dW,
+                    padH,
+                    padW,
                     output_data,
                     divisor_override_value,
                     count_include_pad,
@@ -324,18 +316,18 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda) (
                    at::cuda::getCurrentCUDAStream()>>>(
                     count,
                     input_data,
-                    nbatch_,
-                    nInputPlane_,
-                    inputHeight_,
-                    inputWidth_,
-                    outputHeight_,
-                    outputWidth_,
-                    kH_,
-                    kW_,
-                    dH_,
-                    dW_,
-                    padH_,
-                    padW_,
+                    nbatch,
+                    nInputPlane,
+                    inputHeight,
+                    inputWidth,
+                    outputHeight,
+                    outputWidth,
+                    kH,
+                    kW,
+                    dH,
+                    dW,
+                    padH,
+                    padW,
                     output_data,
                     divisor_override_value,
                     count_include_pad,
