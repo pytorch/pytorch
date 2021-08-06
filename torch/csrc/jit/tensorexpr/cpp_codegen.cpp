@@ -233,7 +233,7 @@ void CppPrinter::visit(Store* v) {
     lane_ = lane;
     emitIndent();
     os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
-          << ";" << std::endl;
+         << ";" << std::endl;
   }
 }
 
