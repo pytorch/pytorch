@@ -4,7 +4,6 @@ import torch.nn as nn
 from functorch import make_fx, grad, nnc_jit, nnc_compile, vmap, make_nnc, vjpfull
 from torch.fx.node import map_arg
 import torch.fx as fx
-from torchvision.models import resnet18
 from functools import partial
 import os
 
