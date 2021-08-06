@@ -557,27 +557,27 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Shape"
         assert len(list(graph.nodes())) == 1
 
-    def test_strip_doc_string(self):
+    def test_verbose(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
                 return torch.exp(input)
         x = torch.randn(3, 4)
 
-        def is_model_stripped(f, strip_doc_string=None):
-            if strip_doc_string is None:
+        def is_model_stripped(f, verbose=None):
+            if verbose is None:
                 torch.onnx.export(MyModule(), x, f, opset_version=self.opset_version)
             else:
-                torch.onnx.export(MyModule(), x, f, strip_doc_string=strip_doc_string,
+                torch.onnx.export(MyModule(), x, f, verbose=verbose,
                                   opset_version=self.opset_version)
             model = onnx.load(io.BytesIO(f.getvalue()))
             model_strip = copy.copy(model)
             onnx.helper.strip_doc_string(model_strip)
             return model == model_strip
 
-        # test strip_doc_string=True (default)
+        # test verbose=False (default)
         self.assertTrue(is_model_stripped(io.BytesIO()))
-        # test strip_doc_string=False
-        self.assertFalse(is_model_stripped(io.BytesIO(), False))
+        # test verbose=True
+        self.assertFalse(is_model_stripped(io.BytesIO(), True))
 
     # NB: remove this test once DataParallel can be correctly handled
     def test_error_on_data_parallel(self):
