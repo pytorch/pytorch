@@ -12,6 +12,9 @@
 namespace torch {
 namespace jit {
 
+TORCH_API bool canEnableStaticRuntime(
+    const std::shared_ptr<torch::jit::Graph>& graph);
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -83,6 +86,7 @@ class TORCH_API StaticModule {
 
   explicit StaticModule(
       const torch::jit::Module& m,
+      bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
   typedef enum {
@@ -362,7 +366,7 @@ class MemoryPlanner {
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class ProcessedNode {
+class TORCH_API ProcessedNode {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ProcessedNode() = default;
@@ -404,6 +408,8 @@ class ProcessedNode {
   bool has_out_variant() const {
     return static_cast<bool>(fn_);
   }
+
+  bool verify_outputs_not_overlapping_with_immutable_inputs() const;
 
  private:
   Node* node_;

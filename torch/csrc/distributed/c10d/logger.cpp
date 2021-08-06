@@ -1,3 +1,4 @@
+#include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
@@ -87,6 +88,16 @@ void Logger::set_parameter_stats() {
   ddp_logging_data_->strs_map["dtypes"] = c10::Join(", ", unique_dtypes);
 }
 
+std::vector<std::vector<size_t>> Logger::get_per_bucket_variable_indices() {
+  std::vector<std::vector<size_t>> per_bucket_variable_indices;
+  per_bucket_variable_indices.reserve(reducer_->buckets_.size());
+  for (const auto& bucket : reducer_->buckets_) {
+    const auto& indices = bucket.variable_indices;
+    per_bucket_variable_indices.push_back(indices);
+  }
+  return per_bucket_variable_indices;
+}
+
 std::vector<int> Logger::get_bucket_sizes() {
   std::vector<int> bucket_sizes;
   for (const auto& bucket : reducer_->buckets_) {
@@ -98,6 +109,14 @@ std::vector<int> Logger::get_bucket_sizes() {
     bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
+}
+
+std::vector<int> Logger::get_bucket_size_limits() {
+  std::vector<int> bucket_size_limits;
+  for (const auto& bucket : reducer_->buckets_) {
+    bucket_size_limits.push_back(bucket.bucket_size_limit);
+  }
+  return bucket_size_limits;
 }
 
 // Communication hook. Empty string if not set, in which case it will not be
@@ -139,6 +158,9 @@ void Logger::set_construction_data_and_log(
   // A list of bucket sizes (Bytes) calculated during construction time
   ddp_logging_data_->strs_map["bucket_sizes"] =
       c10::Join(", ", get_bucket_sizes());
+  // A list of bucket size limits (bytes) specified during construction time
+  ddp_logging_data_->strs_map["initial_bucket_size_limits"] =
+      c10::Join(", ", get_bucket_size_limits());
   set_env_variables();
 
   // DistributedDataParallel constructor input parameters
@@ -223,6 +245,25 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->has_rebuilt_bucket_;
     ddp_logging_data_->strs_map["rebuilt_bucket_sizes"] =
         c10::Join(", ", get_bucket_sizes());
+    ddp_logging_data_->strs_map["rebuilt_bucket_size_limits"] =
+        c10::Join(", ", get_bucket_size_limits());
+    // Log per-bucket variable indices
+    std::vector<std::string> per_bucket_variable_indices;
+    auto indices = get_per_bucket_variable_indices();
+    per_bucket_variable_indices.reserve(indices.size());
+    for (const auto& bucket_indices : indices) {
+      per_bucket_variable_indices.push_back(c10::Join(" ", bucket_indices));
+    }
+    ddp_logging_data_->strs_map["rebuilt_per_bucket_param_indices"] =
+      c10::Join(", ", per_bucket_variable_indices);
+  }
+  // Log gradient ready order
+  if (!reducer_->grad_ready_order_indices_.empty()) {
+    // Note that the indices are for the previous iteration as
+    // this function is called in forward pass, and we last computed gradient
+    // ready order in the last backward pass.
+    ddp_logging_data_->strs_map["prev_iteration_grad_ready_order_indices"] =
+        c10::Join(", ", reducer_->grad_ready_order_indices_);
   }
 
   reset_performance_stats();
