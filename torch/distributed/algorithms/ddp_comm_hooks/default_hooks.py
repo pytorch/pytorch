@@ -35,7 +35,7 @@ def allreduce_hook(
     Example::
         >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
-    return _allreduce_fut(process_group, bucket.get_tensor())
+    return _allreduce_fut(process_group, bucket.buffer())
 
 
 def fp16_compress_hook(
@@ -54,14 +54,14 @@ def fp16_compress_hook(
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     world_size = group_to_use.size()
 
-    compressed_tensor = bucket.get_tensor().to(torch.float16).div_(world_size)
+    compressed_tensor = bucket.buffer().to(torch.float16).div_(world_size)
 
     fut = dist.all_reduce(
         compressed_tensor, group=group_to_use, async_op=True
     ).get_future()
 
     def decompress(fut):
-        decompressed_tensor = bucket.get_tensor()
+        decompressed_tensor = bucket.buffer()
         # Decompress in place to reduce the peak memory.
         # See: https://github.com/pytorch/pytorch/issues/45968
         decompressed_tensor.copy_(fut.value()[0])
@@ -120,8 +120,7 @@ def _hook_then_optimizer(
                     model_param,
                     grad_tensor,
                 )
-            return bucket.get_tensor()
-
+            return bucket.buffer()
         return fut.then(optimizer_step)
 
     return hook_then_optimizer_wrapper
@@ -146,12 +145,12 @@ def fp16_compress_wrapper(
         hook_state, bucket: dist.GradBucket
     ) -> torch.futures.Future[torch.Tensor]:
         # Cast bucket tensor to FP16.
-        bucket.set_tensor(bucket.get_tensor().to(torch.float16))
+        bucket.set_buffer(bucket.buffer().to(torch.float16))
 
         fut = hook(hook_state, bucket)
 
         def decompress(fut):
-            decompressed_tensor = bucket.get_tensor()
+            decompressed_tensor = bucket.buffer()
             # Decompress in place to reduce the peak memory.
             # See: https://github.com/pytorch/pytorch/issues/45968
             decompressed_tensor.copy_(fut.value())
