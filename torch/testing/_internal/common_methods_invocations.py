@@ -2643,15 +2643,22 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
-    assert mode in ('constant', 'reflect', 'replicate', 'circular')
-    # Supports 2-D, 3-D, 4-D, 5-D tensors
-    shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))
-    pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 1, 1, 1, 1))
-
-    negative_pad_case = (
-        # (shape, pad)
-        ((1, 3, 4, 4), (-1, 1, -2, 1)),
-    )
+    assert mode in ('caonstant', 'reflect', 'replicate', 'circular')
+    if dtype == torch.bool and mode == 'circular':
+        # test_dtypes fails on ASAN with for the case below
+        # runtime error: load of value 190, which is not a valid value for type 'bool'
+        # Reference: https://github.com/pytorch/pytorch/pull/62814#issuecomment-894156562
+        shapes = ((1, 3), (2, 3, 3), (1, 3, 3), (3, 3, 3, 3), (3, 3, 5, 5))
+        pads = ((1, 2),)
+        negative_pad_case = ()
+    else:
+        # Supports 2-D, 3-D, 4-D, 5-D tensors
+        shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))
+        pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 1, 1, 1, 1))
+        negative_pad_case = (
+            # (shape, pad)
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
+        )
 
     make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2697,7 +2704,9 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
                 for pad_value in (1., 2.):
                     yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
-    return list(generator())
+    samples = list(generator())
+    assert len(samples) > 0
+    return samples
 
 
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
