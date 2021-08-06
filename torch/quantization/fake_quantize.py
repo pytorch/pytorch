@@ -290,7 +290,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     def extra_repr(self) -> str:
         return (
             "fake_quant_enabled={}, observer_enabled={}, scale={}, zero_point={}, "
-            "dtype={}, quant_min={}, quant_max={}, qscheme={}".format(
+            "dtype={}, quant_min={}, quant_max={}, qscheme={}, reduce_range={}".format(
                 self.fake_quant_enabled,
                 self.observer_enabled,
                 self.scale,
@@ -299,6 +299,7 @@ class FusedMovingAvgObsFakeQuantize(FakeQuantize):
                 self.quant_min,
                 self.quant_max,
                 self.qscheme,
+                self.activation_post_process.reduce_range,
             )
         )
 
