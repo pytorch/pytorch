@@ -94,7 +94,7 @@ bool _backport_for_mobile_impl(
   if (!backportManager.hasBytecodeBackportFunction(to_version + 1)) {
     return false;
   }
-  int64_t from_version = _get_model_bytecode_version(istream_adapter);
+  auto from_version = _get_model_bytecode_version(istream_adapter);
   return backportManager.backport(
       istream_adapter, writer, from_version, to_version);
 }
