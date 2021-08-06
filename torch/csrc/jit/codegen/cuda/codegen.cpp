@@ -281,7 +281,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   void visit(const kir::NamedScalar* node) final {
-    code_ << node->name();
+    // dim3 components are unsigned int. Cast to signed integer to
+    // support negative indexing
+    if (node->getParallelIndex().has_value() ||
+        node->getParallelDim().has_value()) {
+      code_ << "((nvfuser_index_t)" << node->name() << ")";
+    } else {
+      code_ << node->name();
+    }
   }
 
   void visit(const kir::TensorIndex* node) final {
@@ -416,6 +423,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
       if (op_type == UnaryOpType::Cast) {
         const auto cast_str =
             cast_func_str({node->in()->dtype(), node->out()->dtype()});
+        TORCH_INTERNAL_ASSERT(
+            cast_str.has_value(),
+            "Invalid cast. Input type: ",
+            node->in()->dtype(),
+            ", output type: ",
+            node->out()->dtype());
         code_ << cast_str.value();
       } else {
         code_ << op_type;
