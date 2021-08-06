@@ -157,6 +157,7 @@
       xcode: "12.0"
     steps:
       - checkout
+      - run: echo "JOB_BASE_NAME is $JOB_BASE_NAME"
       - run_brew_for_macos_build
       - run:
           name: Build
