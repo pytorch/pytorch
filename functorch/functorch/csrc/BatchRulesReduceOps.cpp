@@ -261,43 +261,96 @@ Tensor dist_decomp(const Tensor& self, const Tensor& other, const Scalar& p) {
   return at::norm((self - other), p);
 }
 
+static std::tuple<Tensor, Tensor, Tensor> expand_bdims(
+    const Tensor& a, bool a_has_bdim,
+    const Tensor& b, bool b_has_bdim,
+    const Tensor& c, bool c_has_bdim) {
+  int64_t bdim_size = -1;
+  Tensor flagpole;
+  if (a_has_bdim) {
+    bdim_size = a.size(0);
+    flagpole = a;
+  } else if (b_has_bdim) {
+    bdim_size = b.size(0);
+    flagpole = b;
+  } else if (c_has_bdim) {
+    bdim_size = c.size(0);
+    flagpole = c;
+  } else {
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  return std::make_tuple(
+      a_has_bdim ? a : a.expand_as(flagpole),
+      b_has_bdim ? b : b.expand_as(flagpole),
+      c_has_bdim ? c : c.expand_as(flagpole));
+}
 
-std::tuple<Tensor,optional<int64_t>>
-_log_softmax_backward_data(
+std::tuple<Tensor,optional<int64_t>> _softmax_backward_batch_rule(
     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
     const Tensor& output, optional<int64_t> output_bdim,
     int64_t dim,
     const Tensor& self, optional<int64_t> self_bdim) {
   TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
-      "output_bdim and self_bdim must be the same");
-  if (grad_output_bdim && self_bdim) {
-    auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
-    auto output_ = moveBatchDimToFront(output, output_bdim);
-    auto self_ = moveBatchDimToFront(self, self_bdim);
-    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
-    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
+    "output_bdim and self_bdim must be the same");
+  // NB: self only gets used for its dtype. We handle it anyways just in case.
+  // softmax_backward's decomposition is y * gy - y * (y * gy).sum(dim, keepdim=True)
+  // NB: the CUDA kernel handles strides so we can just expand
+  // all of the tensors and call it a day. The CPU kernel is not as good but
+  // idk if the perf on that really matters
+  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+  auto output_ = moveBatchDimToFront(output, output_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+
+  // Expand out that extra dimension for everyone
+  std::tie(grad_output_, output_, self_) = expand_bdims(
+      grad_output_, grad_output_bdim.has_value(),
+      output_, output_bdim.has_value(),
+      self_, self_bdim.has_value());
+
+  // Scalar tensor case. softmax turns into the identity when this happens.
+  // I don't know why the output is zeros, though, but that's what softmax tells me...
+  if (self_.dim() == 1 && (dim == 0 || dim == -1)) {
+    return std::make_tuple(at::zeros_like(grad_output_), 0);
   }
+
+  dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
+
+  return std::make_tuple(at::_softmax_backward_data(grad_output_, output_, dim, self_), 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
+    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+    const Tensor& output, optional<int64_t> output_bdim,
+    int64_t dim,
+    const Tensor& self, optional<int64_t> self_bdim) {
+  TORCH_INTERNAL_ASSERT(false);
+  TORCH_INTERNAL_ASSERT(!(output_bdim.has_value() ^ self_bdim.has_value()),
+    "output_bdim and self_bdim must be the same");
   // NB: It turns out that expanding + calling log_softmax_backward is generally
   // faster than the decomposition.
   // Benchmark here: https://gist.github.com/zou3519/ae3b33b5730a84aae8a80a05c89e078a
   // Decomposition is (grad_output - grad_output.sum(dim, keepdim=True) * result.exp())
   // We can squeeze out a last mile of performance by writing custom kernels.
-  if (grad_output_bdim && !self_bdim) {
-    auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
-    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
-    auto output_ = output.expand_as(grad_output_);
-    auto self_ = self.expand_as(grad_output_);
-    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
+  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+  auto output_ = moveBatchDimToFront(output, output_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+
+  // Expand out that extra dimension for everyone
+  std::tie(grad_output_, output_, self_) = expand_bdims(
+      grad_output_, grad_output_bdim.has_value(),
+      output_, output_bdim.has_value(),
+      self_, self_bdim.has_value());
+
+  // Scalar tensor case. log_softmax returns zeros when this happens
+  if (self_.dim() == 1 && (dim == 0 || dim == -1)) {
+    return std::make_tuple(at::zeros_like(grad_output_), 0);
   }
-  if (!grad_output_bdim && self_bdim) {
-    auto output_ = moveBatchDimToFront(output, output_bdim);
-    auto self_ = moveBatchDimToFront(self, self_bdim);
-    auto grad_output_ = grad_output.expand_as(output_);
-    dim = getPhysicalDim(grad_output_, /*has_batch_dim*/true, dim);
-    return std::make_tuple( at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0 );
-  }
-  TORCH_INTERNAL_ASSERT(false);
+
+  dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
+
+  return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, self_), 0);
 }
+
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("amax", SINGLE_ARG(reduction_dimarray_batch_rule<decltype(&at::amax), &at::amax, bool>));
@@ -334,7 +387,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(var);
   OP_DECOMPOSE2(var, dim);
   VMAP_SUPPORT("var.correction", var_correction_batch_rule);
-  VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_data);
+  VMAP_SUPPORT("_log_softmax_backward_data", _log_softmax_backward_batch_rule);
+  VMAP_SUPPORT("_softmax_backward_data", _softmax_backward_batch_rule);
+
 }
 
 }}
