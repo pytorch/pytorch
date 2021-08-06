@@ -209,18 +209,6 @@ void CppPrinter::visit(Free* v) {
   os() << "free(" << *v->buffer_var() << ");" << std::endl;
 }
 
-static bool isMaskIntImm(const Expr* mask, int v) {
-  const IntImm* m = dynamic_cast<const IntImm*>(mask);
-  if (m != nullptr) {
-    return m->value() == v;
-  }
-  const Broadcast* mm = dynamic_cast<const Broadcast*>(mask);
-  if (mm != nullptr) {
-    return isMaskIntImm(mm->value(), v);
-  }
-  return true;
-}
-
 void CppPrinter::visit(Load* v) {
   auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
   os() << *v->base_handle() << "[" << *flat_idx << "]";
