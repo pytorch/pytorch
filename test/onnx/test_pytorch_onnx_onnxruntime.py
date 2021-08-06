@@ -6557,7 +6557,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_uninitialized_tensorList_dynamic(self):
         class UninitializedModel(torch.nn.Module):
             def forward(self, y):
-                if y.shape[1] < 5:
+                if y[0].shape[1] < 5:
                     if y.size(0) == 1:
                         y = y + 4
                     else:
@@ -6570,7 +6570,8 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input_1"],
                       dynamic_axes={"input_1": [0, 1]})
 
-    @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::identity of sequence in opset 14
+    # ONNX::identity of sequence supported for ONNX opset >= 14
+    @skipIfUnsupportedMinOpsetVersion(14)
     @skipIfONNXShapeInference(False)
     def test_uninitialized_tensorList_shape_dynamic(self):
         class UninitializedModel(torch.nn.Module):
