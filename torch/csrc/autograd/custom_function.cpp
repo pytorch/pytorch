@@ -29,6 +29,28 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   }
 }
 
+void _foreach_tensor(
+    const std::function<void (size_t, size_t, const at::Tensor&)>& fn,
+    torch::jit::Stack* stack,
+    size_t stack_start,
+    size_t size) {
+  // Enumerate over tensors in a stack, including ones in TensorLists
+  int idx = 0;
+  for (const auto i : c10::irange(size)) {
+    auto& ivalue = (*stack)[stack_start + i];
+    if (ivalue.isTensor()) {  // true for optional tensor that has value
+      const auto& tensor = ivalue.toTensor();
+      fn(idx, i, tensor);
+      idx++;
+    } if (ivalue.isTensorList()) {
+      for (const auto& tensor : ivalue.toTensorVector()) {
+        fn(idx, i, tensor);
+        idx++;
+      }
+    }
+  }
+}
+
 void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
   // Mimics the logic of a VariableType NotImplemented kernel
   const auto& schema = op.schema();
@@ -46,20 +68,26 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySe
     const auto& alias_info = arguments[i].alias_info();
     any_is_inplace |= alias_info.has_value() && alias_info->isWrite();
   }
+  // Keep track of which outputs are output of in-place modification
+  // so we can rebase_history if necessary
   std::vector<bool> is_inplace_output;
+  std::vector<bool> is_aliased_output;
   is_inplace_output.reserve(num_returns);
   for (const auto i : c10::irange(num_returns)) {
     const auto& alias_info = returns[i].alias_info();
     is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
+    is_aliased_output.push_back(alias_info.has_value());
   }
-  // Check fwd grad not defined
+  size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
   for (const auto i : c10::irange(num_arguments)) {
     auto& ivalue = (*stack)[stack_start + i];
     if (ivalue.isTensor()) {
+      // ivalues for optional tensors have isTensor = true
       const auto& tensor = VariableType::unpack(ivalue.toTensor(), op_name.c_str(), i);
       if (grad_mode && tensor.requires_grad()) {
         tensors_requiring_grad.push_back(tensor);
       }
+      num_tensor_inputs++;
       TORCH_CHECK_NOT_IMPLEMENTED(!generated::details::isFwGradDefined(tensor), "Trying to use forward AD with ", op_name, " that does not support it.");
     } else if (ivalue.isTensorList()) {
       const auto& tensors = VariableType::unpack(ivalue.toTensorVector(), op_name.c_str(), i);
@@ -67,10 +95,10 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySe
         if (grad_mode && tensor.requires_grad()) {
           tensors_requiring_grad.push_back(tensor);
         }
+        num_tensor_inputs++;
         TORCH_CHECK_NOT_IMPLEMENTED(!generated::details::isFwGradDefined(tensor), "Trying to use forward AD with ", op_name, " that does not support it.");
       }
     }
-    // What about optional tensors?
   }
   const bool any_requires_grad = tensors_requiring_grad.size() > 0;
 
@@ -89,11 +117,47 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySe
     grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented(op_name), deleteNode);
     grad_fn->set_next_edges(collect_next_edges(tensors_requiring_grad));
   }
+
+  #ifndef NDEBUG
+  // See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
+  std::vector<c10::IValue> stack_copy(*stack);
+  std::vector<c10::intrusive_ptr<TensorImpl>> impl_saved;
+  impl_saved.reserve(num_tensor_inputs);
+  std::vector<c10::optional<Storage>> storage_saved;
+  storage_saved.reserve(num_tensor_inputs);
+  _foreach_tensor([&](size_t idx, size_t _, const at::Tensor& t) {
+    storage_saved.push_back(t.has_storage() ? c10::optional<Storage>(t.storage()) : c10::nullopt);
+  }, &stack_copy, stack_start, num_arguments);
+  _foreach_tensor([&](size_t idx, size_t _, const at::Tensor& t) {
+    impl_saved.push_back(t.getIntrusivePtr());
+  }, &stack_copy, stack_start, num_arguments);
+  #endif
   {
     at::AutoDispatchBelowADInplaceOrView guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   }
+  #ifndef NDEBUG
+  _foreach_tensor([&](size_t idx, size_t _, const at::Tensor& t) {
+    if (storage_saved.at(idx).has_value())
+      AT_ASSERT(storage_saved.at(idx).value().is_alias_of(t.storage()));
+  }, &stack_copy, stack_start, num_arguments);
+  _foreach_tensor([&](size_t idx, size_t _, const at::Tensor& t) {
+    if (impl_saved.at(idx))
+      AT_ASSERT(impl_saved.at(idx) == t.getIntrusivePtr());
+  }, &stack_copy, stack_start, num_arguments);
+  // Do we have alias information for tensors in tensorlist outputs?
+  _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+    if (!is_inplace_output[idx_ret])
+      AT_ASSERT(t.use_count() <= 1);  // Okay to return undefined tensor
+  }, stack, stack->size() - num_returns, num_returns);
+  // TODO: Add check if view ops return tensor that is aliased with the right input
+  _foreach_tensor([&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
+    if (!is_aliased_output[idx_ret] && t.has_storage())
+      AT_ASSERT(t.storage().use_count() == 1);
+  }, stack, stack->size() - num_returns, num_returns);
+  #endif
   const auto& ret = torch::jit::last(stack, num_returns);
+
   for (const auto return_idx : c10::irange(ret.size())) {
     if (ret[return_idx].isTensor()) {
       const auto& t = ret[return_idx].toTensor();
@@ -105,7 +169,6 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySe
         }
       }
     }
-
   }
 }
 
