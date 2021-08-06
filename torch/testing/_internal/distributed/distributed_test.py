@@ -67,6 +67,11 @@ from torch.testing._internal.common_utils import (
 if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    from torch.distributed.optim.functional_adam import _FunctionalAdam
+    _SUPPORTED_OPTIM_MAPPING = {
+        _FunctionalSGD: torch.optim.SGD,
+        _FunctionalAdam: torch.optim.Adam
+    }
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -3832,7 +3837,8 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
         def _test_ddp_hook_with_optimizer_parity(
-            self, grad_as_bucket_view, static_graph
+            self, grad_as_bucket_view, static_graph, functional_optim_cls,
+            *functional_optim_args, **functional_optim_kwargs
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3850,9 +3856,6 @@ class DistributedTest:
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
-                    sgd_lr = 1e-2
-                    sgd_momentum = 0.9
-                    sgd_weight_decay = 0.01
                     ddp_model_with_optimizer_hook = (
                         torch.nn.parallel.DistributedDataParallel(
                             copy.deepcopy(model).cuda(),
@@ -3863,13 +3866,13 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_optimizer_hook._set_static_graph()
 
-                    # Register hook that runs allreduce + functional SGD step.
+                    # Register hook that runs allreduce + functional optimizer
+                    # step.
                     allreduce_hook = default.allreduce_hook
                     opt_hook_state = default._OptimizerHookState(
-                        _FunctionalSGD,
-                        sgd_lr,
-                        momentum=sgd_momentum,
-                        weight_decay=sgd_weight_decay,
+                        functional_optim_cls,
+                        *functional_optim_args,
+                        **functional_optim_kwargs,
                     )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
@@ -3885,11 +3888,10 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_no_hook._set_static_graph()
 
-                    sgd_no_hook = torch.optim.SGD(
+                    optimizer_no_hook = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
                         ddp_model_with_no_hook.parameters(),
-                        lr=sgd_lr,
-                        momentum=sgd_momentum,
-                        weight_decay=sgd_weight_decay,
+                        *functional_optim_args,
+                        **functional_optim_kwargs,
                     )
 
                     # Verify parameters are equal initially.
@@ -3919,7 +3921,7 @@ class DistributedTest:
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
                         loss.backward()
-                        sgd_no_hook.step()
+                        optimizer_no_hook.step()
 
                     dist.barrier()
 
@@ -3930,8 +3932,8 @@ class DistributedTest:
                     ):
                         self.assertEqual(hook_param, allreduce_param)
 
-                    # Verify optimizer modified parameters, otherwise they would be
-                    # trivially equal above.
+                    # Verify optimizer modified parameters, otherwise they would
+                    # be trivially equal above.
                     self.assertNotEqual(
                         opt_hook_init_params,
                         list(ddp_model_with_optimizer_hook.parameters()),
@@ -3942,15 +3944,51 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        @sandcastle_skip_if(IS_WINDOWS, "FunctionalSGD not yet supported with Windows.")
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity(self):
+        def test_ddp_hook_with_optimizer_parity_adam(self):
             for grad_as_bucket_view, static_graph in itertools.product(
                 [True, False], [True, False]
             ):
+                adam_lr = 1e-2
+                adam_betas = (0.9, 0.99)
+                adam_eps = 1e-6
                 self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view=grad_as_bucket_view, static_graph=static_graph
+                    grad_as_bucket_view,
+                    static_graph,
+                    _FunctionalAdam,
+                    adam_lr,
+                    betas=adam_betas,
+                    eps=adam_eps,
+                )
+
+        @sandcastle_skip_if(
+            BACKEND != "nccl" and BACKEND != "gloo",
+            "Only Nccl & Gloo backend support DistributedDataParallel",
+        )
+        @sandcastle_skip_if(
+            IS_WINDOWS,
+            "FunctionalSGD not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
+        )
+        @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
+        def test_ddp_hook_with_optimizer_parity_sgd(self):
+            for grad_as_bucket_view, static_graph in itertools.product(
+                [True, False], [True, False]
+            ):
+                sgd_lr = 1e-2
+                sgd_momentum = 0.9
+                sgd_weight_decay = 0.01
+                self._test_ddp_hook_with_optimizer_parity(
+                    grad_as_bucket_view, static_graph,
+                    _FunctionalSGD,
+                    sgd_lr,
+                    momentum=sgd_momentum,
+                    weight_decay=sgd_weight_decay,
                 )
 
         def _test_ddp_hook_parity(self, state, hook):
