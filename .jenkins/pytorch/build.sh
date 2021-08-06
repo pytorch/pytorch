@@ -12,7 +12,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang5-asan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-linux-xenial-py3-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
 fi
 
@@ -208,6 +208,12 @@ fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
+fi
+
+if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
+  if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+    export BUILD_STATIC_RUNTIME_BENCHMARK=ON
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
