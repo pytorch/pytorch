@@ -846,8 +846,7 @@ void addObjectMethods(py::module& m) {
              std::map<std::string, py::object> inputs)
               -> std::vector<py::object> {
             caffe2::Predictor::TensorMap tensors_data{};
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
 #ifdef USE_NUMPY
@@ -1017,8 +1016,7 @@ void addObjectMethods(py::module& m) {
               -> std::vector<py::object> {
             Predictor::TensorMap tensors_data;
 #ifdef USE_NUMPY
-            // NOLINTNEXTLINE(clang-diagnostic-range-loop-construct,performance-for-range-copy)
-            for (const auto pair : inputs) {
+            for (const auto& pair : inputs) {
               const auto& name = pair.first;
               const auto& input = pair.second;
               CAFFE_ENFORCE(

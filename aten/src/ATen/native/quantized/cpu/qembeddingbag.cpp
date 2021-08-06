@@ -153,8 +153,6 @@ at::Tensor& embedding_bag_4bit_impl(
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
 
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
   auto offsets_data = offsets.data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights op.
@@ -175,7 +173,6 @@ at::Tensor& embedding_bag_4bit_impl(
   }
 
   const auto weight_sizes = weight.sizes();
-  const int64_t N = weight_sizes[0];
   const int64_t weight_size = weight_sizes[1];
   const int64_t D =
       (weight_size - 4) * 2; // NB: 2-byte fp16 scale and 2-byte zero_offset
@@ -200,13 +197,17 @@ at::Tensor& embedding_bag_4bit_impl(
 
   const std::vector<int64_t> shape = {output_size, D};
   at::native::resize_(output, shape, c10::nullopt);
+
+
+#ifdef USE_FBGEMM
+  const auto indices_data = indices.data_ptr<IndexType>();
+  const auto weight_data = weight.data_ptr<uint8_t>();
   auto* output_data = output.data_ptr<float>();
+  const int64_t N = weight_sizes[0];
 
   const int64_t block_size = D;
   const int index_size = indices.numel();
   constexpr int prefetch_distance = 16;
-
-#ifdef USE_FBGEMM
   if (!pruned_weights || fallback_to_no_sparse) {
     // Generate the fbgemm kernel
     auto kernel = fbgemm::GenerateEmbeddingSpMDMNBit<IndexType, OffsetType>(
@@ -291,8 +292,6 @@ at::Tensor& embedding_bag_byte_impl(
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
-  const auto weight_data = weight.data_ptr<uint8_t>();
-  const auto indices_data = indices.data_ptr<IndexType>();
   auto offsets_data = offsets.data_ptr<OffsetType>();
 
   // Get compressed indices for pruned_weights.
@@ -313,7 +312,6 @@ at::Tensor& embedding_bag_byte_impl(
   }
 
   const auto weight_sizes = weight.sizes();
-  const int64_t N = weight_sizes[0];
   const int64_t D = weight_sizes[1] - 8; // NB: -8 to account for scale and bias
   const int64_t M = offsets.sizes()[0];
 
@@ -342,10 +340,13 @@ at::Tensor& embedding_bag_byte_impl(
     shape = {output_size, D};
   }
   at::native::resize_(output, shape, c10::nullopt);
-  auto* output_data = output.data_ptr<float>();
-
-  const int index_size = indices.numel();
 #ifdef USE_FBGEMM
+  const int64_t N = weight_sizes[0];
+  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto indices_data = indices.data_ptr<IndexType>();
+  auto* output_data = output.data_ptr<float>();
+  const int index_size = indices.numel();
+
   if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
         fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
