@@ -2,7 +2,6 @@
 
 namespace at {
 
-// TODO: Move to its own file
 namespace {
   // PyObject is defined in c10/util/python_stub.h
   // Reference counting is handled by the caller of `set_hooks`.
