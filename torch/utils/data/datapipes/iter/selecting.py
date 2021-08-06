@@ -1,12 +1,13 @@
-from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
-from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
+from typing import Callable, Dict, Iterator, Optional, Tuple, TypeVar
+
+from torch.utils.data import DataChunk, IterDataPipe, functional_datapipe
 
 from .callable import MapIterDataPipe
 
 try:
     import pandas
     WITH_PANDAS = True
-except Exception:
+except ImportError:
     WITH_PANDAS = False
 
 T_co = TypeVar('T_co', covariant=True)

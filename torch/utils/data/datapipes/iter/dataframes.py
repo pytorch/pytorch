@@ -1,8 +1,14 @@
-from torch.utils.data import IterDataPipe, functional_datapipe, DFIterDataPipe, DataChunk
+from torch.utils.data import (
+    DataChunk,
+    DFIterDataPipe,
+    IterDataPipe,
+    functional_datapipe,
+)
+
 try:
     import pandas
     WITH_PANDAS = True
-finally:
+except ImportError:
     WITH_PANDAS = False
 import random
 
@@ -10,6 +16,11 @@ import random
 
 
 class DataChunkDF(DataChunk):
+    """
+        DataChunkDF iterating over individual items inside of DataFrame containers,
+        to access DataFrames user `raw_iterator`
+    """
+
     def __iter__(self):
         for df in self.items:
             for record in df.to_records(index=False):
@@ -38,7 +49,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
 
 
 @functional_datapipe('dataframes_per_row', is_df=True)
-class ShuffleDataFramesPipe(DFIterDataPipe):
+class PerRowDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
 
@@ -49,7 +60,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
 
 
 @functional_datapipe('dataframes_concat', is_df=True)
-class ShuffleDataFramesPipe(DFIterDataPipe):
+class ConcatDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
         self.batch = batch
@@ -94,7 +105,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
 
 
 @functional_datapipe('dataframes_filter', is_df=True)
-class ShuffleDataFramesPipe(DFIterDataPipe):
+class FilterDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, filter_fn):
         self.source_datapipe = source_datapipe
         self.filter_fn = filter_fn
@@ -134,8 +145,8 @@ class ExampleAggregateAsDataFrames(DFIterDataPipe):
 
     def _as_list(self, item):
         try:
-            return [i for i in item]
-        except:
+            return list(item)
+        except Exception:  # TODO(VitalyFedyunin): Replace with better iterable exception
             return [item]
 
     def __iter__(self):
@@ -222,7 +233,14 @@ class Capture(object):
         dp._dp_contains_dataframe = True
         return dp
 
-    def groupby(self, group_key_fn, *, buffer_size=10000, group_size=None, unbatch_level=0, guaranteed_group_size=None, drop_remaining=False):
+    def groupby(self,
+                group_key_fn,
+                *,
+                buffer_size=10000,
+                group_size=None,
+                unbatch_level=0,
+                guaranteed_group_size=None,
+                drop_remaining=False):
         if unbatch_level != 0:
             dp = self.unbatch(unbatch_level).dataframes_per_row()
         else:
