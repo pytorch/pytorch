@@ -244,7 +244,7 @@ void writeArchiveV5(
   std::string prefix = archive_name + "/";
 
   TORCH_INTERNAL_ASSERT(tensor_names.size() == data_pickle.tensorData().size());
-  const std::vector<std::string>& pre_serialized_files =
+  const std::unordered_set<std::string>& pre_serialized_files =
       writer.getAllWrittenRecords();
 
   for (const auto& td : data_pickle.tensorData()) {

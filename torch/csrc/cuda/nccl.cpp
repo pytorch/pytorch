@@ -17,6 +17,7 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include <glog/logging.h>
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
@@ -827,6 +828,7 @@ void gather(
   const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
+  NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   if (cur_rank == root)
   {
     for (int r = 0; r < numranks; r++)
@@ -835,7 +837,6 @@ void gather(
       NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
     }
   }
-  NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   NCCL_CHECK(ncclGroupEnd());
 
 #else
@@ -864,6 +865,9 @@ void scatter(
   size_t count = inputs.numel();
   auto type = to_nccl_data_type(inputs);
   auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+  
+  LOG(INFO) << "ylsh before," << "cur_rank=" << cur_rank << "input=" << inputs << "output=" << outputs;
+
 
   NCCL_CHECK(ncclGroupStart());
   if (cur_rank == root)
@@ -876,9 +880,10 @@ void scatter(
   }
   NCCL_CHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
   NCCL_CHECK(ncclGroupEnd());
-
+ 
+  LOG(INFO) << "ylsh after, "  << "cur_rank=" << cur_rank << "input=" << inputs << "output=" << outputs;
 #else
-  AT_ERROR("gather is only supported for NCCL lib version >= 2.7.0");
+  AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
   AT_ERROR("PyTorch built without NCCL support");
