@@ -2053,7 +2053,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         pg.allreduce(torch.rand(10).cuda(self.rank))
 
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_nonblocking(self):
@@ -2116,7 +2116,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_clean_exit(self):
@@ -2124,7 +2124,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_nonzero_exit(self):
@@ -2132,7 +2132,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     @sandcastle_skip(
@@ -2143,7 +2143,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigkill(self):
@@ -2151,7 +2151,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_blocking_sigterm(self):
@@ -2159,7 +2159,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
-    @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_blocking_wait_with_barrier(self):
         store = c10d.FileStore(self.file_name, self.world_size)
