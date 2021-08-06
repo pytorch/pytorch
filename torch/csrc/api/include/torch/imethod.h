@@ -4,7 +4,7 @@
 
 namespace torch {
 
-class IMethod {
+class TORCH_API IMethod {
   /*
   IMethod provides a portable interface for torch methods, whether
   they are backed by torchscript or python/deploy.
@@ -38,6 +38,7 @@ class IMethod {
   virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
 
  private:
+  bool isArgumentNamesInitialized_ { false };
   std::vector<std::string> argumentNames_;
 };
 

@@ -1484,7 +1484,7 @@ void OnnxifiTransformer::transform(
     WriteProtoToTextFile(*pred_net, "debug_full_opt_net.pb_txt", false);
   }
   if (opts_.verify_only_single_subnet && cutResult.numberOfSubnets > 1) {
-    CAFFE_THROW("Multiple Onnxifi ops were created: ", cutResult.numberOfSubnets, " subnets found");
+    CAFFE_THROW("Multiple Onnxifi ops were created: ", cutResult.numberOfSubnets, " subnets were found. There may be unsupported operators in the model.");
   }
 }
 
