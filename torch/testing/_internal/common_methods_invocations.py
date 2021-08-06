@@ -18,8 +18,8 @@ from torch.testing import \
     (make_non_contiguous, floating_types, floating_types_and, complex_types,
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types, double_types)
-from .._core import _dispatch_dtypes
+     integral_types_and, all_types, double_types, empty_types)
+from torch.testing._core import _dispatch_dtypes
 from torch.testing._internal.common_device_type import \
     (onlyOnCPUAndCUDA, skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
      skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
@@ -875,10 +875,10 @@ class ReductionOpInfo(OpInfo):
         # Operators are expected to work with all dtypes unless documented
         # otherwise. It is often easier and clearer to specify the dtypes
         # an operator does not support.
-        unsupported_dtypes: _dispatch_dtypes = tuple(),
-        unsupported_dtypes_cpu: _dispatch_dtypes = tuple(),
-        unsupported_dtypes_cuda: _dispatch_dtypes = tuple(),
-        unsupported_dtypes_rocm: _dispatch_dtypes = tuple(),
+        unsupported_dtypes: _dispatch_dtypes = empty_types(),
+        unsupported_dtypes_cpu: _dispatch_dtypes = empty_types(),
+        unsupported_dtypes_cuda: _dispatch_dtypes = empty_types(),
+        unsupported_dtypes_rocm: _dispatch_dtypes = empty_types(),
 
         # Options from the OpInfo base class
         **kwargs,
