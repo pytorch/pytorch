@@ -87,7 +87,8 @@ void batch_norm_elementwise(
   case Impl::ChannelsLast: {
     auto weight = at::borrow_from_optional_tensor(weight_opt);
     auto bias = at::borrow_from_optional_tensor(bias_opt);
-    if ((!weight->defined() || weight->is_contiguous()) &&
+    if (out.is_contiguous(at::MemoryFormat::ChannelsLast) &&
+        (!weight->defined() || weight->is_contiguous()) &&
         (!bias->defined() || bias->is_contiguous()) &&
         (!mean_.defined() || mean_.is_contiguous()) &&
         (!invstd_.defined() || invstd_.is_contiguous())) {
