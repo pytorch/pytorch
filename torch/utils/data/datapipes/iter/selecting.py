@@ -6,7 +6,7 @@ from .callable import MapIterDataPipe
 try:
     import pandas
     WITH_PANDAS = True
-finally:
+except Exception:
     WITH_PANDAS = False
 
 T_co = TypeVar('T_co', covariant=True)
@@ -51,14 +51,22 @@ class FilterIterDataPipe(MapIterDataPipe):
         if nesting_level == 0:
             return self._returnIfTrue(data)
         elif nesting_level > 0:
-            if not isinstance(data, DataChunk):
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1)
+                                                   for i in data.raw_iterator()])
+                return type(data)(list(result))
+            elif isinstance(data, list):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
+                return list(result)
+            else:
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data.raw_iterator()])
-            return data.__class__(list(result))
         else:  # Handling nesting_level == -1
             if isinstance(data, DataChunk):
                 result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
-                return data.__class__(list(result))
+                return type(data)(list(result))
+            elif isinstance(data, list):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
+                return list(result)
             else:
                 return self._returnIfTrue(data)
 
@@ -85,7 +93,10 @@ class FilterIterDataPipe(MapIterDataPipe):
         if WITH_PANDAS:
             if isinstance(data, pandas.core.frame.DataFrame):
                 return True
-        return data is not None and not (len(data) == 0 and self.drop_empty_batches)
+        r = data is not None and \
+            not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
+        return r
+
 
     def __len__(self):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))

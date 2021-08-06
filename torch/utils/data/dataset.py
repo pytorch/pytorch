@@ -52,6 +52,32 @@ class DataChunk(object):
             yield i 
 
 
+class DataChunk(List[T]):
+    def __init__(self, items):
+        self.items = items
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __len__(self):
+        return len(self.items)
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
+        return res
+
+    def __str__(self):
+        return self.as_str()
+
+    def __iter__(self) -> Iterator[T]:
+        for i in self.items:
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i
+
+
 class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
 

@@ -31,7 +31,7 @@ class ShardingFilterIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe('batch')
-class BatchIterDataPipe(IterDataPipe[List[T_co]]):
+class BatchIterDataPipe(IterDataPipe[DataChunk[T_co]]):
     r""" :class:`BatchIterDataPipe`.
 
     Iterable DataPipe to create mini-batches of data. An outer dimension will be added as
@@ -72,7 +72,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
         self._dp_nesting_depth = source_depth + 1
         self.wrapper_class = wrapper_class
 
-    def __iter__(self) -> Iterator[List[T_co]]:
+    def __iter__(self) -> Iterator[DataChunk[T_co]]:
         batch: List[T_co] = []
         for x in self.datapipe:
             batch.append(x)
@@ -121,7 +121,7 @@ class UnBatchIterDataPipe(IterDataPipe):
         if unbatch_level < -1:
             raise ValueError("unbatch_level must be -1 or >= 0")
         if unbatch_level == -1:
-            if isinstance(element, list):
+            if isinstance(element, list) or isinstance(element, DataChunk):
                 for item in element:
                     for i in self._dive(item, unbatch_level=-1):
                         yield i
@@ -130,11 +130,12 @@ class UnBatchIterDataPipe(IterDataPipe):
         elif unbatch_level == 0:
             yield element
         else:
-            if not isinstance(element, list):
+            if isinstance(element, list) or isinstance(element, DataChunk):
+                for item in element:
+                    for i in self._dive(item, unbatch_level=unbatch_level - 1):
+                        yield i
+            else:
                 raise IndexError(f"unbatch_level {self.unbatch_level} exceeds the depth of the DataPipe")
-            for item in element:
-                for i in self._dive(item, unbatch_level=unbatch_level - 1):
-                    yield i
 
 
 @functional_datapipe('bucket_batch')
@@ -181,11 +182,16 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
     def __iter__(self) -> Iterator[List[T_co]]:
         # Bucket without sorting remains same order, directly returns BatchDataset
         if self.sort_key is None:
-            yield from BatchIterDataPipe(self.datapipe, batch_size=self.batch_size, drop_last=self.drop_last)
+            for element in BatchIterDataPipe(self.datapipe, batch_size=self.batch_size, drop_last=self.drop_last):
+                if isinstance(element, DataChunk):
+                    yield list(element.raw_iterator())
+                else:
+                    yield element
         else:
             bucket: List[T_co]
             batch: List[T_co] = []
-            for bucket in self.bucket_ds:
+            for bucket_or_chunk in self.bucket_ds:
+                bucket = list(bucket_or_chunk)
                 # In-place sort within bucket
                 bucket.sort(key=self.sort_key)
                 for start in range(0, len(bucket), self.batch_size):
@@ -261,6 +267,7 @@ class GroupByIterDataPipe(IterDataPipe):
             assert guaranteed_group_size > 0 and group_size is not None and guaranteed_group_size <= group_size
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
+        self.wrapper_class = DataChunk
 
     def _remove_biggest_key(self, buffer_elements, buffer_size):
         biggest_key = None
@@ -289,14 +296,14 @@ class GroupByIterDataPipe(IterDataPipe):
             key = self.group_key_fn(x)
 
             if self.group_size is not None and self.group_size == len(buffer_elements[key]):
-                yield buffer_elements[key]
+                yield self.wrapper_class(buffer_elements[key])
                 buffer_size -= len(buffer_elements[key])
                 del buffer_elements[key]
 
             if buffer_size == self.buffer_size:
                 (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
                 if result_to_yield is not None:
-                    yield result_to_yield
+                    yield self.wrapper_class(result_to_yield)
 
             buffer_elements[key].append(x)
             buffer_size += 1
@@ -304,7 +311,7 @@ class GroupByIterDataPipe(IterDataPipe):
         while buffer_size:
             (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
             if result_to_yield is not None:
-                yield result_to_yield
+                yield self.wrapper_class(result_to_yield)
 
 
 @functional_datapipe('group_by_key')
