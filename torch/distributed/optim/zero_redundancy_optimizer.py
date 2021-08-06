@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
-from torch.distributed.optim import DistributedOptimizer
+from torch.distributed.optim import functional_optim_map
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -308,8 +308,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     .. _ZeRO: https://arxiv.org/abs/1910.02054
 
     """
-
-    functional_optim_map = DistributedOptimizer.functional_optim_map
 
     def __init__(
         self,
@@ -1337,7 +1335,6 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 - if ``overlap_with_ddp=False`` and ``optimizer_class`` is a
                     functional optimizer.
         """
-        functional_optim_map = ZeroRedundancyOptimizer.functional_optim_map
         functional_optims = functional_optim_map.values()
         if not self._overlap_with_ddp:
             if optimizer_class in functional_optims:
