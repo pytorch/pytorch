@@ -2812,7 +2812,45 @@ class TestFX(JitTestCase):
         nf = symbolic_trace(nf)
         self.assertEqual(nf(**val), f(**val))
 
+    def test_node_normalize_arguments_use_kwargs(self):
+        class Tracer(torch.fx.Tracer):
+            def is_leaf_module(self, m, module_qualified_name):
+                return False
 
+        foo = torch.nn.Linear(4, 4)
+        trace = Tracer().trace(foo)
+        node = list(trace.nodes)[3]
+        output = node.normalized_arguments(foo, normalize_to_only_use_kwargs=True)
+        sig = inspect.signature(node.target)
+        expected_result = {k: v for (k, v) in zip(sig.parameters, node.args)}
+        expected_result.update(node.kwargs)
+        assert output.kwargs == expected_result
+        assert len(output.args) == 0
+
+        output = node.normalized_arguments(foo, normalize_to_only_use_kwargs=False)
+        assert output.kwargs == node.kwargs
+        assert output.args == node.args
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        module = MyModule()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        node = list(symbolic_traced.graph.nodes)[1]
+
+        output = node.normalized_arguments(module, normalize_to_only_use_kwargs=True)
+
+        assert output.kwargs == {"input": node.args[0]}
+        assert len(output.args) == 0
+
+        output = node.normalized_arguments(module, normalize_to_only_use_kwargs=False)
+        assert output.kwargs == node.kwargs
+        assert output.args == node.args
 
 
 def run_getitem_target():
