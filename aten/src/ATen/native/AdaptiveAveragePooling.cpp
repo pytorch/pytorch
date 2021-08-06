@@ -24,7 +24,7 @@ namespace {
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pooling2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
