@@ -926,6 +926,12 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if has_torch_function_variadic(a, b):
         return handle_torch_function(tensordot, (a, b), a, b, dims=dims)
 
+    if not isinstance(dims, (tuple, list, torch.Tensor, int)):
+        raise RuntimeError("tensordot expects dims to be int or "
+                           + "Tuple[List[int], List[int]] or "
+                           + "List[List[int]] containing two lists, but got "
+                           + f"dims={dims}")
+
     dims_a: List[int] = []
     dims_b: List[int] = []
 
@@ -950,9 +956,6 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
-
-    if len(dims_a) == 0 or len(dims_b) == 0:
-        raise RuntimeError(f"unsupported input to tensordot, got dims={dims}")
 
     if out is None:
         return _VF.tensordot(a, b, dims_a, dims_b)  # type: ignore[attr-defined]

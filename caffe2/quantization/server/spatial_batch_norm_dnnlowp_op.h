@@ -16,7 +16,7 @@ class SpatialBNDNNLowPOp final : public DNNLowPOp<T, SpatialBNOp<CPUContext>> {
   USE_DNNLOWP_OPERATOR_BASE_FUNCTIONS(T, SpatialBNOp<CPUContext>);
   SpatialBNDNNLowPOp(const OperatorDef& operator_def, Workspace* ws);
 
-  virtual ~SpatialBNDNNLowPOp() override = default;
+   ~SpatialBNDNNLowPOp() override = default;
 
   bool RunOnDevice() override;
 
