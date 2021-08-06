@@ -200,6 +200,38 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
 }
 
+template <typename A, A a, typename C>
+struct UpsampleBackwardBatchRuleHelper;
+
+template <typename F, F Func, typename A, typename B, typename C, typename... T>
+struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
+  static std::tuple<Tensor,optional<int64_t>> apply(
+      const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+      optional<IntArrayRef> output_size, IntArrayRef input_size,
+      T... extra_args) {
+    auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
+    TORCH_INTERNAL_ASSERT(input_size.size() > 0);
+
+    // input_size is wrong so we correct it
+    DimVector physical_input_size(input_size.begin(), input_size.end());
+    physical_input_size[0] = grad_output_.sizes()[0];
+
+    auto out = Func(
+        grad_output_,
+        output_size,
+        physical_input_size,
+        std::forward<T>(extra_args)...);
+    return std::make_tuple(reshape_dim_outof(0, grad_output.sizes()[*grad_output_bdim], out), 0);
+  }
+
+};
+
+#define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT(#op"."#overload, SINGLE_ARG(\
+    UpsampleBackwardBatchRuleHelper<\
+      decltype(&ATEN_FN2(op, overload)),\
+      &ATEN_FN2(op, overload),\
+      c10::guts::function_traits<decltype(ATEN_FN2(op, overload))>::parameter_types>::apply))
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batching_rule);
   m.impl("conv1d", convNd_decomp);
@@ -225,6 +257,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("upsample_nearest2d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest2d, vec)));
   VMAP_SUPPORT("upsample_nearest3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_nearest3d, vec)));
   VMAP_SUPPORT("upsample_trilinear3d.vec", EXISTING_BDIM_BATCH_RULE(ATEN_FN2(upsample_trilinear3d, vec)));
+  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_linear1d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_nearest1d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_nearest2d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_nearest3d_backward, vec);
+  UPSAMPLE_BACKWARD(upsample_trilinear3d_backward, vec);
 
 }
 }}
