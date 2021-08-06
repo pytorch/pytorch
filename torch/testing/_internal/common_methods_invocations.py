@@ -2655,9 +2655,9 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
         # Supports 2-D, 3-D, 4-D, 5-D tensors
         shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))  # type: ignore[assignment]
         pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 1, 1, 1, 1))  # type: ignore[assignment]
-        negative_pad_case = (  
+        negative_pad_case = (
             # (shape, pad)
-            ((1, 3, 4, 4), (-1, 1, -2, 1)),  # type: ignore[assignment] 
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),  # type: ignore[assignment]
         )
 
     make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
