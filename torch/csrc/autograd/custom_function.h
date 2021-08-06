@@ -231,7 +231,7 @@ inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
   return result;
 }
 
-void TORCH_API autogradNotImplementedFunction(const c10::OperatorHandle& op, at::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
+void TORCH_API autogradNotImplementedFallback(const c10::OperatorHandle& op, at::DispatchKeySet dispatch_keys, torch::jit::Stack* stack);
 
 template<class T>
 template<typename X, typename... Args>

@@ -30,7 +30,8 @@ from .gen_trace_type import (
 from .gen_inplace_or_view_type import (
     get_view_info, is_tensor_type, is_tensor_list_type, unpack_args, get_base_name,
     use_derived, modifies_arguments, WRAPPER_REGISTRATION, TMP_VAR, METHOD_DEFINITION,
-    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name
+    ASSIGN_RETURN_VALUE, gen_formals, ALL_VIEW_FUNCTIONS, unpacked_name,
+    AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION
 )
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
@@ -403,14 +404,29 @@ def gen_variable_type_func(
     with native_function_manager(f):
         name = cpp.name(f.func)
         formals = gen_formals(f)
-
-        type_definition = METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns).cpp_type(),
-            type_wrapper_name=type_wrapper_name(f),
-            type_definition_body=emit_body(fn),
-            formals=formals,
-        )
-        wrapper_registration = gen_wrapper_registration(f)
+        # NOTE: [ Registering AutogradNotImplemented boxed kernel ]
+        #
+        # When there is no derivatives.yaml entry, we register a generic boxed NotImplemented kernel
+        # to set grad_fn to be NotImplemented, so that forward proceeds as usual but an error is
+        # properly produced on backward.
+        #
+        # There are two cases where still let codegen handle it:
+        # 1) ops that need to reset grad accumulator (we let codegen handle this case because) the
+        #    list is (currently) only accessible in Python and there are only 2 op.
+        # 2) User explicitly specifies DONT_REQUIRE_DERIVATIVE. This basically makes autograd a
+        #    fallthrough with NDEBUG checks. This can be useful for when all outputs are integral.
+        #
+        if fn.info is None and not get_base_name(f) in RESET_GRAD_ACCUMULATOR and not get_base_name(f) in DONT_REQUIRE_DERIVATIVE:
+            wrapper_registration = (AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION.substitute(
+                unqual_operator_name_with_overload=f.func.name))
+        else:
+            type_definition = METHOD_DEFINITION.substitute(
+                return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                type_wrapper_name=type_wrapper_name(f),
+                type_definition_body=emit_body(fn),
+                formals=formals,
+            )
+            wrapper_registration = gen_wrapper_registration(f)
 
     # See Note [Manual Backend kernels]
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration

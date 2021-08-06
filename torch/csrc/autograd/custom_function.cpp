@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/variable.h>
 
 namespace torch { namespace autograd {
 
@@ -28,31 +29,63 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
   }
 }
 
-void autogradNotImplementedFunction(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+  // Mimics the logic of a VariableType NotImplemented kernel
   const auto& schema = op.schema();
   const auto& op_name = schema.operator_name().name;
-  const auto& arguments = op.schema().arguments();
+  const auto& arguments = schema.arguments();
+  const auto& returns = schema.returns();
   const auto num_arguments = arguments.size();
-  const auto num_returns = schema.returns().size();
+  const auto num_returns = returns.size();
   const auto stack_start = stack->size() - num_arguments;
-
+  const bool grad_mode = GradMode::is_enabled();
   std::vector<at::Tensor> tensors_requiring_grad;
+
+  bool any_is_inplace = false;
+  for (const auto i : c10::irange(num_arguments)) {
+    const auto& alias_info = arguments[i].alias_info();
+    any_is_inplace |= alias_info.has_value() && alias_info->isWrite();
+  }
+  std::vector<bool> is_inplace_output;
+  is_inplace_output.reserve(num_returns);
+  for (const auto i : c10::irange(num_returns)) {
+    const auto& alias_info = returns[i].alias_info();
+    is_inplace_output.push_back(alias_info.has_value() && alias_info->isWrite());
+  }
+  // Check fwd grad not defined
   for (const auto i : c10::irange(num_arguments)) {
     auto& ivalue = (*stack)[stack_start + i];
-    // Replicate 'unpack' behavior in VariableType
     if (ivalue.isTensor()) {
       const auto& tensor = VariableType::unpack(ivalue.toTensor(), op_name.c_str(), i);
-      if (GradMode::is_enabled() && tensor.requires_grad()) {
+      if (grad_mode && tensor.requires_grad()) {
         tensors_requiring_grad.push_back(tensor);
       }
       TORCH_CHECK_NOT_IMPLEMENTED(!generated::details::isFwGradDefined(tensor), "Trying to use forward AD with ", op_name, " that does not support it.");
-    } else if (ivalue.isTensor()) {
-      VariableType::unpack(ivalue.toTensorVector(), op_name.c_str(), i);
+    } else if (ivalue.isTensorList()) {
+      const auto& tensors = VariableType::unpack(ivalue.toTensorVector(), op_name.c_str(), i);
+      for (const auto& tensor : tensors) {
+        if (grad_mode && tensor.requires_grad()) {
+          tensors_requiring_grad.push_back(tensor);
+        }
+        TORCH_CHECK_NOT_IMPLEMENTED(!generated::details::isFwGradDefined(tensor), "Trying to use forward AD with ", op_name, " that does not support it.");
+      }
     }
     // What about optional tensors?
   }
+  const bool any_requires_grad = tensors_requiring_grad.size() > 0;
+
+  if (any_is_inplace) {
+    for (const auto i : c10::irange(num_arguments)) {
+      auto& ivalue = (*stack)[stack_start + i];
+      if (ivalue.isTensor()) {
+        check_inplace(ivalue.toTensor(), any_requires_grad);
+      } else if (ivalue.isTensorList()) {
+        check_inplace(ivalue.toTensorVector(), any_requires_grad);
+      }
+    }
+  }
   std::shared_ptr<NotImplemented> grad_fn;
-  if (tensors_requiring_grad.size() > 0) {
+  if (any_requires_grad) {
     grad_fn = std::shared_ptr<NotImplemented>(new NotImplemented(op_name), deleteNode);
     grad_fn->set_next_edges(collect_next_edges(tensors_requiring_grad));
   }
@@ -60,30 +93,19 @@ void autogradNotImplementedFunction(const c10::OperatorHandle& op, DispatchKeySe
     at::AutoDispatchBelowADInplaceOrView guard;
     op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
   }
-  const auto returns = torch::jit::last(stack, num_returns);
-  // Copy non-tensor outputs to use after jit::drop
-  std::vector<c10::IValue> returns_copy;
-  std::vector<at::Tensor> output_tensors;
-  for (const auto return_idx : c10::irange(returns.size())) {
-    if (!returns[return_idx].isTensor()) {
-      // Undefined tensor as placeholder for non-tensor outputs
-      output_tensors.push_back(Tensor());
-      returns_copy.push_back(returns[return_idx]);
-    } else {
-      output_tensors.push_back(returns[return_idx].toTensor());
-      returns_copy.push_back({});
+  const auto& ret = torch::jit::last(stack, num_returns);
+  for (const auto return_idx : c10::irange(ret.size())) {
+    if (ret[return_idx].isTensor()) {
+      const auto& t = ret[return_idx].toTensor();
+      if (grad_fn && isDifferentiableType(t.scalar_type())) {
+        if (is_inplace_output[return_idx]) {
+          rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+        } else {
+          set_history(const_cast<at::Tensor&>(t), grad_fn);
+        }
+      }
     }
-  }
-  torch::jit::drop(stack, num_returns);
-  if (grad_fn) {
-    set_history(output_tensors, grad_fn);
-  }
-  for (const auto return_idx : c10::irange(num_returns)) {
-    if (output_tensors[return_idx].defined()) {
-      torch::jit::push(stack, output_tensors[return_idx]);
-    } else {
-      torch::jit::push(stack, returns_copy[return_idx]);
-    }
+
   }
 }
 
