@@ -137,6 +137,18 @@ Tensor dot(const Tensor &self, const Tensor &other){
 
   dot_check(self, other);
 
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return at::vdot(self.resolve_conj(), other.conj());
+       } else {
+         return at::vdot(other, self.conj());
+       }
+    } else if (other.is_conj()) {
+      return at::vdot(self, other.conj());
+    }
+  }
+
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
@@ -150,6 +162,16 @@ Tensor vdot(const Tensor &self, const Tensor &other){
   // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()){
     return at::dot(self, other);
+  }
+
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return at::vdot(other.resolve_conj(), self.conj());
+    } else {
+      return at::vdot(self.resolve_conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return at::dot(self, other.conj());
   }
 
   // For complex dtypes.

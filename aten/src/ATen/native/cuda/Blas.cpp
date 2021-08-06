@@ -365,6 +365,18 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
+  if (self.is_complex()) {
+    if (self.is_conj()) {
+      if (other.is_conj()) {
+        return vdot_cuda(self.resolve_conj(), other.conj());
+       } else {
+        return vdot_cuda(other, self.conj());
+      }
+    } else if (other.is_conj()) {
+      return vdot_cuda(self, other.conj());
+    }
+  }
+
 return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       self.scalar_type(), "dot",
@@ -400,6 +412,16 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
   if (n == 1) {
     incx = 1;
     incy = 1;
+  }
+
+  if (self.is_conj()) {
+    if (other.is_conj()) {
+      return vdot_cuda(other.resolve_conj(), self.conj());
+    } else {
+      return vdot_cuda(self.resolve_conj(), other);
+    }
+  } else if (other.is_conj()) {
+    return dot_cuda(self, other.conj());
   }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
