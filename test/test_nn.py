@@ -16855,16 +16855,6 @@ class TestNNDeviceType(NNTestCase):
                                     r'lambda must be greater or equal to 0, but found to be -1\.'):
             m(input)
 
-    def test_unfold(self, device):
-        def func(x):
-            return F.unfold(x, kernel_size=(3, 3))
-        seeds = (13, 256, 811, 43, 7)
-        for sd in seeds:
-            torch.manual_seed(sd)
-            x = torch.randn(1, 1, 5, 5, device=device, requires_grad=True)
-            gradcheck(func, [x])
-            gradgradcheck(func, [x])
-
     def test_fold(self, device):
         def func(x):
             return F.fold(x, output_size=(4, 5), kernel_size=(2, 2))
