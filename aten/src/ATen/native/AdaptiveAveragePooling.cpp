@@ -18,13 +18,13 @@ namespace {
     int64_t ndim = input.ndimension();
     for (int64_t i = 1; i < ndim; i++) {
       TORCH_CHECK(input.size(i) > 0,
-        "adaptive_avg_pooling2d(): Expected input to have non-zero size for non-batch dimensions, "
+        "adaptive_avg_pool2d(): Expected input to have non-zero size for non-batch dimensions, "
         "but input has sizes ", input.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pooling2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pool2d(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == output.dtype(),
       "expected dtype ", input.dtype(), " for `output` but got dtype ", output.dtype());
 
@@ -54,13 +54,13 @@ namespace {
     int64_t ndim = grad_output.ndimension();
     for (int64_t i = 1; i < ndim; i++) {
       TORCH_CHECK(grad_output.size(i) > 0,
-        "adaptive_avg_pooling2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
+        "adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero size for non-batch dimensions, "
         "but grad_output has sizes ", grad_output.sizes(), " with dimension ", i, " being "
         "empty");
     }
 
     TORCH_CHECK((ndim == 3 || ndim == 4),
-      "adaptive_avg_pooling2d_backward(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
+      "adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor with optional 0-dim batch size, but got ", input.sizes());
     TORCH_CHECK(input.dtype() == grad_output.dtype(),
       "expected dtype ", input.dtype(), " for `grad_output` but got dtype ", grad_output.dtype());
     TORCH_CHECK(input.dtype() == grad_input.dtype(),
