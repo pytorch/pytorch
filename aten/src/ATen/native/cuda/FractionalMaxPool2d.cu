@@ -161,6 +161,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
     input_ = input_.reshape({1, input.size(0), input.size(1), input.size(2)});
   }
 
+  if (output_.numel() == 0) {
+    return;
+  }
+
   // block is limited to 4 warps
   // grid handles overflow per each plane
   int outputPlaneSize = output_.size(2) *
@@ -219,6 +223,9 @@ void fractional_max_pool2d_backward_out_cuda_template(
 
   /* resize */
   gradInput.resize_as_(input);
+  if (gradInput.numel() == 0) {
+    return;
+  }
   gradInput.zero_();
 
   auto gradInput_ = gradInput;
