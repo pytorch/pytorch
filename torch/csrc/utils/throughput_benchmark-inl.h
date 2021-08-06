@@ -8,6 +8,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <aten/src/ATen/Parallel.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -59,8 +60,14 @@ BenchmarkExecutionStats BenchmarkHelper<Input, Output, Model>::benchmark(
   std::vector<std::thread> callers;
 
   callers.reserve(config.num_calling_threads);
+
+  bool grad_mode = at::GradMode::is_enabled();
+
   for (const auto thread_id : c10::irange(config.num_calling_threads)) {
-    callers.emplace_back([&, thread_id]() {
+    callers.emplace_back([&, thread_id, grad_mode]() {
+      // sync the status of thread_local variables from the main thread
+      at::GradMode::set_enabled(grad_mode);
+
       // We use conditional variable as a barrier to make sure each thread
       // performs required warmeup iterations before we start measuring
       for (const auto j : c10::irange(config.num_warmup_iters)) {
