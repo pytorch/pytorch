@@ -19,6 +19,9 @@ option_parser = OptionParser.new do |opts|
  opts.on('-t', '--team_id ', 'development team ID') { |value|
     options[:team_id] = value
  }
+ opts.on('-f', "--framework", Array, "system frameworks") { |value|
+    options[:framework] = value
+}
 end.parse!
 puts options.inspect
 
@@ -60,7 +63,7 @@ for lib in libs do
     end
 end
 # link system frameworks
-frameworks = ['Accelerate', 'MetalPerformanceShaders']
+frameworks = options[:framework]
 frameworks.each do |framework|
     path = "System/Library/Frameworks/#{framework}.framework"
     framework_ref = project.frameworks_group.new_reference(path)
