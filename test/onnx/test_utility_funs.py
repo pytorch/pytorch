@@ -2,7 +2,7 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode
+from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
@@ -683,6 +683,44 @@ class TestUtilityFuns(TestCase):
                                             dynamic_axes={'x': [0, 1, 2], 'y': [0, 1, 2]})
         iter = graph.nodes()
         assert next(iter).kind() == "custom_namespace::custom_op"
+
+    def test_custom_opsets_gelu(self):
+        def gelu(g, self):
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
+
+        register_custom_op_symbolic("::gelu", gelu, 1)
+        model = torch.nn.GELU()
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f,
+                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        assert graph.graph.node[0].op_type == "Gelu"
+        assert graph.opset_import[0].version == self.opset_version
+        assert graph.opset_import[1].domain == 'com.microsoft'
+        assert graph.opset_import[1].version == 1
+
+    def test_custom_opsets_inverse(self):
+        class CustomInverse(torch.nn.Module):
+            def forward(self, x):
+                return torch.inverse(x) + x
+
+        def inverse(g, self):
+            return g.op("com.microsoft::Inverse", self).setType(self.type())
+
+        register_custom_op_symbolic('::inverse', inverse, 1)
+        model = CustomInverse()
+        x = torch.randn(2, 3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f,
+                          opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
+
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+        assert graph.graph.node[0].op_type == "Inverse"
+        assert graph.opset_import[0].version == self.opset_version
+        assert graph.opset_import[1].domain == 'com.microsoft'
+        assert graph.opset_import[1].version == 1
 
     def test_onnx_fallthrough(self):
         # Test aten export of op with symbolic for aten

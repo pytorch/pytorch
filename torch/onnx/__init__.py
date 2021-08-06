@@ -31,9 +31,9 @@ def _export(*args, **kwargs):
 
 def export(model, args, f, export_params=True, verbose=False, training=TrainingMode.EVAL,
            input_names=None, output_names=None, operator_export_type=None,
-           opset_version=None, _retain_param_name=True, do_constant_folding=True,
-           example_outputs=None, strip_doc_string=True, dynamic_axes=None,
-           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=True,
+           opset_version=None, _retain_param_name=None, do_constant_folding=True,
+           example_outputs=None, strip_doc_string=None, dynamic_axes=None,
+           keep_initializers_as_inputs=None, custom_opsets=None, enable_onnx_checker=None,
            use_external_data_format=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
@@ -303,7 +303,8 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             * VALUE (int): opset version
 
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
-            the opset version is set to 1.
+            the opset version is set to 1. Only custom opset domain name and version should be
+            indicated through this argument.
 
         enable_onnx_checker (bool, default True): Deprecated and ignored. Will be removed in next
             Pytorch release.
