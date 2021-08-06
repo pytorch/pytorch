@@ -22,7 +22,7 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit
+    make_functional_deprecated_v1, make_functional_with_buffers_deprecated_v1, make_fx, nnc_jit, compiled_function
 )
 
 from torch.testing._internal.common_device_type import ops, onlyCPU
@@ -184,6 +184,7 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
             t = f(args, kwargs)
+            # just since pytrees with torch.return_types doesn't work
             if isinstance(t, tuple):
                 continue
             new_f = make_fx(f)(args, kwargs)
@@ -198,7 +199,52 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
             self.assertEqual(new_out, old_out)
             pass
 
+class TestEagerFusionOpInfo(TestCase):
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    def test_eager_fusion_exhaustive(self, device, dtype, op):
+        # These are ops that don't make sense to test
+        op_skip = {
+        }
+        # Unsupported input types
+        if opinfo_in_dict(op, op_skip):
+            return
+        # entries in here need don't work and need to be fixed.
+        # Each one of these is a bug
+        python_fail = {
+            'var',
+            'std',
+            'sort',
+            'prod',
+            'to_sparse',
+            'rsub.rsub_scalar',
+            'linalg.matrix_power',
+            'linalg.inv',
+            'linalg.cholesky',
+            'linalg.eigvals',
+            'tensor_split',
+            'nn.functional.pad.circular',
+        }
+        if opinfo_in_dict(op, python_fail):
+            return
 
+        def f(args, kwargs):
+            return op.op(*args, **kwargs)
+        if not op.supports_autograd:
+            return
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
+        new_f = None
+        for sample_input in sample_inputs_itr:
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+            if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in args]):
+                continue
+            if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in kwargs.values()]):
+                continue
+            t = f(args, kwargs)
+            if isinstance(t, tuple):
+                continue
+            compiled_f = compiled_function(f, lambda x,_: x, lambda x,_: x).apply
+            compiled_f(args, kwargs)
 
 only_for = ("cpu")
 instantiate_device_type_tests(
@@ -207,6 +253,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(TestPythonKeyOperatorsOpInfo, globals(), only_for=only_for)
+instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_for)
 
 
 if __name__ == '__main__':
