@@ -28,10 +28,10 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autoclass:: torch.distributed.GradBucket
 
 .. autofunction:: torch.distributed.GradBucket.index
-.. autofunction:: torch.distributed.GradBucket.get_tensor
+.. autofunction:: torch.distributed.GradBucket.buffer
 .. autofunction:: torch.distributed.GradBucket.gradients
 .. autofunction:: torch.distributed.GradBucket.is_last
-.. autofunction:: torch.distributed.GradBucket.set_tensor
+.. autofunction:: torch.distributed.GradBucket.set_buffer
 
 Default Communication Hooks
 ---------------------------
