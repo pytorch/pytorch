@@ -19,11 +19,9 @@ bool checkModuleHierarchyForOp(
     const std::string& module_hier,
     std::ifstream& trace_file) {
   std::string line;
-  while (std::getline(trace_file, line) )
-  {
+  while (std::getline(trace_file, line) ) {
     if (line.find(op_name) != std::string::npos) {
-      while (std::getline(trace_file, line) )
-      {
+      while (std::getline(trace_file, line) ) {
         if (line.find("Module Hierarchy") != std::string::npos) {
           return (line.find(module_hier) != std::string::npos);
         }
@@ -46,7 +44,7 @@ TEST(MobileProfiler, ModuleHierarchy) {
 
   mobile::Module bc = _load_for_mobile(testModelFile);
   {
-    KinetoEdgeCPUProfiler pofiler(
+    KinetoEdgeCPUProfiler profiler(
         bc,
         trace_file_name,
         false, // record input_shapes
@@ -55,7 +53,7 @@ TEST(MobileProfiler, ModuleHierarchy) {
         false, // record flops
         true); // record module hierarchy
     bc.forward(inputs);
-  }
+  } // End of profiler
   std::ifstream trace_file(trace_file_name);
   std::string line;
   ASSERT_TRUE(trace_file.is_open());

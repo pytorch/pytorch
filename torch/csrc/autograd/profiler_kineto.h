@@ -338,6 +338,22 @@ TORCH_API void enableProfiler(
     const std::set<ActivityType>& activities,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
+/*
+ * Same as enableProfiler but with callback to do post-processing of
+ * KinetoEvents.
+ * enableProfilerWithEventPostProcess enables profiler to capture
+ * specified activities, with specified RecordFunction scope, if any.
+ * Additinally it takes functor that does in-place post processing of
+ * events, e.g. populate stack trace or module hierarchy information lazily
+ * using debug_handle.
+ * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
+ * In this case lite interpreter runtime, records debug handles in RecordFunction, along
+ * with other information. Debug handles are eventually passed down to KinetoEvent and
+ * recorded as part of the event. KinetoEdgeCPUProfiler,
+ * in torch/csrc/jit/mobile/profiler_edge.cpp, enables profiler using post-processing
+ * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
+ * and generates stack trace and module hierarchy information, once profiling is done.
+ */
 TORCH_API void enableProfilerWithEventPostProcess(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,

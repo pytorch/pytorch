@@ -266,6 +266,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 #endif // USE_KINETO
   uint64_t start_time_;
   std::vector<KinetoEvent> kineto_events_;
+  // Optional, if event post-processing is enabled.
   std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
 };
 

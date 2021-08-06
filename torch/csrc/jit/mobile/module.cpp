@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/mobile/module.h>
 
-#include <bits/stdint-intn.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>

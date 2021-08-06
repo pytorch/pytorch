@@ -85,7 +85,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
   std::vector<StackEntry> stack_entries;
   std::string module_info =
       root_scope_string + "(" + top_module_type_name + ")";
-  std::string caller_fn_name = "<forward>";
+  std::string caller_fn_name = "<unknown>";
   module_info.append("::").append(caller_fn_name);
   for (const auto& debug_info : source_callstacks) {
     auto debug_info_pair =
