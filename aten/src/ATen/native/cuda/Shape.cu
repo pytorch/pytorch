@@ -529,6 +529,17 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
 
   // skip resizing if size of result is same as expected
   if (out.sizes() != size) {
+    // raise a warning while resizing if output has one or more elements
+    if (out.numel() != 0) {
+      TORCH_WARN(
+        "An output with one or more elements was resized since it had ",
+        "shape ", out.sizes(), ", which does not match the required ",
+        "output shape ", size, ".",
+        "This behavior is deprecated, and in a future PyTorch release outputs ",
+        "will not be resized unless they have zero elements. You can explicitly ",
+        "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+        "t.resize_(0).");
+    }
     out.resize_(size, memory_format);
   }
 

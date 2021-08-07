@@ -7556,8 +7556,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cat_concat,
            supports_forward_ad=True,
            skips=(
-               # cat does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
                SkipInfo('TestJit', 'test_variant_consistency_jit'),
                SkipInfo('TestJit', 'test_jit_alias_remapping'))),
     OpInfo('vstack',
@@ -7566,18 +7564,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
            supports_forward_ad=True,
            skips=(
-               # vstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),
                # RuntimeError: _fn() Expected a value of type
                #   'Tensor (inferred)' for argument 't0' but instead found type 'tuple'.
-               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('dstack',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_hstack_dstack_vstack,
-           supports_forward_ad=True,
-           skips=(
-               # dstack does not correctly warn when resizing out= inputs
-               SkipInfo('TestCommon', 'test_out'),)),
+           supports_forward_ad=True),
     OpInfo('unfold',
            op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
