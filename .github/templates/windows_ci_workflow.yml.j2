@@ -5,7 +5,7 @@
 
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Windows CI (!{{ build_environment }})
+name: !{{ build_environment }}
 
 on:
 {%- if on_pull_request %}
@@ -80,6 +80,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -183,6 +185,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
