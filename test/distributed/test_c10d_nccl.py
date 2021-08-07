@@ -39,7 +39,6 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
     TestCase,
     run_tests,
     retry_on_connect_failures,
@@ -50,13 +49,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils.checkpoint import checkpoint
 
-if not IS_WINDOWS:
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
-    from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
-    }
+from torch.distributed.optim.functional_sgd import _FunctionalSGD
+from torch.distributed.optim.functional_adam import _FunctionalAdam
+_SUPPORTED_OPTIM_MAPPING = {
+    _FunctionalSGD: torch.optim.SGD,
+    _FunctionalAdam: torch.optim.Adam
+}
 
 if TEST_WITH_TSAN:
     print(
