@@ -84,6 +84,7 @@ IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
 }
 
 ScalarType get_result_or_bytebool_dtype(const Tensor& self, const Tensor& result) {
+  // Refer [all, any : uint8 compatibility]
   if (result.defined()) {
     return result.scalar_type();
   } else {
@@ -200,13 +201,16 @@ TORCH_META_FUNC2(prod, dim_int)
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
+void check_floating_or_complex_dtype(const char* name, ScalarType dtype) {
+  TORCH_CHECK(
+      at::isFloatingType(dtype) || at::isComplexType(dtype),
+      name, "(): input dtype should be either floating point or complex dtypes. "
+      "Got ", toString(dtype), " instead.");
+}
+
 TORCH_META_FUNC2(mean, dim)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto self_dtype = self.scalar_type();
-  TORCH_CHECK(
-      at::isFloatingType(self_dtype) || at::isComplexType(self_dtype),
-      "Can only calculate the mean of floating types. Got ",
-      toString(self_dtype), " instead.");
+  check_floating_or_complex_dtype("mean", self.scalar_type());
   auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -222,22 +226,11 @@ ScalarType get_result_or_self_value_dtype(
   }
 }
 
-void check_norm(const Tensor& self, optional<ScalarType> opt_dtype) {
-  auto in_dtype = opt_dtype.value_or(self.scalar_type());
 
-  TORCH_CHECK(
-      self.layout() == Layout::Strided,
-      "norm only supports strided layout, but got: ", self.layout());
-
-  TORCH_CHECK(
-      at::isFloatingType(in_dtype) || at::isComplexType(in_dtype),
-      "Can only calculate the norm of floating point and complex dtypes. Got ",
-      toString(in_dtype), " instead.");
-}
 
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  check_norm(self, c10::nullopt);
+  check_floating_or_complex_dtype("norm", self.scalar_type());
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), c10::nullopt);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
@@ -248,14 +241,10 @@ TORCH_META_FUNC2(norm, ScalarOpt_dim_dtype)
  IntArrayRef dim,
  bool keepdim,
  ScalarType dtype) {
-  check_norm(self, dtype);
+  check_floating_or_complex_dtype("norm", dtype);
   auto out_dtype = get_result_or_self_value_dtype(self, maybe_get_output(), dtype);
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
-
-} // namespace meta
-
-namespace meta {
 
 TORCH_META_FUNC(aminmax)
 (const Tensor& self, c10::optional<int64_t> dim_opt, bool keepdim) {
@@ -1282,8 +1271,6 @@ Tensor sparse_norm(
     const optional<Scalar>& p,
     IntArrayRef dim,
     bool keepdim) {
-  // Sparse tensors need a different implementation because their values
-  // are accessed with a different API than strided tensors
   return at::native_norm(self, p, dim, keepdim, c10::nullopt);
 }
 
