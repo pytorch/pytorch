@@ -199,6 +199,16 @@ class TestSortAndSelect(TestCase):
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
+    @dtypes(torch.float32)
+    def test_sort_1d_output_discontiguous(self, device, dtype):
+        tensor = torch.randn(12, device=device, dtype=dtype)
+        values = torch.empty_like(tensor)
+        indices = torch.empty_like(tensor, dtype=torch.long)
+        torch.sort(tensor[:6], out=(values[::2], indices[::2]))
+        values_cont, indices_cont = tensor[:6].sort()
+        self.assertEqual(indices[::2], indices_cont)
+        self.assertEqual(values[::2], values_cont)
+
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):

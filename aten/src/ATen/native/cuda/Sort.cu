@@ -150,10 +150,15 @@ void sortKeyValueInplace(const Tensor& key,
       at::cuda::detail::TensorInfo<int64_t, unsigned int> valueInfo =
         at::cuda::detail::getTensorInfo<int64_t, unsigned int>(value);
 
-      keyInfo.reduceDim(dim);
-      int collapseKeyDim = keyInfo.collapseDims(dim);
-      valueInfo.reduceDim(dim);
-      int collapseValueDim = valueInfo.collapseDims(dim);
+      int collapseKeyDim = 0;
+      int collapseValueDim = 0;
+
+      if (keyInfo.dims > 1) {
+        keyInfo.reduceDim(dim);
+        collapseKeyDim = keyInfo.collapseDims(dim);
+        valueInfo.reduceDim(dim);
+        collapseValueDim = valueInfo.collapseDims(dim);
+      }
 
       if (keyInfo.isContiguous()) {
         HANDLE_SORT_CASE(unsigned int, -2);
