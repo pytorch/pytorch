@@ -1795,6 +1795,15 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
 
     return (SampleInput(tensors, args=(0,)),)
 
+def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
+    tensors = [
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+    ]
+
+    return (SampleInput(tensors),)
+
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
         make_tensor((S, S), device, dtype, requires_grad=requires_grad),
@@ -7540,6 +7549,17 @@ op_db: List[OpInfo] = [
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
+    OpInfo('cat',
+           ref=np.concatenate,
+           aliases=('concat',),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_cat_concat,
+           supports_forward_ad=True,
+           skips=(
+               # cat does not correctly warn when resizing out= inputs
+               SkipInfo('TestCommon', 'test_out'),
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
