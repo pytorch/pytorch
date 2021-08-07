@@ -1796,13 +1796,21 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
     return (SampleInput(tensors, args=(0,)),)
 
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     tensors = [
-        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
-        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
-        make_tensor((S, S), device, dtype, requires_grad=requires_grad),
+        make_arg((S, S)),
+        make_arg((S, S)),
+        make_arg((S, S)),
     ]
 
-    return (SampleInput(tensors),)
+    dim_cases = (-1, 0, 1)
+
+    def generator():
+        for dim in dim_cases:
+            yield SampleInput(tensors, args=(dim,))
+
+    return list(generator())
 
 def sample_inputs_hstack_dstack_vstack(op_info, device, dtype, requires_grad, **kwargs):
     tensors = [
