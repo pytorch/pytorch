@@ -11,7 +11,9 @@ from torch.quantization.fx._equalize import (
     _WeightEqualizationObserver,
     calculate_equalization_scale,
     default_equalization_qconfig,
-    _convert_equalization_ref
+    _convert_equalization_ref,
+    get_layer_sqnr_dict,
+    get_equalization_qconfig_dict,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -789,3 +791,67 @@ class TestEqualizeFx(QuantizationTestCase):
             equalized_and_quantized = convert_fx(prepared)  # Check if compile
             equalized_and_quantized_output = equalized_and_quantized(x)
             self.assertTrue(torch.allclose(quantized_output, equalized_and_quantized_output, atol=0.1))
+
+    @skipIfNoFBGEMM
+    def test_selective_equalization(self):
+        """ Tests that we are able to run numeric suite on the equalized model
+        and construct a valid equalization_qconfig_dict equalizing only the top
+        4 layers with the highest quantization errors.
+        """
+
+        torch.manual_seed(1)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bot = torch.nn.Sequential(torch.nn.Linear(5, 5))
+                self.top = torch.nn.Sequential(torch.nn.Linear(5, 5))
+
+            def forward(self, x):
+                x = self.bot(x)
+                x = torch.add(x, 5)
+                x = self.top(x)
+                return x
+
+        float_model = M().eval()
+        # Hard coded so that the top layer has a higher quantization error
+        x = torch.tensor([[0.0642, 0.7824, 0.4255, 0.7106, 0.5957],
+                          [0.8373, 0.8851, 0.8229, 0.0212, 0.8987],
+                          [0.9077, 0.7538, 0.4530, 0.5772, 0.1376],
+                          [0.0690, 0.9002, 0.7998, 0.2768, 0.8985],
+                          [0.0282, 0.5068, 0.6725, 0.1829, 0.5480]])
+
+        # Quantize the float model
+        prepared_model = prepare_fx(copy.deepcopy(float_model), specific_qconfig_dict)
+        prepared_model(x)
+        quantized_model = convert_fx(copy.deepcopy(prepared_model))
+
+        # Get the SQNR between the float and quantized model
+        layer_to_sqnr_dict = get_layer_sqnr_dict(copy.deepcopy(prepared_model), quantized_model, x)
+
+        # Construct the equalization_qconfig_dict equalizing layers with the highest
+        # quantization errors
+        selective_equalization_qconfig_dict = get_equalization_qconfig_dict(layer_to_sqnr_dict, 1)
+
+        # Create the selectively equalized model
+        prepared_model = prepare_fx(
+            copy.deepcopy(float_model),
+            specific_qconfig_dict,
+            equalization_qconfig_dict=selective_equalization_qconfig_dict,
+        )
+        prepared_model(x)
+        equalized_model = convert_fx(prepared_model)
+
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.add),
+            ns.call_function(torch.mul),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_method('dequantize')
+        ]
+
+        # Check the order of nodes in the graph
+        self.checkGraphModuleNodes(equalized_model, expected_node_list=node_list)

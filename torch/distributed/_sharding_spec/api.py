@@ -4,7 +4,6 @@ from typing import List, Union
 from torch.distributed.remote_device import _RemoteDevice
 
 from ._internals import (
-    Device,
     ShardMetadata,
     validate_non_overlapping_shards_metadata
 )
@@ -27,7 +26,7 @@ class DevicePlacementSpec(PlacementSpec):
         device(:class:`torch.distributed.remote_device._RemoteDevice`): The device to place the entity on.
     """
 
-    device: Device
+    device: _RemoteDevice
 
     def __post_init__(self):
         if not isinstance(self.device, _RemoteDevice):

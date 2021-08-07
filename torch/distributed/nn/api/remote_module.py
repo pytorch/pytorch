@@ -413,21 +413,21 @@ class _RemoteModule(nn.Module):
     def extra_repr(self) -> str:  # type: ignore[return]
         _raise_not_supported(self.extra_repr.__name__)
 
-    def _prepare_init(self, remote_device: str) -> bool:
+    def _prepare_init(self, remote_device_str: str) -> bool:
         """
         Prepares the initializaiton and returns whether to enable automatically moving CPU tensors to CUDA devices.
         """
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
-        remote_device = _RemoteDevice(remote_device)
+        remote_device = _RemoteDevice(remote_device_str)
         self.on = remote_device.remote_worker()
         self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
         # then enable moving any input CPU tensors to the same cuda device.
         self.is_device_map_set = bool(
-            agent._get_device_map(agent.get_worker_info(self.on))
+            agent._get_device_map(agent.get_worker_info(self.on))  # type: ignore[arg-type]
         )
         # ``enable_moving_cpu_tensors_to_cuda`` is less strict than ``is_device_map_set``:
         # If ``enable_moving_cpu_tensors_to_cuda`` is true, but the device map is not set,

@@ -1337,6 +1337,10 @@ def _get_overloads(obj):
     if uncompiled_overloads is None:
         return existing_compiled_fns
 
+    if obj in uncompiled_overloads:
+        raise RuntimeError(_jit_internal.get_overload_no_implementation_error_message(
+            'function', obj))
+
     compiled_fns = []
     for overload_fn in uncompiled_overloads:
         compiled_fns.append(
