@@ -226,8 +226,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
   OP_DECOMPOSE2(float_power, Scalar);
-  BINARY_POINTWISE(fmin);
+
+  BINARY_POINTWISE(floor_divide);
+  UNARY_POINTWISE2(floor_divide, Scalar);
+
   BINARY_POINTWISE(fmax);
+  BINARY_POINTWISE(fmin);
+  BINARY_SCALAR_2(fmod, Tensor, Scalar);
   BINARY_POINTWISE(maximum);
   BINARY_POINTWISE(minimum);
 

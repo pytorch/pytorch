@@ -143,6 +143,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(outer);
   OP_DECOMPOSE(ger);
   m.impl("linear", linear_decomp);
+  VMAP_SUPPORT("cholesky", VARIADIC_BDIMS_BATCH_RULE(at::cholesky));
   VMAP_SUPPORT("cholesky_inverse", VARIADIC_BDIMS_BATCH_RULE(at::cholesky_inverse));
   VMAP_SUPPORT("pinverse", VARIADIC_BDIMS_BATCH_RULE(at::pinverse));
   VMAP_SUPPORT("linalg_pinv", VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(linalg_pinv)));
