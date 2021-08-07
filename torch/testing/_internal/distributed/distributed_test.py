@@ -7637,13 +7637,15 @@ class DistributedTest:
 
             model = MyModel().to(self.rank)
             inp = torch.randn(1, 10, device=self.rank)
-            for find_unused in [True, False]:
+            for (find_unused, static_graph) in itertools.product([True, False], [True, False]):
                 ddp = DistributedDataParallel(
                     model,
                     device_ids=[self.rank],
                     output_device=self.rank,
                     find_unused_parameters=find_unused
                 )
+                if static_graph:
+                    ddp._set_static_graph()
                 for i in range(6):
                     out = ddp(inp)
                     self.assertFalse(out[0].requires_grad)
