@@ -75,6 +75,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   UNARY_POINTWISE_ALL(sinh);
   UNARY_POINTWISE_ALL(sqrt);
   UNARY_POINTWISE_ALL(tan);
+  OP_DECOMPOSE2(trapezoid, x);
+  OP_DECOMPOSE2(trapezoid, dx);
+  OP_DECOMPOSE2(trapz, x);
+  OP_DECOMPOSE2(trapz, dx);
+  OP_DECOMPOSE2(true_divide, Tensor);
+  OP_DECOMPOSE2(true_divide, Scalar);
   UNARY_POINTWISE_ALL(trunc);
 
   // special-related
