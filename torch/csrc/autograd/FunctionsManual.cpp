@@ -3034,8 +3034,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& ggG,
     const Tensor& ggB,
     const Tensor& gO_t,
-    const c10::optional<Tensor>& save_mean_t,
-    const c10::optional<Tensor>& save_invstd_t,
+    const Tensor& save_mean_t,
+    const Tensor& save_invstd_t,
     IntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
 
@@ -3052,8 +3052,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
 
   auto input = input_t.reshape({M, N});
   auto gO = gO_t.reshape({M, N});
-  auto save_mean = toNonOptTensor(save_mean_t).reshape({M, 1});
-  auto save_invstd = toNonOptTensor(save_invstd_t).reshape({M, 1});
+  auto save_mean = save_mean_t.reshape({M, 1});
+  auto save_invstd = save_invstd_t.reshape({M, 1});
 
   bool affine = isDefined(gamma);
   Tensor gamma_expanded;

@@ -230,8 +230,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor & ggG,
     const Tensor & ggB,
     const Tensor & gO,
-    const c10::optional<Tensor> & save_mean,
-    const c10::optional<Tensor> & save_invstd,
+    const Tensor & save_mean,
+    const Tensor & save_invstd,
     IntArrayRef normalized_shape,
     std::array<bool,3> output_mask);
 
