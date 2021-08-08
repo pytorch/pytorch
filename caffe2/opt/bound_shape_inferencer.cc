@@ -5,6 +5,8 @@
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 namespace {
@@ -77,8 +79,7 @@ int takePrecedenceOver(
   if (left.size() == 0 || right.size() == 0) {
     return right.size() > left.size();
   }
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 0; i < right.size(); i++) {
+  for (auto i: c10::irange(right.size())) {
     // If right.size > left.size and left[0:i] == right[0:i],
     // right take precedence
     // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
@@ -284,8 +285,7 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     // new value is skipped.
     if (precedence == 1) {
       shape_info.setDimType(t);
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      for (int i = 0; i < bound_dims.size(); i++) {
+      for (auto i: c10::irange(bound_dims.size())) {
         shape.set_dims(i, bound_dims[i]);
       }
     } else if (precedence == 0 && !allow_existing_shape) {
@@ -874,8 +874,7 @@ void BoundShapeInferencer::InferUnPackRecords(const OperatorDef& op) {
     }
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (int i = 0; i < output_shapes.size(); i++) {
+  for (auto i: c10::irange(output_shapes.size())) {
     const auto& shape = output_shapes[i];
 
     CheckAndSetTensorBoundShape(
@@ -1091,8 +1090,7 @@ void BoundShapeInferencer::InferCommonOp(
       infered_data_type = TensorProto::FLOAT;
     }
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int i = 0; i < output_shapes.size(); i++) {
+    for (auto i: c10::irange(output_shapes.size())) {
       const auto& shape = output_shapes[i];
       if (shape.unknown_shape()) {
         continue;
