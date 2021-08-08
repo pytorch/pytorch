@@ -916,15 +916,6 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
-         [](Stack* stack) {
-           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-           int64_t a, b;
-           pop(stack, a, b);
-           push(stack, static_cast<double>(powWrapper(a, b)));
-         },
-         aliasAnalysisFromSchema()),
      // min and max are in prim:: because there is a difference between
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
