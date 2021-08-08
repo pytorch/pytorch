@@ -461,6 +461,7 @@ test_vec256() {
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   build/bin/test_deploy
+  ls -lR "$TORCH_INSTALL_DIR"
   assert_git_not_dirty
 }
 

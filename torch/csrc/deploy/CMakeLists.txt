@@ -46,3 +46,7 @@ target_include_directories(test_deploy_lib BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_executable(deploy_benchmark ${DEPLOY_DIR}/example/benchmark.cpp)
 target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
+
+if(INSTALL_TEST)
+  install(TARGETS test_deploy DESTINATION bin)
+endif()
