@@ -466,7 +466,6 @@ test_torch_deploy() {
   ls -l build/bin
   ls -l build/lib
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  
   "$TORCH_BIN_DIR"/test_deploy
   assert_git_not_dirty
 }
