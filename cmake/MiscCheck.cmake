@@ -10,6 +10,10 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
+if (${CMAKE_VERSION} VERSION_EQUAL "3.15.6" OR ${CMAKE_VERSION} VERSION_GREATER "3.15.6")
+  include(CheckCXXLinkerFlag)
+endif()
+
 if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
@@ -178,7 +182,11 @@ endif()
 # -to add all (including unused) symbols into the dynamic symbol
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
-check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+if(${CMAKE_VERSION} VERSION_EQUAL "3.15.6" OR ${CMAKE_VERSION} VERSION_GREATER "3.15.6")
+  check_cxx_linker_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+else()
+  check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+endif()
 if(${COMPILER_SUPPORTS_RDYNAMIC})
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
