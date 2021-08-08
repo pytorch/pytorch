@@ -10,10 +10,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-if(${CMAKE_VERSION} VERSION_EQUAL "3.18.0" OR ${CMAKE_VERSION} VERSION_GREATER "3.18.0")
-  include(CheckLinkerFlag)
-endif()
-
 if(NOT INTERN_BUILD_MOBILE)
   # ---[ Check that our programs run.  This is different from the native CMake
   # compiler check, which just tests if the program compiles and links.  This is
@@ -182,20 +178,12 @@ endif()
 # -to add all (including unused) symbols into the dynamic symbol
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
-if(${CMAKE_VERSION} VERSION_EQUAL "3.18.0" OR ${CMAKE_VERSION} VERSION_GREATER "3.18.0")
-  if(MSVC)
-    # "Unknown option" classified as a warning in MSVC-like tools.
-    # So, we need to use `/WX` to treat it as an error.
-    check_linker_flag(CXX "-WX -rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-  else()
-    check_linker_flag(CXX "-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-  endif()
-else()
+if(NOT MSVC)
   check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
-endif()
-if(${COMPILER_SUPPORTS_RDYNAMIC})
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+  if(${COMPILER_SUPPORTS_RDYNAMIC})
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -rdynamic")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -rdynamic")
+  endif()
 endif()
 
 # ---[ If we are using msvc, set no warning flags
