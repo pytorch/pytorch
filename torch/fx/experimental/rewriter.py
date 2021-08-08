@@ -6,7 +6,7 @@ from types import FunctionType
 from typing import cast, Union, Callable, Dict, Optional, Any
 from torch.fx._symbolic_trace import Tracer
 from torch.fx.graph import Graph
-from torch.jit.frontend import normalize_source_lines
+from torch._sources import normalize_source_lines
 import torch
 
 class AST_Rewriter(ast.NodeTransformer):
