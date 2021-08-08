@@ -630,6 +630,9 @@ class DistributedDataParallel(Module, Joinable):
             self.find_unused_parameters,
             self.gradient_as_bucket_view,
             param_to_name_mapping,
+            # User can set dist._DEFAULT_FIRST_BUCKET_BYTES to tune DDP first
+            # bucket.
+            dist._DEFAULT_FIRST_BUCKET_BYTES
         )
 
         self.logger = dist.Logger(self.reducer)
@@ -1252,7 +1255,7 @@ class DistributedDataParallel(Module, Joinable):
 
             >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
             >>>     fut = torch.futures.Future()
-            >>>     fut.set_result(bucket.get_tensor())
+            >>>     fut.set_result(bucket.buffer())
             >>>     return fut
 
             >>> ddp.register_comm_hook(state=None, hook=noop)
@@ -1262,7 +1265,7 @@ class DistributedDataParallel(Module, Joinable):
             allreduce, and then decoded after allreduce.
 
             >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
-            >>>     encoded_tensor = encode(bucket.get_tensor()) # encode gradients
+            >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):

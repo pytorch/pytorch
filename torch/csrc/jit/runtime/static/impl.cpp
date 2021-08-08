@@ -573,8 +573,7 @@ StaticModule::StaticModule(
   std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < graph_->inputs().size(); ++i) {
+  for (auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
     value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
@@ -827,8 +826,7 @@ c10::IValue StaticRuntime::operator()(
   if (static_module_.num_outputs() > 1) {
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+    for (auto i : c10::irange(static_module_.num_outputs())) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
@@ -937,10 +935,8 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
+    for (auto i : c10::irange(iv.toTensor().sizes().size())) {
       std::cout << iv.toTensor().sizes()[i];
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
       }
@@ -972,16 +968,14 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < inputs.size(); ++i) {
+  for (auto i : c10::irange(inputs.size())) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < outputs.size(); ++i) {
+  for (auto i : c10::irange(outputs.size())) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
