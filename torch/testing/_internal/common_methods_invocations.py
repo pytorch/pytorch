@@ -2641,6 +2641,26 @@ def sample_unsqueeze(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
+def sample_inputs_nn_unfold(op_info, device, dtype, requires_grad, **kwargs):
+    shapes = ((0, 1, 5, 5), (1, 1, 5, 5), (2, 3, 5, 5))
+    kernel_sizes = (2, (2, 2), (3, 3))
+    dilations = (1, 2, (1, 2))
+    paddings = (0, 1, (1, 1))
+    strides = (1, 2, (1, 2))
+
+    def generator():
+        cases = product(shapes, kernel_sizes, dilations, paddings, strides)
+        for shape, kernel_size, dilation, padding, stride in cases:
+            tensor = make_tensor(shape, device, dtype, requires_grad=requires_grad)
+            yield SampleInput(tensor, args=(kernel_size, dilation, padding, stride))
+
+        # With default args
+        yield SampleInput(make_tensor((1, 1, 5, 5), device, dtype, requires_grad=requires_grad),
+                          args=((3, 3),))
+
+    return list(generator())
+
+
 def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_args = (
         ((S, 1, S, 1), ()),
@@ -4747,6 +4767,37 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         for shape, kwargs in shapes_and_kwargs
     ]
 
+def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    batch_size = 2
+    num_channels = 3
+    modes = ("bilinear", "nearest")
+    align_cornerss = (False, True)
+    padding_modes = ("zeros", "border", "reflection")
+
+    sample_inputs = []
+    for dim in (2, 3):
+        input = _make_tensor((batch_size, num_channels, *[S] * dim))
+        grid = _make_tensor((batch_size, *[S] * dim, dim))
+
+        modes_ = (*modes, "bicubic") if dim == 2 else modes
+
+        for mode, padding_mode, align_corners in itertools.product(modes_, padding_modes, align_cornerss):
+            sample_inputs.append(
+                SampleInput(
+                    input,
+                    args=(grid,),
+                    kwargs=dict(
+                        mode=mode,
+                        padding_mode=padding_mode,
+                        align_corners=align_corners,
+                    )
+                )
+            )
+
+    return sample_inputs
+
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
     ForeachFuncInfo('acos'),
@@ -6578,7 +6629,7 @@ op_db: List[OpInfo] = [
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
@@ -6603,6 +6654,14 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_out=False,
            autodiff_nonfusible_nodes=["aten::hardswish"]),
+    OpInfo('nn.functional.unfold',
+           aten_name='im2col',
+           dtypes=floating_types_and(torch.half),
+           sample_inputs_func=sample_inputs_nn_unfold,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
            aten_name="leaky_relu",
@@ -8264,6 +8323,23 @@ op_db: List[OpInfo] = [
         dtypesIfCPU=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            SkipInfo(
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.grid_sample",
+        ref=_NOTHING,
+        dtypesIfCPU=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_grid_sample,
+        supports_gradgrad=False,
+        gradcheck_nondet_tol=1e-15,
         skips=(
             SkipInfo(
                 "TestJit",
