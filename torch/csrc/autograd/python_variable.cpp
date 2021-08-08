@@ -107,6 +107,10 @@ PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 
+c10::impl::PyInterpreter* getPyInterpreter() {
+  return self_interpreter.get();
+}
+
 namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
