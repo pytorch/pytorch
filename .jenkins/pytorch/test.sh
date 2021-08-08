@@ -11,6 +11,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
 
@@ -460,7 +461,7 @@ test_vec256() {
 
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
-  build/bin/test_deploy
+  "$TORCH_BIN_DIR"/test_deploy
   assert_git_not_dirty
 }
 
