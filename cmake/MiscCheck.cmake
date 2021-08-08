@@ -183,7 +183,13 @@ endif()
 # -table. We need this to get symbols when generating backtrace at
 # -runtime.
 if(${CMAKE_VERSION} VERSION_EQUAL "3.18.0" OR ${CMAKE_VERSION} VERSION_GREATER "3.18.0")
-  check_linker_flag(CXX "-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  if(MSVC)
+    # "Unknown option" classified as a warning in MSVC-like tools.
+    # So, we need to use `/WX` to treat it as an error.
+    check_linker_flag(CXX "-WX -rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  else()
+    check_linker_flag(CXX "-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
+  endif()
 else()
   check_cxx_compiler_flag("-rdynamic" COMPILER_SUPPORTS_RDYNAMIC)
 endif()
