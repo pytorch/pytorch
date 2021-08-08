@@ -10,7 +10,7 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-if (${CMAKE_VERSION} VERSION_EQUAL "3.15.6" OR ${CMAKE_VERSION} VERSION_GREATER "3.15.6")
+if(${CMAKE_VERSION} VERSION_EQUAL "3.15.6" OR ${CMAKE_VERSION} VERSION_GREATER "3.15.6")
   include(CheckCXXLinkerFlag)
 endif()
 
