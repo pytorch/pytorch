@@ -502,7 +502,6 @@ filegroup(
         "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cu.cc",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cu.cc",
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu.cc",
-        "aten/src/ATen/native/sparse/cuda/ConvertCooToCsr.cu.cc",
     ],
 )
 
