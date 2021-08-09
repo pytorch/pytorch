@@ -728,35 +728,28 @@ class TestEqualizeFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
-        tests = [(SingleLayerLinearModel, 2, linear_node_list),
-                 (LinearAddModel, 2, linearAdd_node_list),
-                 (TwoLayerLinearModel, 2, linear2_node_list),
-                 (SingleLayerFunctionalLinearModel, 2, functionalLinear_node_list),
-                 (FunctionalLinearAddModel, 2, functionalLinearAdd_node_list),
-                 (TwoLayerFunctionalLinearModel, 2, functionalLinear2_node_list),
-                 (LinearReluModel, 2, linearRelu_node_list),
-                 (LinearReluLinearModel, 2, linearReluLinear_node_list),
-                 (FunctionalLinearReluModel, 2, functionalLinearRelu_node_list),
-                 (FunctionalLinearReluLinearModel, 2, functionalLinearReluLinear_node_list),
-                 (ConvModel, 4, conv_node_list),
-                 (TwoLayerConvModel, 4, conv2_node_list),
-                 (SingleLayerFunctionalConvModel, 4, functionalConv_node_list),
-                 (TwoLayerFunctionalConvModel, 4, functionalConv2_node_list),
-                 (ConvReluModel, 4, convRelu_node_list),
-                 (ConvReluConvModel, 4, convReluConv_node_list),
-                 (FunctionalConvReluModel, 4, functionalConvRelu_node_list),
-                 (FunctionalConvReluConvModel, 4, functionalConvReluConv_node_list)]
+        tests = [(SingleLayerLinearModel, linear_node_list),
+                 (LinearAddModel, linearAdd_node_list),
+                 (TwoLayerLinearModel, linear2_node_list),
+                 (SingleLayerFunctionalLinearModel, functionalLinear_node_list),
+                 (FunctionalLinearAddModel, functionalLinearAdd_node_list),
+                 (TwoLayerFunctionalLinearModel, functionalLinear2_node_list),
+                 (LinearReluModel, linearRelu_node_list),
+                 (LinearReluLinearModel, linearReluLinear_node_list),
+                 (FunctionalLinearReluModel, functionalLinearRelu_node_list),
+                 (FunctionalLinearReluLinearModel, functionalLinearReluLinear_node_list),
+                 (ConvModel, conv_node_list),
+                 (TwoLayerConvModel, conv2_node_list),
+                 (SingleLayerFunctionalConvModel, functionalConv_node_list),
+                 (TwoLayerFunctionalConvModel, functionalConv2_node_list),
+                 (ConvReluModel, convRelu_node_list),
+                 (ConvReluConvModel, convReluConv_node_list),
+                 (FunctionalConvReluModel, functionalConvRelu_node_list),
+                 (FunctionalConvReluConvModel, functionalConvReluConv_node_list)]
 
-        for (M, ndim, node_list) in tests:
+        for (M, node_list) in tests:
             m = M().eval()
-
-            if ndim == 2:
-                x = torch.rand((5, 5))
-            elif ndim == 4:
-                x = torch.rand((16, 3, 224, 224))
-
             prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
-            prepared(x)
             equalized_quantized_model = convert_fx(prepared)
 
             # Check the order of nodes in the graph
