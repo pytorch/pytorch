@@ -106,24 +106,30 @@ static std::vector<int64_t> seq_to_aten_shape(PyObject *py_seq) {
 }
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
-  if (!is_numpy_available()) {
-    throw std::runtime_error("Numpy is not available");
-  }
-  if (tensor.device().type() != DeviceType::CPU) {
-    throw TypeError(
-      "can't convert %s device type tensor to numpy. Use Tensor.cpu() to "
-      "copy the tensor to host memory first.", tensor.device().str().c_str());
-  }
-  if (tensor.layout() != Layout::Strided) {
-      throw TypeError(
-        "can't convert %s layout tensor to numpy."
-        "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
-  }
-  if (at::GradMode::is_enabled() && tensor.requires_grad()) {
-    throw std::runtime_error(
-        "Can't call numpy() on Tensor that requires grad. "
-        "Use tensor.detach().numpy() instead.");
-  }
+  TORCH_CHECK(is_numpy_available(), "Numpy is not available");
+
+  TORCH_CHECK_TYPE(tensor.device().type() == DeviceType::CPU,
+      "can't convert ", tensor.device().str().c_str(),
+      " device type tensor to numpy. Use Tensor.cpu() to ",
+      "copy the tensor to host memory first.");
+
+  TORCH_CHECK_TYPE(tensor.layout() == Layout::Strided,
+      "can't convert ", c10::str(tensor.layout()).c_str(),
+      " layout tensor to numpy.",
+      "convert the tensor to a strided layout first.");
+
+  TORCH_CHECK(!(at::GradMode::is_enabled() && tensor.requires_grad()),
+      "Can't call numpy() on Tensor that requires grad. "
+      "Use tensor.detach().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_conj(),
+      "Can't call numpy() on Tensor that has conjugate bit set. ",
+      "Use tensor.resolve_conj().numpy() instead.");
+
+  TORCH_CHECK(!tensor.is_neg(),
+      "Can't call numpy() on Tensor that has negative bit set. "
+      "Use tensor.resolve_neg().numpy() instead.");
+
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());
   auto strides = to_numpy_shape(tensor.strides());
