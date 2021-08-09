@@ -23,11 +23,10 @@ namespace c10d {
   const char* kDistDebugDetailLogLevel = "DETAIL";
   const char* kDistDebugInfoLogLevel = "INFO";
   const char* kDistDebugOffLogLevel = "OFF";
-  const char* kUnsetEnvVariable = "N/A";
 
   std::string parse_env(const char* env_var_name) {
     char* stringValue = std::getenv(env_var_name);
-    std::string res = kUnsetEnvVariable;
+    std::string res = "N/A";
     if (stringValue != nullptr) {
       res = stringValue;
     }
@@ -37,7 +36,7 @@ namespace c10d {
   DistributedDebugLevel parseDistDebugLevel() {
     std::string debugLevel = parse_env(kDistDebugEnvVar);
     const char * levelStr;
-    if (debugLevel.compare(kUnsetEnvVariable) == 0) {
+    if (debugLevel.compare("N/A") == 0) {
       levelStr = kDistDebugOffLogLevel;
     } else {
       levelStr = debugLevel.c_str();

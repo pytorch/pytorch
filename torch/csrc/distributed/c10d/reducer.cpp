@@ -1649,15 +1649,15 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
-  // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
-  // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
-  // as the bucket order as we would immediately advance to the 2nd element
-  // after the first bucket, whereas we only want the last bucket to have
-  // a smaller size.
   auto ddp_set_last_bucket_as_small =
       (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
 
   if (ddp_set_last_bucket_as_small) {
+    // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
+    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
+    // as the bucket order as we would immediately advance to the 2nd element
+    // after the first bucket, whereas we only want the last bucket to have
+    // a smaller size.
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
@@ -1693,18 +1693,9 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  // if (process_group_->getRank() == 0) {
-  //   LOG(INFO) << "Rebuilt bucket indices: ";
-  //   for (int i =0; i < rebuilt_bucket_indices.size(); ++i) {
-  //     LOG(INFO) << rebuilt_bucket_indices[i];
-  //   }
-  // }
   initialize_buckets(
       std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
 
-  // for (const auto & b : buckets_) {
-  //   if (process_group_->getRank() == 0) LOG(INFO) << "bucket variable idx: " << b.variable_indices << " size lim: " << b.bucket_size_limit;
-  // }
   return true;
 }
 

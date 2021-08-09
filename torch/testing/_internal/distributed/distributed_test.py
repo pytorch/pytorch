@@ -7695,6 +7695,7 @@ class DistributedTest:
             torch.cuda.set_device(self.rank)
             default_bucket_cap_mb = 25 * (1024 ** 2)
             first_bucket_bytes_mb = dist._DEFAULT_FIRST_BUCKET_BYTES
+            os.environ["DDP_SET_LAST_BUCKET_CAP"] = "1"
 
             class MyModel(nn.Module):
                 def __init__(self):
@@ -7717,10 +7718,14 @@ class DistributedTest:
                 out.backward()
                 logging_data = ddp._get_ddp_logging_data()
                 bucket_size_limits = [
-                    int(b) for b in logging_data[f"{\"initial\" if i < 2 else \"rebuilt\"}_bucket_size_limits"].split(", ")
+                    int(b) for b in logging_data[
+                        "{}_bucket_size_limits".format(
+                            "initial" if i < 2 else "rebuilt"
+                        )
+                        ].split(", ")
                 ]
                 # first_bucket_bytes is actually the last because we reverse
-                # parameter bucket order.
+                # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
                 self.assertEqual(bucket_size_limits[-1], first_bucket_bytes_mb)
                 for j, bucket_size in enumerate(bucket_size_limits):
                     if j != len(bucket_size_limits) - 1:

@@ -44,8 +44,6 @@ extern const char* kDistDebugEnvVar;
 extern const char* kDistDebugDetailLogLevel;
 extern const char* kDistDebugInfoLogLevel;
 extern const char* kDistDebugOffLogLevel;
-// Unset environment variable
-extern const char* kUnsetEnvVariable;
 
 TORCH_API std::string parse_env(const char* env_var_name);
 
