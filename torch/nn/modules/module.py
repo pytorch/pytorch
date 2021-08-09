@@ -1228,11 +1228,10 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        extra_state = self.get_extra_state()
-        if extra_state:
+        if hasattr(self, 'get_extra_state'):
             EXTRA_STATE_KEY = prefix + '_extra_state'
             destination[EXTRA_STATE_KEY] = OrderedDict()
-            for name, obj in extra_state.items():
+            for name, obj in self.get_extra_state().items():
                 destination[EXTRA_STATE_KEY][name] = obj
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
@@ -1372,8 +1371,13 @@ class Module:
                 missing_keys.append(key)
 
         EXTRA_STATE_KEY = prefix + '_extra_state'
-        if EXTRA_STATE_KEY in state_dict:
-            self.set_extra_state(state_dict[EXTRA_STATE_KEY])
+        if hasattr(self, 'set_extra_state'):
+            if EXTRA_STATE_KEY in state_dict:
+                self.set_extra_state(state_dict[EXTRA_STATE_KEY])
+            elif strict:
+                missing_keys.append(EXTRA_STATE_KEY)
+        elif strict and (EXTRA_STATE_KEY in state_dict):
+            unexpected_keys.append(EXTRA_STATE_KEY)
 
         if strict:
             for key in state_dict.keys():
@@ -1761,12 +1765,6 @@ class Module:
         strings are acceptable.
         """
         return ''
-
-    def get_extra_state(self):
-        return {}
-
-    def set_extra_state(self, state):
-        pass
 
     def __repr__(self):
         # We treat the extra repr like the sub-module, one item per line
