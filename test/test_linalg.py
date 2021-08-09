@@ -7496,7 +7496,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(Ax))
 
-        run_test((1, 1), (1, 1, 1025)) 
+        run_test((1, 1), (1, 1, 1025))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
