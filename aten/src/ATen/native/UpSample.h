@@ -251,10 +251,10 @@ static inline scalar_t area_pixel_compute_scale(
     const c10::optional<double> scale) {
   // see Note [area_pixel_compute_scale]
   if(align_corners){
-    if(output_size > 1){
+    if(output_size > 1) {
       return static_cast<scalar_t>(input_size - 1) / (output_size - 1);
     }
-    else{
+    else {
       return static_cast<scalar_t>(0);
     }
   }
