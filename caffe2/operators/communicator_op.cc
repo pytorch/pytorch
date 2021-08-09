@@ -3,7 +3,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CreateCommonWorld)
     .NumInputs(0, 1)
     .NumOutputs(1)
@@ -15,7 +14,6 @@ Creates a common world for communication operators.
     .Arg("size", "(int) size of the common world.")
     .Arg("rank", "(int) rank of this node in the common world.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(CloneCommonWorld)
     .NumInputs(1)
     .NumOutputs(1)
@@ -25,7 +23,6 @@ Clones existing common world.
     .Input(0, "existing_comm_world", "Existing common world to clone.")
     .Output(0, "comm_world", "A common world for collective operations.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DestroyCommonWorld)
     .NumInputs(1)
     .NumOutputs(1)
@@ -33,7 +30,6 @@ OPERATOR_SCHEMA(DestroyCommonWorld)
     .SetDoc("Closes all connections managed by a common world.")
     .Input(0, "common_world", "The common world to be destroyed.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Broadcast)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out == (in - 1);
@@ -50,7 +46,6 @@ on each node should have been pre-created with the same shape and data type.
     .Output(0, "X", "In-place as input 1.")
     .Arg("root", "(int, default 0) the root to run broadcast from.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Reduce)
     .NumInputs(2)
     .NumOutputs(1)
@@ -65,7 +60,6 @@ Sum is supported.
     .Output(0, "Y", "The reduced result on root, not set for other nodes.")
     .Arg("root", "(int, default 0) the root to run reduce into.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Allreduce)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out == (in - 1);
@@ -80,7 +74,6 @@ Does an allreduce operation among the nodes. Currently only Sum is supported.
     .Input(1, "X", "A tensor to be allreduced.")
     .Output(0, "Y", "The allreduced tensor, same on all nodes.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReduceScatter)
     .NumInputsOutputs([](int in, int out) {
       return in >= 2 && out == (in - 1);
@@ -95,7 +88,6 @@ Does reduce-scatter operation among the nodes. Currently only Sum is supported.
     .Input(1, "X", "A tensor to be reduce-scattered.")
     .Output(0, "Y", "The reduced tensor, scattered on all nodes.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Allgather)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
@@ -107,7 +99,6 @@ Does an allgather operation among the nodes.
     .Input(1, "X", "A tensor to be allgathered.")
     .Output(0, "Y", "The allgathered tensor, same on all nodes.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Barrier)
     .NumInputs(1)
     .SetDoc(R"DOC(
@@ -115,7 +106,6 @@ Does a barrier operation among the nodes.
 )DOC")
     .Input(0, "comm_world", "The common world.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SendTensor)
     .NumInputs({2, 4})
     .NumOutputs(0)
@@ -142,7 +132,6 @@ Sends the tensor to another node.
         "(bool) if set, only send the content and assume that the receiver "
         "has already known the tensor's shape and information.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ReceiveTensor)
     .NumInputs({2, 4})
     .NumOutputs(3)
@@ -186,51 +175,29 @@ Receives the tensor from another node.
         "(bool) if set, only send the content and assume that the receiver "
         "has already known the tensor's shape and information.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CreateCommonWorld);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(CloneCommonWorld);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(DestroyCommonWorld);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Broadcast);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Reduce);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Allgather);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Allreduce);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReduceScatter);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(Barrier);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(SendTensor);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(ReceiveTensor);
 
 // Communication operators do not have default engines.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CreateCommonWorld, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(CloneCommonWorld, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DestroyCommonWorld, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Broadcast, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Reduce, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Allgather, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Allreduce, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReduceScatter, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Barrier, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SendTensor, NoDefaultEngineOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ReceiveTensor, NoDefaultEngineOp<CPUContext>);
 
 } // namespace caffe2
