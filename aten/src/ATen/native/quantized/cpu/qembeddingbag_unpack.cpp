@@ -135,13 +135,13 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
         }
       });
 #else
-  for (std::size_t row = 0; row < input_rows; ++row) {
+  for (auto row: c10::irange(input_rows)) {
     const std::uint8_t* input_row = input_data + row * input_columns;
     const float* input_row_scale_zp =
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output_data + row * output_columns;
 
-    for (std::size_t col = 0; col < output_columns; ++col) {
+    for(auto col: c10::irange(output_columns)) {
       output_row[col] =
           input_row[col] * input_row_scale_zp[0] + input_row_scale_zp[1];
     } // output_columns
@@ -183,7 +183,7 @@ Tensor _qembeddingbag_nbit_unpack_helper(
       });
 #else
   auto output_columns = output_dimensions[1];
-  for (size_t row = 0; row < input_rows; ++row) {
+  for (auto row: c10::irange(input_rows)) {
     float* output_row = output_data + row * output_columns;
     const std::uint8_t* input_row = input_data + row * input_columns;
     const at::Half* input_row_scale_zp = reinterpret_cast<const at::Half*>(
