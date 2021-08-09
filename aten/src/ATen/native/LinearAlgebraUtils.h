@@ -385,27 +385,47 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   auto sizes = input.sizes().vec();
   int64_t m = input.size(-2), n = input.size(-1);
 
-  sizes[input.dim() - 1] = (compute_uv && some) ? std::min(m, n) : m;
-  auto strides = at::detail::defaultStrides(sizes);
+  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
+  auto u_strides = at::detail::defaultStrides(sizes);
   // U should be a column-major or a batch of column-major matrices
   // ... x m x ucol will have strides: ...., ucol, 1
   // We require: ...., 1, m
-  strides[input.dim() - 1] = m;
-  strides[input.dim() - 2] = 1;
+  u_strides[input.dim() - 1] = m;
+  u_strides[input.dim() - 2] = 1;
 
-  Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
-  U_empty.zero_();
+  // cuSOLVER's gesvdjBatched fails with illegal memory access and
+  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
+  // if matrices for U and VT are not allocated
+  // even though the result of computation is not used we need to allocate this memory
+
+  Tensor U_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
 
   // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = n;
+  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
   sizes[input.dim() - 1] = n;
-  // VT should be a column-major or a batch of column-major matrices
-  Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
-  VT_empty.transpose_(-2, -1);
+  auto vt_strides = at::detail::defaultStrides(sizes);
+  if (!svd_use_cusolver) {
+    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
+    vt_strides[input.dim() - 2] = 1;
+  }
+  Tensor VT_empty = (compute_uv || svd_use_cusolver)
+      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
+      : at::empty({0}, input.options().device(usvt_device));
+
+  // U and VT might not get filled in this case
+  if (!some && compute_uv && input.numel() == 0) {
+    U_empty.zero_();
+    VT_empty.zero_();
+    // make U and VT an identity matrix, because they should be orthogonal
+    U_empty.diagonal(0, -2, -1).fill_(1);
+    VT_empty.diagonal(0, -2, -1).fill_(1);
+  }
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  ScalarType dtype = toValueType(input.scalar_type());
   Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
 
   return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);

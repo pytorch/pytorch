@@ -44,6 +44,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
   ${JIT_TEST_ROOT}/test_graph_executor.cpp
+  ${JIT_TEST_ROOT}/test_graph_iterator.cpp
   ${JIT_TEST_ROOT}/test_cs_debug_info_serialization.cpp
   ${JIT_TEST_ROOT}/test_inliner.cpp
   ${JIT_TEST_ROOT}/test_interface.cpp
@@ -54,6 +55,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
   ${JIT_TEST_ROOT}/test_memory_dag.cpp
+  ${JIT_TEST_ROOT}/test_memory_planning.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp

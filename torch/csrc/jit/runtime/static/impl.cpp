@@ -1295,8 +1295,15 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
   return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
 }
 
-at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUCachingAllocator();
+at::DataPtr MemoryPlanner::allocate_buffer(
+    size_t size,
+    at::DeviceType deviceType) {
+  at::Allocator* allocator;
+  if (deviceType == at::kCPU) {
+    allocator = c10::GetCPUCachingAllocator();
+  } else {
+    allocator = GetAllocator(deviceType);
+  }
   return allocator->allocate(size);
 }
 
