@@ -1,9 +1,10 @@
 #pragma once
 #include <ATen/core/ivalue.h>
+#include <vector>
 
 namespace torch {
 
-class IMethod {
+class TORCH_API IMethod {
   /*
   IMethod provides a portable interface for torch methods, whether
   they are backed by torchscript or python/deploy.
@@ -25,13 +26,20 @@ class IMethod {
 
   virtual c10::IValue operator()(
       std::vector<c10::IValue> args,
-      const IValueMap& kwargs = IValueMap()) = 0;
+      const IValueMap& kwargs = IValueMap()) const = 0;
 
   // Returns an ordered list of argument names, possible in both
   // script and python methods.  This is a more portable dependency
   // than a ScriptMethod FunctionSchema, which has more information
   // than can be generally expected from a python method.
-  virtual std::vector<std::string> getArgumentNames() = 0;
+  const std::vector<std::string>& getArgumentNames();
+
+ protected:
+  virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
+
+ private:
+  bool isArgumentNamesInitialized_ { false };
+  std::vector<std::string> argumentNames_;
 };
 
 } // namespace torch

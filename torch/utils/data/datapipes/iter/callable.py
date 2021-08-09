@@ -1,6 +1,6 @@
 import warnings
 import torch.nn as nn
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe, DataChunk
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
@@ -68,14 +68,17 @@ class MapIterDataPipe(IterDataPipe[T_co]):
         if nesting_level == 0:
             return self.fn(data, *self.args, **self.kwargs)
         elif nesting_level > 0:
-            if not isinstance(data, list):
+            if isinstance(data, DataChunk):
+                return type(data)([self._apply(i, nesting_level - 1) for i in data.raw_iterator()])
+            elif isinstance(data, list):
+                return [self._apply(i, nesting_level - 1) for i in data]
+            else:
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = [self._apply(i, nesting_level - 1) for i in data]
-            return result
         else:
-            if isinstance(data, list):
-                result = [self._apply(i, nesting_level) for i in data]
-                return result
+            if isinstance(data, DataChunk):
+                return type(data)([self._apply(i, nesting_level) for i in data.raw_iterator()])
+            elif isinstance(data, list):
+                return [self._apply(i, nesting_level) for i in data]
             else:
                 return self.fn(data, *self.args, **self.kwargs)
 
@@ -93,11 +96,11 @@ class MapIterDataPipe(IterDataPipe[T_co]):
             dill_function = dill.dumps(self.fn)
         else:
             dill_function = self.fn
-        state = (self.datapipe, dill_function, self.args, self.kwargs)
+        state = (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level)
         return state
 
     def __setstate__(self, state):
-        (self.datapipe, dill_function, self.args, self.kwargs) = state
+        (self.datapipe, dill_function, self.args, self.kwargs, self.nesting_level) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]
         else:
@@ -162,6 +165,7 @@ class TransformsIterDataPipe(MapIterDataPipe):
         datapipe: Iterable DataPipe being transformed
         transforms: A transform or a sequence of transforms from torchvision or torchaudio.
     """
+
     def __init__(self,
                  datapipe: IterDataPipe,
                  transforms: Callable,
