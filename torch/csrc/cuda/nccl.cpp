@@ -334,7 +334,8 @@ std::uint64_t version() {
                                 ((uint64_t) NCCL_PATCH);
   return ver;
 #elif defined(USE_NCCL)
-  return 1000;
+  // return major version "1"
+  return ((uint64_t) 1) << 32;
 #else
   return 0;
 #endif
