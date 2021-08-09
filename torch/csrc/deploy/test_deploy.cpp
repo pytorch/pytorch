@@ -132,6 +132,10 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   kwargs["input"] = input;
   auto jit_output_kwargs = model.call_kwargs(kwargs).toTensor();
   ASSERT_TRUE(ref_output.equal(jit_output_kwargs));
+
+  // test hasattr
+  ASSERT_TRUE(model.hasattr("forward"));
+  ASSERT_FALSE(model.hasattr("make_prediction"));
 }
 
 TEST(TorchpyTest, ThreadedSimpleModel) {

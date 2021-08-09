@@ -303,6 +303,11 @@ if(HAVE_SOVERSION)
 endif()
 add_dependencies(torch_python torch_python_stubs)
 
+if(USE_PRECOMPILED_HEADERS)
+  target_precompile_headers(torch_python PRIVATE
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+endif()
+
 # Required workaround for generated sources
 # See https://samthursfield.wordpress.com/2015/11/21/cmake-dependencies-between-targets-and-files-and-custom-commands/#custom-commands-in-different-directories
 add_dependencies(torch_python generate-torch-sources)
