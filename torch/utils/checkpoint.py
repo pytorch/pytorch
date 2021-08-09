@@ -343,7 +343,10 @@ class Checkpoint(torch.nn.Module):
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
                         try:
-                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, lambda x: None)
+                            torch.autograd.graph.set_saved_tensors_default_hooks(
+                                    inner_pack,
+                                    lambda x: raise RuntimeError("You are calling backwards on a tensor that is never exposed.
+                                        Please open an issue."))
                             y = self.function(*args)
                         finally:
                             torch.autograd.graph.reset_saved_tensors_default_hooks()
