@@ -108,11 +108,11 @@ class CodeGen::BufferArg {
   BufferArg(const VarHandle& var) : var_(var.node()), isVar_(true) {}
   BufferArg(const BufHandle& buf) : buf_(buf.node()) {}
 
-  const Var* var() const {
+  Var* var() const {
     return isVar_ ? var_ : buf_->base_handle();
   }
 
-  const Buf* buf() const {
+  Buf* buf() const {
     return buf_;
   }
 
@@ -125,8 +125,8 @@ class CodeGen::BufferArg {
   }
 
  private:
-  const Var* var_ = nullptr;
-  const Buf* buf_ = nullptr;
+  Var* var_ = nullptr;
+  Buf* buf_ = nullptr;
   bool isVar_ = false;
 };
 
@@ -226,7 +226,7 @@ TORCH_API std::unique_ptr<CodeGen> CreateCodeGen(
 
 class TORCH_API GenericIntrinsicsExpander : public IRMutator {
  protected:
-  const Expr* mutate(const Intrinsics* v) override;
+  Expr* mutate(Intrinsics* v) override;
 };
 
 } // namespace tensorexpr

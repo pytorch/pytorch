@@ -13,7 +13,6 @@ namespace caffe2 {
 // Simple tests to make sure that our stoi and stod implementations are
 // matching the std implementations, but not testing it very extensively
 // as one should be using the std version most of the time.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonTest, TestStoi) {
   EXPECT_TRUE(CAFFE2_TESTONLY_WE_ARE_USING_CUSTOM_STRING_FUNCTIONS);
   string s = "1234";
@@ -22,7 +21,6 @@ TEST(CommonTest, TestStoi) {
   EXPECT_EQ(i_std, i_caffe2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(CommonTest, TestStod) {
   // Full string is parsed.
   string s = "1.234";

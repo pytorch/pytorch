@@ -54,50 +54,50 @@ class ExternalCall;
 class TORCH_API IRVisitor {
  public:
   virtual ~IRVisitor() = default;
-  virtual void visit(const Add* v);
-  virtual void visit(const Sub* v);
-  virtual void visit(const Mul* v);
-  virtual void visit(const Div* v);
-  virtual void visit(const Mod* v);
-  virtual void visit(const Max* v);
-  virtual void visit(const Min* v);
-  virtual void visit(const And* v);
-  virtual void visit(const Or* v);
-  virtual void visit(const Xor* v);
-  virtual void visit(const Lshift* v);
-  virtual void visit(const Rshift* v);
-  virtual void visit(const CompareSelect* v);
+  virtual void visit(Add* v);
+  virtual void visit(Sub* v);
+  virtual void visit(Mul* v);
+  virtual void visit(Div* v);
+  virtual void visit(Mod* v);
+  virtual void visit(Max* v);
+  virtual void visit(Min* v);
+  virtual void visit(And* v);
+  virtual void visit(Or* v);
+  virtual void visit(Xor* v);
+  virtual void visit(Lshift* v);
+  virtual void visit(Rshift* v);
+  virtual void visit(CompareSelect* v);
 
 #define IMM_PRINT_VISIT(Type, Name) virtual void visit(const Name##Imm* v);
 
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT)
 #undef IMM_PRINT_VISIT
 
-  virtual void visit(const Cast* v);
-  virtual void visit(const BitCast* v);
-  virtual void visit(const Var* v);
-  virtual void visit(const Buf* v);
-  virtual void visit(const Ramp* v);
-  virtual void visit(const Load* v);
-  virtual void visit(const For* v);
-  virtual void visit(const Block* v);
-  virtual void visit(const Store* v);
-  virtual void visit(const Broadcast* v);
-  virtual void visit(const IfThenElse* v);
-  virtual void visit(const Intrinsics* v);
-  virtual void visit(const Allocate* v);
-  virtual void visit(const Free* v);
-  virtual void visit(const Let* v);
-  virtual void visit(const Cond* v);
-  virtual void visit(const Term* v);
-  virtual void visit(const Polynomial* v);
-  virtual void visit(const RoundOff* v);
-  virtual void visit(const MaxTerm* v);
-  virtual void visit(const MinTerm* v);
-  virtual void visit(const ReduceOp* v);
-  virtual void visit(const AtomicAdd* v);
-  virtual void visit(const SyncThreads* v);
-  virtual void visit(const ExternalCall* v);
+  virtual void visit(Cast* v);
+  virtual void visit(BitCast* v);
+  virtual void visit(Var* v);
+  virtual void visit(Buf* v);
+  virtual void visit(Ramp* v);
+  virtual void visit(Load* v);
+  virtual void visit(For* v);
+  virtual void visit(Block* v);
+  virtual void visit(Store* v);
+  virtual void visit(Broadcast* v);
+  virtual void visit(IfThenElse* v);
+  virtual void visit(Intrinsics* v);
+  virtual void visit(Allocate* v);
+  virtual void visit(Free* v);
+  virtual void visit(Let* v);
+  virtual void visit(Cond* v);
+  virtual void visit(Term* v);
+  virtual void visit(Polynomial* v);
+  virtual void visit(RoundOff* v);
+  virtual void visit(MaxTerm* v);
+  virtual void visit(MinTerm* v);
+  virtual void visit(ReduceOp* v);
+  virtual void visit(AtomicAdd* v);
+  virtual void visit(SyncThreads* v);
+  virtual void visit(ExternalCall* v);
 };
 
 } // namespace tensorexpr

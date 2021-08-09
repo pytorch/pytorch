@@ -1036,7 +1036,8 @@ def main() -> None:
                     Target.NAMESPACED_DEFINITION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_anonymous_definitions': list(concatMap(
@@ -1045,7 +1046,8 @@ def main() -> None:
                     Target.ANONYMOUS_DEFINITION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
@@ -1054,7 +1056,8 @@ def main() -> None:
                     Target.REGISTRATION,
                     selector,
                     rocm=options.rocm,
-                    cpp_namespace='at::native'),
+                    cpp_namespace='at::native',
+                    class_method_name=None),
                 grouped_native_functions
             )),
         })
@@ -1078,7 +1081,8 @@ def main() -> None:
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=options.rocm,
-                        cpp_namespace='at::native'),
+                        cpp_namespace='at::native',
+                        class_method_name=None),
                     grouped_native_functions
                 )),
             })

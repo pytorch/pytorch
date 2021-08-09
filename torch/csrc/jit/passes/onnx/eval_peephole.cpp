@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/torch.h>
@@ -36,10 +37,10 @@ std::vector<at::Tensor> getValues(
 }
 
 // This pass fuses Conv and BatchNorm into Conv node
-// Conv and BatchNorm can be fused only if inputs for Batchnorm node:
+// Conv and BatchNorm can be fused only if inputs for BatchNorm node:
 // scale, bias, mean and var are all tensors of same shape (C) and
 // if the size of the first dimension (dim 0) is the same between Conv
-// input weight and Batchnorm input scale
+// input weight and BatchNorm input scale.
 static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
@@ -53,81 +54,84 @@ static void fuseConvBatchNorm(Block* b, ValueToParamPairMap& valsToParamsMap) {
       if (bnNode->kind() != onnx::BatchNormalization) {
         continue;
       }
-      auto origconvNode = *it;
+      auto oldConv = *it;
       auto epsilon = bnNode->f(attr::epsilon);
-      auto w_conv_value = getValues(origconvNode, valsToParamsMap);
-      if (w_conv_value.size() < 1 ||
-          (origconvNode->inputs().size() == 3 && w_conv_value.size() != 2)) {
+      auto convInputVals = getValues(oldConv, valsToParamsMap);
+      if (convInputVals.size() < 1 ||
+          (oldConv->inputs().size() == 3 && convInputVals.size() != 2)) {
         continue;
       }
 
-      auto bn_value = getValues(bnNode, valsToParamsMap);
-      if (bn_value.size() != 4) {
+      auto bnInputVals = getValues(bnNode, valsToParamsMap);
+      if (bnInputVals.size() != 4) {
         continue;
       }
 
-      auto bn_scale = bn_value[0].clone();
-      auto bn_B = bn_value[1].clone();
-      auto bn_mean = bn_value[2].clone();
-      auto bn_var = bn_value[3].clone();
-      auto w_conv = w_conv_value[0].clone();
-      at::Tensor b_conv;
+      // See
+      // https://github.com/onnx/onnx/blob/master/docs/Operators.md#BatchNormalization
+      auto bnScale = bnInputVals[0].clone();
+      auto bnB = bnInputVals[1].clone();
+      auto bnMean = bnInputVals[2].clone();
+      auto bnVar = bnInputVals[3].clone();
+      // See https://github.com/onnx/onnx/blob/master/docs/Operators.md#Conv
+      auto convW = convInputVals[0].clone();
+      at::Tensor convB;
 
-      if (!bn_scale.is_floating_point() || !bn_B.is_floating_point() ||
-          !bn_mean.is_floating_point() || !bn_var.is_floating_point() ||
-          !w_conv.is_floating_point() || bn_scale.dim() != 1 ||
-          bn_B.dim() != 1 || bn_mean.dim() != 1 || bn_var.dim() != 1 ||
-          !(bn_scale.size(0) == bn_B.size(0)) ||
-          !(bn_B.size(0) == bn_mean.size(0)) ||
-          !(bn_mean.size(0) == bn_var.size(0)) || !(w_conv.dim() > 2) ||
-          !(w_conv.size(0) == bn_scale.size(0))) {
+      if (!bnScale.is_floating_point() || !bnB.is_floating_point() ||
+          !bnMean.is_floating_point() || !bnVar.is_floating_point() ||
+          !convW.is_floating_point() || bnScale.dim() != 1 || bnB.dim() != 1 ||
+          bnMean.dim() != 1 || bnVar.dim() != 1 ||
+          !(bnScale.size(0) == bnB.size(0)) ||
+          !(bnB.size(0) == bnMean.size(0)) ||
+          !(bnMean.size(0) == bnVar.size(0)) || !(convW.dim() > 2) ||
+          !(convW.size(0) == bnScale.size(0))) {
         continue;
       }
 
-      bn_var = bn_var.add(epsilon);
-      bn_var = bn_var.sqrt();
-      bn_scale = bn_scale.div(bn_var);
+      bnVar = bnVar.add(epsilon);
+      bnVar = bnVar.sqrt();
+      bnScale = bnScale.div(bnVar);
 
       // Calculate weight
-      for (const auto i : c10::irange(w_conv.size(0))) {
-        w_conv[i] = w_conv[i].mul(bn_scale[i]);
+      for (const auto i : c10::irange(convW.size(0))) {
+        convW[i] = convW[i].mul(bnScale[i]);
       }
 
       // Calculate bias
-      if (origconvNode->inputs().size() == 3) {
-        b_conv = w_conv_value[1].clone();
-        b_conv = b_conv.sub(bn_mean);
-        b_conv = b_conv.mul(bn_scale);
-        b_conv = b_conv.add(bn_B);
+      if (oldConv->inputs().size() == 3) {
+        convB = convInputVals[1].clone();
+        convB = convB.sub(bnMean);
+        convB = convB.mul(bnScale);
+        convB = convB.add(bnB);
       } else {
-        bn_mean = bn_mean.mul(bn_scale);
-        bn_B = bn_B.sub(bn_mean);
-        b_conv = bn_B;
+        bnMean = bnMean.mul(bnScale);
+        bnB = bnB.sub(bnMean);
+        convB = bnB;
       }
 
-      Node* convNode =
+      Node* newConv =
           b->owningGraph()->create(onnx::Conv, bnNode->outputs().size());
-      for (size_t i = 0; i < convNode->outputs().size(); ++i) {
-        convNode->outputs()[i]->copyMetadata(bnNode->outputs()[i]);
+      for (size_t i = 0; i < newConv->outputs().size(); ++i) {
+        newConv->outputs()[i]->copyMetadata(bnNode->outputs()[i]);
       }
 
-      convNode->copyAttributes(*origconvNode);
-      convNode->insertBefore(bnNode);
-      convNode->addInput(origconvNode->inputs().at(0));
+      newConv->copyAttributes(*oldConv);
+      newConv->insertBefore(bnNode);
+      newConv->addInput(oldConv->inputs().at(0));
 
-      auto conv_W = b->owningGraph()->addInput();
+      auto newConvW = b->owningGraph()->addInput();
       valsToParamsMap.insert(
-          {conv_W, std::make_pair(conv_W->debugName(), w_conv)});
-      conv_W->inferTypeFrom(w_conv);
-      convNode->addInput(conv_W);
+          {newConvW, std::make_pair(newConvW->debugName(), convW)});
+      newConvW->inferTypeFrom(convW);
+      newConv->addInput(newConvW);
 
-      auto conv_B = b->addInput();
+      auto newConvB = b->addInput();
       valsToParamsMap.insert(
-          {conv_B, std::make_pair(conv_B->debugName(), b_conv)});
-      conv_B->inferTypeFrom(b_conv);
-      convNode->addInput(conv_B);
+          {newConvB, std::make_pair(newConvB->debugName(), convB)});
+      newConvB->inferTypeFrom(convB);
+      newConv->addInput(newConvB);
 
-      bnNode->replaceAllUsesWith(convNode);
+      bnNode->replaceAllUsesWith(newConv);
       bnNode->removeAllInputs();
       it->removeAllInputs();
       bnNode->destroy();
@@ -140,7 +144,11 @@ void EvalPeepholeONNX(Block* b, ParamMap& paramsDict) {
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   fuseConvBatchNorm(b, valsToParamsMap);
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
-  return;
+}
+
+void EvalPeepholeONNX(std::shared_ptr<Graph>& g, ParamMap& paramsDict) {
+  EvalPeepholeONNX(g->block(), paramsDict);
+  GRAPH_DUMP("After EvalPeepholeONNX:", g);
 }
 
 } // namespace jit

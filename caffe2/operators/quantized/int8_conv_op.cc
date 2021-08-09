@@ -2,7 +2,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8Conv, int8::Int8ConvOp<int8::Activation::NONE>);
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
@@ -58,7 +57,6 @@ and a bias blob and computes the output. {conv_doc})DOC";
   };
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8Conv)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -69,7 +67,6 @@ OPERATOR_SCHEMA(Int8Conv)
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""));
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8ConvRelu)
     .NumInputs(2, 3)
     .NumOutputs(1)
