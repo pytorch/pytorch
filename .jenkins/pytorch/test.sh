@@ -536,11 +536,19 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   pushd test
-  echo "Generating XML coverage report"
-  time python -mcoverage xml
+  if [[ -f "./coverage.xml" ]]; then
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+  else
+    echo "No python coverage report found. Skipping"
+  fi
   popd
   pushd build
-  echo "Generating lcov coverage report for C++ sources"
-  time lcov --capture --directory . --output-file coverage.info
+  if [[ -f "./coverage.info" ]]; then
+    echo "Generating lcov coverage report for C++ sources"
+    time lcov --capture --directory . --output-file coverage.info
+  else
+    echo "No cpp coverage report found. Skipping"
+  fi
   popd
 fi
