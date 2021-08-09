@@ -32,6 +32,14 @@ class TestNNAPI(TestCase):
         else:
             self.can_run_nnapi = False
 
+    # Created for easy override by subclasses (eg TestNnapiBackend)
+    def call_lowering_to_nnapi(self, traced_module, args):
+        return convert_model_to_nnapi(traced_module, args)
+
+    # Created for subclasses to set can_run_nnapi (eg TestNnapiBackend)
+    def set_can_run_nnapi(self, can_run):
+        self.can_run_nnapi = can_run
+
     def check(
         self,
         module,
@@ -49,7 +57,7 @@ class TestNNAPI(TestCase):
                 args = arg_or_args
             module.eval()
             traced = torch.jit.trace(module, trace_args or args)
-            nnapi_module = convert_model_to_nnapi(traced, convert_args or args)
+            nnapi_module = self.call_lowering_to_nnapi(traced, convert_args or args)
             if not self.can_run_nnapi:
                 # Only test that the model was converted successfully.
                 return
@@ -154,11 +162,29 @@ class TestNNAPI(TestCase):
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
+        # flex inputs
         self.check(
             torch.nn.Flatten(),
             torch.randn(4, 2, 1, 3, 7),
             convert_args=[torch.zeros(0, 2, 1, 3, 7)]
         )
+
+        # channels last
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 1, 4, 7))
+        )
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 3, 1, 1))
+        )
+
+        # Exceptions
+        with self.assertRaisesRegex(Exception, "not supported on NHWC"):
+            self.check(
+                torch.nn.Flatten(),
+                nhwc(torch.randn(1, 3, 4, 4))
+            )
         with self.assertRaisesRegex(Exception, "Flattening flexible dims is not supported yet"):
             self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
         with self.assertRaisesRegex(Exception, "Only 1 dim"):

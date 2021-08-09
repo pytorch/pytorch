@@ -118,9 +118,7 @@ bool _nnpack_available() {
 
 // Make thread_local for safety in cases where we have multiple threads running
 // Convs at once
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local void* workspace = nullptr;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static thread_local size_t workspace_size = 0;
 
 static inline void deallocate_workspace() {
