@@ -122,7 +122,7 @@ ALLOW_LIST_COMPILED = [
         re.compile(item[0]),
         item[1],
         re.compile(item[2]) if len(item) > 2 else None,
-    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+    ) for item in ALLOW_LIST if item[1] < datetime.date.today()
 ]
 
 def allow_listed(schema):

@@ -749,7 +749,14 @@ class TestEqualizeFx(QuantizationTestCase):
 
         for (M, node_list) in tests:
             m = M().eval()
+
+            if ndim == 2:
+                x = torch.rand((5, 5))
+            elif ndim == 4:
+                x = torch.rand((16, 3, 224, 224))
+
             prepared = prepare_fx(m, specific_qconfig_dict, equalization_qconfig_dict=default_equalization_qconfig_dict)
+            prepared(x)
             equalized_quantized_model = convert_fx(prepared)
 
             # Check the order of nodes in the graph

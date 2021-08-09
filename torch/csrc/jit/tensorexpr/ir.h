@@ -319,9 +319,9 @@ Expr* getImmediateByType(Dtype dtype, T initialVal) {
 
 template <typename T>
 T immediateAs(Expr* e) {
-#define TYPE_CASE(Type, Name)                         \
-  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
-    return imm->value();                              \
+#define TYPE_CASE(Type, Name)                                     \
+  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
+    return imm->value();                                          \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -336,9 +336,9 @@ T immediateAs(ExprHandle e) {
 
 template <typename T>
 bool immediateEquals(Expr* e, T val) {
-#define TYPE_CASE(Type, Name)                         \
-  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
-    return imm->value() == val;                       \
+#define TYPE_CASE(Type, Name)                                     \
+  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
+    return imm->value() == val;                                   \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE

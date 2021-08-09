@@ -69,11 +69,6 @@ from torch.testing._internal.common_utils import (
 if not IS_WINDOWS:
     import torch.distributed.optim.post_localSGD_optimizer as post_localSGD_optimizer
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
-    from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        _FunctionalSGD: torch.optim.SGD,
-        _FunctionalAdam: torch.optim.Adam
-    }
 
 from torch.utils.data.distributed import DistributedSampler
 
@@ -3128,20 +3123,6 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             self._test_all_to_all_helper(group, group_id, rank)
 
-        @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports all_to_all")
-        @skip_if_rocm
-        def test_all_to_all_quantized(self):
-            group, group_id, rank = self._init_global_test()
-            rank_to_GPU = self._init_multigpu_helper()
-            self._test_all_to_all_helper(
-                group,
-                group_id,
-                rank,
-                cuda=True,
-                rank_to_GPU=rank_to_GPU,
-                dtype=torch.float32,
-                qtype=DQuantType.FP16)
-
         @sandcastle_skip_if(BACKEND != "nccl", "Only NCCL supports CUDA all_to_all")
         @skip_if_rocm
         def test_all_to_all_cuda(self):
@@ -3869,8 +3850,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.get("comm_hook", ""), "")
 
         def _test_ddp_hook_with_optimizer_parity(
-            self, grad_as_bucket_view, static_graph, functional_optim_cls,
-            *functional_optim_args, **functional_optim_kwargs
+            self, grad_as_bucket_view, static_graph
         ):
             rank = self.rank
             torch.cuda.set_device(rank)
@@ -3888,6 +3868,9 @@ class DistributedTest:
                 with torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 ):
+                    sgd_lr = 1e-2
+                    sgd_momentum = 0.9
+                    sgd_weight_decay = 0.01
                     ddp_model_with_optimizer_hook = (
                         torch.nn.parallel.DistributedDataParallel(
                             copy.deepcopy(model).cuda(),
@@ -3898,13 +3881,13 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_optimizer_hook._set_static_graph()
 
-                    # Register hook that runs allreduce + functional optimizer
-                    # step.
+                    # Register hook that runs allreduce + functional SGD step.
                     allreduce_hook = default.allreduce_hook
                     opt_hook_state = default._OptimizerHookState(
-                        functional_optim_cls,
-                        *functional_optim_args,
-                        **functional_optim_kwargs,
+                        _FunctionalSGD,
+                        sgd_lr,
+                        momentum=sgd_momentum,
+                        weight_decay=sgd_weight_decay,
                     )
                     ddp_model_with_optimizer_hook.register_comm_hook(
                         None,
@@ -3920,10 +3903,11 @@ class DistributedTest:
                     if static_graph:
                         ddp_model_with_no_hook._set_static_graph()
 
-                    optimizer_no_hook = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
+                    sgd_no_hook = torch.optim.SGD(
                         ddp_model_with_no_hook.parameters(),
-                        *functional_optim_args,
-                        **functional_optim_kwargs,
+                        lr=sgd_lr,
+                        momentum=sgd_momentum,
+                        weight_decay=sgd_weight_decay,
                     )
 
                     # Verify parameters are equal initially.
@@ -3953,7 +3937,7 @@ class DistributedTest:
                         out = ddp_model_with_no_hook(inp)
                         loss = out.sum()
                         loss.backward()
-                        optimizer_no_hook.step()
+                        sgd_no_hook.step()
 
                     dist.barrier()
 
@@ -3964,8 +3948,8 @@ class DistributedTest:
                     ):
                         self.assertEqual(hook_param, allreduce_param)
 
-                    # Verify optimizer modified parameters, otherwise they would
-                    # be trivially equal above.
+                    # Verify optimizer modified parameters, otherwise they would be
+                    # trivially equal above.
                     self.assertNotEqual(
                         opt_hook_init_params,
                         list(ddp_model_with_optimizer_hook.parameters()),
@@ -3976,51 +3960,15 @@ class DistributedTest:
             BACKEND != "nccl" and BACKEND != "gloo",
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
-        @sandcastle_skip_if(
-            IS_WINDOWS,
-            "FunctionalAdam not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
-        )
+        @sandcastle_skip_if(IS_WINDOWS, "FunctionalSGD not yet supported with Windows.")
         @skip_if_lt_x_gpu(2)
         @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_adam(self):
+        def test_ddp_hook_with_optimizer_parity(self):
             for grad_as_bucket_view, static_graph in itertools.product(
                 [True, False], [True, False]
             ):
-                adam_lr = 1e-2
-                adam_betas = (0.9, 0.99)
-                adam_eps = 1e-6
                 self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view,
-                    static_graph,
-                    _FunctionalAdam,
-                    adam_lr,
-                    betas=adam_betas,
-                    eps=adam_eps,
-                )
-
-        @sandcastle_skip_if(
-            BACKEND != "nccl" and BACKEND != "gloo",
-            "Only Nccl & Gloo backend support DistributedDataParallel",
-        )
-        @sandcastle_skip_if(
-            IS_WINDOWS,
-            "FunctionalSGD not yet supported with Windows, see https://github.com/pytorch/pytorch/issues/62137"
-        )
-        @skip_if_lt_x_gpu(2)
-        @skip_if_rocm
-        def test_ddp_hook_with_optimizer_parity_sgd(self):
-            for grad_as_bucket_view, static_graph in itertools.product(
-                [True, False], [True, False]
-            ):
-                sgd_lr = 1e-2
-                sgd_momentum = 0.9
-                sgd_weight_decay = 0.01
-                self._test_ddp_hook_with_optimizer_parity(
-                    grad_as_bucket_view, static_graph,
-                    _FunctionalSGD,
-                    sgd_lr,
-                    momentum=sgd_momentum,
-                    weight_decay=sgd_weight_decay,
+                    grad_as_bucket_view=grad_as_bucket_view, static_graph=static_graph
                 )
 
         def _test_ddp_hook_parity(self, state, hook):
@@ -5154,7 +5102,6 @@ class DistributedTest:
             self.assertGreaterEqual(bwd_comm_start_host_side_time, bwd_comp_start_host_side_time)
             self.assertGreaterEqual(bwd_comp_end_host_side_time, bwd_comp_start_host_side_time)
             self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
-
 
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):

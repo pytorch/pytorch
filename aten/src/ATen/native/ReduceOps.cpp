@@ -173,25 +173,6 @@ TORCH_META_FUNC(cumprod)
   meta_func_cum_ops(*this, "cumprod", self, dim, dtype);
 }
 
-TORCH_META_FUNC2(sum, dim_IntList)
-(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype;
-  const auto& result = maybe_get_output();
-
-  if (result.defined()) {
-    dtype = opt_dtype.value_or(result.scalar_type());
-  } else {
-    dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
-  }
-
-  DimVector dims(dim);
-  maybe_wrap_dims(dims, self.dim());
-
-  auto shape = get_reduction_shape(self, dims, keepdim);
-  set_output(shape, self.options().dtype(dtype));
-  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
-}
-
 } // namespace meta
 
 namespace meta {
@@ -218,6 +199,34 @@ TORCH_META_FUNC(aminmax)
 }
 
 } // namespace meta
+
+namespace native {
+
+DEFINE_DISPATCH(aminmax_stub);
+DEFINE_DISPATCH(aminmax_allreduce_stub);
+
+TORCH_IMPL_FUNC(aminmax_out)
+(const Tensor& self,
+ c10::optional<int64_t> dim_opt,
+ bool keepdim,
+ const Tensor& min,
+ const Tensor& max) {
+  auto mutable_min = const_cast<Tensor&>(min);
+  auto mutable_max = const_cast<Tensor&>(max);
+  if (dim_opt.has_value()) {
+    aminmax_stub(
+        self.device().type(),
+        self,
+        maybe_wrap_dim(dim_opt.value(), self.ndimension()),
+        keepdim,
+        mutable_min,
+        mutable_max);
+  } else {
+    aminmax_allreduce_stub(self.device().type(), self.contiguous(), mutable_min, mutable_max);
+  }
+}
+
+} // namespace native
 
 namespace native {
 

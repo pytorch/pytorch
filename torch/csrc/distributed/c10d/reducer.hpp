@@ -105,6 +105,13 @@ struct BucketAccumulator {
   size_t size_limit = 0;
 };
 
+// Local accumulator type for a single bucket.
+struct BucketAccumulator {
+  std::vector<size_t> indices;
+  size_t size = 0;
+  size_t size_limit = 0;
+};
+
 C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {

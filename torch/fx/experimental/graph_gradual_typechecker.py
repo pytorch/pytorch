@@ -109,7 +109,7 @@ def add_inference_rule(n: Node):
     if new_t1 != t1 or new_t2 != t2:
         n.meta['broadcast'] = True
         n.meta[str(n.args[0])] = new_t1
-        n.meta[str(n.args[1])] = new_t2
+        n.meta[str(n.args[0])] = new_t2
 
     # Todo: maybe figure out that broadcasting definitely did not happen?
     else:
@@ -551,6 +551,160 @@ class GraphTypeChecker:
 
         else:
             raise NotImplementedError(f"Method {n.op} not yet implemented")
+
+
+@register_refinement_rule(Conv2d)
+@register_refinement_rule(torch.nn.Linear)
+def first_one(n: Node):
+    res = []
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
+    return res
+
+# todo needs review for addition. Is this constraint correct?
+@register_refinement_rule(BatchNorm2d)
+@register_refinement_rule(torch.nn.ReLU)
+@register_refinement_rule(torch.nn.AdaptiveAvgPool2d)
+def all_eq(n: Node):
+    res = []
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        args1 = arg_type.__args__
+        args2 = n.type.__args__
+        res = [Equality(args1[i], args2[i]) for i in range(len(args1))]
+    return res
+
+@register_refinement_rule(torch.add)
+@register_refinement_rule(operator.add)
+def add_eq(n: Node):
+    res = []
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        arg_type1 = n.args[0].type
+        arg_type2 = n.args[1].type
+        if isinstance(arg_type1, TensorType) and isinstance(arg_type2, TensorType) and isinstance(n.type, TensorType):
+            args1, args2 = broadcast_types(arg_type1, arg_type2)
+            # by this point, we know for sure that args1 and args2 are the same size.
+            a1 = args1.__args__
+            a2 = args2.__args__
+            a3 = n.type.__args__
+            r = []
+            for x, y, z in zip(a1, a2, a3):
+                if x == y:
+                    r.append(Equality(x, z))
+            res = r
+    return res
+
+@register_refinement_rule(torch.nn.MaxPool2d)
+def first_two(n: Node):
+    res = []
+    assert isinstance(n.args[0], Node)
+    arg_type = n.args[0].type
+    if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
+        args1 = arg_type.__args__
+        args2 = n.type.__args__
+        res = [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
+    return res
+
+@register_refinement_rule(torch.flatten)
+def flatten_refinement_rule(n: Node):
+    assert isinstance(n.args[0], Node)
+
+    eq_const = []
+
+    start_dim = 1
+    end_dim = -1
+
+    if len(n.args) > 1:
+        assert isinstance(n.args[1], int)
+        start_dim = n.args[1]
+
+    if len(n.args) > 2:
+        assert isinstance(n.args[2], int)
+        end_dim = n.args[2]
+
+    if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
+        l = len(n.type.__args__)
+        arg_type = n.args[0].type
+        start_dim = l if start_dim == -1 else start_dim
+        end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
+
+        for t1, t2 in zip(n.type.__args__[0:start_dim], arg_type.__args__[0:start_dim]):
+            eq_const.append(Equality(t1, t2))
+
+        for t1, t2 in zip(n.type.__args__[end_dim:], arg_type.__args__[end_dim:]):
+            eq_const.append(Equality(t1, t2))
+    return eq_const
+
+class Refine:
+    """
+    Symbolic shape inference.
+    Generates constraints over type variables.
+    Currently all constraints are equality constraints.
+    """
+    def __init__(self, traced):
+        self.constraints = []
+        self.traced = traced
+        self.symbol_iter = itertools.count(start=0, step=1)
+
+    def refine(self):
+        """
+        Generates constraints for
+        every node in the graph based on
+        the operation.
+        """
+        graph = self.traced.graph
+        for n in graph.nodes:
+            self.refine_node(n)
+        return True
+
+    def replace_dyn_with_fresh_var(self, typ):
+        """
+        Replace all unknown types with fresh type variables.
+        """
+        if typ == Dyn:
+            new_symbol = Var(next(self.symbol_iter))
+            return new_symbol
+        elif isinstance(typ, TensorType):
+            new_args = [self.replace_dyn_with_fresh_var(a) for a in typ.__args__]
+            return TensorType(tuple(new_args))
+        else:
+            return typ
+
+    def refine_node(self, n: Node):
+        """
+        Returns a list of equality constraints for
+        call_module and call_function nodes.
+        Models the relation between input and output dimensions
+        using constraints in case they are both tensors.
+        All operations used in resnet50 are defined.
+        """
+        if n.type is None:
+            n.type = Dyn
+
+        n.type = self.replace_dyn_with_fresh_var(n.type)
+
+        if n.op == 'call_function':
+            if n.target in _REFINEMENT_RULES:
+                self.constraints += _REFINEMENT_RULES[n.target](n)
+            else:
+                pass
+
+        if n.op == 'call_module':
+            module_instance = self.traced.get_submodule(n.target)
+            if type(module_instance) in _REFINEMENT_RULES:
+                self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
+            else:
+                pass
+
+        if n.op == 'output':
+            assert isinstance(n.args[0], Node)
+            n.type = n.args[0].type
+
+        else:
+            raise NotImplementedError("Method not yet implemented")
 
 
 @register_refinement_rule(Conv2d)

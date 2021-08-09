@@ -1656,15 +1656,6 @@ bool Reducer::rebuild_buckets() {
           expect_sparse_gradients_[0],
           rebuilt_param_indices_);
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
-    TORCH_INTERNAL_ASSERT(
-        rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
-    LOG(INFO) << rebuilt_bucket_indices.size()
-              << " buckets rebuilt with size limits: "
-              << c10::Join(", ", per_bucket_size_limits)
-              << " bytes.";
-  }
-
   // For rebuilt bucket indices, it needs to be synced across all ranks.
   // Broadcast the newly rebuilt bucket indices from rank 0 in default.
   // After syncing up rebuilt bucket indices, initialize buckets for reducer.

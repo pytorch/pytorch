@@ -956,7 +956,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     lr=SGD_LR,
                     momentum=SGD_MOMENTUM,
                     weight_decay=SGD_WEIGHT_DECAY,
-                    _allow_empty_param_list=True
+                    allow_empty_param_list=True
                 )
                 ddp_model_overlap.register_comm_hook(
                     None,

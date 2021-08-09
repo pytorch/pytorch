@@ -461,6 +461,11 @@ namespace {
 // contains FP divide, which is single-ported.
 static constexpr int kVectorWidth = 16;
 
+// disable NNC temporarily until a code cache is implemented
+#ifdef TORCH_ENABLE_LLVM
+#undef TORCH_ENABLE_LLVM
+#endif
+
 #ifdef TORCH_ENABLE_LLVM
 
 struct TEWrapper {
@@ -1096,11 +1101,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     }
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::sum(self, dim, keepdim, dtype);
+      p_node->Output(0) = at::native::sum(self, dim, keepdim, dtype);
     } else {
       auto& output = p_node->Output(0).toTensor();
       fastResizeToZero(output);
-      at::cpu::sum_out(output, self, dim, keepdim, dtype);
+      at::native::sum_out(self, dim, keepdim, dtype, output);
     }
   };
 });

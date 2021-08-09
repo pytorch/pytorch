@@ -5129,9 +5129,9 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
                                                       reductions):
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
-        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
-        input_fn=lambda f=input_fn: f(),
-        target_fn=lambda f=target_fn: f(),
+        constructor=lambda *args: getattr(nn, name)(reduction=reduction),
+        input_fn=input_fn,
+        target_fn=target_fn,
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )

@@ -230,7 +230,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(Rshift* v) override;
   void visit(CompareSelect* v) override;
 
-#define IMM_VISIT_DECLARE(_1, Name) void visit(Name##Imm* v) override;
+#define IMM_VISIT_DECLARE(_1, Name) void visit(const Name##Imm* v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 

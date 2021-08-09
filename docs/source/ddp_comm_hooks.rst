@@ -32,7 +32,6 @@ Particularly, :class:`torch.distributed.GradBucket` represents a bucket of gradi
 .. autofunction:: torch.distributed.GradBucket.gradients
 .. autofunction:: torch.distributed.GradBucket.is_last
 .. autofunction:: torch.distributed.GradBucket.set_buffer
-.. autofunction:: torch.distributed.GradBucket.parameters
 
 Default Communication Hooks
 ---------------------------
