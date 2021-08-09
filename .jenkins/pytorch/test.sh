@@ -467,6 +467,10 @@ test_torch_deploy() {
   ls -l build/lib
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
+  # ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+  # ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
+  # ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
   "$TORCH_BIN_DIR"/test_deploy
   assert_git_not_dirty
 }
