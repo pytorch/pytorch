@@ -214,6 +214,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
+    "torch/csrc/jit/passes/memory_planning.cpp",
     "torch/csrc/jit/passes/normalize_ops.cpp",
     "torch/csrc/jit/passes/peephole_list_idioms.cpp",
     "torch/csrc/jit/passes/value_refinement_utils.cpp",
