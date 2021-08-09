@@ -1432,12 +1432,12 @@ class TestTracer(JitTestCase):
         # Generate JIT IR.
         traced = torch.jit.trace(Bar(), (x, y))
 
-        # Output schema of the custom autograd.Function.
+        # Expected output schema of the custom autograd.Function.
         schema = '(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), '\
             'Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) '\
             '= ^Foo'
 
-        # See of expected schema exists.
+        # See if expected schema exists.
         FileCheck().check(schema).run(traced.graph)
 
         # Also examine if the graph is runnable and produces
