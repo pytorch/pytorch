@@ -61,7 +61,9 @@ class DeadCodeEliminator {
         continue;
       }
       Graph& g = *node->g(attr::Subgraph);
-      for (size_t i = 0; i < g.inputs().size(); ++i) {
+      // WARNING: Do not use a ranged loop. The loop bounds are changed by the
+      // loop body.
+      for (size_t i = 0; i < g.inputs().size(); /* pass */) {
         if (!g.inputs().at(i)->hasUses()) {
           GRAPH_UPDATE(
               "Dead ",
@@ -71,8 +73,13 @@ class DeadCodeEliminator {
               "(",
               g.inputs().at(i)->debugName(),
               " in a subgraph) will be removed");
+          // If we erase an element the subsequent elements move left, so
+          // we don't want to increment `i`
           g.eraseInput(i);
           node->removeInput(i);
+        } else {
+          // Increment `i` since we have not removed an element
+          i++;
         }
       }
     }
@@ -362,8 +369,9 @@ class DeadCodeEliminator {
     auto loop_body_offset =
         1; // offset to the loop carried dependencies in block inputs/outputs
 
-    for (size_t i_1 = node->outputs().size(); i_1 > 0; --i_1) {
-      size_t i = i_1 - 1;
+    for (auto i_1 = static_cast<int64_t>(node->outputs().size()); i_1 > 0;
+         --i_1) {
+      int64_t i = i_1 - 1;
       if (!node->outputs().at(i)->hasUses() &&
           !loop_body->inputs().at(loop_body_offset + i)->hasUses()) {
         logDeadLoopOutputs(node, i, loop_input_offset, loop_body_offset);
