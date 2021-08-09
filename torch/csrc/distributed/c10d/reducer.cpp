@@ -442,7 +442,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   std::lock_guard<std::mutex> lock(mutex_);
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
-  for (size_t i = 0; i < buckets_.size(); ++i) {
+  for (const auto i : c10::irange(buckets_.size())) {
     auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(

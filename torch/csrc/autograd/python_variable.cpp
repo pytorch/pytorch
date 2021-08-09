@@ -1566,7 +1566,7 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
       }
     } else if (ivalue.isList()) {
       const auto& list = ivalue.toListRef();
-      for (int64_t jdx = 0; jdx < list.size(); jdx++) {
+      for (const auto jdx : c10::irange(list.size())) {
         const auto& nv = list[jdx];
         if (nv.isTensor()) {
           const auto& tensor = nv.toTensor();
