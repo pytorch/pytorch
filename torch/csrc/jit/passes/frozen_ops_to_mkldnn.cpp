@@ -1,6 +1,7 @@
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/interned_strings.h>
+#include <ATen/native/layer_norm.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -271,6 +272,76 @@ Operation createUnaryOp(
   };
 }
 
+static Tensor to_dense(const Tensor input) {
+  auto input_it = at::native::itensor_from_mkldnn(input);
+  auto input_raw_data = input_it.get_data_handle();
+
+  auto input_options_with_strided = input.options().layout(c10::kStrided);
+  auto in_aten = at::from_blob(
+      input_raw_data,
+      input.sizes(),
+      input_it.get_strides(),
+      input_options_with_strided);
+  return in_aten;
+}
+
+void MKLDNNLayerNormOp(Stack* stack) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+
+  // enable_cudnn not used
+  pop(stack);
+  auto eps = pop(stack).toDouble();
+
+  // TODO: avoid doing these unwrappings
+  Tensor bias{};
+  Tensor weight{};
+  auto bias_ival = pop(stack);
+  if (!bias_ival.isNone()) {
+    bias = to_dense(bias_ival.toTensor());
+  }
+  auto weight_ival = pop(stack);
+  if (!weight_ival.isNone()) {
+    weight = to_dense(weight_ival.toTensor());
+  }
+
+  auto shape = pop(stack).toIntVector();
+  auto mkldnn_input = pop(stack).toTensor();
+
+  auto input_it = at::native::itensor_from_mkldnn(mkldnn_input);
+  auto input_options_with_strided =
+      mkldnn_input.options().layout(c10::kStrided);
+  auto input = (input_it.get_desc().is_plain()) ? to_dense(mkldnn_input)
+                                                : mkldnn_input.to_dense();
+
+  auto tgt_desc = input_it.get_desc();
+  // this isn't great if layernorm is followed by a convolution
+  if (!input_it.get_desc().is_plain()) {
+    tgt_desc = input_it.get_desc().to_default_format();
+  }
+
+  auto it_empty = ideep::tensor(tgt_desc);
+  TORCH_INTERNAL_ASSERT(it_empty.get_desc() == tgt_desc);
+  auto out = at::native::new_with_itensor_mkldnn(
+      std::move(it_empty),
+      optTypeMetaToScalarType(input.options().dtype_opt()),
+      input.options().device_opt());
+
+  auto out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
+  auto out_aten = at::from_blob(
+      out_raw_data, input.sizes(), input.strides(), input_options_with_strided);
+
+  auto M_N = at::native::_check_layer_norm_inputs(input, shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+
+  at::Tensor mean = at::empty({M}, input_options_with_strided);
+  at::Tensor rstd = at::empty({M}, input_options_with_strided);
+
+  at::native::layer_norm_cpu_out(
+      out_aten, mean, rstd, input, shape, weight, bias, eps, M, N);
+  push(stack, out);
+};
+
 Operation BroadOp(const Node* node) {
   return [](Stack* stack) {
     auto b = pop(stack).toTensor();
@@ -435,6 +506,13 @@ const RegisterOperators BroadOpReg({
         prim::BroadcastMKLDNNTensors,
         BroadOp,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+});
+
+const RegisterOperators MKLDNNLayerNormOpReg({
+    torch::jit::Operator(
+        "prim::MKLDNNLayerNorm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor",
+        MKLDNNLayerNormOp,
+        AliasAnalysisKind::FROM_SCHEMA),
 });
 
 Operation ConstantMKLDNNTensorOp(const Node* node) {
@@ -719,6 +797,13 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       continue;
     }
 
+    if (body_node->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNLayerNorm"));
+      body_node->destroy();
+      continue;
+    }
+
     if (body_node->kind() == aten::hardswish) {
       body_node->replaceWithNewSymbol(prim::MKLDNNHardSwish);
       body_node->destroy();
@@ -917,6 +1002,12 @@ class MKLDNNSubgraphSlicer {
         return false;
       }
     }
+
+    if (n->matches(
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
+      return true;
+    }
+
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
     switch (n->kind()) {
