@@ -4017,16 +4017,16 @@
     CPU, CUDA: sum
 
 - func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: sum
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
 - func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: sum_out
