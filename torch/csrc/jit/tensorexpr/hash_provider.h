@@ -83,7 +83,7 @@ class TORCH_API HashProvider : public IRVisitor {
 
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name)                    \
-  void visit(const Name##Imm* v) override {      \
+  void visit(Name##Imm* v) override {            \
     CACHE_GUARD();                               \
     putHash(v, hash_combine(#Name, v->value())); \
   }

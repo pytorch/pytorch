@@ -122,32 +122,36 @@ class TestReductions(TestCase):
         args, kwargs = next(op.generate_args_kwargs(t, dim=0))
         self.assertEqual(op(t, *args, dim=0, keepdim=True, **kwargs).shape, [1, 3])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_multi(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
         t = make_tensor((2, 3, 2), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
         self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_multi_keepdim(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...], keepdim=True reduces dimensions i, j, ... to size 1."""
         t = make_tensor((2, 3, 2), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
         self.assertEqual(op(t, *args, dim=[0, 2], keepdim=True, **kwargs).shape, [1, 3, 1])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
+    def test_dim_multi_unsupported(self, device, dtype, op: ReductionOpInfo):
+        """Tests that ops claiming to not support multi dim actually don't."""
+        t = make_tensor((2, 3, 2), device, dtype)
+        with self.assertRaises(TypeError):
+            args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
+            self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_empty(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[] is a noop"""
         t = make_tensor((2, 3), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[]))
         self.assertEqual(op(t, *args, dim=[], **kwargs), t)
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_empty_keepdim(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[], keepdim=True is a noop"""
         t = make_tensor((2, 3), device, dtype)
@@ -188,7 +192,7 @@ class TestReductions(TestCase):
                 self.assertEqual(result, torch.full_like(result, torch.nan))
             else:
                 # Reducing along empty slice should raise an error
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(IndexError):
                     op(t, *args, dim=dim, **kwargs)
 
     @ops(reduction_op_db, allowed_dtypes=[torch.float])
@@ -202,40 +206,40 @@ class TestReductions(TestCase):
             result = op(t, *args, dim=dim, **kwargs)
             self.assertEqual(result.shape, reduced_shape(t.shape, dim))
 
-    @ops(reduction_op_db, dtypes=OpDTypes.supported,
-         allowed_dtypes=integral_types_and(torch.bool))
-    def test_type_promotion(self, device, dtype, op: ReductionOpInfo):
-        """Tests that the result has the correct dtype"""
-        t = make_tensor((5,), device, dtype)
-        args, kwargs = next(op.generate_args_kwargs(t))
-        result: torch.Tensor = op(t, *args, **kwargs)
-        if op.promotes_int_to_float:
-            self.assertTrue(torch.is_floating_point(result.dtype))
-        elif op.promotes_int_to_int64:
-            self.assertEqual(result.dtype, torch.int64)
-        else:
-            self.assertEqual(result.dtype, op.result_dtype or dtype)
-
-    @ops(reduction_op_db, dtypes=OpDTypes.supported,
-         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    @ops(reduction_op_db, dtypes=OpDTypes.supported)
     def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
         """Tests that the result has the correct dtype"""
         t = make_tensor((5,), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t))
         result: torch.Tensor = op(t, *args, **kwargs)
-        self.assertEqual(result.dtype, op.result_dtype or dtype)
+        is_integral = dtype in integral_types_and(torch.bool)
+        if op.promotes_int_to_float and is_integral:
+            self.assertTrue(torch.is_floating_point(result.dtype))
+        elif op.promotes_int_to_int64 and is_integral:
+            self.assertEqual(result.dtype, torch.int64)
+        else:
+            self.assertEqual(result.dtype, op.result_dtype or dtype)
 
     # TODO(@heitorschueroff) Update these to use the nan_policy kwarg once
     # it is added to reduction operators.
 
-    @ops(reduction_op_db,
+    @ops(filter(lambda op: op.nan_policy == 'propagate', reduction_op_db),
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
     def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
         """Tests that nan is propagated to the output by default"""
         t = torch.tensor([0, torch.nan, 2])
         args, kwargs = next(op.generate_args_kwargs(t))
-        result: torch.Tensor = op(t, *args, **kwargs)
+        result = op(t, *args, **kwargs)
         self.assertEqual(result, torch.nan)
+
+    @ops(filter(lambda op: op.nan_policy == 'omit', reduction_op_db),
+         allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
+    def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
+        """Tests that NaN values do not affect the result."""
+        t = torch.tensor([0, torch.nan, 2])
+        args, kwargs = next(op.generate_args_kwargs(t))
+        result = op(t, *args, **kwargs)
+        self.assertEqual(result, op(t[~t.isnan()], *args, **kwargs))
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
@@ -853,7 +857,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):

@@ -51,3 +51,5 @@ inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
 inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
   return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
 }
+
+THP_API c10::impl::PyInterpreter* getPyInterpreter();
