@@ -25,6 +25,7 @@ from torch._C._distributed_c10d import (
 )
 from torch._C._distributed_c10d import _get_debug_mode, _DistributedDebugLevel
 from torch._six import string_classes
+import torch_ucc
 
 # This module is wildcard imported from torch.distributed.
 # TODO: specify __all__
@@ -367,7 +368,7 @@ def is_nccl_available():
     """
     Checks if the NCCL backend is available.
     """
-    return _NCCL_AVAILABLE
+    return True
 
 
 def is_gloo_available():
@@ -589,8 +590,8 @@ def init_process_group(
         # default devices and messes up NCCL internal state.
         _store_based_barrier(rank, store, timeout)
         # Set sequence numbers for gloo and nccl process groups.
-        if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
-            default_pg._set_sequence_number_for_group()
+        # if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
+        #     default_pg._set_sequence_number_for_group()
 
 
 def _new_process_group_helper(
@@ -686,19 +687,19 @@ def _new_process_group_helper(
             _pg_map[pg] = (Backend.GLOO, store)
             _pg_names[pg] = group_name
         elif backend == Backend.NCCL:
-            if not is_nccl_available():
-                raise RuntimeError("Distributed package doesn't have NCCL " "built in")
-            if pg_options is not None:
-                assert isinstance(
-                    pg_options, ProcessGroupNCCL.Options
-                ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
-            else:
-                # default pg_options for NCCL
-                pg_options = ProcessGroupNCCL.Options()
-                pg_options.is_high_priority_stream = False
-                pg_options._timeout = timeout
+            # if not is_nccl_available():
+            #     raise RuntimeError("Distributed package doesn't have NCCL " "built in")
+            # if pg_options is not None:
+            #     assert isinstance(
+            #         pg_options, ProcessGroupNCCL.Options
+            #     ), "Expected pg_options argument to be of type ProcessGroupNCCL.Options"
+            # else:
+            #     # default pg_options for NCCL
+            #     pg_options = ProcessGroupNCCL.Options()
+            #     pg_options.is_high_priority_stream = False
+            #     pg_options._timeout = timeout
 
-            pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
+            pg = torch_ucc.createProcessGroupUCC(prefix_store, rank, world_size, timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
@@ -2897,11 +2898,11 @@ def new_group(ranks=None, timeout=default_pg_timeout, backend=None, pg_options=N
         # default devices and messes up NCCL internal state.
         _store_based_barrier(global_rank, default_store, timeout)
         # Set sequence numbers for gloo and nccl process groups.
-        if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
-            Backend.GLOO,
-            Backend.NCCL,
-        ]:
-            pg._set_sequence_number_for_group()
+        # if pg != GroupMember.NON_GROUP_MEMBER and get_backend(pg) in [
+        #     Backend.GLOO,
+        #     Backend.NCCL,
+        # ]:
+        #     pg._set_sequence_number_for_group()
 
     return pg
 

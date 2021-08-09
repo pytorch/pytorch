@@ -361,7 +361,7 @@ if dist.is_available():
             'WORLD_SIZE': '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-mpi'
         }
-    if dist.is_nccl_available():
+    if True: #dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG['nccl'] = {
             'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3',
             'TEST_REPORT_SOURCE_OVERRIDE': 'dist-nccl'
@@ -554,6 +554,8 @@ def test_distributed(test_module, test_directory, options):
             'MPI not available -- MPI backend tests will be skipped')
     config = DISTRIBUTED_TESTS_CONFIG
     for backend, env_vars in config.items():
+        if backend != "nccl":
+            continue
         if sys.platform == 'win32' and backend != 'gloo':
             continue
         if backend == 'mpi' and not mpi_available:
