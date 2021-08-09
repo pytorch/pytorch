@@ -16650,18 +16650,18 @@ class TestNNDeviceType(NNTestCase):
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double, torch.float16)
     def test_cudnn_convolution_relu(self, device, dtype):
-        for batch in [1, 2, 3]:
-            for groups in [1, 2, 4]:
-                for kernel_size in [(1, 1), (3, 3)]:
-                    for memory_format in [torch.channels_last, torch.contiguous_format]:
-                        inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
-                        w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
-                        conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
-                        inp = inp.to(memory_format=memory_format)
-                        w = w.to(memory_format=memory_format)
-                        cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
-                        self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
-                        self.assertEqual(conv2d_out.relu(), cudnn_out)
+        for batch, groups, kernel_size, memory_format in product((1, 2, 3),
+                                                                 (1, 2, 4),
+                                                                 ((1, 1), (3, 3)),
+                                                                 (torch.channels_last, torch_contiguous_format)):
+            inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
+            w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
+            conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            inp = inp.to(memory_format=memory_format)
+            w = w.to(memory_format=memory_format)
+            cudnn_out = torch.cudnn_convolution_relu(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
+            self.assertTrue(cudnn_out.is_contiguous(memory_format=memory_format))
+            self.assertEqual(conv2d_out.relu(), cudnn_out)
 
     @onlyCUDA
     @skipCUDAIfRocm
