@@ -368,12 +368,12 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return vdot_cuda(self.resolve_conj(), other.conj());
+        return vdot_cuda(self.conj(), other.clone());
        } else {
-        return vdot_cuda(other, self.conj());
-      }
+         return vdot_cuda(self.conj(), other);
+       }
     } else if (other.is_conj()) {
-      return vdot_cuda(self, other.conj());
+      return vdot_cuda(other.conj(), self);
     }
   }
 
@@ -416,12 +416,12 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
 
   if (self.is_conj()) {
     if (other.is_conj()) {
-      return vdot_cuda(other.resolve_conj(), self.conj());
+      return vdot_cuda(self.conj(), other.clone());
     } else {
-      return vdot_cuda(self.resolve_conj(), other);
+      return dot_cuda(self.conj(), other);
     }
   } else if (other.is_conj()) {
-    return dot_cuda(self, other.conj());
+    return vdot_cuda(other.conj(), self);
   }
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
