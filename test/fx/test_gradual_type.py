@@ -1,11 +1,30 @@
 import unittest
 import torch
 from torch.fx import symbolic_trace
+from torch.fx.experimental.unify_refinements import infer_symbolic_types
+from torch.fx.experimental.refinement_types import Equality
 from torch.fx.tensor_type import TensorType, Dyn, is_consistent, is_more_precise
 from torch.fx.annotate import annotate
-from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types
+from torch.fx.experimental.graph_gradual_typechecker import GraphTypeChecker, broadcast_types, Refine
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx import GraphModule
+from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.experimental.unification import Var
+
+try:
+    from torchvision.models import resnet50
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+# try:
+#     from unification import Var
+#     HAS_UNIFICATION = True
+# except ImportError:
+#     HAS_UNIFICATION = False
+# skipIfNoUnification = unittest.skipIf(not HAS_UNIFICATION, "no unification")
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -70,20 +89,25 @@ class AnnotationsTest(unittest.TestCase):
     def test_broadcasting1(self):
         t1 = TensorType((1, 2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
+        t3 = TensorType(())
+        t4 = TensorType((4, 1))
+        t5 = TensorType((4, 4, 4))
+        # todo switch all code to use list instead of tuple
+        t6 = TensorType([1])
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
+        assert broadcast_types(t3, t4) == (t4, t4)
+        assert broadcast_types(t5, t6) == (t5, t5)
 
     def test_broadcasting2(self):
         t1 = TensorType((2, 3, 4))
         t2 = TensorType((1, 2, 1, 4))
 
-        with self.assertRaises(TypeError):
-            broadcast_types(t1, t2)
+        assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, 4)), TensorType((1, 2, 3, 4)))
 
     def test_broadcasting3(self):
         t1 = TensorType((1, 2, 3, Dyn))
         t2 = TensorType((2, 3, 4))
         assert broadcast_types(t1, t2) == (TensorType((1, 2, 3, Dyn)), TensorType((1, 2, 3, 4)))
-
 
 class TypeCheckerTest(unittest.TestCase):
 
@@ -96,12 +120,14 @@ class TypeCheckerTest(unittest.TestCase):
         tc = GraphTypeChecker({}, symbolic_traced)
         tc.type_check()
         expected_ph_types = [TensorType((1, 2, 3, Dyn)),
-                             TensorType((1, 2, 3, 4)),
+                             TensorType((2, 3, 4)),
                              TensorType((1, 2, 3, Dyn)),
                              TensorType((1, 2, 3, Dyn))]
         expected_iter = iter(expected_ph_types)
 
         for n in symbolic_traced.graph.nodes:
+            if n.op == 'call_function':
+                assert n.meta['broadcast']
             assert n.type == next(expected_iter)
 
     def test_type_check_add_with_scalar(self):
@@ -551,7 +577,7 @@ class TypeCheckerTest(unittest.TestCase):
                 assert isinstance(n.type, TensorType)
                 assert torch.Size(n.type.__args__) == B.forward(torch.rand(2, 2, 4, 5)).size()
 
-    def test_type_check_conv2D_and_maxpool2d(self):
+    def test_type_check_conv2D_maxpool2d_flatten(self):
 
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -570,6 +596,7 @@ class TypeCheckerTest(unittest.TestCase):
                 out = self.pool(out)
                 out = self.fc1(out)
                 out = self.pool2(out)
+                out = torch.flatten(out, 1)
                 return out
 
         B = BasicBlock()
@@ -582,13 +609,57 @@ class TypeCheckerTest(unittest.TestCase):
         expected_ph_types = [TensorType((4, 3, 32, 32)), TensorType((4, 6, 28, 28)),
                              TensorType((4, 6, 14, 14)), TensorType((4, 16, 10, 10)),
                              TensorType((4, 16, 5, 5)), TensorType((4, 16, 5, 120)),
-                             TensorType((4, 16, 6, 7)), TensorType((4, 16, 6, 7))]
+                             TensorType((4, 16, 6, 7)), TensorType((4, 672)), TensorType((4, 672))]
 
         expected_iter = iter(expected_ph_types)
 
         for n in traced.graph.nodes:
             assert n.type == next(expected_iter)
 
+    def test_type_check_flatten(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2, 3, 5, Dyn))):
+                return torch.flatten(x, 1, 2)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((1, 6, 5, Dyn))
+
+
+    def test_type_check_flatten_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, Dyn, 3, 5, Dyn))):
+                return torch.flatten(x, 1, 2)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((1, Dyn, 5, Dyn))
+
+
+    def test_type_check_flatten3(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((2, 3, 4, 5))):
+                return torch.flatten(x, start_dim=1, end_dim=3)
+
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'output':
+                assert n.type == TensorType((2, 60))
+        r = Refine(symbolic_traced)
+        r.refine()
+        c = r.constraints
+        assert c == [Equality(2, 2)]
 
 
     def test_type_typechecl_maxpool2d_3dinput(self):
@@ -700,6 +771,176 @@ class TypeCheckerTest(unittest.TestCase):
                     assert is_consistent(n.type, TensorType(b.size()))
 
 
+    def test_flatten_fully_static(self):
+        annotation_list = [Dyn, TensorType((2, 5, 6, 9)), TensorType((10, 15, 13, 14)),
+                           TensorType((10, Dyn, 13, 14)), TensorType((Dyn, Dyn, Dyn, 10))]
+        input_list = [(1, 2, 3, 5), (2, 5, 6, 9), (10, 15, 13, 14),
+                      (10, 15, 13, 14), (2, 2, 10, 10)]
+
+        intermediate_list = [Dyn, (2, 5, 6, 9), (10, 15, 13, 14),
+                             (10, 15, 13, 14), (2, 2, 10, 10)]
+
+        start_dim = [1, 2, 1, 2, 0]
+        end_dim = [1, 3, 3, 3, -2]
+
+        for i in range(5):
+            annotation = annotation_list[i]
+            input = input_list[i]
+            # intermediate_type = intermediate_list[i]
+
+            class BasicBlock(torch.nn.Module):
+                def __init__(self, start, end):
+                    super(BasicBlock, self).__init__()
+                    self.start = start
+                    self.end = end
+
+                def forward(self, x):
+                    out = torch.flatten(x, self.start, self.end)
+                    return out
+
+            B = BasicBlock(start_dim[i], end_dim[i])
+            ast_rewriter = RewritingTracer()
+            graph = ast_rewriter.trace(B)
+            traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+            # annotate our argument
+            for n in graph.nodes:
+                if n.op == 'placeholder':
+                    n.type = annotation
+
+            b = B.forward(torch.rand(input))
+            tc = GraphTypeChecker({}, traced)
+            tc.type_check()
+
+            for n in graph.nodes:
+                if n.op == 'output':
+                    assert is_consistent(n.type, TensorType(b.size()))
+
+    @skipIfNoTorchVision
+    def test_resnet50(self):
+        gm_run = symbolic_trace(resnet50())
+        sample_input = torch.randn(1, 3, 224, 224)
+
+        # run our nodes
+        ShapeProp(gm_run).propagate(sample_input)
+
+        gm_static = symbolic_trace(resnet50())
+
+        for n in gm_static.graph.nodes:
+            n.type = None
+
+        g = GraphTypeChecker({}, gm_static)
+        g.type_check()
+        # here we are checking for consistency with fully dynamic nodes
+        for n1, n2 in zip(gm_static.graph.nodes, gm_run.graph.nodes):
+            assert is_consistent(n1.type, TensorType(n2.meta['tensor_meta'].shape))
+
+        # here we give the same input as to runtume
+        gm_static_with_types = symbolic_trace(resnet50())
+
+        # we initialize our placeholder
+        for n in gm_static_with_types.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType((1, 3, 224, 224))
+
+        g = GraphTypeChecker({}, gm_static_with_types)
+        g.type_check()
+        for n1, n2 in zip(gm_static_with_types.graph.nodes, gm_run.graph.nodes):
+            assert n1.type == TensorType(n2.meta['tensor_meta'].shape)
+
+        # apply shape inference to graph and check
+        # that the batch size is equal across all layers
+        infer_symbolic_types(gm_static)
+
+
+        batch_sizes = set()
+        for n in gm_static.graph.nodes:
+            assert isinstance(n.type, TensorType)
+            batch_sizes.add(n.type.__args__[0])
+        assert (len(batch_sizes) == 1)
+
+
+    def test_type_check_batch_norm_symbolic(self):
+        class BasicBlock(torch.nn.Module):
+
+            def __init__(self, inplanes, planes, norm_layer=None):
+                super(BasicBlock, self).__init__()
+                if norm_layer is None:
+                    norm_layer = torch.nn.BatchNorm2d
+                self.bn1 = norm_layer(planes)
+
+            def forward(self, x: Dyn):
+                identity = x
+                out: TensorType((2, 2, Dyn, 4)) = self.bn1(x)
+                out += identity
+                return out
+
+        B = BasicBlock(2, 2)
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(B)
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        tc = GraphTypeChecker({}, traced)
+        tc.type_check()
+
+        infer_symbolic_types(traced)
+
+
+        my_types = iter([TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)],
+                         TensorType[(2, 2, Var(7), 4)]])
+
+        for n in graph.nodes:
+            assert n.type == next(my_types)
+
+    def test_symbolic_add_with_broadcast(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2, 3, Dyn)), y: TensorType((2, 3, 4))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        infer_symbolic_types(symbolic_traced)
+        r = Refine(symbolic_traced)
+        r.refine()
+
+        assert r.constraints == [Equality(1, 1), Equality(2, 2), Equality(3, 3)]
+        # note that there is no equality constraint between dyn and 4 because
+        # dyn could be 4 or 1
+
+        infer_symbolic_types(symbolic_traced)
+
+        expected_ph_types = [TensorType((1, 2, 3, Var(0))),
+                             TensorType((2, 3, 4)),
+                             TensorType((1, 2, 3, Var(1))),
+                             TensorType((1, 2, 3, Var(1)))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
+
+
+    def test_symbolic_add_with_broadcast_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x: TensorType((1, 2)), y: TensorType((Dyn, 2))):
+                return torch.add(x, y)
+        module = M()
+        symbolic_traced: torch.fx.GraphModule = symbolic_trace(module)
+        tc = GraphTypeChecker({}, symbolic_traced)
+        tc.type_check()
+        infer_symbolic_types(symbolic_traced)
+        r = Refine(symbolic_traced)
+        r.refine()
+
+        expected_ph_types = [TensorType((1, 2)),
+                             TensorType((Var(1), 2)),
+                             TensorType((Var(1), 2)),
+                             TensorType((Var(1), 2))]
+        expected_iter = iter(expected_ph_types)
+
+        for n in symbolic_traced.graph.nodes:
+            assert n.type == next(expected_iter)
 
 if __name__ == '__main__':
     unittest.main()
