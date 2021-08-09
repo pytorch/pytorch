@@ -354,10 +354,8 @@ void Pickler::pushTensor(const IValue& ivalue) {
 
 void Pickler::pushLiteralSparseTensor(const at::Tensor& tensor) {
   // The arguments to this function are:
-  // size, requires_grad, pinned memory, data_type,
-  // indices_storage, indices_offset, indices_size, indices_stride,
-  // indices_requires_grad, values_storage, values_offset, values_size,
-  // values_stride, values_requires_grad, backward_hooks
+  // size, requires_grad, pinned memory, data_type, device,
+  // indices, values, backward_hooks
   pushGlobal("torch._utils", "_rebuild_sparse_coo_tensor");
   // size
   push<PickleOpCode>(PickleOpCode::MARK);
