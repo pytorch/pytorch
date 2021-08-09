@@ -109,7 +109,7 @@ def add_inference_rule(n: Node):
     if new_t1 != t1 or new_t2 != t2:
         n.meta['broadcast'] = True
         n.meta[str(n.args[0])] = new_t1
-        n.meta[str(n.args[0])] = new_t2
+        n.meta[str(n.args[1])] = new_t2
 
     # Todo: maybe figure out that broadcasting definitely did not happen?
     else:
@@ -132,6 +132,18 @@ def add_inference_rule(n: Node):
         raise TypeError(f'Cannot add arguments {n.args[0]} ({ n.args[0].type}) and {n.args[1]} ({ n.args[1].type}) in node {n}.'
                         f' Types should match ')
 
+@register_inference_rule(getattr)
+def get_attr_inference_rule(n: Node, traced):
+    attr_node = n.args[0]
+    attr_name = n.args[1]
+
+    if attr_name == "shape":
+        n.type = Dyn
+    else:
+        raise TypeError("Not yet implelemted")
+
+    # TODO. We leave it like this till we add a type to represent tensor sizes
+    return n.type
 
 @register_inference_rule(torch.transpose)
 def transpose_inference_rule(n: Node):
@@ -508,8 +520,18 @@ class GraphTypeChecker:
         if n.op == 'placeholder':
             return n.type
 
+        elif n.op == 'get_attr':
+            t = self.traced.get_parameter(n.target)
+            if isinstance(t.data, torch.Tensor):
+                n.type = TensorType(t.data.shape)
+            return n.type
+
         elif n.op == 'call_function':
-            if n.target in _INFERENCE_RULES:
+            if n.target == getattr:
+                assert getattr in _INFERENCE_RULES
+                return _INFERENCE_RULES[n.target](n, self.traced)
+
+            elif n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n)
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
@@ -525,10 +547,6 @@ class GraphTypeChecker:
             def get_node_type(a):
                 return a.type
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
-            return n.type
-
-        # TODO
-        elif n.op == 'get_attr':
             return n.type
 
         else:
