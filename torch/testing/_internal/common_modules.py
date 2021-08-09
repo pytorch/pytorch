@@ -1,7 +1,7 @@
 import torch
 from copy import deepcopy
 from functools import wraps, partial
-from itertools import chain
+from itertools import chain, product
 from torch.testing import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
@@ -46,22 +46,14 @@ for namespace in MODULE_NAMESPACES:
 
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
-    def __init__(self, module_info_list):
+    def __init__(self, module_info_list, requires_grad):
         self.module_info_list = module_info_list
+        self.requires_grad = requires_grad
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         for module_info in self.module_info_list:
             # TODO: Factor some of this out since it's similar to OpInfo.
             for dtype in floating_types():
-                # Construct the test name.
-                test_name = '{}_{}_{}{}'.format(test.__name__,
-                                                module_info.name.replace('.', '_'),
-                                                device_cls.device_type,
-                                                _dtype_test_suffix(dtype))
-
-                # Construct parameter kwargs to pass to the test.
-                param_kwargs = {'module_info': module_info}
-                _update_param_kwargs(param_kwargs, 'dtype', dtype)
 
                 try:
                     active_decorators = []
@@ -85,9 +77,31 @@ class modules(_TestParametrizer):
                     for decorator in active_decorators:
                         test_wrapper = decorator(test_wrapper)
 
-                    yield (test_wrapper, test_name, param_kwargs)
+                    try:
+                        module_inputs = module_info.module_inputs_func(
+                            module_info, device=device_cls.device_type, dtype=dtype, requires_grad=False)
+                    except NotImplementedError as ex:
+                        if "arguments from the 'Meta' backend" in str(ex):
+                            # Meta function not implemented
+                            continue
+                        raise
+
+                    for module_input in module_inputs:
+                        # Construct parameter kwargs to pass to the test.
+                        param_kwargs = {'module_info': module_info, 'module_input': module_input}
+                        _update_param_kwargs(param_kwargs, 'dtype', dtype)
+                        # Construct the test name.
+                        test_name = '{}_{}_{}_{}{}'.format(test.__name__,
+                                                        module_info.name.replace('.', '_'),
+                                                        module_input.desc,
+                                                        device_cls.device_type,
+                                                        _dtype_test_suffix(dtype))
+                        yield (test_wrapper, test_name, param_kwargs)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
+                    test_name = '{}_{}_{}{}'.format(
+                        test.__name__, module_info.name.replace('.', '_'),
+                        device_cls.device_type, _dtype_test_suffix(dtype))
                     print("Failed to instantiate {0} for module {1}!".format(test_name, module_info.name))
                     raise ex
 
@@ -223,66 +237,64 @@ def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
 def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    yield ModuleInput(constructor_input=FunctionInput(kernel_size=2),
-                     forward_input=FunctionInput(make_input(size=(3, 6))),
-                     desc='no_batch_dim',
-                     reference_fn=no_batch_dim_reference_fn)
+    return [ModuleInput(constructor_input=FunctionInput(kernel_size=2),
+                       forward_input=FunctionInput(make_input(size=(3, 6))),
+                       desc='no_batch_dim',
+                       reference_fn=no_batch_dim_reference_fn)]
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    yield ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                      forward_input=FunctionInput(make_input(size=(3, 2, 5))),
-                      reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)))
-    yield ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                      forward_input=FunctionInput(make_input(size=())),
-                      desc='scalar')
-    yield ModuleInput(constructor_input=FunctionInput(),
-                      forward_input=FunctionInput(make_input(size=(3,))),
-                      desc='no_batch_dim',
-                      reference_fn=no_batch_dim_reference_fn)
+    return [
+        ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                    forward_input=FunctionInput(make_input(size=(3, 2, 5))),
+                    reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1))),
+        ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                    forward_input=FunctionInput(make_input(size=())),
+                    desc='scalar'),
+        ModuleInput(constructor_input=FunctionInput(),
+                    forward_input=FunctionInput(make_input(size=(3,))),
+                    desc='no_batch_dim',
+                    reference_fn=no_batch_dim_reference_fn)]
 
 
 def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    yield ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                      forward_input=FunctionInput(make_input(size=(3, 2, 5))),
-                      reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1)))
-    yield ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                      forward_input=FunctionInput(make_input(size=())),
-                      reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
-                      desc='scalar')
-    yield ModuleInput(constructor_input=FunctionInput(alpha=2.),
-                      forward_input=FunctionInput(make_input(size=(3,))),
-                      desc='no_batch_dim',
-                      reference_fn=no_batch_dim_reference_fn)
+    return [ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                        forward_input=FunctionInput(make_input(size=(3, 2, 5))),
+                        reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2. * ((.5 * i).exp() - 1))),
+            ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                        forward_input=FunctionInput(make_input(size=())),
+                        reference_fn=lambda m, p, i: torch.where(i >= 0, i, 2 * (i.exp() - 1)),
+                        desc='scalar'),
+            ModuleInput(constructor_input=FunctionInput(alpha=2.),
+                        forward_input=FunctionInput(make_input(size=(3,))),
+                        desc='no_batch_dim',
+                        reference_fn=no_batch_dim_reference_fn)]
 
 
-def generate_regression_criterion_inputs(make_input):
-    for reduction in ['none', 'mean', 'sum']:
-        yield ModuleInput(
+def regression_criterion_inputs(make_input):
+    return [
+        ModuleInput(
             constructor_input=FunctionInput(reduction=reduction),
-            forward_input=FunctionInput(make_input(size=(4, )), make_input(size=4,)),
-            reference_fn=no_batch_dim_reference_criterion_fn,
-            desc='no_batch_dim_{}'.format(reduction)
-        )
+            forward_input=FunctionInput(make_input(size=(4, )), make_input(size=4,)), reference_fn=no_batch_dim_reference_criterion_fn,
+            desc='no_batch_dim_{}'.format(reduction)) for reduction in ['none', 'mean', 'sum']]
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    yield ModuleInput(constructor_input=FunctionInput(),
-                      forward_input=FunctionInput(make_input(size=(2, 3, 4)),
-                                                  make_input(size=(2, 3, 4))),
-                      reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
-                                                                           for a, b in zip(i, t)))
-    yield ModuleInput(constructor_input=FunctionInput(),
-                      forward_input=FunctionInput(make_input(size=()), make_input(size=())),
-                      reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
-                      desc='scalar')
-    yield from generate_regression_criterion_inputs(make_input)
+    return [ModuleInput(constructor_input=FunctionInput(),
+                        forward_input=FunctionInput(make_input(size=(2, 3, 4)),
+                                                    make_input(size=(2, 3, 4))),
+                        reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
+                                                                           for a, b in zip(i, t))),
+            ModuleInput(constructor_input=FunctionInput(),
+                        forward_input=FunctionInput(make_input(size=()), make_input(size=())),
+                        reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
+                        desc='scalar')] + regression_criterion_inputs(make_input)
 
 
 # Database of ModuleInfo entries in alphabetical order.
