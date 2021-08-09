@@ -128,6 +128,7 @@ def filter_master_only_jobs(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
+        cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
     ]
     build_jobs = [f() for f in build_workflows_functions]
