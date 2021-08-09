@@ -11,7 +11,7 @@
 // This version uses a static number of dimensions.
 template <typename IndexType, typename Real, int Dims>
 struct IndexToScatterGatherOffsets {
-  static __device__ void compute(
+  static inline __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
@@ -28,7 +28,7 @@ struct IndexToScatterGatherOffsets {
     }
   }
 
-  static __device__ void compute(
+  static inline __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
@@ -47,7 +47,7 @@ struct IndexToScatterGatherOffsets {
 // Same as above but using a dynamic number of dimensions.
 template <typename IndexType, typename Real>
 struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
-  static __device__ void compute(
+  static inline __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t1, IndexType* t1Offset,
@@ -63,7 +63,7 @@ struct IndexToScatterGatherOffsets<IndexType, Real, -1> {
     }
   }
 
-  static __device__ void compute(
+  static inline __device__ void compute(
       IndexType linearId, const int dim,
       const TensorInfo<int64_t, IndexType>& index, IndexType* indexOffset,
       const TensorInfo<Real, IndexType>& t2, IndexType* t2Offset) {
