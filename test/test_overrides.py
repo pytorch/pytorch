@@ -407,7 +407,7 @@ class TestTorchFunctionOverride(TestCase):
 
     def test_precedence_semantics(self):
         """Test semantics for __torch_function__ for functions that take
-        multiple arugments
+        multiple arguments
 
         For functions that take multiple arguments, the appropriate
         __torch_function__ implementation to call is determined by

@@ -65,8 +65,7 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
       memory_format != MemoryFormat::Preserve,
       "preserve memory format is unsupported by the contiguous operator");
 
-  auto result = at::empty_like(self, self.options(), memory_format);
-  return result.copy_(self);
+  return self.clone(memory_format);
 }
 
 bool is_set_to(const Tensor& self, const Tensor& src) {

@@ -1,3 +1,5 @@
+.. _elastic_errors-api:
+
 Error Propagation
 ==================
 
