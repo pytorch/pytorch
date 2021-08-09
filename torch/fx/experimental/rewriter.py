@@ -34,7 +34,7 @@ class AST_Rewriter(ast.NodeTransformer):
 
         # Pull out the compiled fucntion from the newly-created Module
         code = compile(dest_ast, "", "exec")
-        globals_dict = copy.copy(fn.__globals__)
+        globals_dict = fn.__globals__
         keys_before = set(globals_dict.keys())
         exec(code, globals_dict)
         new_keys = list(set(globals_dict.keys()) - keys_before)
