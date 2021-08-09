@@ -4,6 +4,7 @@ from io import BytesIO
 from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, is_from_package
+from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_utils import run_tests
 
 try:
@@ -63,7 +64,7 @@ class TestMisc(PackageTestCase):
             """
         )
 
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import module_a
             import package_a
             import package_a.subpackage
@@ -101,7 +102,7 @@ class TestMisc(PackageTestCase):
         Test Directory's has_file() method.
         """
         buffer = BytesIO()
-        with PackageExporter(buffer, verbose=False) as he:
+        with PackageExporter(buffer) as he:
             import package_a.subpackage
 
             he.intern("**")
@@ -115,6 +116,34 @@ class TestMisc(PackageTestCase):
         self.assertTrue(file_structure.has_file("package_a/subpackage.py"))
         self.assertFalse(file_structure.has_file("package_a/subpackage"))
 
+    def test_exporter_content_lists(self):
+        """
+        Test content list API for PackageExporter's contained modules.
+        """
+
+        with PackageExporter(BytesIO()) as he:
+            import package_b
+
+            he.extern("package_b.subpackage_1")
+            he.mock("package_b.subpackage_2")
+            he.intern("**")
+            he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+            self.assertEqual(he.externed_modules(), ["package_b.subpackage_1"])
+            self.assertEqual(he.mocked_modules(), ["package_b.subpackage_2"])
+            self.assertEqual(
+                he.interned_modules(),
+                ["package_b", "package_b.subpackage_0.subsubpackage_0"],
+            )
+            self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
+
+        with self.assertRaises(PackagingError) as e:
+            with PackageExporter(BytesIO()) as he:
+                import package_b
+
+                he.deny("package_b")
+                he.save_pickle("obj", "obj.pkl", package_b.PackageBObject(["a"]))
+                self.assertEqual(he.denied_modules(), ["package_b"])
+
     def test_is_from_package(self):
         """is_from_package should work for objects and modules"""
         import package_a.subpackage
@@ -122,7 +151,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -144,7 +173,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -168,7 +197,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         obj = package_a.subpackage.PackageASubpackageObject()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", obj)
 
@@ -187,7 +216,7 @@ class TestMisc(PackageTestCase):
 
         buffer = BytesIO()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_module(mod.__name__)
 
@@ -208,7 +237,7 @@ class TestMisc(PackageTestCase):
         buffer = BytesIO()
         mod = package_a.std_sys_module_hacks.Module()
 
-        with PackageExporter(buffer, verbose=False) as pe:
+        with PackageExporter(buffer) as pe:
             pe.intern("**")
             pe.save_pickle("obj", "obj.pkl", mod)
 

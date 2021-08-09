@@ -25,7 +25,8 @@ try:
         get_shard_based_on_S3,
         get_slow_tests_based_on_S3,
         get_specified_test_cases,
-        get_reordered_tests
+        get_reordered_tests,
+        get_test_case_configs,
     )
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
@@ -41,6 +42,7 @@ TESTS = [
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
+    'test_buffer_protocol',
     'test_bundled_inputs',
     'test_complex',
     'test_cpp_api_parity',
@@ -55,6 +57,7 @@ TESTS = [
     'distributed/test_c10d_spawn_nccl',
     'distributed/test_store',
     'distributed/test_pg_wrapper',
+    'distributed/algorithms/test_join',
     'test_cuda',
     'test_jit_cuda_fuser',
     'test_cuda_primary_ctx',
@@ -74,6 +77,7 @@ TESTS = [
     'test_mkldnn',
     'test_model_dump',
     'test_module_init',
+    'test_modules',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -82,6 +86,7 @@ TESTS = [
     'test_nn',
     'test_ops',
     'test_optim',
+    'test_functional_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_set_default_mobile_cpu_allocator',
@@ -451,6 +456,9 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
         unittest_args = [arg if arg != '-f' else '-x' for arg in unittest_args]
+    elif IS_IN_CI:
+        # use the downloaded test cases configuration, not supported in pytest
+        unittest_args.extend(['--import-slow-tests', '--import-disabled-tests'])
 
     # Multiprocessing related tests cannot run with coverage.
     # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
@@ -1044,6 +1052,8 @@ def main():
 
     if IS_IN_CI:
         selected_tests = get_reordered_tests(selected_tests, ENABLE_PR_HISTORY_REORDERING)
+        # downloading test cases configuration to local environment
+        get_test_case_configs(dirpath=os.path.dirname(os.path.abspath(__file__)))
 
     has_failed = False
     failure_messages = []
