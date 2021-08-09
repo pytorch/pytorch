@@ -93,7 +93,6 @@ unsigned short float2halfbits(float src) {
   return (sign | (exponent << 10) | mantissa);
 };
 } // namespace half_legacy_impl
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(HalfDoubleConversionTest, Half2Double) {
   std::vector<uint16_t> inputs = {
       0,
