@@ -57,8 +57,54 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
+std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    bool sparse_grad) {
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
+
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto index_ = moveBatchDimToFront(index, index_bdim);
+
+  auto physical_dim = dim;
+  if (self_logical_rank == 0) {
+    TORCH_CHECK(dim == 0 || dim == -1,
+        "Dimension out of range (expected to be in range of [-1, 0], but got ", dim, ")");
+    physical_dim = -1;
+  } else {
+    physical_dim = getPhysicalDim(self_, self_bdim.has_value(), dim);
+  }
+  if (!self_bdim) {
+    TORCH_INTERNAL_ASSERT(index_bdim);
+    DimVector expanded_shape(self_.sizes().begin(), self_.sizes().end());
+    expanded_shape.insert(expanded_shape.begin(), index_.size(0));
+    self_ = self_.expand(expanded_shape);
+    physical_dim += 1;
+  }
+  if (!index_bdim) {
+    TORCH_INTERNAL_ASSERT(self_bdim);
+    DimVector expanded_shape(index_.sizes().begin(), index_.sizes().end());
+    expanded_shape.insert(expanded_shape.begin(), self_.size(0));
+    index_ = index_.expand(expanded_shape);
+  }
+  // Ridiculous special case for scalar tensors
+  if (self_logical_rank == 1 && index_logical_rank == 0) {
+    index_ = index_.unsqueeze(-1);
+    auto result = at::gather(self_, physical_dim, index_, sparse_grad).squeeze(-1);
+    return std::make_tuple(result, 0);
+  }
+  if (self_logical_rank == 0 && index_logical_rank == 1) {
+    self_ = self_.unsqueeze(-1);
+  }
+
+  return std::make_tuple(at::gather(self_, physical_dim, index_, sparse_grad), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     // m.impl("index.Tensor", index_plumbing);
+  VMAP_SUPPORT("gather", gather_batch_rule);
 }
 
 }}
