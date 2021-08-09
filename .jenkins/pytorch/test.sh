@@ -472,8 +472,8 @@ test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
   ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TORCH_BIN_DIR"
   "$TORCH_BIN_DIR"/test_deploy
   assert_git_not_dirty
 }
