@@ -34,10 +34,14 @@ DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 using reduce_fn_flag = void(*)(TensorIterator &, const Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
+using structured_cum_fn = void (*)(const Tensor&, const Tensor&, int64_t);
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
-DECLARE_DISPATCH(cum_fn, cumsum_stub);
-DECLARE_DISPATCH(cum_fn, cumprod_stub);
+DECLARE_DISPATCH(structured_cum_fn, cumsum_stub);
+DECLARE_DISPATCH(structured_cum_fn, cumprod_stub);
 DECLARE_DISPATCH(cum_fn, logcumsumexp_stub);
+
+DECLARE_DISPATCH(void (*)(const Tensor&, int64_t, bool, Tensor&, Tensor&), aminmax_stub);
+DECLARE_DISPATCH(void (*)(const Tensor&, Tensor&, Tensor&), aminmax_allreduce_stub);
 
 // Used in cuda/Normalization.cu
 TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(

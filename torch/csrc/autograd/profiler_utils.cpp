@@ -192,6 +192,11 @@ uint64_t computeFlops(const std::string &op_name, const std::unordered_map<std::
       return 0;
     } else {
       int64_t overlap_dim = mat1_size.back();
+      if (overlap_dim == 0) {
+        TORCH_WARN("Failed to compute flops for op aten::mm on a mat1_size of 0.");
+        return 0;
+      }
+
       const uint64_t gemm_multiply_factor = 2;
       uint64_t flops = 1;
       for(int64_t dim : mat1_size) {
