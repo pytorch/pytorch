@@ -421,5 +421,18 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> outputs_;
 };
 
+//  Map each value to all values that are alive at the same time.
+using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
+using LiveRanges = std::unordered_map<const Value*, std::pair<size_t, size_t>>;
+
+TORCH_API std::unordered_set<const Value*> GetAlwaysAliveValues(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    AliasDb& db);
+
+TORCH_API std::pair<LivenessMap, LiveRanges> GetLiveness(
+    const std::shared_ptr<torch::jit::Graph>& graph,
+    const std::unordered_set<const Value*>& always_alive,
+    AliasDb& db);
+
 } // namespace jit
 } // namespace torch
