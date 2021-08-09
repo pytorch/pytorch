@@ -19,6 +19,7 @@ import torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook as post_lo
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as model_averaging_utils
+import torch.distributed.algorithms.quantization as quant
 import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
@@ -28,6 +29,7 @@ from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.distributed.algorithms.ddp_comm_hooks import (
     quantization as quantization_hooks,
 )
+from torch.distributed.algorithms.quantization import DQuantType
 from torch.distributed.distributed_c10d import (
     get_world_size,
     _get_default_group,
@@ -2731,11 +2733,15 @@ class DistributedTest:
 
         # ALL GATHER
         def _test_all_gather_helper(
-            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float
+            self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=None
         ):
             for dest in group:
                 tensor = _build_tensor(dest + 1, rank, dtype=dtype)
                 tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
+                if qtype is not None:
+                    allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
+                else:
+                    allgather = dist.all_gather
                 if cuda:
                     tensor = tensor.cuda(rank_to_GPU[rank][0])
                     tensors = [t.cuda(rank_to_GPU[rank][0]) for t in tensors]
@@ -2746,10 +2752,11 @@ class DistributedTest:
                 self.call_dist_op(
                     ":all_gather",
                     False,
-                    dist.all_gather,
+                    allgather,
                     tensors,
                     tensor,
                     group_id,
+                    False,
                     tensor_shapes=tensor_shapes,
                 )
 
@@ -2799,6 +2806,12 @@ class DistributedTest:
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "mpi", "all_gather_quantized does not support MPI")
+        def test_all_gather_quantized(self):
+            group, group_id, rank = self._init_global_test()
+            self._test_all_gather_helper(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.FP16)
 
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
@@ -3002,6 +3015,7 @@ class DistributedTest:
             cuda=False,
             rank_to_GPU=None,
             dtype=torch.float,
+            qtype=None
         ):
             if group_id is not None:
                 size = len(group)
@@ -3022,7 +3036,11 @@ class DistributedTest:
                         t.cuda(rank_to_GPU[rank][0]) for t in expected_tensors
                     ]
                     out_tensors = [t.cuda(rank_to_GPU[rank][0]) for t in out_tensors]
-                dist.all_to_all(out_tensors, in_tensors, group=group_id)
+                if(qtype is not None):
+                    quantize_alltoall = quant.auto_quantize(dist.all_to_all, qtype, quant_loss=None)
+                    quantize_alltoall(out_tensors, in_tensors, group=group_id)
+                else:
+                    dist.all_to_all(out_tensors, in_tensors, group=group_id)
                 for t1, t2 in zip(out_tensors, expected_tensors):
                     self.assertEqual(t1, t2)
             self._barrier()
@@ -4992,6 +5010,11 @@ class DistributedTest:
             self.assertEqual(
                 ddp_logging_data.get("rebuilt_bucket_sizes"), str(param_size)
             )
+            grad_ready_order = ddp_logging_data.get("prev_iteration_grad_ready_order_indices")
+            expected_order = list(reversed([str(x) for x in range(3)]))
+            self.assertEqual(grad_ready_order, ", ".join(expected_order))
+            bucket_indices = ddp_logging_data.get("rebuilt_per_bucket_param_indices")
+            self.assertEqual(bucket_indices, " ".join(expected_order))
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
             self.assertGreaterEqual(ddp_logging_data.get("avg_forward_compute_time"), 1)
@@ -5007,6 +5030,17 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_comm_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"),
             )
+            # Test host-side times are roughly in the order that we expect
+            fwd_host_side_time = ddp_logging_data.get("forward_compute_time_start")
+            bwd_comp_start_host_side_time = ddp_logging_data.get("backward_compute_time_start")
+            bwd_comp_end_host_side_time = ddp_logging_data.get("backward_compute_time_end")
+            bwd_comm_start_host_side_time = ddp_logging_data.get("backward_comm_time_start")
+            bwd_comm_end_host_side_time = ddp_logging_data.get("backward_comm_time_end")
+            self.assertGreaterEqual(bwd_comm_end_host_side_time, bwd_comm_start_host_side_time)
+            self.assertGreaterEqual(bwd_comm_start_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_end_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
+
             # test larger net with mixed data types, verify multiple bucket sizes
             model = LargeNet()
             model.float()
@@ -5038,6 +5072,11 @@ class DistributedTest:
             ddp_logging_data = model_DDP._get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.get("device_ids"), str(rank))
             self.assertEqual(ddp_logging_data.get("output_device"), rank)
+            grad_ready_order = ddp_logging_data.get("prev_iteration_grad_ready_order_indices")
+            expected_order = list(reversed([str(x) for x in range(3)]))
+            self.assertEqual(grad_ready_order, ", ".join(expected_order))
+            bucket_indices = ddp_logging_data.get("rebuilt_per_bucket_param_indices")
+            self.assertEqual(bucket_indices, " ".join(expected_order))
             # test runtime logging fields
             # It is hard to test accurate latency, but it can test whether the latency is
             # a valid value and in the expected range.
@@ -5053,6 +5092,16 @@ class DistributedTest:
                 ddp_logging_data.get("avg_backward_comm_time"),
                 ddp_logging_data.get("avg_backward_compute_comm_overlap_time"),
             )
+            # Test host-side times are roughly in the order that we expect
+            fwd_host_side_time = ddp_logging_data.get("forward_compute_time_start")
+            bwd_comp_start_host_side_time = ddp_logging_data.get("backward_compute_time_start")
+            bwd_comp_end_host_side_time = ddp_logging_data.get("backward_compute_time_end")
+            bwd_comm_start_host_side_time = ddp_logging_data.get("backward_comm_time_start")
+            bwd_comm_end_host_side_time = ddp_logging_data.get("backward_comm_time_end")
+            self.assertGreaterEqual(bwd_comm_end_host_side_time, bwd_comm_start_host_side_time)
+            self.assertGreaterEqual(bwd_comm_start_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_end_host_side_time, bwd_comp_start_host_side_time)
+            self.assertGreaterEqual(bwd_comp_start_host_side_time, fwd_host_side_time)
 
         @sandcastle_skip_if(BACKEND == "nccl", "nccl does not support DDP on CPU models")
         def test_static_graph_api_cpu(self):

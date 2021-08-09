@@ -20,6 +20,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <mutex>
 
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
@@ -548,10 +549,35 @@ std::shared_ptr<TEWrapper> wrapTECompute(
 
 #endif
 
+std::mutex& getNNCCacheMutex() {
+  static std::mutex nncCacheMutex;
+  return nncCacheMutex;
+}
+
+std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static std::unordered_map<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+  return nncCache;
+}
+
+std::shared_ptr<TEWrapper> lookupNNCCache(NodeKind kind) {
+  std::lock_guard<std::mutex> lock(getNNCCacheMutex());
+  auto it = getNNCCache().find(kind);
+  if (it != getNNCCache().end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
+void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
+  std::lock_guard<std::mutex> lock(getNNCCacheMutex());
+  getNNCCache()[kind] = code;
+}
+
 } // namespace
 
 std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
   using namespace torch::jit::tensorexpr;
+  // TODO: Use NNC cache for this op.
   auto wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
@@ -574,7 +600,11 @@ std::shared_ptr<TEWrapper> createLogit(c10::optional<float> clamp) {
 
 std::shared_ptr<TEWrapper> createRelu() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::relu);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
@@ -582,24 +612,36 @@ std::shared_ptr<TEWrapper> createRelu() {
     auto a = A.load(i);
     return ifThenElse(a < zero, zero, a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, A, B, N);
+  updateNNCCache(aten::relu, wrap);
+  return wrap;
 }
 
 std::shared_ptr<TEWrapper> createTanh() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::tanh);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
     auto a = A.load(i);
     return fast_tanh(a);
   });
-  return wrapTECompute(wrap, A, B, N);
+  wrap = wrapTECompute(wrap, A, B, N);
+  updateNNCCache(aten::tanh, wrap);
+  return wrap;
 }
 
 std::shared_ptr<TEWrapper> createSigmoid() {
   using namespace torch::jit::tensorexpr;
-  auto wrap = std::make_shared<TEWrapper>();
+  auto wrap = lookupNNCCache(aten::sigmoid);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   Tensor* B =
@@ -607,7 +649,9 @@ std::shared_ptr<TEWrapper> createSigmoid() {
   // NNC uses sleef for vectorizing sigmoid, which comes in an 8-wide flavor
   // (Sleef_expf8).
   constexpr int kSleefWidth = 8;
-  return wrapTECompute(wrap, A, B, N, kSleefWidth);
+  wrap = wrapTECompute(wrap, A, B, N, kSleefWidth);
+  updateNNCCache(aten::sigmoid, wrap);
+  return wrap;
 }
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {

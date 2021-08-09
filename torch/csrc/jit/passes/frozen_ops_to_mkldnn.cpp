@@ -182,7 +182,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
     if (k == aten::relu || k == aten::sigmoid || k == aten::dropout ||
         k == prim::MKLDNNHardSwish || k == prim::MKLDNNHardSigmoid ||
         k == prim::MKLDNNHardTanh || k == aten::tanh ||
-        k == prim::MKLDNNClamp) {
+        k == prim::MKLDNNClamp || k == Symbol::prim("MKLDNNScalarMul")) {
       if (set_liveness[alias_mapping[node->inputs().at(0)]]->isAfter(node)) {
         continue;
       }
@@ -445,6 +445,18 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
   };
 }
 
+Tensor mkldnn_tensor_scalar_mul(Tensor& tensor, Tensor& out, float scalar) {
+  ideep::tensor& x = at::native::itensor_from_mkldnn(tensor);
+  ideep::tensor& z = at::native::itensor_from_mkldnn(out);
+  ideep::eltwise_forward::compute(
+      x,
+      z,
+      ideep::algorithm::eltwise_linear,
+      ideep::prop_kind::forward_inference,
+      /*alpha*/ scalar);
+  return out;
+}
+
 // aten::convolution does a lot of precomputation and dispatching before
 // mkldnn_convolution is called. registering here we can directly invoke the op
 // and avoid overhead. avoiding dispatch overhead for other operators - relu,
@@ -498,6 +510,37 @@ jit::RegisterOperators reg_fut_ops({
               stack,
               at::native::mkldnn_convolution(
                   input, weight, bias, padding, stride, dilation, groups));
+        },
+        aliasAnalysisFromSchema()),
+    // registering as custom operators avoids Scalar->Tensor->Scalar conversion
+    // in default bindings
+    jit::Operator(
+        "prim::MKLDNNScalarMul(Tensor self, Scalar other) -> Tensor",
+        [](jit::Stack* stack) {
+          c10::impl::ExcludeDispatchKeyGuard edkg(
+              c10::autograd_dispatch_keyset);
+          float other = pop(stack).toScalar().toFloat();
+          Tensor self = pop(stack).toTensor();
+          auto out = at::native::empty_mkldnn(
+              self.sizes(),
+              optTypeMetaToScalarType(self.options().dtype_opt()),
+              self.options().layout_opt(),
+              self.options().device_opt(),
+              self.options().pinned_memory_opt());
+
+          mkldnn_tensor_scalar_mul(self, out, other);
+          push(stack, out);
+        },
+        aliasAnalysisFromSchema()),
+    jit::Operator(
+        "prim::MKLDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
+        [](jit::Stack* stack) {
+          c10::impl::ExcludeDispatchKeyGuard edkg(
+              c10::autograd_dispatch_keyset);
+          float other = pop(stack).toScalar().toFloat();
+          Tensor self = pop(stack).toTensor();
+          mkldnn_tensor_scalar_mul(self, self, other);
+          push(stack, self);
         },
         aliasAnalysisFromSchema()),
 });
@@ -658,7 +701,9 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
 
     moveWeightsToMKLDNN(body_node);
 
-    if (body_node->kind() == aten::add || body_node->kind() == aten::mul) {
+    if (body_node->kind() == aten::add ||
+        (body_node->kind() == aten::mul &&
+         body_node->input(1)->type()->cast<TensorType>())) {
       auto node = body_node->owningGraph()->create(
           Symbol::prim("BroadcastMKLDNNTensors"),
           {body_node->inputs().at(0), body_node->inputs().at(1)},
@@ -666,6 +711,12 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
       node->insertBefore(body_node);
       body_node->replaceInput(0, node->outputs().at(0));
       body_node->replaceInput(1, node->outputs().at(1));
+    }
+    if (body_node->kind() == aten::mul &&
+        body_node->input(1)->type()->isSubtypeOf(NumberType::get())) {
+      body_node->replaceWithNewSymbol(Symbol::prim("MKLDNNScalarMul"));
+      body_node->destroy();
+      continue;
     }
 
     if (body_node->kind() == aten::hardswish) {
@@ -900,7 +951,7 @@ class MKLDNNSubgraphSlicer {
       }
     }
 
-    if (n->kind() == aten::add || n->kind() == aten::mul) {
+    if (n->kind() == aten::add) {
       // mkldnn doesn't currently support Tensor-Scalar add
       for (const auto i : c10::irange(2)) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
@@ -909,7 +960,12 @@ class MKLDNNSubgraphSlicer {
       }
       return true;
     }
-    // TODO: dropout removal. mkldnn doesnt support train=True
+    if (n->kind() == aten::mul) {
+      return n->input(0)->type()->cast<TensorType>() &&
+          (n->input(1)->type()->cast<TensorType>() ||
+           n->input(1)->type()->isSubtypeOf(NumberType::get()));
+    }
+
     if (n->kind() == aten::dropout) {
       auto train = constant_as<bool>(n->namedInput("train")).value();
       return train == false;
