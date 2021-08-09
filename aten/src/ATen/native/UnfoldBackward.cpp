@@ -2,7 +2,6 @@
 
 namespace at { namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(unfold_backward_stub);
 
 Tensor unfold_backward(

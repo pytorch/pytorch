@@ -58,7 +58,6 @@ class Int8TensorFetcher : public BlobFetcherBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_BLOB_FETCHER(
     (TypeMeta::Id<caffe2::int8::Int8TensorCPU>()),
     caffe2::python::Int8TensorFetcher);
