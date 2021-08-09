@@ -31,7 +31,7 @@ try:
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
     HAVE_TEST_SELECTION_TOOLS = False
-    print("Unable to import test_selections from tools/testing. Running without test selection stats...")
+    print("uh oh :c Unable to import test_selections from tools/testing. Running without test selection stats...")
 
 
 TESTS = [
@@ -270,7 +270,7 @@ WINDOWS_COVERAGE_BLOCKLIST = [
 # These tests are slow enough that it's worth calculating whether the patch
 # touched any related files first. This list was manually generated, but for every
 # run with --determine-from, we use another generated list based on this one and the
-# previous test stats.
+# previous test stats, which are updated daily.
 TARGET_DET_LIST = [
     'distributions/test_distributions',
     'test_nn',
