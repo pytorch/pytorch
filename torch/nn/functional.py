@@ -1827,6 +1827,12 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
         return torch._C._nn.hardsigmoid_(input)
     return torch._C._nn.hardsigmoid(input)
 
+# This one calls operator
+def bias(input: Tensor, bias_values: Tensor) -> Tensor:
+    r"""
+    TBD
+    """
+    return torch._C._nn.bias(input, bias_values)
 
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
     r"""

@@ -17601,6 +17601,15 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
             module.share_memory()
 
+    def test_bias(self):
+        module = nn.Bias(5)
+        input = torch.ones(10, 5)
+        module(input)
+        self.assertIsInstance(module, nn.Bias)
+        self.assertTrue(module.bias_values.shape == (5,))
+        y = module(input)
+        self.assertTrue(torch.equal(torch.nn.functional.bias(input, module.bias_values), y))
+
     @suppress_warnings
     def test_linear(self):
         module = nn.LazyLinear(10)

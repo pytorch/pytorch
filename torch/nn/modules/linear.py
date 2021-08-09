@@ -31,6 +31,18 @@ class Identity(Module):
     def forward(self, input: Tensor) -> Tensor:
         return input
 
+class Bias(Module):
+    r"""
+    Description TBD
+    """
+    def __init__(self, num_features: int) -> None:
+        super(Bias, self).__init__()
+        self.num_features = num_features
+        self.bias_values = Parameter(torch.randn(self.num_features))
+
+    def forward(self, input: Tensor) -> Tensor:
+        return input + self.bias_values
+
 
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`

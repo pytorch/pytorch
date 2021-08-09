@@ -1232,6 +1232,18 @@ TEST_F(FunctionalTest, LocalResponseNorm) {
   ASSERT_TRUE(torch::allclose(y, y_exp, 1e-4, 1e-7));
 }
 
+TEST_F(FunctionalTest, Bias) {
+  {
+    const auto x = torch::arange(0., 50.).resize_({5, 10});
+    const auto b = torch::ones(10);
+    const auto y = F::bias(x, b);
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({5, 10}));
+    const auto y_exp = torch::arange(1., 51.).resize_({5, 10});
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(FunctionalTest, Linear) {
   {
     const auto x = torch::arange(100., 118).resize_({3, 3, 2});

@@ -1060,6 +1060,34 @@ TEST_F(ModulesTest, MaxPool3d_MaxUnpool3d) {
   ASSERT_EQ(unpooled_output.sizes(), std::vector<int64_t>({20, 16, 51, 33, 15}));
 }
 
+TEST_F(ModulesTest, Bias) {
+  {
+    Bias model(5);
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model(x);
+    torch::Tensor s = y.sum();
+
+    s.backward();
+    ASSERT_EQ(y.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(y.size(0), 10);
+    ASSERT_EQ(y.size(1), 5);
+
+    std::cout << "bias_values:" << std::endl;
+    std::cout << model->bias_values << std::endl;
+
+    std::cout << "bias_values size:" << std::endl;
+    std::cout << model->bias_values.sizes() << std::endl;
+
+    std::cout << "bias_values.grad():" << std::endl;
+    std::cout << model->bias_values.grad() << std::endl;
+    ASSERT_EQ(model->bias_values.grad().numel(), 5);  // Figure this out
+
+    auto y_exp = torch::add(x, model->bias_values);
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
+
 TEST_F(ModulesTest, Linear) {
   {
     Linear model(5, 2);

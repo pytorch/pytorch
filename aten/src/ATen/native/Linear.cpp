@@ -16,6 +16,10 @@
 
 namespace at { namespace native {
 
+Tensor bias(const Tensor& input, const Tensor& bias_values) {
+  return input + bias_values;
+}
+
 Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()

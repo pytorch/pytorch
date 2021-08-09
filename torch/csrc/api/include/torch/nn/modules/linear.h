@@ -35,6 +35,34 @@ class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
 /// module storage semantics.
 TORCH_MODULE(Identity);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// Description TBD
+class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
+  public:
+  BiasImpl(int64_t num_features)
+    : BiasImpl(BiasOptions(num_features)) {}
+  explicit BiasImpl(const BiasOptions& options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  /// Pretty prints the `Bias` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Transforms the `input` tensor by add bias to the last dimension
+  Tensor forward(const Tensor& input);
+
+  /// The options used to configure this module.
+  BiasOptions options;
+
+  /// The learned bias
+  Tensor bias_values;
+
+};
+
+TORCH_MODULE(Bias);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Linear ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies a linear transformation with optional bias.

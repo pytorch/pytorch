@@ -2409,6 +2409,9 @@
   dispatch:
     CPU, CUDA: nan_to_num_out
 
+- func: bias(Tensor input, Tensor bias_values) -> Tensor
+  python_module: nn
+
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
 
