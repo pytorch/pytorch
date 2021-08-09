@@ -95,7 +95,7 @@ class FunctionMeta(type):
             version of this function (which is generated on the fly by this
             metaclass).
     """
-    def __init__(cls, name, bases, attrs):
+    def __init__(cls, name: str, bases, attrs) -> None:
         backward_fn = type(name + 'Backward', (BackwardCFunction,), {'_forward_cls': cls})
         cls._backward_cls = backward_fn
 
