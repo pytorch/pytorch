@@ -293,10 +293,8 @@ class JitCommonTestCase(TestCase):
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
             # Add sizes to default tensor type to avoid checking something out of scope
             # and difficulties with tracer leaving in other parts of tensor type
-            out_type = TensorType.get()
             sizes = next(traced_graph.outputs()).type().symbolic_sizes()
-            if sizes is not None:
-                out_type = TensorType.get().with_sizes(sizes)
+            out_type = TensorType.get().with_sizes(sizes)
             actual_type = TensorType.get().with_sizes(out_size)
 
             # always check actual shape is a subtype of the output
