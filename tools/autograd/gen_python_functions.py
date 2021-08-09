@@ -84,6 +84,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
+    '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
@@ -92,6 +93,7 @@ _SKIP_PYTHON_BINDINGS = [
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_reshape_alias',
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
