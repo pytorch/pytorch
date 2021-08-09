@@ -10370,7 +10370,7 @@ class TestNN(NNTestCase):
 
     def test_upsampling_small_scale(self):
         m = torch.nn.Upsample(scale_factor=0.5, mode="bilinear")
-        in_t = torch.arange(1, 5).reshape(1, 1, 2, 2)
+        in_t = torch.arange(1, 5, dtype=torch.float32).reshape(1, 1, 2, 2)
         out_t = m(in_t)
         expected_out_t = torch.tensor([[[[2.5]]]])
         self.assertEqual(expected_out_t, out_t)
