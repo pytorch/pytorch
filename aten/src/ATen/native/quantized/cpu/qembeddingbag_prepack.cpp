@@ -251,7 +251,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
     : weight_contig;
   const auto weight_data = float_weight.data_ptr<float>();
   constexpr float kEpsilon = 1e-8f;
-  for (std::size_t row = 0; row < embedding_rows; ++row) {
+  for (auto row: c10::irange(embedding_rows)) {
     const float* input_row = weight_data + row * embedding_cols;
     std::uint8_t* output_row = output_data + row * output_columns;
     float* output_row_scale_zp =
@@ -266,7 +266,7 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
     output_row_scale_zp[0] = range / 255.0f;
     output_row_scale_zp[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
-    for (std::size_t col = 0; col < embedding_cols; ++col) {
+    for (auto col: c10::irange(embedding_cols)) {
       output_row[col] =
           lrintf((input_row[col] - minimum_element) * inverse_scale);
     } // embedding_cols
