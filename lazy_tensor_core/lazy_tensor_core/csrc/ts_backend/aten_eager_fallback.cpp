@@ -47,7 +47,11 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
 }
 
 TORCH_LIBRARY_IMPL(_, Lazy, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
+  try {
+    m.fallback(
+        torch::CppFunction::makeFromBoxedFunction<&ltc_eager_fallback>());
+  } catch (...) {
+  }
 }
 
 }  // namespace torch_lazy_tensors
