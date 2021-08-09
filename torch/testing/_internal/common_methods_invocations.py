@@ -855,9 +855,10 @@ class ReductionOpInfo(OpInfo):
         identity: Optional[Union[int, float, complex]] = None,
 
         # possible values are:
-        # - propagate: NaN values are propagated to the output
-        # - omit: only non-NaN values participate in computing reduction
-        nan_policy: str = 'propagate',
+        # - 'propagate': NaN values are propagated to the output
+        # - 'omit': only non-NaN values participate in computing reduction
+        # - None: operator decides how to handle NaNs.
+        nan_policy: Optional[str] = None,
 
         # Whether the operator supports reducing multiple dimensions.
         supports_multiple_dims: bool = True,
@@ -891,7 +892,7 @@ class ReductionOpInfo(OpInfo):
         assert not (result_dtype and promotes_int_to_float)
         assert not (result_dtype and promotes_int_to_int64)
 
-        assert nan_policy in ('propagate', 'omit')
+        assert nan_policy in (None, 'propagate', 'omit')
 
         # ReductionOpInfo tests generate their own input tensors and the dim
         # and keepdim parameters. Operators can provide a `generate_args_kwargs`
@@ -8459,6 +8460,7 @@ op_db: List[OpInfo] = [
 reduction_op_db: List[ReductionOpInfo] = [
     ReductionOpInfo(
         'amax',
+        nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_amax_amin,
         reference=reference_reduction_numpy(np.amax),
@@ -8470,6 +8472,7 @@ reduction_op_db: List[ReductionOpInfo] = [
     ),
     ReductionOpInfo(
         'amin',
+        nan_policy='propagate',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         sample_inputs_func=sample_inputs_amax_amin,
         reference=reference_reduction_numpy(np.amin),
@@ -8482,7 +8485,6 @@ reduction_op_db: List[ReductionOpInfo] = [
     ReductionOpInfo(
         'all',
         identity=True,
-        nan_policy='omit',
         supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
@@ -8504,7 +8506,6 @@ reduction_op_db: List[ReductionOpInfo] = [
     ReductionOpInfo(
         'any',
         identity=False,
-        nan_policy='omit',
         supports_multiple_dims=False,
         supports_autograd=False,
         result_dtype=torch.bool,
@@ -8526,6 +8527,7 @@ reduction_op_db: List[ReductionOpInfo] = [
     ReductionOpInfo(
         'sum',
         identity=0,
+        nan_policy='propagate',
         supports_out=False,
         supports_forward_ad=True,
         promotes_int_to_int64=True,
@@ -8542,10 +8544,10 @@ reduction_op_db: List[ReductionOpInfo] = [
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
             # FIXME: difference of 0.00390625
             SkipInfo('TestReductions', 'test_ref_random_input_small',
-                     dtypes=[torch.float16], device_type='cpu'),
+                     dtypes=[torch.float16]),
             # FIXME: difference of 128.0
             SkipInfo('TestReductions', 'test_ref_random_input_large',
-                     dtypes=[torch.float16], device_type='cpu'),
+                     dtypes=[torch.float16]),
         ),
     ),
     ReductionOpInfo(
@@ -8553,7 +8555,6 @@ reduction_op_db: List[ReductionOpInfo] = [
         identity=0,
         nan_policy='omit',
         supports_out=False,
-        supports_forward_ad=True,
         promotes_int_to_int64=True,
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         reference=reference_reduction_numpy(np.sum),
@@ -8568,15 +8569,16 @@ reduction_op_db: List[ReductionOpInfo] = [
             SkipInfo('TestReductions', 'test_dim_none_keepdim'),
             # FIXME: difference of 0.00390625
             SkipInfo('TestReductions', 'test_ref_random_input_small',
-                     dtypes=[torch.float16], device_type='cpu'),
+                     dtypes=[torch.float16]),
             # FIXME: difference of 128.0
             SkipInfo('TestReductions', 'test_ref_random_input_large',
-                     dtypes=[torch.float16], device_type='cpu'),
+                     dtypes=[torch.float16]),
         ),
     ),
     ReductionOpInfo(
         'prod',
         identity=1,
+        nan_policy='propagate',
         supports_multiple_dims=False,
         supports_out=False,
         promotes_int_to_int64=True,
