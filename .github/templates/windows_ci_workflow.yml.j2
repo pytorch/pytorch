@@ -259,11 +259,11 @@ jobs:
   # doesn't create the best experience
   render_test_results:
 {%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name == 'push' && always() }}
+    if:  ${{ github.event_name == 'push' && (needs.test.result == 'success' || needs.test.result == 'failure') }}
 {%- else %}
-    if: always()
+    if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
 {%- endif %}
-    needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
+    needs: [test, !{{ ciflow_config.root_job_name }}]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

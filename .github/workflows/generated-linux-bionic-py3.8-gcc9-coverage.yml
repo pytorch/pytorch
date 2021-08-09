@@ -405,8 +405,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
-    needs: [generate-test-matrix, test, ciflow_should_run]
+    if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
+    needs: [test, ciflow_should_run]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}

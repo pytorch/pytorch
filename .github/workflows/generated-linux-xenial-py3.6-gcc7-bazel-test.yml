@@ -257,7 +257,7 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
+    if: ${{ needs.build-and-test.result == 'success' || needs.build-and-test.result == 'failure' }}
     needs: [build-and-test, ciflow_should_run]
     runs-on: linux.2xlarge
     steps:
