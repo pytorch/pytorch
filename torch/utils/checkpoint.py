@@ -329,6 +329,9 @@ class Checkpoint(torch.nn.Module):
                     counter_inner += 1
                     return None
 
+                def inner_unpack(packed):
+                    raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
+
                 # Stash the surrounding rng state, and mimic the state that was
                 # present at this time during forward.  Restore the surrounding state
                 # when we're done.
@@ -343,10 +346,7 @@ class Checkpoint(torch.nn.Module):
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
                         try:
-                            torch.autograd.graph.set_saved_tensors_default_hooks(
-                                    inner_pack,
-                                    lambda x: raise RuntimeError("You are calling backwards on a tensor that is never exposed.
-                                        Please open an issue."))
+                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack,inner_unpack)
                             y = self.function(*args)
                         finally:
                             torch.autograd.graph.reset_saved_tensors_default_hooks()
