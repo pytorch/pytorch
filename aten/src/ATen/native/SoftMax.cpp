@@ -206,7 +206,7 @@ Tensor softmax_backward_cpu(
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
     softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
-    AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, grad.scalar_type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
     });
   }
@@ -303,13 +303,9 @@ Tensor special_log_softmax(const Tensor& input, const int64_t dim, c10::optional
   return at::log_softmax(input, dim, dtype);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 DEFINE_DISPATCH(softmax_kernel);

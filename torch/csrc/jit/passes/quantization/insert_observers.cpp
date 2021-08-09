@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -124,7 +125,7 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       IValue s = module._ivalue()->getSlot(i);
       std::string attr_name = type->getAttributeName(i);
       TypePtr attr_type = type->getAttribute(i);

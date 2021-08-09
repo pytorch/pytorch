@@ -629,7 +629,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * override is for `intrusive_ptr_target` and is used to implement weak
    * tensors.
    */
-  virtual void release_resources() override;
+  void release_resources() override;
 
   /**
    * Return the DispatchKeySet corresponding to this Tensor, specifying
@@ -840,6 +840,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XLA);
   }
 
+  bool is_lazy() const {
+    return key_set_.has(DispatchKey::Lazy);
+  }
+
   bool is_hip() const {
     // NB: This method is not virtual and avoid dispatches for performance
     // reasons.
@@ -1010,6 +1014,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       TORCH_INTERNAL_ASSERT(isComplexType(typeMetaToScalarType(dtype())));
     } else {
       key_set_ = key_set_.remove(DispatchKey::Conjugate);
+    }
+  }
+
+  /**
+   * Whether or not the tensor should be negated
+   */
+  inline bool is_neg() const {
+    return key_set_.has(DispatchKey::Negative);
+  }
+
+  /**
+   * Set whether or not to take the conjugate of the tensor (flip the imaginary
+   * bit).
+   */
+  void _set_neg(bool value) {
+    if (value) {
+      key_set_ = key_set_.add(DispatchKey::Negative);
+    } else {
+      key_set_ = key_set_.remove(DispatchKey::Negative);
     }
   }
 

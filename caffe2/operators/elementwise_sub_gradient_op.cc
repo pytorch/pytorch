@@ -5,10 +5,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SubGradient,
-    BinaryElementwiseGradientOp<
+    BinaryElementwiseGradientBroadcastOp<
         NumericTypes,
         CPUContext,
         SubFunctor<CPUContext>>);
@@ -29,7 +28,6 @@ class GetSubGradient final : public GradientMakerBase {
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(Sub, GetSubGradient);
 
 } // namespace caffe2
