@@ -266,14 +266,14 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
       "GradBucket",
       R"(
 This class mainly passes a flattened gradient tensor
-(returned by :meth:`~torch.distributed.GradBucket.get_tensor`)
+(returned by :meth:`~torch.distributed.GradBucket.buffer`)
 to DDP communication hook.
 This tensor can be further decomposed into a list of per-parameter tensors within this bucket
 (returned by :meth:`~torch.distributed.GradBucket.get_per_parameter_tensors`)
 to apply layer-wise operations.
 )")
       .def(
-          "get_index",
+          "index",
           &::c10d::GradBucket::getIndex,
           py::call_guard<py::gil_scoped_release>(),
           R"(
@@ -285,25 +285,25 @@ Returns:
     All the gradients are bucketized.
 )")
       .def(
-          "get_tensor",
-          &::c10d::GradBucket::getTensor,
+          "buffer",
+          &::c10d::GradBucket::getBuffer,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
-    A flattened 1D ``torch.Tensor``,
+    A flattened 1D ``torch.Tensor`` buffer,
     which can be further decomposed into a list of per-parameter tensors within this bucket.
 )")
       .def(
-          "get_per_parameter_tensors",
-          &::c10d::GradBucket::getPerParameterTensors,
+          "gradients",
+          &::c10d::GradBucket::getGradients,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
     A list of ``torch.Tensor``. Each tensor in the list corresponds to a gradient.
 )")
       .def(
-          "get_model_params_for_bucket",
-          &::c10d::GradBucket::getModelParamsForBucket,
+          "parameters",
+          &::c10d::GradBucket::getParameters,
           py::call_guard<py::gil_scoped_release>(),
                     R"(
 Returns:
@@ -311,8 +311,8 @@ Returns:
     parameter.
 )")
       .def(
-          "is_the_last_bucket_to_allreduce",
-          &::c10d::GradBucket::isTheLastBucketToAllreduce,
+          "is_last",
+          &::c10d::GradBucket::isLast,
           py::call_guard<py::gil_scoped_release>(),
           R"(
 Returns:
@@ -320,12 +320,12 @@ Returns:
     This also means that this bucket corresponds to the first few layers in the forward pass.
 )")
       .def(
-          "set_tensor",
-          &::c10d::GradBucket::setTensor,
-          py::arg("tensor"),
+          "set_buffer",
+          &::c10d::GradBucket::setBuffer,
+          py::arg("buffer"),
           py::call_guard<py::gil_scoped_release>(),
           R"(
-Replaces the tensor in the bucket with the input tensor.
+Replaces the tensor in the bucket with the input tensor buffer.
 )");
 
   py::enum_<::c10d::BuiltinCommHookType>(module, "BuiltinCommHookType", R"(
@@ -338,6 +338,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init<
               std::vector<std::vector<at::Tensor>>,
               std::vector<std::vector<size_t>>,
+              std::vector<size_t>,
               c10::intrusive_ptr<::c10d::ProcessGroup>,
               std::vector<std::vector<bool>>,
               int64_t,
@@ -346,6 +347,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
               std::unordered_map<size_t, std::string>>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
+          py::arg("per_bucket_size_limits"),
           py::arg("process_group"),
           py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
           py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
@@ -403,6 +405,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           "_set_static_graph",
           &::c10d::Reducer::set_static_graph,
           py::call_guard<py::gil_scoped_release>())
+      .def(
+      "_ddp_graph_static",
+      &::c10d::Reducer::ddp_graph_static,
+      py::call_guard<py::gil_scoped_release>())
       .def(
           "_delay_all_reduce",
           &::c10d::Reducer::delay_all_reduce,
@@ -1490,7 +1496,7 @@ Example::
           },
           R"(
             Returns:
-                A ``torch._C.Future`` object which is associated with the completion of
+                A ``torch.futures.Future`` object which is associated with the completion of
                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
@@ -1501,16 +1507,13 @@ Example::
 
                 >>> def allreduce(process_group: dist.ProcessGroup, bucket: dist.GradBucket): -> torch.futures.Future
                 >>>     group_to_use = process_group if process_group is not None else torch.distributed.group.WORLD
-                >>>     tensor = bucket.get_tensor().div_(group_to_use.size())
+                >>>     tensor = bucket.buffer().div_(group_to_use.size())
                 >>>     return torch.distributed.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
                 >>> ddp_model.register_comm_hook(state=None, hook=allreduce)
 
             .. warning ::
                 ``get_future`` API supports NCCL, and partially GLOO and MPI backends
-                (no support for peer-to-peer operations like send/recv).
-                The ``torch._C.Future`` object returned by this API can be used in
-                ``DistributedDataParallel.register_comm_hook``, and adds some CUDA-specific
-                features on top of ``torch.futures.Future``.
+                (no support for peer-to-peer operations like send/recv) and will return a ``torch.futures.Future``.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams

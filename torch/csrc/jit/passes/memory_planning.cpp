@@ -15,19 +15,35 @@ c10::TensorTypePtr checkIsSupported(const Value& value) {
   auto ttp = value.type()->expect<TensorType>();
   TORCH_CHECK(
       ttp->scalarType().has_value(),
-      "This output was profiled but didn't have a scalar type.")
+      "This output was profiled but didn't have a scalar type: ",
+      *ttp,
+      ", ",
+      value.debugName())
   TORCH_CHECK(
       ttp->sizes().concrete_sizes().has_value(),
-      "This output was profiled but doesn't have sizes.")
+      "This output was profiled but doesn't have sizes: ",
+      *ttp,
+      ", ",
+      value.debugName())
   return ttp;
 }
 
 std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
     const c10::TensorTypePtr& ttp) {
-  auto sizes = ttp->sizes().concrete_sizes().value();
+  std::vector<int64_t> sizes;
+  auto _sizes = ttp->sizes().concrete_sizes();
+  // TODO: why does this break? answer: in place mutation
+  // also %9 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+  if (_sizes.has_value() && _sizes.value().size() > 0 &&
+      _sizes.value()[0] != 0) {
+    sizes = _sizes.value();
+  } else {
+    sizes = std::vector<int64_t>{0};
+  }
   std::vector<int64_t> strides;
   auto _strides = ttp->strides().concrete_sizes();
-  if (_strides.has_value() && _strides.value()[0] != 0) {
+  if (_strides.has_value() && _strides.value().size() > 0 &&
+      _strides.value()[0] != 0) {
     strides = _strides.value();
   } else {
     strides = at::detail::defaultStrides(sizes);
@@ -39,7 +55,11 @@ size_t computeStorageSize(const c10::TensorTypePtr& ttp) {
   std::vector<int64_t> sizes, strides;
   std::tie(sizes, strides) = getSizesStrides(ttp);
   return at::detail::computeStorageNbytes(
-      sizes, strides, elementSize(ttp->scalarType().value()));
+      sizes,
+      strides,
+      // TODO: why does this happen? answer: in place mutation
+      ttp->scalarType().has_value() ? elementSize(ttp->scalarType().value())
+                                    : aten::Float);
 }
 
 std::pair<size_t, std::map<Value*, c10::TensorTypePtr>>
@@ -129,18 +149,105 @@ std::vector<Node*> findOutVariantNodes(std::shared_ptr<Graph>& graph) {
     for (const auto& variant : getAllOperatorsFor(node->kind())) {
       auto variant_args = variant->schema().arguments();
       auto maybe_out_arg =
+          /* TODO
+            aten::cat.names_out(Tensor[] tensors, str dim, *, Tensor(a!) out) ->
+            (Tensor(a!)) aten::cat.out(Tensor[] tensors, int dim=0, *,
+            Tensor(a!) out) -> (Tensor(a!))
+          */
           std::find_if(variant_args.begin(), variant_args.end(), [](auto arg) {
             return arg.name() == "out";
           });
       if (maybe_out_arg != variant_args.end()) {
         out_nodes.emplace_back(node);
+        break;
       }
     }
   }
   return out_nodes;
 }
 
+std::map<Value*, std::vector<int>> computeLiveness(
+    std::shared_ptr<Graph>& graph) {
+  std::map<Value*, std::vector<int>> liveness_map = {};
+  int t = 0;
+  auto insert = [&](Value* v) {
+    if (liveness_map.count(v)) {
+      liveness_map.at(v).emplace_back(t);
+    } else {
+      liveness_map.insert({v, {t}});
+    }
+  };
+
+  std::unordered_set<Value*> graph_inputs = {};
+
+  for (const auto& inp : graph->inputs()) {
+    graph_inputs.insert(inp);
+  }
+
+  for (const auto& node : graph->nodes()) {
+    t++;
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+
+    for (const auto& inp : node->inputs()) {
+      if (graph_inputs.count(inp) == 0 &&
+          inp->node()->kind() != prim::Constant) {
+        insert(inp);
+      }
+    }
+    for (const auto& out : node->outputs()) {
+      insert(out);
+    }
+  }
+
+  t++;
+  for (const auto& out : graph->outputs()) {
+    insert(out);
+  }
+
+//  std::map<Value*, std::pair<int, int>> value_to_range;
+//  std::map<int, std::vector<Value*>> time_to_value;
+//  std::vector<std::tuple<Value*, int, int>> tasks;
+//
+//  auto insert2 = [&](int t, Value* ident) {
+//    if (time_to_value.count(t)) {
+//      time_to_value.at(t).emplace_back(ident);
+//    } else {
+//      time_to_value.insert({t, {ident}});
+//    }
+//  };
+//
+//  for (const auto& v_lifespan : liveness_map) {
+//    auto v = v_lifespan.first;
+//    auto lifespan = v_lifespan.second;
+//
+//    auto start = lifespan.front();
+//    auto end = lifespan.back();
+//
+//    tasks.emplace_back(std::make_tuple(v, start, end));
+//    value_to_range.insert({v, std::make_pair(start, end)});
+//    insert2(start, v);
+//    insert2(end, v);
+//  }
+//
+//  std::unordered_set<Value*> active_set;
+//
+//  for (int tt = 1; tt <= t; ++tt) {
+//    for (const auto& v : time_to_value.at(tt)) {
+//      if (tt == value_to_range[v].first) {
+//        active_set.insert(v);
+//      } else {
+//        active_set.erase(v);
+//      }
+//    }
+//  }
+
+  return liveness_map;
+}
+
 void planMemory(std::shared_ptr<Graph>& graph) {
+  auto liveness = computeLiveness(graph);
   auto out_nodes = findOutVariantNodes(graph);
   size_t aligned_size;
   std::map<Value*, c10::TensorTypePtr> managed_tensors;
