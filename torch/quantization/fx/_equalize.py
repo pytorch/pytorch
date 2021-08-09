@@ -66,7 +66,7 @@ class _InputEqualizationObserver(nn.Module):
                                                   quant_max=quant_max,
                                                   factory_kwargs=factory_kwargs)
 
-        self.equalization_scale = torch.empty(0)
+        self.equalization_scale = torch.tensor(1)
         self.equalization_shape: List[int] = []
 
     def forward(self, x_orig):
@@ -85,17 +85,19 @@ class _InputEqualizationObserver(nn.Module):
     def set_equalization_scale(self, equalization_scale):
         # Reshape the equalization scale along axis=1 so that it can be
         # multiplied with the input along axis=1
+        if equalization_scale.nelement() == 1 and equalization_scale == torch.tensor(1):
+            return
         self.equalization_scale = torch.reshape(equalization_scale, self.equalization_shape)
 
     def calculate_scaled_minmax(self):
         r""" Returns the scaled min/max inputs
         """
-        if self.equalization_scale.nelement() == 0:
+        if self.equalization_scale.nelement() == 1 and self.equalization_scale == torch.tensor(1):
             warnings.warn(
-                "Must call calculate_scale before calling calculate_qparams.\
-                Returning default min and max input."
+                "Must call calculate_equalization_scale before calling calculate_scaled_minmax. " +
+                "Will not scale the next quantization observer."
             )
-            return torch.tensor([0]), torch.tensor([0])
+            return None, None
 
         # Calculate qparams for the scaled min/max inputs
         # Scale the input by the equalization scale located at the same column
@@ -145,7 +147,7 @@ class _WeightEqualizationObserver(nn.Module):
                                                        quant_max=quant_max,
                                                        factory_kwargs=factory_kwargs)
 
-        self.equalization_scale = torch.empty(0)
+        self.equalization_scale = torch.tensor(1)
 
     def forward(self, w_orig):
         if not (w_orig.ndim >= 2 and w_orig.ndim <= 5):
@@ -176,12 +178,16 @@ def calculate_equalization_scale(input_obs: _InputEqualizationObserver,
     (min_weights, max_weights) = weight_obs.get_weight_col_minmax()
 
     if not (check_min_max_valid(min_inputs, max_inputs) and check_min_max_valid(min_weights, max_weights)):
+        warnings.warn(
+            "Must run observer before calling calculate_equalization_scale. " +
+            "Returning default equalization scale torch.tensor(1)."
+        )
         return torch.tensor(1)
 
     if not (min_inputs.shape == min_weights.shape):
         raise ValueError(
             "Input and Weight must have the same column dimension. " +
-            f"Found {min_inputs.shape} and {max_inputs.shape} instead."
+            f"Found {min_inputs.shape} and {min_weights.shape} shapes instead."
         )
 
     equalization_scale = torch.sqrt((max_weights - min_weights) / (max_inputs - min_inputs))
@@ -356,6 +362,9 @@ def maybe_get_next_equalization_scale(node: Node, modules: Dict[str, nn.Module])
     """
     next_inp_eq_obs = maybe_get_next_input_eq_obs(node, modules)
     if next_inp_eq_obs:
+        if next_inp_eq_obs.equalization_scale.nelement() == 1 and \
+           next_inp_eq_obs.equalization_scale == torch.tensor(1):
+            return None
         return next_inp_eq_obs.equalization_scale
     return None
 
@@ -375,6 +384,8 @@ def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
         return
 
     min_input_scaled, max_input_scaled = input_eq_obs.calculate_scaled_minmax()
+    if min_input_scaled is None and max_input_scaled is None:
+        return
     input_quant_obs.min_val = min_input_scaled
     input_quant_obs.max_val = max_input_scaled
 
@@ -393,6 +404,9 @@ def scale_weight_node(
         next_equalization_scale: Next node's calculated equalization scale if
            the following node needs to be equalized, 1 otherwise
     """
+    if equalization_scale is None:
+        return
+
     if fused_module_supports_equalization(modules[str(node.target)]):
         op_module = modules[str(node.target)][0]    # type: ignore[index]
     else:
@@ -440,6 +454,8 @@ def scale_weight_functional(
 ) -> None:
     """ Scales the weight value for functional layers
     """
+    if equalization_scale is None:
+        return
 
     # From the given op_node, the path looks like:
     #   get_attr(weight) -> weight_quant_obs -> weight_eq_obs -> op_node
@@ -667,6 +683,9 @@ def convert_eq_obs(
             weight_eq_obs = weight_eq_obs_dict.get(node.name)
             assert(isinstance(weight_eq_obs, _WeightEqualizationObserver))
             equalization_scale = weight_eq_obs.equalization_scale
+
+            if equalization_scale.nelement() == 1 and equalization_scale == torch.tensor(1):
+                equalization_scale = None  # type: ignore[assignment]
             maybe_next_equalization_scale = maybe_get_next_equalization_scale(node, modules)
 
             # Scale the weight nodes
