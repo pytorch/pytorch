@@ -9352,27 +9352,6 @@ class TestNN(NNTestCase):
         test_huber_loss_zero_delta()
 
     def test_cosine_similarity(self):
-        input1 = torch.randn(4, 4, requires_grad=True)
-        input2 = torch.randn(4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y), (input1, input2)))
-
-        input1 = torch.randn(4, 5, 6, requires_grad=True)
-        input2 = torch.randn(4, 5, 6, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        input1 = torch.randn((), requires_grad=True)
-        input2 = torch.randn((), requires_grad=True)
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
-        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
-
-        # Check cosine_similarity input/output shapes
-        input_size = (1, 3, 2, 1)
-        expected_size = (1, 2, 1)
-        input1 = torch.randn(input_size, requires_grad=True)
-        input2 = torch.randn(input_size, requires_grad=True)
-        self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
-
         # Check numerical precision, issue #18057
         vv1 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
         vv2 = torch.tensor(list([float(i) for i in range(84)])).unsqueeze(0)
