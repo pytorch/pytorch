@@ -23,24 +23,43 @@ class Parameter(torch.Tensor):
     def __new__(cls, data=None, requires_grad=True):
         if data is None:
             data = torch.tensor([])
-        return torch.Tensor._make_subclass(cls, data, requires_grad)
+        if type(data).__name__ == 'Tensor':
+            return torch.Tensor._make_subclass(cls, data, requires_grad)
+        else:
+            # The wrapping tensor is just a meta tensor, so it
+            # doesn't hold any memory (meta tensor is generally the preferred type
+            # of tensor you want to make a subclass from)...
+            p = torch.Tensor._make_subclass(cls, data.to('meta'), requires_grad)
+            # ...the real tensor is held as an element on the tensor.
+            p.wrapped = data
+            return p
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        def unwrap(e):
+            return e.wrapped if hasattr(e, 'wrapped') else e
+
+        return func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs if kwargs else {}))
 
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            inp = (self.wrapped.clone() if hasattr(self, 'wrapped')
+                   else self.data.clone(memory_format=torch.preserve_format))
+            result = type(self)(inp, self.requires_grad)
             memo[id(self)] = result
             return result
 
     def __repr__(self):
-        return 'Parameter containing:\n' + super(Parameter, self).__repr__()
+        return 'Parameter containing:\n{}'.format(self.wrapped.__repr__() if hasattr(self, 'wrapped') else
+                                                  super(Parameter, self).__repr__())
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
         return (
             torch._utils._rebuild_parameter,
-            (self.data, self.requires_grad, OrderedDict())
+            (self.wrapped if hasattr(self, 'wrapped') else self.data, self.requires_grad, OrderedDict())
         )
 
     __torch_function__ = _disabled_torch_function_impl
