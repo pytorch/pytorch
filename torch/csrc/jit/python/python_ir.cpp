@@ -22,10 +22,8 @@ namespace torch {
 namespace jit {
 
 // Controls whether graph source ranges are printed by default
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool global_print_source_ranges = true;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
 using c10::Type;
@@ -278,7 +276,6 @@ void initPythonIRBindings(PyObject* module_) {
                 add_node_names,
                 use_external_data_format,
                 onnx_file_path);
-            graph = serialize_model_proto_to_string(model_proto);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -572,28 +569,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("output", [](Node& n) { return n.output(); })
       .def(
           "getModuleHierarchy",
-          [](Node& n) {
-            if (!n.callstack().has_value()) {
-              return std::string();
-            }
-            InlinedCallStackPtr callstack_ptr = n.callstack().value();
-            std::string module_info;
-            for (auto& entry : callstack_ptr->vec()) {
-              const auto& opt_module_info =
-                  std::get<kModuleInstanceInfo>(entry);
-              if (opt_module_info.has_value()) {
-                const auto& module_instance_info = opt_module_info.value();
-                if (!module_info.empty()) {
-                  module_info.append(".");
-                }
-                module_info.append(
-                    utils::get_module_info(module_instance_info));
-              } else {
-                module_info += ".UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
-              }
-            }
-            return module_info;
-          })
+          [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
       .NS(replaceInput)
       .NS(replaceInputWith)
