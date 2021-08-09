@@ -10,7 +10,6 @@
 namespace at {
 namespace vulkan {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::atomic<const VulkanImplInterface*> g_vulkan_impl_registry;
 
 VulkanImplRegistrar::VulkanImplRegistrar(VulkanImplInterface* impl) {

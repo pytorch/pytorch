@@ -12,7 +12,6 @@ tensor as input. Correct code for this case is generated, however, nvrtc does
 not know how to handle int*_t integer types, so typedefs help it handle those
 cases*/
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto type_declarations_template = CodeTemplate(R"(
 
 #define POS_INFINITY INFINITY
@@ -31,7 +30,6 @@ struct TensorInfo<T, 0> {
 };
 )");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <math.h>
 #include <cstddef>

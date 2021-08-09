@@ -22,7 +22,6 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 int FusionExecutor::fusion_id_counter_ = 0;
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
