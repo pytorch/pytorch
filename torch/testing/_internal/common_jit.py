@@ -291,10 +291,15 @@ class JitCommonTestCase(TestCase):
             torch._C._jit_erase_non_input_shape_information(traced_graph)
             torch._C._jit_pass_constant_propagation(traced_graph)
             torch._C._jit_pass_propagate_shapes_on_graph(traced_graph)
-            out_type = next(traced_graph.outputs()).type()
+            # Add sizes to default tensor type to avoid checking something out of scope
+            # and difficulties with tracer leaving in other parts of tensor type
+            out_type = TensorType.get()
+            sizes = next(traced_graph.outputs()).type().symbolic_sizes()
+            if sizes is not None:
+                out_type = TensorType.get().with_sizes(sizes)
             actual_type = TensorType.get().with_sizes(out_size)
 
-            # always actual shape is a subtype of the output
+            # always check actual shape is a subtype of the output
             self.assertTrue(actual_type.isSubtypeOf(out_type))
 
             # and then if assertion flag is provided, check shape analysis
