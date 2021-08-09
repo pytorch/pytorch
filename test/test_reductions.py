@@ -61,7 +61,7 @@ class TestReductions(TestCase):
     # ReductionOpInfo unit tests
     ###########################################################################
 
-    @ops(reduction_op_db)
+    @ops(reduction_op_db, allowed_dtypes=[torch.float])
     def test_dim_default(self, device, dtype, op: ReductionOpInfo):
         """Tests that the default behavior is to reduce all dimensions."""
         t = make_tensor((2, 3), device, dtype)
@@ -684,7 +684,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
