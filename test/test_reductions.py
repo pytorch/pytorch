@@ -124,41 +124,36 @@ class TestReductions(TestCase):
         args, kwargs = next(op.generate_args_kwargs(t, dim=0))
         self.assertEqual(op(t, *args, dim=0, keepdim=True, **kwargs).shape, [1, 3])
 
-    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
-    def test_dim_no_multi_support(self, device, dtype, op: ReductionOpInfo):
-        """Tests that ops claiming to not support multi dim actually don't."""
-        t = make_tensor((2, 3, 2), device, dtype)
-        with self.assertRaises(TypeError):
-            args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
-            self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
-
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_multi(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...] reduces dimensions i, j, ...."""
         t = make_tensor((2, 3, 2), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
         self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_multi_keepdim(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[i, j, ...], keepdim=True reduces dimensions i, j, ... to size 1."""
         t = make_tensor((2, 3, 2), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
         self.assertEqual(op(t, *args, dim=[0, 2], keepdim=True, **kwargs).shape, [1, 3, 1])
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: not op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
+    def test_dim_multi_unsupported(self, device, dtype, op: ReductionOpInfo):
+        """Tests that ops claiming to not support multi dim actually don't."""
+        t = make_tensor((2, 3, 2), device, dtype)
+        with self.assertRaises(TypeError):
+            args, kwargs = next(op.generate_args_kwargs(t, dim=[0, 2]))
+            self.assertEqual(op(t, *args, dim=[0, 2], **kwargs).shape, [3])
+
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_empty(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[] is a noop"""
         t = make_tensor((2, 3), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=[]))
         self.assertEqual(op(t, *args, dim=[], **kwargs), t)
 
-    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db),
-         allowed_dtypes=[torch.float])
+    @ops(filter(lambda op: op.supports_multiple_dims, reduction_op_db), allowed_dtypes=[torch.float])
     def test_dim_empty_keepdim(self, device, dtype, op: ReductionOpInfo):
         """Tests that dim=[], keepdim=True is a noop"""
         t = make_tensor((2, 3), device, dtype)
@@ -248,7 +243,23 @@ class TestReductions(TestCase):
         result = op(t, *args, **kwargs)
         self.assertEqual(result, op(t[~t.isnan()], *args, **kwargs))
 
-    # NumPy does not support BFloat16
+    @ops(reduction_op_db)
+    def test_non_contiguous_input(self, device, dtype, op: ReductionOpInfo):
+        """Tests reducing along non contiguous dimensions"""
+        for ndim in range(1, 4):
+            shape = list(torch.randint(1, 5, (ndim,)))
+            t = make_tensor(shape, device, dtype, noncontiguous=True)
+            for kwargs in _generate_reduction_kwargs(ndim, op.supports_multiple_dims):
+                dim = kwargs.pop('dim')
+                keepdim = kwargs.pop('keepdim')
+                for args, kwargs in op.generate_args_kwargs(t, dim=dim):
+                    res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+                    ref = op(t.contiguous(), *args, dim=dim, keepdim=keepdim, **kwargs)
+                    self.assertEqual(res, ref)
+
+    # NumPy does not support BFloat16 so we don't test that agains
+    # reference implementations
+
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
     def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
@@ -283,20 +294,6 @@ class TestReductions(TestCase):
             res = op(t, *args, **kwargs)
             ref = op.reference(t, *args, **kwargs)
             self.assertEqual(res, ref, atol=1e-03, rtol=1e-03)
-
-    @ops(reduction_op_db)
-    def test_non_contiguous_input(self, device, dtype, op: ReductionOpInfo):
-        """Tests reducing along non contiguous dimensions"""
-        for ndim in range(1, 4):
-            shape = list(torch.randint(1, 5, (ndim,)))
-            t = make_tensor(shape, device, dtype, noncontiguous=True)
-            for kwargs in _generate_reduction_kwargs(ndim, op.supports_multiple_dims):
-                dim = kwargs.pop('dim')
-                keepdim = kwargs.pop('keepdim')
-                for args, kwargs in op.generate_args_kwargs(t, dim=dim):
-                    res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
-                    ref = op(t.contiguous(), *args, dim=dim, keepdim=keepdim, **kwargs)
-                    self.assertEqual(res, ref)
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
@@ -914,7 +911,7 @@ class TestReductions(TestCase):
 
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypesIfCUDA(torch.half, torch.float, torch.bfloat16)
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
