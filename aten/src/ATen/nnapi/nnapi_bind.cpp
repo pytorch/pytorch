@@ -11,9 +11,7 @@ namespace torch {
 namespace nnapi {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* nnapi;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 nnapi_wrapper* check_nnapi;
 
 void load_platform_library() {
@@ -44,16 +42,12 @@ MAKE_SMART_PTR(Execution)
 #undef MAKE_SMART_PTR
 
 struct NnapiCompilation : torch::jit::CustomClassHolder {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
-  NnapiCompilation() {
-    // Could possibly call load_platform_library here, but error reporting
-    // can be complicated if the constructor is called during model loading.
-    // Instead, delay all work until the explicit init call.
-  }
+  // Could possibly call load_platform_library here, but error reporting
+  // can be complicated if the constructor is called during model loading.
+  // Instead, delay all work until the explicit init call.
+  NnapiCompilation() = default;
 
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  ~NnapiCompilation() {
-  }
+  ~NnapiCompilation() override = default;
 
   void init(
       at::Tensor serialized_model_tensor,
@@ -191,6 +185,12 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
       operand->zeroPoint = t.q_zero_point();
       return;
     }
+    if (t.scalar_type() == c10::kInt) {
+      operand->type = ANEURALNETWORKS_TENSOR_INT32;
+      operand->scale = 0;
+      operand->zeroPoint = 0;
+      return;
+    }
     // TODO: Support more dtypes.
     CAFFE_THROW("Bad dtype");
   }
@@ -201,7 +201,15 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
   int32_t num_outputs_;
 };
 
-#ifndef __APPLE__
+// Set flag if running on ios
+#ifdef __APPLE__
+  #include <TargetConditionals.h>
+  #if TARGET_OS_IPHONE
+    #define IS_IOS_NNAPI_BIND
+  #endif
+#endif
+
+#ifndef IS_IOS_NNAPI_BIND
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto register_NnapiCompilation = [](){
   try {
@@ -215,6 +223,8 @@ static auto register_NnapiCompilation = [](){
     throw;
   }
 }();
+#else
+  #undef IS_IOS_NNAPI_BIND
 #endif
 
 } // namespace

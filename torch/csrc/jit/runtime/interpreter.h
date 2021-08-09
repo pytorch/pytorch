@@ -9,7 +9,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_bool(torch_jit_disable_warning_prints);
 
 namespace at {
@@ -42,8 +41,7 @@ using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
 struct TORCH_API Code {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  Code() : pImpl(nullptr) {}
+  Code() = default;
   explicit Code(interpreter::CodeImpl* pImpl);
   // remaining_bailout_depth is irrelevant in a `Code` object unless the `Code`
   // is directly created by `GraphExecutor` in which case it's likely to contain

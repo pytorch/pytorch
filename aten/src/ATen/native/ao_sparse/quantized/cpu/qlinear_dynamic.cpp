@@ -2,6 +2,7 @@
 #include <ATen/Parallel.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
+#include <c10/util/accumulate.h>
 
 #include <ATen/native/quantized/cpu/quant_utils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
@@ -39,18 +40,14 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       "quantized_sparse_lienar: Input tensor's last and weight tensor's"
       " second dimension must match.");
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_min;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float x_max;
+  // On empty input, no output data will be generated,
+  // so use arbitrary qparams.
+  float x_min = 0;
+  float x_max = 0;
+  // Otherwise...
   if (input.numel() > 0) {
     x_min = input.min().item<float>();
     x_max = input.max().item<float>();
-  } else {
-    // On empty input, no output data will be generated,
-    // so use arbitrary qparams.
-    x_min = 0;
-    x_max = 0;
   }
 
   auto q_params = quant_utils::ChooseQuantizationParams(

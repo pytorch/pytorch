@@ -10,6 +10,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/cub.cuh>
 
+#include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
 
@@ -2891,7 +2892,8 @@ CAFFE2_CUDA_EXPORT void BroadcastCUDAImpl(
       const T alpha,                                 \
       const T* X,                                    \
       T* Y,                                          \
-      CUDAContext* context) {                        \
+      CUDAContext* context,                          \
+      bool) {                                        \
     CAFFE_ENFORCE_LE(X_ndim, Y_ndim);                \
     DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(          \
         Y_ndim,                                      \

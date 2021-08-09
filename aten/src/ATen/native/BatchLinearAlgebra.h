@@ -191,9 +191,9 @@ using ormqr_fn = void (*)(const Tensor& /*input*/, const Tensor& /*tau*/, const 
 DECLARE_DISPATCH(ormqr_fn, ormqr_stub);
 
 using linalg_eigh_fn = void (*)(
-    Tensor& /*eigenvalues*/,
-    Tensor& /*eigenvectors*/,
-    Tensor& /*infos*/,
+    const Tensor& /*eigenvalues*/,
+    const Tensor& /*eigenvectors*/,
+    const Tensor& /*infos*/,
     bool /*upper*/,
     bool /*compute_eigenvectors*/);
 DECLARE_DISPATCH(linalg_eigh_fn, linalg_eigh_stub);
@@ -230,5 +230,13 @@ using lu_solve_fn = void (*)(
     const Tensor& /*lu*/,
     const Tensor& /*pivots*/);
 DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
+
+using lu_solve_trans_fn = void (*)(
+    const Tensor& /*b*/,
+    const Tensor& /*lu*/,
+    const Tensor& /*pivots*/,
+    char /*trans*/);
+DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+
 
 }} // namespace at::native
