@@ -214,7 +214,7 @@ jobs:
   # doesn't create the best experience
   render_test_results:
     if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
-    needs: [test, ]
+    needs: [generate-test-matrix, test, ]
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
