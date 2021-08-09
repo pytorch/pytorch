@@ -1098,12 +1098,21 @@ def check_args_exist(target_type) -> None:
         raise_error_container_parameter_missing("Optional")
 
 
+def check_empty_containers(obj) -> None:
+    if not obj:
+        warnings.warn("The inner type of a container is lost when "
+            "calling torch.jit.isinstance in eager mode. For example, "
+            "List[int] would become list and therefore falsely return "
+            "True for List[float] or List[str].")
+
+
 # supports List/Dict/Tuple and Optional types
 # TODO support future
 def container_checker(obj, target_type) -> bool:
     origin_type = get_origin(target_type)
     check_args_exist(target_type)
     if origin_type is list or origin_type is List:
+        check_empty_containers(obj)
         if not isinstance(obj, list):
             return False
         arg_type = get_args(target_type)[0]
@@ -1117,6 +1126,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Dict or origin_type is dict:
+        check_empty_containers(obj)
         if not isinstance(obj, dict):
             return False
         key_type = get_args(target_type)[0]
@@ -1133,6 +1143,7 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Tuple or origin_type is tuple:
+        check_empty_containers(obj)
         if not isinstance(obj, tuple):
             return False
         arg_types = get_args(target_type)
