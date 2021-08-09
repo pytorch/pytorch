@@ -70,7 +70,9 @@ class DecorateInfo(object):
 
 
 class SkipInfo(DecorateInfo):
-    """Information about which tests to skip."""
+    """Describes which test, or type of tests, should be skipped when testing
+       an operator. Any test that matches all provided arguments will be skipped.
+       The skip will only be checked if the active_if argument is True."""
 
     def __init__(
             self, cls_name=None, test_name=None, *, device_type=None, dtypes=None, active_if=True,
