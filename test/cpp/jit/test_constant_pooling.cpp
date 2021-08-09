@@ -12,7 +12,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ConstantPoolingTest, Int) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -29,7 +28,6 @@ graph():
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ConstantPoolingTest, PoolingAcrossBlocks) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -55,7 +53,6 @@ graph(%cond : Tensor):
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ConstantPoolingTest, PoolingDifferentDevices) {
   auto graph = std::make_shared<Graph>();
   parseIR(
@@ -92,7 +89,6 @@ graph():
       ->run(*graph);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ConstantPoolingTest, DictConstantPooling) {
   auto graph = std::make_shared<Graph>();
   parseIR(

@@ -243,6 +243,7 @@ class TestProfiler(TestCase):
                         if evt["name"] == "[memory]":
                             found_memory_events = True
                             assert "args" in evt
+                            assert "Addr" in evt["args"]
                             assert "Device Type" in evt["args"]
                             assert "Device Id" in evt["args"]
                             assert "Bytes" in evt["args"]
@@ -559,7 +560,7 @@ class TestProfiler(TestCase):
 
         # test case for gzip file format
         with TemporaryDirectoryName() as dname:
-            with profile(
+            p = profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU
                 ] + ([
@@ -571,10 +572,12 @@ class TestProfiler(TestCase):
                     active=2,
                     repeat=3),
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(dname, use_gzip=True)
-            ) as p:
-                for _ in range(18):
-                    self.payload(use_cuda=use_cuda)
-                    p.step()
+            )
+            p.start()
+            for _ in range(18):
+                self.payload(use_cuda=use_cuda)
+                p.step()
+            p.stop()
 
             self.assertTrue(os.path.exists(dname))
             file_num = 0
