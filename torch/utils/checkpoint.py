@@ -275,3 +275,80 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         input = checkpoint(run_function(start, end, functions), input,
                            preserve_rng_state=preserve)
     return run_function(end + 1, len(functions) - 1, functions)(input)
+
+
+class Checkpoint():
+    """Checkpoitining without re-entrant autograd
+
+    Args:
+        function: describes what to run in the forward pass of the model or
+            part of the model. It should also know how to handle the inputs
+            passed as the tuple. For example, in LSTM, if user passes
+            ``(activation, hidden)``, :attr:`function` should correctly use the
+            first input as ``activation`` and the second input as ``hidden``
+        preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
+            the RNG state during each checkpoint.
+    """
+    def __init__(self, function, preserve_rng_state=True):
+        self.function = function
+        self.preserve_rng_state = preserve_rng_state
+
+    def __call__(self, *args):
+        check_backward_validity(*args)
+        self.had_autocast_in_fwd = torch.is_autocast_enabled()
+
+        if self.preserve_rng_state:
+            self.fwd_cpu_state = torch.get_rng_state()
+            # Don't eagerly initialize the cuda context by accident.
+            # (If the user intends that the context is initialized later, within their
+            # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
+            # we have no way to anticipate this will happen before we run the function.)
+            self.had_cuda_in_fwd = False
+            if torch.cuda._initialized:
+                self.had_cuda_in_fwd = True
+                self.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
+
+        storage = []
+        counter = 0
+
+        def pack(x):
+            nonlocal counter, storage
+            # we could store something else than an int here, but not None because that's a valid saved tensor value
+            storage.append(counter)
+            counter += 1
+            return counter - 1
+
+        def unpack(x):
+            nonlocal counter, storage
+            if isinstance(storage[x], int):
+                counter_inner = 0
+                def inner_pack(inner):
+                    nonlocal counter, storage, counter_inner
+                    storage[counter_inner] = inner
+                    counter_inner += 1
+                    return None
+
+                # Stash the surrounding rng state, and mimic the state that was
+                # present at this time during forward.  Restore the surrounding state
+                # when we're done.
+                rng_devices = []
+                if self.preserve_rng_state and self.had_cuda_in_fwd:
+                    rng_devices = self.fwd_gpu_devices
+                with torch.random.fork_rng(devices=rng_devices, enabled=self.preserve_rng_state):
+                    if self.preserve_rng_state:
+                        torch.set_rng_state(self.fwd_cpu_state)
+                        if self.had_cuda_in_fwd:
+                            set_device_states(self.fwd_gpu_devices, self.fwd_gpu_states)
+                    #  detached_inputs = detach_variable(tuple(inputs))
+                    with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
+                        torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, lambda x: None)
+                        y = self.function(*args)
+                        torch.autograd.graph.reset_saved_tensors_default_hooks()
+
+            assert not isinstance(storage[x], int)
+            return storage[x]
+
+        torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
+        y = self.function(*args)
+        torch.autograd.graph.reset_saved_tensors_default_hooks()
+        return y

@@ -23,7 +23,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, Checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
@@ -4495,6 +4495,33 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+
+    @slowTest
+    def test_checkpointing_with_hooks(self):
+        num_inp = 2000
+        nz_inp = 10
+        nz_out = 10
+        nz_bottleneck = 1000
+
+        # small proxy network for some complex reasoning we want to do per input
+        module = Checkpoint(nn.Sequential(
+            nn.Linear(nz_inp, nz_bottleneck),
+            nn.ReLU(),
+            nn.Linear(nz_bottleneck, nz_inp)
+        ))
+
+        feat_combined = []
+        for r in range(num_inp):
+            data_r = torch.empty(1, nz_inp)
+            data_r.uniform_()
+            data_r.requires_grad = True
+            feat_r = checkpoint(module, data_r)
+            feat_combined.append(feat_r)
+
+        # compute mean as a proxy for some joint reasoning
+        mean_combined = torch.stack(feat_combined).mean()
+        mean_combined.backward()
+
 
     def test_checkpoint_valid_reset_on_error(self):
         a = torch.randn(2, 2, requires_grad=True)
