@@ -1050,7 +1050,6 @@ _(attr, to) \
 _(attr, tol) \
 _(attr, total) \
 _(attr, total_length) \
-_(attr, total_size) \
 _(attr, total_weight) \
 _(attr, train) \
 _(attr, training) \
