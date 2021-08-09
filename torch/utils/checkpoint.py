@@ -342,14 +342,18 @@ class Checkpoint(torch.nn.Module):
                             set_device_states(self.fwd_gpu_devices, self.fwd_gpu_states)
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
-                        torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, lambda x: None)
-                        y = self.function(*args)
-                        torch.autograd.graph.reset_saved_tensors_default_hooks()
+                        try:
+                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, lambda x: None)
+                            y = self.function(*args)
+                        finally:
+                            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
             assert not isinstance(storage[x], int)
             return storage[x]
 
-        torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
-        y = self.function(*args)
-        torch.autograd.graph.reset_saved_tensors_default_hooks()
+        try:
+            torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
+            y = self.function(*args)
+        finally:
+            torch.autograd.graph.reset_saved_tensors_default_hooks()
         return y
