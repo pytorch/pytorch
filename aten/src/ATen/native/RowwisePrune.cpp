@@ -103,4 +103,4 @@ std::tuple<Tensor, Tensor> _rowwise_prune(const Tensor& weights,
                                         compressed_indices_dtype);
 }
 
-}} // namesapce at::native
+}} // namespace at::native
