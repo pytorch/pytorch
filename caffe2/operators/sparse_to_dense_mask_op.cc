@@ -3,14 +3,11 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseToDenseMask, SparseToDenseMaskOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseToDenseMaskGradient,
     SparseToDenseMaskGradientOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseToDenseMask)
     .NumInputs(3, 4)
     .NumOutputs(1, 2)
@@ -99,7 +96,6 @@ matrix of size `len(lengths) X len(mask)`.
         "provided the first dimension is omitted). True when a value for given "
         "id was present, false otherwise.");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseToDenseMaskGradient)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -122,7 +118,6 @@ class GetSparseToDenseMaskGradient : public GradientMakerBase {
         "SparseToDenseMaskGradient", "", blob_names, vector<string>{GI(1)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SparseToDenseMask, GetSparseToDenseMaskGradient);
 } // namespace
 } // namespace caffe2

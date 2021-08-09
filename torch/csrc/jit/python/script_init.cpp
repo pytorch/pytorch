@@ -1,3 +1,4 @@
+#include <pybind11/detail/common.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -17,6 +18,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -174,7 +176,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
       "Overload must have same number of parameters\n",
       new_decl.range(),
       old_decl.range());
-  for (size_t i = 0; i < new_decl.params().size(); ++i) {
+  for (const auto i : c10::irange(new_decl.params().size())) {
     TORCH_INTERNAL_ASSERT(
         new_params[i].ident().name() == old_params[i].ident().name(),
         "Overload parameters must have the same names\n",
@@ -310,7 +312,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
       overload_decl.range(),
       impl_decl.range());
 
-  for (size_t i = 0; i < overload_params.size(); ++i) {
+  for (const auto i : c10::irange(overload_params.size())) {
     auto overload_name = overload_params[i].ident().name();
     auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
@@ -585,7 +587,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     } else if (item.a.isList()) {
       auto al = item.a.toList();
       auto bl = item.b.toList();
-      for (size_t i = 0; i < al.size(); ++i) {
+      for (const auto i : c10::irange(al.size())) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }
     } else if (item.a.isGenericDict()) {
@@ -1020,7 +1022,10 @@ void initJitScriptBindings(PyObject* module) {
           "write_files",
           &ScriptModuleSerializer::writeFiles,
           py::arg("code_dir") = ".data/ts_code/code/")
-      .def("storage_context", &ScriptModuleSerializer::storage_context);
+      .def(
+          "storage_context",
+          &ScriptModuleSerializer::storage_context,
+          pybind11::return_value_policy::reference_internal);
 
   // Used by torch.package to coordinate sharing of storages between eager
   // and ScriptModules.
@@ -1028,7 +1033,6 @@ void initJitScriptBindings(PyObject* module) {
       SerializationStorageContext,
       std::shared_ptr<SerializationStorageContext>>(
       m, "SerializationStorageContext")
-      .def(py::init<SerializationStorageContext&>())
       .def("has_storage", &SerializationStorageContext::hasStorage)
       .def("get_or_add_storage", &SerializationStorageContext::getOrAddStorage);
 
