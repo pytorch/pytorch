@@ -107,6 +107,10 @@ PyInterpreterHolder self_interpreter;
 
 } // anonymous namespace
 
+c10::impl::PyInterpreter* getPyInterpreter() {
+  return self_interpreter.get();
+}
+
 namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
@@ -1507,30 +1511,54 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
   py::handle torch_api_function = py::module::import("torch").attr("ops").attr(ns).attr(func_name);
   std::string module_name_str = "torch.ops." + ns_str;
 
-  // Pre-scan for arguments that match defaults
-  int64_t default_suffix_len = 0;
-  for (int64_t idx = arguments.size() - 1; idx >= 0; idx--) {
+  // About all the pointers:
+  //
+  // f(int x, int y = 0, *, int z = 0)
+  //                                  ^- arguments.size()
+  //                        ^- kwarg_only_start
+  //          ^- positional_default_start
+  //   ^- 0
+
+  // Find the split point between kwarg-only and regular.  Since most functions
+  // don't have kwarg-only arguments, it is more efficient to scan from the
+  // right (but ideally, this would just be precomputed in FunctionSchema
+  // itself).  (NB: minus one in the loop is because we're testing if the
+  // *next* argument is kwarg-only before we advance the starting index)
+  int64_t kwarg_only_start = arguments.size();
+  for (; kwarg_only_start > 0; kwarg_only_start--) {
+    const auto& arg = schema.arguments()[kwarg_only_start - 1];
+    if (!arg.kwarg_only()) {
+      break;
+    }
+  }
+
+  // Find the first positional argument that isn't defaulted
+  auto is_default = [&](int64_t idx) -> bool {
     const auto& arg = schema.arguments()[idx];
     if (!arg.default_value().has_value()) {
-      break;
+      return false;
     }
     const auto& default_ivalue = *arg.default_value();
     const auto& ivalue = arguments[idx];
     if (default_ivalue != ivalue) {
+      return false;
+    }
+    return true;
+  };
+
+  int64_t positional_default_start = kwarg_only_start;
+  for (; positional_default_start > 0; positional_default_start--) {
+    if (!is_default(positional_default_start - 1)) {
       break;
     }
-    default_suffix_len++;
   }
 
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(num_arguments - default_suffix_len));
-
-  // TODO: actually populate kwargs sometimes?  At the moment, every argument
-  // just gets passed positionally
+  auto args = py::reinterpret_steal<py::object>(PyTuple_New(positional_default_start));
   py::dict kwargs;
 
-  for (int64_t idx = 0; idx < arguments.size() - default_suffix_len; idx++) {
-    auto& ivalue = arguments[idx];
-    // Search for Tensors (as they may have the torch functions we need)
+  // Find overloaded tensors
+  for (int64_t idx = 0; idx < arguments.size(); idx++) {
+    const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       const auto& tensor = ivalue.toTensor();
       if (isPythonTensor(tensor)) {
@@ -1548,7 +1576,19 @@ void concrete_dispatch_fn(const c10::impl::PyInterpreter*, const c10::OperatorHa
         }
       }
     }
-    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(ivalue)).release().ptr());
+  }
+
+  // Populate positional arguments
+  for (int64_t idx = 0; idx < positional_default_start; idx++) {
+    PyTuple_SET_ITEM(args.ptr(), idx, torch::jit::toPyObject(std::move(arguments[idx])).release().ptr());
+  }
+
+  // Populate keyword arguments
+  for (int64_t idx = kwarg_only_start; idx < arguments.size(); idx++) {
+    // But don't populate default keyword arguments
+    if (is_default(idx)) continue;
+    const auto& arg = schema.arguments()[idx];
+    kwargs[py::cast(arg.name())] = torch::jit::toPyObject(std::move(arguments[idx]));
   }
 
   auto out = py::reinterpret_steal<py::object>(handle_torch_function_no_python_arg_parser(

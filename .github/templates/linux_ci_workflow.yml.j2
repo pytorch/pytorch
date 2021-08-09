@@ -1,12 +1,15 @@
-{%- set exclude_test = exclude_test|default(false) -%}
+{# squid_proxy is an private ELB that only available for GHA custom runners #}
+{%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
+{# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
+{%- set squid_no_proxy = "localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+
 {%- block name -%}
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: Linux CI (!{{ build_environment }})
+name: !{{ build_environment }}
 {%- endblock %}
 
 on:
-  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- if on_pull_request %}
   pull_request:
   {%- if ciflow_config.enabled %}
@@ -16,6 +19,8 @@ on:
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
     {%- endif %}
   {%- endif %}
+{%- else %}
+  # TODO: Enable pull_request builds when we can verify capacity can be met by auto-scalers
 {%- endif %}
 
 {%- if is_scheduled %}
@@ -35,6 +40,8 @@ env:
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   TORCH_CUDA_ARCH_LIST: 5.2
   IN_CI: 1
+  # This is used for the phase of adding wheel tests only, will be removed once completed
+  IN_WHEEL_TEST: 1
   # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
   CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -47,7 +54,7 @@ jobs:
 {%- if ciflow_config.enabled %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
-    if: !{{ ciflow_config.root_job_condition }}
+    if: ${{ !{{ ciflow_config.root_job_condition }} }}
     steps:
       - name: noop
         run: echo running !{{ ciflow_config.root_job_name }}
@@ -55,7 +62,9 @@ jobs:
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       DOCKER_BUILDKIT: 1
     timeout-minutes: 90
@@ -74,6 +83,7 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -118,7 +128,7 @@ jobs:
           fi
           echo ::set-output name=rebuild::yes
       - name: Build and push docker image
-        if: steps.check.outputs.rebuild
+        if: ${{ steps.check.outputs.rebuild }}
         env:
           DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker_tag }}
           DOCKER_SKIP_S3_UPLOAD: 1
@@ -145,6 +155,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -166,6 +181,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -175,6 +191,9 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
             sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -219,6 +238,10 @@ jobs:
           path:
             artifacts.zip
       {%- endif %}
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -230,7 +253,9 @@ jobs:
   generate-test-matrix:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
+    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
+    {%- endif %}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
@@ -241,9 +266,11 @@ jobs:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -267,6 +294,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
       - name: Log in to ECR
         run: |
@@ -280,6 +308,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -318,6 +351,8 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          BUILD_ENVIRONMENT: !{{ build_environment }}-${{ matrix.config }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -336,12 +371,15 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
             -e IN_CI \
+            -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
+            -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -359,10 +397,13 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - name: Zip test reports for upload
         if: always()
+        env:
+          COMMIT_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
-          zip -r "test-reports-${TEST_CONFIG}.zip" test -i '*.xml'
+          zip -r "test-reports-${COMMIT_SHA1}-${WORKFLOW_ID}.zip" test -i '*.xml'
       - uses: actions/upload-artifact@v2
         name: Store PyTorch Test Reports
         if: always()
@@ -381,6 +422,10 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
@@ -405,6 +450,18 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
       fail-fast: false
     steps:
+      - name: Log in to ECR
+        run: |
+          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
+          bash /tmp/ecr-login.sh
+          rm /tmp/ecr-login.sh
+      - name: Chown workspace
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "$(pwd)/../":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -465,6 +522,11 @@ jobs:
       - name: Clean workspace
         run: |
           rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: "[FB EMPLOYEES] Enables SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: actions/checkout@v2
         with:
@@ -511,7 +573,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: driazati/upload-artifact-s3@21c31d0a7bcb056ca50bd6ce197ba6507c26a1be
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         name: Upload Docs Preview
         with:
           name: deploy
@@ -519,7 +581,7 @@ jobs:
           if-no-files-found: error
           path: pytorch.github.io/docs/merge
       - name: Show Docs Preview URL (Click Me)
-        if: github.event_name == 'pull_request'
+        if: ${{ github.event_name == 'pull_request' }}
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -533,6 +595,10 @@ jobs:
           name: pytorch_github_io
           if-no-files-found: error
           path: pytorch_github_io.zip
+      - name: Hold runner for 2 hours or until ssh sessions have drained
+        # Always hold for active ssh sessions
+        if: always()
+        run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Clean up docker images
         if: always()
         run: |
