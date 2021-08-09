@@ -3,11 +3,9 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsSumFused8BitRowwise,
     SparseLengthsFused8BitRowwiseOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsSumFused8BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -36,14 +34,11 @@ stores quantized values, and then 4-byte scale and 4-byte bias).
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output")
     .InheritOnnxSchema();
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsSumFused8BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsWeightedSumFused8BitRowwise,
     SparseLengthsFused8BitRowwiseOp<CPUContext, /*with_weights=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsWeightedSumFused8BitRowwise)
     .NumInputs(4)
     .NumOutputs(1)
@@ -77,17 +72,14 @@ but operating on 8-bit rowwise quantized matrices with fused storage
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsWeightedSumFused8BitRowwise);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     SparseLengthsMeanFused8BitRowwise,
     SparseLengthsFused8BitRowwiseOp<
         CPUContext,
         /*with_weights=*/false,
         /*is_mean=*/true>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseLengthsMeanFused8BitRowwise)
     .NumInputs(3)
     .NumOutputs(1)
@@ -115,6 +107,5 @@ operating on 8-bit rowwise quantized matrices with fused storage
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(SparseLengthsMeanFused8BitRowwise);
 } // namespace caffe2
