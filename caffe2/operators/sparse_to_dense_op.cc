@@ -4,10 +4,8 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SparseToDense, SparseToDenseOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SparseToDense)
     .NumInputs(2, 3)
     .NumOutputs(1)
@@ -71,7 +69,6 @@ class GetSparseToDenseGradient : public GradientMakerBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(SparseToDense, GetSparseToDenseGradient);
 }
 } // namespace caffe2
