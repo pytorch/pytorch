@@ -48,5 +48,5 @@ target_include_directories(deploy_benchmark PRIVATE ${PYTORCH_ROOT}/torch)
 target_link_libraries(deploy_benchmark PUBLIC torch_deploy)
 
 if(INSTALL_TEST)
-  install(TARGETS test_deploy DESTINATION bin)
+  install(TARGETS torch_deploy DESTINATION lib)
 endif()
