@@ -880,7 +880,7 @@ void dot<at::BFloat16>(CUDABLAS_DOT_ARGTYPES(at::BFloat16)) {
       result,
       CUDA_R_16BF,
       CUDA_R_32F));
-#elif HIP_VERSION >= 210
+#elif TORCH_HIP_VERSION >= 210
   TORCH_CUDABLAS_CHECK(rocblas_bfdot(
       handle,
       n,
