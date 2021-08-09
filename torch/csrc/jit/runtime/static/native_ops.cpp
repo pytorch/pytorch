@@ -136,8 +136,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         listUnpack(stack, num_outputs);
         // put output back
         DCHECK_EQ(stack.size(), num_outputs);
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (auto i = 0; i < num_outputs; i++) {
+        for (auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = std::move(stack[i]);
         }
       };
