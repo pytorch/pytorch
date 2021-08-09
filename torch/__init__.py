@@ -26,7 +26,8 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 if sys.executable == 'torch_deploy':
     __version__ = "torch-deploy-1.8"
 else:
-    from .version import __version__ as __version__
+    from .torch_version import __version__ as __version__
+
 from ._six import string_classes as _string_classes
 
 from typing import Set, Type, TYPE_CHECKING
@@ -40,8 +41,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic',
+    'lobpcg', 'use_deterministic_algorithms',
+    'are_deterministic_algorithms_enabled',
     'set_warn_always', 'is_warn_always_enabled',
 ]
 
@@ -468,31 +469,11 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
-def set_deterministic(d):
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.use_deterministic_algorithms` instead.
-    """
-    warnings.warn((
-        "torch.set_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.use_deterministic_algorithms instead"))
-
-    use_deterministic_algorithms(d)
-
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
-
-def is_deterministic():
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
-    """
-    warnings.warn((
-        "torch.is_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
-    return are_deterministic_algorithms_enabled()
-
 
 def set_warn_always(b):
     r"""When this flag is False (default) then some PyTorch warnings may only
