@@ -561,10 +561,12 @@ class TestPeephole(JitTestCase):
 
     def test_peephole_int(self):
         @torch.jit.script
-        def foo(x: int):
+        def foo(x):
+            # type: (number)
             return int(x)
 
         FileCheck().check("aten::Int").run(foo.graph)
+        next(foo.graph.inputs()).setType(torch._C.IntType.get())
         self.run_pass("peephole", foo.graph)
         FileCheck().check_not("aten::Int").run(foo.graph)
 
@@ -581,6 +583,6 @@ class TestPeephole(JitTestCase):
                    .check("aten::mul").check("aten::floordiv") \
                    .check("aten::div").run(foo.graph)
         self.run_pass("peephole", foo.graph)
-        FileCheck().check("graph").check("):").check_next("aten::Int") \
+        FileCheck().check("graph").check("):") \
                    .check_next("ListConstruct").check_next("return").run(foo.graph)
         self.assertEqual(foo(0, 1, 2, 3), [1, 3])
