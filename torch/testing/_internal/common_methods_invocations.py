@@ -6637,7 +6637,6 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
-           ref=None,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_out=False,
