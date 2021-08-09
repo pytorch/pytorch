@@ -4522,7 +4522,6 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
-
     def test_checkpoint_valid_reset_on_error(self):
         a = torch.randn(2, 2, requires_grad=True)
 
@@ -4532,6 +4531,39 @@ for shape in [(1,), ()]:
 
         c = checkpoint(torch.exp, a).sum()
         c.backward()
+
+    def test_checkpointing_with_hooks_correct_grad(self):
+        a = torch.randn(2, 2, requires_grad=True)
+
+        b = torch.exp(a).sum()
+        b.backward()
+        b_grad = a.grad
+
+        a.grad = None
+        c = Checkpoint(torch.exp)(a).sum()
+        c.backward()
+        c_grad = a.grad
+
+        a.grad = None
+        d = Checkpoint(torch.exp)(a).sum()
+        d_grad, = torch.autograd.grad(d, (a,))
+
+        self.assertEqual(b_grad, c_grad)
+        self.assertEqual(b_grad, d_grad)
+
+    def test_checkpointing_with_dataparallel(self):
+        a = torch.randn(20, 20, requires_grad=True)
+
+        b = torch.exp(a).sum()
+        b.backward()
+        b_grad = a.grad
+
+        a.grad = None
+        c = torch.nn.DataParallel(Checkpoint(torch.exp))(a).sum()
+        c.backward()
+        c_grad = a.grad
+
+        self.assertEqual(b_grad, c_grad)
 
     def test_callback_adds_callback(self):
         called = [0]

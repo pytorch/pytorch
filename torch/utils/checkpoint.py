@@ -277,7 +277,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
 
-class Checkpoint():
+class Checkpoint(torch.nn.Module):
     """Checkpoitining without re-entrant autograd
 
     Args:
@@ -290,11 +290,11 @@ class Checkpoint():
             the RNG state during each checkpoint.
     """
     def __init__(self, function, preserve_rng_state=True):
+        super().__init__()
         self.function = function
         self.preserve_rng_state = preserve_rng_state
 
-    def __call__(self, *args):
-        check_backward_validity(*args)
+    def forward(self, *args):
         self.had_autocast_in_fwd = torch.is_autocast_enabled()
 
         if self.preserve_rng_state:
