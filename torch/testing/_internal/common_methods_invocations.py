@@ -852,7 +852,7 @@ class ReductionOpInfo(OpInfo):
         self, name, *,
 
         # The identity value of the operator.
-        identity: Optional[numbers.Number] = None,
+        identity: Optional[Union[int, float, complex]] = None,
 
         # possible values are:
         # - propagate: NaN values are propagated to the output
