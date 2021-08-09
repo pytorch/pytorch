@@ -2826,8 +2826,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-          for (int i = 0; i < l.size(); i++) {
+          for (auto i : c10::irange(l.size())) {
             sum = sum + l.extract(i);
           }
           push(stack, sum);
