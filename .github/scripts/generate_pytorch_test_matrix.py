@@ -21,11 +21,25 @@ class Config(TypedDict):
 
 def main() -> None:
     TEST_RUNNER_TYPE = os.getenv('TEST_RUNNER_TYPE')
+    assert TEST_RUNNER_TYPE is not None
+    ON_PULL_REQUEST = os.getenv('GITHUB_HEAD_REF')
+    NUM_TEST_SHARDS_ON_PULL_REQUEST = os.getenv('NUM_TEST_SHARDS_ON_PULL_REQUEST')
     NUM_TEST_SHARDS = int(os.getenv('NUM_TEST_SHARDS', '1'))
+    if ON_PULL_REQUEST and NUM_TEST_SHARDS_ON_PULL_REQUEST:
+        NUM_TEST_SHARDS = int(NUM_TEST_SHARDS_ON_PULL_REQUEST)
     MULTIGPU_RUNNER_TYPE = os.getenv('MULTIGPU_RUNNER_TYPE')
+    NOGPU_RUNNER_TYPE = os.getenv('NOGPU_RUNNER_TYPE')
     configs: Dict[str, Config] = {}
+    if os.getenv('ENABLE_JIT_LEGACY_TEST'):
+        configs['jit_legacy'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     if MULTIGPU_RUNNER_TYPE is not None and os.getenv('ENABLE_MULTIGPU_TEST'):
         configs['multigpu'] = {'num_shards': 1, 'runner': MULTIGPU_RUNNER_TYPE}
+    if NOGPU_RUNNER_TYPE is not None and os.getenv('ENABLE_NOGPU_NO_AVX_TEST'):
+        configs['nogpu_NO_AVX'] = {'num_shards': 1, 'runner': NOGPU_RUNNER_TYPE}
+    if NOGPU_RUNNER_TYPE is not None and os.getenv('ENABLE_NOGPU_NO_AVX2_TEST'):
+        configs['nogpu_NO_AVX2'] = {'num_shards': 1, 'runner': NOGPU_RUNNER_TYPE}
+    if os.getenv('ENABLE_SLOW_TEST'):
+        configs['slow'] = {'num_shards': 1, 'runner': TEST_RUNNER_TYPE}
     matrix = {
         'include': [
             {
