@@ -80,9 +80,7 @@ Tensor upsample_nearest1d_backward(
   return at::upsample_nearest1d_backward(grad_output, osize, input_size, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest1d_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(upsample_nearest1d_backward_kernel);
 
 } // namespace native

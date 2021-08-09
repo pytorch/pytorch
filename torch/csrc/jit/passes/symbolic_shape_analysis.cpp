@@ -1,5 +1,6 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -35,7 +36,6 @@ pointwise ops)
 - Supporting returning partially evaluated shape compute graph
 */
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static bool symbolic_shape_analysis_test_mode = false;
 
 namespace torch {
@@ -119,7 +119,7 @@ struct SymbolicShapeAnalyzer {
 
   c10::SymbolicShape run() {
     bool made_change = true;
-    size_t MAX_ATTEMPTS = 6;
+    constexpr size_t MAX_ATTEMPTS = 8;
     size_t curr_attempt = 0;
     while (made_change && curr_attempt < MAX_ATTEMPTS) {
       curr_attempt++;
@@ -235,13 +235,12 @@ struct SymbolicShapeAnalyzer {
 
     // there are ways to compute this more efficiently but typically number of
     // Values for each symbolic set is low and this is cheap to run
-    for (size_t i = 0; i < symbolic_set.size(); ++i) {
+    for (const auto i : c10::irange(symbolic_set.size())) {
       Value* v = symbolic_set[i];
       Value* dominating_value = v;
-      // NOLINTNEXTLINE(modernize-loop-convert)
-      for (size_t j = 0; j < symbolic_set.size(); ++j) {
-        if (dominating_value->node()->isDominatedBy(symbolic_set[j]->node())) {
-          dominating_value = symbolic_set[j];
+      for (const auto& sym_set : symbolic_set) {
+        if (dominating_value->node()->isDominatedBy(sym_set->node())) {
+          dominating_value = sym_set;
         }
       }
       if (dominating_value != v) {

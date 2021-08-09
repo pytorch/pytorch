@@ -285,8 +285,8 @@ class JitCommonTestCase(TestCase):
         # repropagte input shapes provided by tracing,
         prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         for enable_test_mode in [True, False]:
-            # here we are testing allowing/disallowing substituting in complete shapes as constants, 
-            # disallowing constants helps stress test partial eval and substitution pipeline 
+            # here we are testing allowing/disallowing substituting in complete shapes as constants,
+            # disallowing constants helps stress test partial eval and substitution pipeline
             torch._C._jit_set_symbolic_shapes_test_mode(enable_test_mode)
             torch._C._jit_erase_non_input_shape_information(traced_graph)
             torch._C._jit_pass_constant_propagation(traced_graph)
@@ -294,12 +294,12 @@ class JitCommonTestCase(TestCase):
             out_type = next(traced_graph.outputs()).type()
             actual_type = TensorType.get().with_sizes(out_size)
 
-            # always check that output is a subtype of the actual shape
-            self.assertTrue(out_type.isSubtypeOf(actual_type))
+            # always actual shape is a subtype of the output
+            self.assertTrue(actual_type.isSubtypeOf(out_type))
 
             # and then if assertion flag is provided, check shape analysis
             # is successful
             if assert_propagation:
                 self.assertEqual(out_type.sizes(), out_size)
-        
+
         torch._C._jit_set_symbolic_shapes_test_mode(prev_symbolic_shapes_test_enabled)

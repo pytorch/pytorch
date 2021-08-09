@@ -1,3 +1,5 @@
+import functools
+
 from torch.utils.data import IterDataPipe, functional_datapipe
 from typing import Iterator, Optional, Sized, Tuple, TypeVar
 
@@ -58,6 +60,39 @@ class ForkIterDataPipe(IterDataPipe):
         result = []
         buffer = list(datapipe)
         return [IterateBuffer(buffer) for i in range(instances)]
+
+
+@functional_datapipe('demux')
+class DemultiplexerIterDataPipe(IterDataPipe):
+
+    def __new__(cls, datapipe, instances, classifier_fn):
+        result = []
+        buffer = list(datapipe)
+
+        def filter_fn(classifier_fn, i, x):
+            return classifier_fn(x) == i
+        return [IterateBuffer(buffer).filter(functools.partial(filter_fn, classifier_fn, i)) for i in range(instances)]
+
+@functional_datapipe('mux')
+class MultiplexerIterDataPipe(IterDataPipe):
+
+    def __init__(self, *datapipes):
+        self.datapipes = datapipes
+
+    def __iter__(self):
+        iterators = [iter(x) for x in self.datapipes]
+        finished = {}
+        had_more = True
+        while had_more:
+            had_more = False
+            for i in range(len(iterators)):
+                if i not in finished:
+                    try:
+                        value = iterators[i].__next__()
+                        had_more = True
+                        yield value
+                    except StopIteration:
+                        finished[i] = 1
 
 
 @functional_datapipe('zip')
