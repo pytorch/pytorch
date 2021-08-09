@@ -2826,7 +2826,7 @@ RegisterOperators reg2({
         [](Stack* stack) {
           c10::List<c10::complex<double>> l = pop(stack).toComplexDoubleList();
           c10::complex<double> sum = 0.0;
-          for (auto i : c10::irange(l.size())) {
+          for (const auto i : c10::irange(l.size())) {
             sum = sum + l.extract(i);
           }
           push(stack, sum);
