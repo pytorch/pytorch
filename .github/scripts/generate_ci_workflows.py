@@ -207,7 +207,7 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda11-cudnn8-py3",
+        build_environment="win-vs2019-cuda11.3-cudnn8-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
