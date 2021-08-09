@@ -136,9 +136,24 @@ std::tuple<at::Tensor,at::Tensor> nll_loss_forward_plumbing(
     std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(*weight, cur_level);
   }
 
-  if (!self_bdim && !target_bdim && !weight_bdim) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    return at::nll_loss_forward(self_value, target_value, weight_value, reduction, ignore_index);
+  if ((!weight || !weight->defined()) && ignore_index < 0) {
+    // Decomposition: gather to get unreduced loss. 1 is for the C dim, that's always 1.
+    // gather can handle arbitrary strides so it's a good candidate for a decomposition.
+    auto target_ = target.unsqueeze(1);
+    auto result = at::gather(self, 1, target_).squeeze(1);
+    auto total_weight = at::full(
+        {}, result.numel(), self.scalar_type(),
+        self.layout(), self.device(), nullopt);
+
+    // Apply the reduction
+    switch (reduction) {
+      case Reduction::None:
+        return std::make_tuple(result, total_weight);
+      case Reduction::Sum:
+        return std::make_tuple(result.sum(), total_weight);
+      case Reduction::Mean:
+        return std::make_tuple(result.mean(), total_weight);
+    }
   }
 
   if (self_bdim && target_bdim && (!weight || !weight->defined()) && ignore_index < 0) {
