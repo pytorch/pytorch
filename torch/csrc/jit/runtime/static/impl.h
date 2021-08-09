@@ -341,9 +341,6 @@ class TORCH_API MemoryPlanner {
     return reused_tensors_;
   }
 
-  static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size, at::DeviceType deviceType = at::kCPU);
-
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
@@ -364,6 +361,8 @@ class TORCH_API MemoryPlanner {
   // size_t reused_output_tensors_{0};
   // at::DataPtr output_buffer_; // allocated each time we call Run()
 
+  static size_t compute_aligned_tensor_size(size_t nbytes);
+  static at::DataPtr allocate_buffer(size_t size, at::DeviceType deviceType = at::kCPU);
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

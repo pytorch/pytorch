@@ -1121,7 +1121,6 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
   return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
 }
 
-
 // Get set of all inputs/outputs/constants (always alive) and their aliases
 std::unordered_set<const Value*> GetAlwaysAliveValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
