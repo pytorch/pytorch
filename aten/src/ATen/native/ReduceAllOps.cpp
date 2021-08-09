@@ -33,4 +33,4 @@ std::tuple<Tensor, Tensor> _aminmax_all(const Tensor &self) {
   return at::aminmax(self);
 }
 
-}} // namesapce at::native
+}} // namespace at::native
