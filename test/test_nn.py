@@ -16653,7 +16653,7 @@ class TestNNDeviceType(NNTestCase):
         for batch, groups, kernel_size, memory_format in product((1, 2, 3),
                                                                  (1, 2, 4),
                                                                  ((1, 1), (3, 3)),
-                                                                 (torch.channels_last, torch_contiguous_format)):
+                                                                 (torch.channels_last, torch.contiguous_format)):
             inp = torch.rand(batch, groups, 8, 8, dtype=dtype, device=device)
             w = torch.randn(8, groups, kernel_size[0], kernel_size[1], dtype=dtype, device=device)
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
