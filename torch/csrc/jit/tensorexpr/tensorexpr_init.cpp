@@ -325,7 +325,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(py::init([](const std::vector<Stmt*>& stmts) {
         return tensorexpr::Block::make(stmts);
       }))
-      .def("__str__", [](const Stmt& self) {
+      .def("__str__", [](Stmt& self) {
         std::stringstream ss;
         ss << self;
         return ss.str();
@@ -343,7 +343,7 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<For, Stmt, std::unique_ptr<For, py::nodelete>>(te, "For")
       .def(
           "index_var",
-          [](const For& self) { return VarHandle(self.var()); },
+          [](For& self) { return VarHandle(self.var()); },
           py::return_value_policy::reference)
       .def("body", &For::body, py::return_value_policy::reference)
       .def("set_parallel", &For::set_parallel)
@@ -393,8 +393,8 @@ void initTensorExprBindings(PyObject* module) {
   py::class_<LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<Tensor*>&>())
       .def(py::init([](Stmt* s, const std::vector<BufHandle>& bufs) {
-        std::unordered_set<const Buf*> buf_nodes;
-        for (const auto& buf : bufs) {
+        std::unordered_set<Buf*> buf_nodes;
+        for (auto& buf : bufs) {
           buf_nodes.insert(buf.node());
         }
         return std::make_unique<LoopNest>(s, buf_nodes);
@@ -427,7 +427,7 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_enclosing_loopnest",
-          [](const LoopNest& self, const Stmt* s) {
+          [](const LoopNest& self, Stmt* s) {
             return self.getEnclosingLoopNest(s);
           },
           py::return_value_policy::reference)
@@ -451,9 +451,7 @@ void initTensorExprBindings(PyObject* module) {
           py::return_value_policy::reference)
       .def(
           "get_parent_loop",
-          [](const LoopNest& self, const Stmt* s) {
-            return self.getParentLoop(s);
-          },
+          [](const LoopNest& self, Stmt* s) { return self.getParentLoop(s); },
           py::return_value_policy::reference)
       .def_static(
           "get_loop_stmts_in_loopnest",
@@ -566,7 +564,7 @@ void initTensorExprBindings(PyObject* module) {
           [](const BufHandle& producer,
              const std::string& name,
              Stmt* consumer) {
-            std::pair<const Buf*, Stmt*> ret =
+            std::pair<Buf*, Stmt*> ret =
                 LoopNest::cacheAccesses(producer.node(), name, consumer);
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
@@ -679,7 +677,7 @@ void initTensorExprBindings(PyObject* module) {
                        std::unordered_map<std::string, NNCLoweringFunction>
                            custom_lowerings_str) {
         std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings;
-        for (const auto& kv : custom_lowerings_str) {
+        for (auto& kv : custom_lowerings_str) {
           custom_lowerings[c10::Symbol::fromQualString(kv.first)] = kv.second;
         }
         return std::make_unique<TensorExprKernel>(g, custom_lowerings);

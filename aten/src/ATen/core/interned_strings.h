@@ -26,7 +26,6 @@ namespace c10 {
   _(prim, BroadcastingChunk)         \
   _(prim, BroadcastSizes)            \
   _(prim, ReductionSizes)            \
-  _(prim, Concat)                    \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
@@ -84,6 +83,7 @@ namespace c10 {
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, VarConcat)                 \
   _(prim, With)                      \
   _(prim, Enter)                     \
   _(prim, Exit)                      \
@@ -267,6 +267,7 @@ namespace c10 {
   _(aten, transpose_)                \
   _(aten, trapz)                     \
   _(aten, trapezoid)                 \
+  _(aten, cumulative_trapezoid)      \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
   _(aten, _set_item)                 \
@@ -364,6 +365,8 @@ namespace c10 {
   _(aten, log_softmax)               \
   _(aten, special_log_softmax)       \
   _(aten, special_zeta)              \
+  _(aten, mvlgamma)                  \
+  _(aten, special_multigammaln)      \
   _(aten, has_torch_function)        \
   _(aten, hardswish)                 \
   _(aten, hardswish_)                \

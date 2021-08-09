@@ -2,6 +2,8 @@
 #include <unordered_set>
 #include "caffe2/core/init.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 
 class Workspace;
@@ -68,8 +70,7 @@ bool Predictor::operator()(const TensorList& inputs, TensorList* outputs) {
     return false;
   }
   outputs->clear();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+  for (auto i: c10::irange(config_.predict_net->external_output_size())) {
     outputs->emplace_back(
         getTensor(config_.ws.get(), config_.predict_net->external_output(i))
             .UnsafeSharedInstance());
@@ -103,8 +104,7 @@ bool Predictor::operator()(const TensorMap& inputs, TensorList* outputs) {
     return false;
   }
   outputs->clear();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < config_.predict_net->external_output_size(); ++i) {
+  for (auto i: c10::irange(config_.predict_net->external_output_size())) {
     outputs->push_back(
         getTensor(config_.ws.get(), config_.predict_net->external_output(i))
             .UnsafeSharedInstance());
