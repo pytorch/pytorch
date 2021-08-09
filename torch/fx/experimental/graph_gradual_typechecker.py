@@ -508,26 +508,31 @@ class GraphTypeChecker:
         if n.op == 'placeholder':
             return n.type
 
-        if n.op == 'call_function':
+        elif n.op == 'call_function':
             if n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n)
             else:
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
-        if n.op == 'call_module':
+        elif n.op == 'call_module':
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(module_instance)](n, module_instance)
             else:
                 raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
 
-        if n.op == 'output':
-            assert isinstance(n.args[0], Node)
-            n.type = n.args[0].type
+        elif n.op == 'output':
+            def get_node_type(a):
+                return a.type
+            n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
+            return n.type
+
+        # TODO
+        elif n.op == 'get_attr':
             return n.type
 
         else:
-            raise NotImplementedError("Method not yet implemented")
+            raise NotImplementedError(f"Method {n.op} not yet implemented")
 
 
 @register_refinement_rule(Conv2d)
