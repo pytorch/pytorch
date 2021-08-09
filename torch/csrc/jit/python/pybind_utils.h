@@ -874,12 +874,13 @@ inline Stack createStackForSchema(
     // to be keyword only
     if (schema.arguments()[arg_idx].kwarg_only()) {
       throw schema_match_error(c10::str(
-        schema.name(),
-        "() takes ",
-        arg_idx, " positional argument(s) but ",
-        self ? 1 + args.size() : args.size(),
-        " was/were given.  Declaration: ", schema
-      ));
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          self ? 1 + args.size() : args.size(),
+          " was/were given.  Declaration: ",
+          schema));
     }
     // Use the type information from the schema to convert the PyObject.
     push(stack, argumentToIValue(schema, stack.size(), arg));
