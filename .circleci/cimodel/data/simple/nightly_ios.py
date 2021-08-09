@@ -1,4 +1,5 @@
 import cimodel.data.simple.ios_definitions as ios_definitions
+import cimodel.lib.miniutils as miniutils
 
 
 class IOSNightlyJob:
@@ -37,6 +38,7 @@ class IOSNightlyJob:
             "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},
+            "use_metal": miniutils.quote(str(int(True))),
         }
 
         if not self.is_upload:
