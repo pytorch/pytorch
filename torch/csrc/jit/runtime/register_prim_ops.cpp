@@ -922,7 +922,7 @@ RegisterOperators reg(
            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
            int64_t a, b;
            pop(stack, a, b);
-           push(stack, static_cast<double>(powWrapper(a, b)));
+           push(stack, powWrapper(a, b));
          },
          aliasAnalysisFromSchema()),
      // min and max are in prim:: because there is a difference between
