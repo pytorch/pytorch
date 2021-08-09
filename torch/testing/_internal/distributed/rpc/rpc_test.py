@@ -274,6 +274,14 @@ def raise_or_inc(value):
 def nested_rpc(dst):
     return rpc.rpc_sync(dst, torch.add, args=(torch.ones(2, 2), 1))
 
+def run_func_in_mode(to, fn, mode, args=None, kwargs=None):
+    if mode == RPCExecMode.SYNC:
+        return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
+    elif mode == RPCExecMode.ASYNC:
+        return rpc.rpc_async(to, fn, args=args, kwargs=kwargs).wait()
+    elif mode == RPCExecMode.REMOTE:
+        return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
+
 
 def multi_layer_nested_async_rpc(dst, world_size, ttl):
     # this method returns immediately without blocking the callee, but will
@@ -643,7 +651,7 @@ class RpcTest(RpcAgentTestFixture):
 
         # Test dense tensor
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
-            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+            ret = run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
             self.assertEqual(ret, torch.ones(2, 2) + 1)
 
         # Test sparse tensor
@@ -651,25 +659,25 @@ class RpcTest(RpcAgentTestFixture):
             tensor = build_sparse_tensor()
             add_tensor = build_sparse_tensor()
             expected_tensor = (tensor + add_tensor)
-            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(tensor, add_tensor))
+            ret = run_func_in_mode(dst_rank, torch.add, exec_mode, args=(tensor, add_tensor))
             self.assertEqual(expected_tensor, ret)
 
         # Test invalid ranks
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             with self.assertRaises(RuntimeError):
-                self._run_func_in_mode(self.world_size + 1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+                run_func_in_mode(self.world_size + 1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             with self.assertRaises(RuntimeError):
-                self._run_func_in_mode(-1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+                run_func_in_mode(-1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             with self.assertRaises(ValueError):
-                self._run_func_in_mode(dst_rank + 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+                run_func_in_mode(dst_rank + 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
         for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
             with self.assertRaises(ValueError):
-                self._run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+                run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
 
     @dist_init
     def test_self_py_udf_remote(self):
@@ -3613,17 +3621,9 @@ class RpcTest(RpcAgentTestFixture):
     def test_future_nested_callback(self):
         self._test_future_cb(add_use_future_nested_cb)
 
-    def _run_func_in_mode(self, to, fn, mode, args=None, kwargs=None):
-        if mode == RPCExecMode.SYNC:
-            return rpc.rpc_sync(to, fn, args=args, kwargs=kwargs)
-        elif mode == RPCExecMode.ASYNC:
-            return rpc.rpc_async(to, fn, args=args, kwargs=kwargs).wait()
-        elif mode == RPCExecMode.REMOTE:
-            return rpc.remote(to, fn, args=args, kwargs=kwargs).to_here()
-
     def _test_async_function_raise(self, mode):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
-            self._run_func_in_mode(
+            run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
                 async_raise_func,
                 mode
@@ -3647,7 +3647,7 @@ class RpcTest(RpcAgentTestFixture):
             "torch\\.futures\\.Future object,"
         )
         with self.assertRaisesRegex(RuntimeError, errMsg):
-            self._run_func_in_mode(
+            run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
                 async_wrong_type,
                 mode
@@ -3678,7 +3678,7 @@ class RpcTest(RpcAgentTestFixture):
         dst2 = worker_name((self.rank + 2) % self.world_size)
 
         args = (dst2, torch.ones(2, 2), 1, 2)
-        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
+        ret = run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + 3)
 
     @dist_init
@@ -3771,7 +3771,7 @@ class RpcTest(RpcAgentTestFixture):
         num = 20
         step = 3
         args = (dst2, torch.ones(2, 2), num, step)
-        ret = self._run_func_in_mode(dst1, fn, mode, args=args)
+        ret = run_func_in_mode(dst1, fn, mode, args=args)
         self.assertEqual(ret, torch.ones(2, 2) + num * step)
 
     @dist_init
@@ -3815,7 +3815,7 @@ class RpcTest(RpcAgentTestFixture):
             RuntimeError,
             "Can not pickle torch.futures.Future"
         ):
-            self._run_func_in_mode(
+            run_func_in_mode(
                 worker_name((self.rank + 1) % self.world_size),
                 return_future,
                 mode
@@ -4765,13 +4765,33 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        ret = rpc.rpc_sync(
-            dst,
-            TensorPipeAgentCudaRpcTest._gpu_add,
-            args=(torch.zeros(2).to(0), torch.ones(2).to(0))
-        )
-        self.assertEqual(ret.device, torch.device(1))
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
+        # Test dense tensor
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            x = torch.ones(2, 2)
+            y = torch.ones(2, 2)
+            expected_tensor = (x + y)
+            ret = run_func_in_mode(dst, TensorPipeAgentCudaRpcTest._gpu_add, exec_mode, args=(x.to(0), y.to(0)))
+            self.assertEqual(ret.device, torch.device(1))
+            self.assertEqual(ret, expected_tensor.to(1))
+
+        # Test sparse tensor uncoalesced
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            x = build_sparse_tensor()
+            y = build_sparse_tensor()
+            expected_tensor = (x + y)
+            ret = run_func_in_mode(dst, TensorPipeAgentCudaRpcTest._gpu_add, exec_mode, args=(x.to(0), y.to(0)))
+            self.assertEqual(ret.device, torch.device(1))
+            self.assertEqual(ret, expected_tensor.to(1))
+
+        # Test sparse tensor coalesced
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            x = build_sparse_tensor().coalesce()
+            y = build_sparse_tensor().coalesce()
+            expected_tensor = (x + y)
+            ret = run_func_in_mode(dst, TensorPipeAgentCudaRpcTest._gpu_add, exec_mode, args=(x.to(0), y.to(0)))
+            self.assertEqual(ret.device, torch.device(1))
+            self.assertEqual(ret, expected_tensor.to(1))
+
         rpc.shutdown()
 
     @staticmethod

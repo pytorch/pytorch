@@ -73,7 +73,12 @@ std::vector<c10::Device> getDevicesForTensors(
           " for device ",
           t.device(),
           " but received a tensor on that device.");
-      devices.push_back(deviceIter->second);
+      if (t.is_sparse()) {
+        devices.push_back(deviceIter->second);
+        devices.push_back(deviceIter->second);
+      } else {
+        devices.push_back(deviceIter->second);
+      }
       hasMappedDevice = true;
     }
   }
