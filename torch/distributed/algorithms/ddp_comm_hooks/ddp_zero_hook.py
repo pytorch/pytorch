@@ -1,9 +1,13 @@
+import weakref
 from typing import Any, Callable, List, Optional
 
 import torch
 import torch.distributed as dist
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.distributed.optim.zero_redundancy_optimizer import _OverlapStatus, _get_global_rank
+from torch.distributed.optim.zero_redundancy_optimizer import (
+    _get_global_rank,
+    _OverlapStatus,
+)
 from torch.nn.parallel.distributed import DistributedDataParallel
 
 # Functional optimizers require passing a list of gradients to their `step()`
@@ -86,6 +90,7 @@ def _broadcast_bucket(
                     async_op=True,
                 )
             )
+
 
 def _save_ddp_bucket_info(
     bucket: dist.GradBucket,
@@ -174,10 +179,11 @@ def hook_with_zero_step(
             "ZeroRedundancyOptimizer must be constructed with "
             "`overlap_with_ddp=True` to use this hook properly"
         )
+    ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend(ddp.process_group) != dist.Backend.NCCL:
+    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
@@ -210,7 +216,7 @@ def hook_with_zero_step(
         bucket_index = bucket.index()
 
         # Proceed as normal until the DDP buckets have been rebuilt
-        if not ddp._has_rebuilt_buckets:
+        if not ddp_ref()._has_rebuilt_buckets:  # type: ignore[union-attr]
             assert overlap_info.status == _OverlapStatus.UNINITIALIZED
             return fut
 
@@ -339,10 +345,11 @@ def hook_with_zero_step_interleaved(
             "ZeroRedundancyOptimizer must be constructed with "
             "`overlap_with_ddp=True` to use this hook properly"
         )
+    ddp_ref = weakref.ref(ddp)
 
     # NOTE: Gloo may hang with this overlapping approach, so we require
     # NCCL backend for now; see https://github.com/pytorch/pytorch/issues/62300
-    if dist.get_backend(ddp.process_group) != dist.Backend.NCCL:
+    if dist.get_backend(ddp_ref().process_group) != dist.Backend.NCCL:  # type: ignore[union-attr]
         raise RuntimeError(
             "Overlapping DDP with ZeRO using this approach currently requires "
             "NCCL backend to avoid hangs"
@@ -368,7 +375,7 @@ def hook_with_zero_step_interleaved(
         fut = hook(state, bucket)
 
         # Proceed as normal until the DDP buckets have been rebuilt
-        if not ddp._has_rebuilt_buckets:
+        if not ddp_ref()._has_rebuilt_buckets:  # type: ignore[union-attr]
             assert zero._overlap_info.status == _OverlapStatus.UNINITIALIZED
             return fut
 
@@ -382,7 +389,7 @@ def hook_with_zero_step_interleaved(
                 A :class:`torch.Tensor` representing the contents of the
                 gradient bucket.
             """
-            assert ddp._has_rebuilt_buckets
+            assert ddp_ref()._has_rebuilt_buckets  # type: ignore[union-attr]
 
             bucket_index = bucket.index()
             rank = zero.global_rank
