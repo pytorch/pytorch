@@ -266,9 +266,11 @@ jobs:
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -292,6 +294,7 @@ jobs:
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
       - name: Log in to ECR
         run: |
@@ -348,6 +351,8 @@ jobs:
         run: |
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
       - name: Test PyTorch
+        env:
+          BUILD_ENVIRONMENT: !{{ build_environment }}-${{ matrix.config }}
         run: |
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
@@ -371,6 +376,7 @@ jobs:
             -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
+            -e PYTORCH_IGNORE_DISABLED_ISSUES \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e http_proxy="!{{squid_proxy}}" -e https_proxy="!{{squid_proxy}}" -e no_proxy="!{{squid_no_proxy}}" \

@@ -4254,14 +4254,15 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (of size matching x1).
+    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
+        and broadcastable with x1 at other dimensions).
     dim (int, optional): Dimension of vectors. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
 
 Shape:
     - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)`
 
 Example::
 
