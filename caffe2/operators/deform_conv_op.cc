@@ -4,7 +4,6 @@
 
 namespace caffe2 {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DeformConv)
     .NumInputs(3, 4)
     .NumOutputs(1)

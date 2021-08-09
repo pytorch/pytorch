@@ -19,6 +19,7 @@ TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 CUDA11OrLater = torch.version.cuda and distutils.version.LooseVersion(torch.version.cuda) >= "11.0"
 CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
 SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
+SM60OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0)
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:

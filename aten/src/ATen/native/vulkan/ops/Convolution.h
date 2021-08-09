@@ -13,7 +13,6 @@ namespace ops {
 enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
-  Conv2dOld,
   Conv2dSlidingWindow,
   Conv2dWinograd_2_3,
 };
@@ -60,6 +59,15 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       const Conv2dMethod method,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
+
+  void conv2d_sliding_window(
+      const api::Shader::Descriptor& shader,
+      vTensor& v_output,
+      const vTensor& v_input) const;
+
+  void conv2d_winograd_2_3(
+      vTensor& v_output,
+      const vTensor& v_input) const;
 
  private:
   struct {

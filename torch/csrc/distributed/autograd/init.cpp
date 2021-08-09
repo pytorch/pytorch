@@ -42,7 +42,11 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
               "_recv_functions",
               [](const DistAutogradContext& ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx.recvFunctions()) {
+                auto recvFunctions = ctx.recvFunctions();
+
+                // Acquire GIL only when necessary to avoid deadlocks.
+                pybind11::gil_scoped_acquire ag;
+                for (const auto& map_entry : recvFunctions) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -50,12 +54,17 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
                               map_entry.second)));
                 }
                 return funcs;
-              })
+              },
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "_send_functions",
               [](const ContextPtr& ctx) {
                 std::map<int64_t, py::object> funcs;
-                for (const auto& map_entry : ctx->sendFunctions()) {
+                auto sendFunctions = ctx->sendFunctions();
+
+                // Acquire GIL only when necessary to avoid deadlocks.
+                pybind11::gil_scoped_acquire ag;
+                for (const auto& map_entry : sendFunctions) {
                   funcs.emplace(
                       map_entry.first,
                       py::reinterpret_steal<py::object>(
@@ -63,15 +72,20 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
                               map_entry.second)));
                 }
                 return funcs;
-              })
-          .def("_known_worker_ids", &DistAutogradContext::getKnownWorkerIds);
+              },
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_known_worker_ids",
+              &DistAutogradContext::getKnownWorkerIds,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_new_context",
       []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().newContext();
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_release_context",
@@ -80,9 +94,10 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
       },
       py::call_guard<py::gil_scoped_release>());
 
-  module.def("_get_max_id", []() {
-    return DistAutogradContainer::getInstance().getMaxId();
-  });
+  module.def(
+      "_get_max_id",
+      []() { return DistAutogradContainer::getInstance().getMaxId(); },
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_is_valid_context",
@@ -96,14 +111,16 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
       [](int64_t context_id) -> const ContextPtr {
         return DistAutogradContainer::getInstance().retrieveContext(context_id);
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_current_context",
       []() -> const ContextPtr {
         return DistAutogradContainer::getInstance().currentContext();
       },
-      py::return_value_policy::reference);
+      py::return_value_policy::reference,
+      py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_init",
@@ -168,7 +185,11 @@ Example::
       [](int64_t contextId) -> py::dict {
         const auto& autogradContext =
             DistAutogradContainer::getInstance().retrieveContext(contextId);
-        return torch::jit::toPyObject(IValue(autogradContext->getGradients()));
+        auto ival = IValue(autogradContext->getGradients());
+
+        // Acquire GIL only for pyobject conversion.
+        pybind11::gil_scoped_acquire ag;
+        return torch::jit::toPyObject(ival);
       },
       R"(
 get_gradients(context_id: int) -> Dict[Tensor, Tensor]
@@ -196,7 +217,8 @@ Example::
     >>>     print(grads[t1])
     >>>     print(grads[t2])
 )",
-      py::arg("context_id"));
+      py::arg("context_id"),
+      py::call_guard<py::gil_scoped_release>());
 
   Py_RETURN_TRUE;
 }
