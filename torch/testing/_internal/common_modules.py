@@ -1,7 +1,7 @@
 import torch
 from copy import deepcopy
 from functools import wraps, partial
-from itertools import chain, product
+from itertools import chain
 from torch.testing import floating_types
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
@@ -92,10 +92,10 @@ class modules(_TestParametrizer):
                         _update_param_kwargs(param_kwargs, 'dtype', dtype)
                         # Construct the test name.
                         test_name = '{}_{}_{}_{}{}'.format(test.__name__,
-                                                        module_info.name.replace('.', '_'),
-                                                        module_input.desc,
-                                                        device_cls.device_type,
-                                                        _dtype_test_suffix(dtype))
+                                                           module_info.name.replace('.', '_'),
+                                                           module_input.desc,
+                                                           device_cls.device_type,
+                                                           _dtype_test_suffix(dtype))
                         yield (test_wrapper, test_name, param_kwargs)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
@@ -238,9 +238,9 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [ModuleInput(constructor_input=FunctionInput(kernel_size=2),
-                       forward_input=FunctionInput(make_input(size=(3, 6))),
-                       desc='no_batch_dim',
-                       reference_fn=no_batch_dim_reference_fn)]
+                        forward_input=FunctionInput(make_input(size=(3, 6))),
+                        desc='no_batch_dim',
+                        reference_fn=no_batch_dim_reference_fn)]
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
@@ -290,7 +290,7 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **k
                         forward_input=FunctionInput(make_input(size=(2, 3, 4)),
                                                     make_input(size=(2, 3, 4))),
                         reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
-                                                                           for a, b in zip(i, t))),
+                                                                             for a, b in zip(i, t))),
             ModuleInput(constructor_input=FunctionInput(),
                         forward_input=FunctionInput(make_input(size=()), make_input(size=())),
                         reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
