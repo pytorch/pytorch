@@ -319,9 +319,9 @@ Expr* getImmediateByType(Dtype dtype, T initialVal) {
 
 template <typename T>
 T immediateAs(Expr* e) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value();                                          \
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value();                              \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -336,9 +336,9 @@ T immediateAs(ExprHandle e) {
 
 template <typename T>
 bool immediateEquals(Expr* e, T val) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value() == val;                                   \
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value() == val;                       \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
@@ -346,16 +346,7 @@ bool immediateEquals(Expr* e, T val) {
   return false;
 }
 
-template <typename T>
-bool immediateIsNegative(const T* e) {
-#define TYPE_CASE(Type, Name)                                     \
-  if (const Name##Imm* imm = dynamic_cast<const Name##Imm*>(e)) { \
-    return imm->value() < 0;                                      \
-  }
-  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
-#undef TYPE_CASE
-  return false;
-}
+TORCH_API bool immediateIsNegative(Expr* e);
 
 // Represents a ramp vector node:
 //     [base, base + 1 * stride, ... , base + (lanes - 1) * stride]
@@ -759,6 +750,19 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Intrinsics(IntrinsicsOp op_type, const std::vector<Expr*>& params)
       : ExprNodeBase(IntrinsicsDtype(op_type, params)),
+        params_(params),
+        op_type_(op_type) {
+    if (OpArgCount(op_type) != nparams()) {
+      throw malformed_input("bad arg count in Intrinsics");
+    }
+  }
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  Intrinsics(
+      IntrinsicsOp op_type,
+      Dtype dtype,
+      const std::vector<Expr*>& params)
+      : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_(params),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
