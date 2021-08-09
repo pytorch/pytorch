@@ -55,6 +55,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -113,6 +115,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -147,6 +150,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |

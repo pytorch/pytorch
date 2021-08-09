@@ -884,17 +884,17 @@ getFromType(llvm::Type* type, T value) {
 }
 
 #define IMM_VISIT_DECLARE(Type, Name)                  \
-  void LLVMCodeGenImpl::visit(const Name##Imm* v) {    \
+  void LLVMCodeGenImpl::visit(Name##Imm* v) {          \
     value_ = getFromType<Type>(Name##Ty_, v->value()); \
   }
 AT_FORALL_SCALAR_TYPES(IMM_VISIT_DECLARE);
 #undef IMM_VISIT_DECLARE
 
-void LLVMCodeGenImpl::visit(const HalfImm* v) {
+void LLVMCodeGenImpl::visit(HalfImm* v) {
   value_ = llvm::ConstantFP::get(HalfTy_, v->value());
 }
 
-void LLVMCodeGenImpl::visit(const BoolImm* v) {
+void LLVMCodeGenImpl::visit(BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 

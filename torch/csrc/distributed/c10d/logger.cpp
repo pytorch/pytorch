@@ -1,3 +1,4 @@
+#include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
@@ -85,6 +86,16 @@ void Logger::set_parameter_stats() {
     unique_dtypes.insert(std::string(t.dtype().name()));
   }
   ddp_logging_data_->strs_map["dtypes"] = c10::Join(", ", unique_dtypes);
+}
+
+std::vector<std::vector<size_t>> Logger::get_per_bucket_variable_indices() {
+  std::vector<std::vector<size_t>> per_bucket_variable_indices;
+  per_bucket_variable_indices.reserve(reducer_->buckets_.size());
+  for (const auto& bucket : reducer_->buckets_) {
+    const auto& indices = bucket.variable_indices;
+    per_bucket_variable_indices.push_back(indices);
+  }
+  return per_bucket_variable_indices;
 }
 
 std::vector<int> Logger::get_bucket_sizes() {
@@ -181,6 +192,17 @@ void Logger::set_construction_data_and_log(
   at::LogPyTorchDDPUsage(*ddp_logging_data_);
 }
 
+void Logger::set_event_time(
+    int64_t& event_time,
+    Timer& timer,
+    Timer::Event event) {
+  auto timestamp = timer.getTimestamp(event);
+  if (timestamp != c10::nullopt) {
+    // TODO: should we set this as human-readable time instead of unixtime?
+    event_time = *timestamp;
+  }
+}
+
 void Logger::calculate_avg_time(
     int64_t& avg_time,
     int64_t& time_duration,
@@ -202,6 +224,11 @@ void Logger::reset_performance_stats() {
   ddp_logging_data_->ints_map["backward_comm_time"] = 0;
   ddp_logging_data_->ints_map["backward_compute_time"] = 0;
   ddp_logging_data_->ints_map["backward_compute_comm_overlap_time"] = 0;
+  ddp_logging_data_->ints_map["forward_compute_time_start"] = 0;
+  ddp_logging_data_->ints_map["backward_compute_time_start"] = 0;
+  ddp_logging_data_->ints_map["backward_comm_time_start"] = 0;
+  ddp_logging_data_->ints_map["backward_compute_time_end"] = 0;
+  ddp_logging_data_->ints_map["backward_comm_time_end"] = 0;
 }
 
 void Logger::set_runtime_stats_and_log() {
@@ -272,6 +299,32 @@ void Logger::set_runtime_stats_and_log() {
       *reducer_->timer_,
       Timer::Event::kBackwardCommStart,
       Timer::Event::kBackwardComputeEnd);
+
+  set_event_time(
+    ddp_logging_data_->ints_map["forward_compute_time_start"],
+    *reducer_->timer_,
+    Timer::Event::kForwardStart
+  );
+  set_event_time(
+    ddp_logging_data_->ints_map["backward_compute_time_start"],
+    *reducer_->timer_,
+    Timer::Event::kBackwardComputeStart
+  );
+  set_event_time(
+    ddp_logging_data_->ints_map["backward_comm_time_start"],
+    *reducer_->timer_,
+    Timer::Event::kBackwardCommStart
+  );
+  set_event_time(
+    ddp_logging_data_->ints_map["backward_compute_time_end"],
+    *reducer_->timer_,
+    Timer::Event::kBackwardComputeEnd
+  );
+  set_event_time(
+    ddp_logging_data_->ints_map["backward_comm_time_end"],
+    *reducer_->timer_,
+    Timer::Event::kBackwardCommEnd
+  );
 
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
   if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {

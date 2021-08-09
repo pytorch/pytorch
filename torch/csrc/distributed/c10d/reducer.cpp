@@ -23,9 +23,6 @@
 namespace c10d {
 namespace {
 
-inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
-}
 
 constexpr int kUnsetDivFactor = -1;
 
@@ -50,45 +47,12 @@ C10_DEFINE_TYPED_REGISTRY( // NOLINT
 namespace {
 
 class CpuTimer : public Timer {
- private:
-  // The timestamp of forward call start time in each iteration.
-  int64_t forward_start_time = -1;
-  // The timestamp of backward computation start and end time in each
-  // iteration.
-  int64_t backward_compute_start_time = -1;
-  int64_t backward_compute_end_time = -1;
-  // The timestamp of first communication call start time in each iteration.
-  int64_t backward_comm_start_time = -1;
-  // The timestamp of last communication call end time in each iteration.
-  int64_t backward_comm_end_time = -1;
-
-  int64_t& getTime(Event event) {
-    switch (event) {
-      case Event::kForwardStart:
-        return forward_start_time;
-      case Event::kBackwardComputeStart:
-        return backward_compute_start_time;
-      case Event::kBackwardComputeEnd:
-        return backward_compute_end_time;
-      case Event::kBackwardCommStart:
-        return backward_comm_start_time;
-      case Event::kBackwardCommEnd:
-        return backward_comm_end_time;
-      default:
-        TORCH_INTERNAL_ASSERT(false);
-    }
-  }
-
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
 
-  void record(Event event) override {
-    getTime(event) = current_time_in_nanos();
-  }
-
   c10::optional<int64_t> measureDifference(Event start, Event end) override {
-    int64_t start_time = getTime(start);
-    int64_t end_time = getTime(end);
+    int64_t start_time = getTimeRef(start);
+    int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
     // avg_time will return invalid value.
     // For some cases like DDP runs on non-sync mode, backward compute
@@ -115,7 +79,8 @@ Reducer::Reducer(
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
-    std::unordered_map<size_t, std::string> paramNames)
+    std::unordered_map<size_t, std::string> paramNames,
+    int64_t first_bucket_bytes_cap)
     : replicas_(std::move(replicas)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -135,13 +100,19 @@ Reducer::Reducer(
       comm_hook_(nullptr),
       thread_local_state_(at::ThreadLocalState()),
       ddp_debug_level_(parseDistDebugLevel()),
-      param_names_(std::move(paramNames)) {
+      param_names_(std::move(paramNames)),
+      first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       replicas_.size() == 1, "Expected exactly one model replica.");
   TORCH_INTERNAL_ASSERT(
       replicas_[0].size() >= 1, "Expected at least one parameter.");
 
+  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+    LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
+              << bucket_bytes_cap_
+              << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
+  }
   // Check whether the module is multi_device_module
   {
     std::set<int> unique_devices;
@@ -596,6 +567,8 @@ void Reducer::autograd_hook(size_t index) {
   if (!expect_autograd_hooks_) {
     return;
   }
+
+  grad_ready_order_indices_.push_back(index);
 
   // See Note [Skip allreducing local_used_maps_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
@@ -1306,6 +1279,8 @@ void Reducer::prepare_for_backward(
 
   // Reset accounting.
   expect_autograd_hooks_ = true;
+  // Clear gradient ready order as it can be different in the next iteration.
+  grad_ready_order_indices_.clear();
 
   reset_bucket_counting();
 
@@ -1671,7 +1646,7 @@ bool Reducer::rebuild_buckets() {
           rebuilt_param_indices_.size()));
   std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(kDefaultFirstBucketBytes);
+  bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
