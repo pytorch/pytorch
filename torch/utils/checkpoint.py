@@ -306,7 +306,7 @@ class Checkpoint():
             self.had_cuda_in_fwd = False
             if torch.cuda._initialized:
                 self.had_cuda_in_fwd = True
-                self.fwd_gpu_devices, ctx.fwd_gpu_states = get_device_states(*args)
+                self.fwd_gpu_devices, self.fwd_gpu_states = get_device_states(*args)
 
         storage = []
         counter = 0
@@ -322,6 +322,7 @@ class Checkpoint():
             nonlocal counter, storage
             if isinstance(storage[x], int):
                 counter_inner = 0
+
                 def inner_pack(inner):
                     nonlocal counter, storage, counter_inner
                     storage[counter_inner] = inner
