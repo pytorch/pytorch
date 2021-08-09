@@ -38,7 +38,6 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
   int nDims = tensor.ndimension();
 
   c10::ScalarType dtype = tensor.scalar_type();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<TensorArgAbstract> tensor_arg = getTensorArg(dtype, nDims);
   tensor_arg->setPointer(tensor.data_ptr());
   for (const auto i : c10::irange(nDims)) {
