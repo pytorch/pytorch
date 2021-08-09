@@ -66,6 +66,17 @@ bool InterpreterState::run(Stack& stack) {
       //      }
       //    }
       //    std::cout << std::endl;
+
+      // TODO(iliacher): remove the workaround after RecordFunction is in
+      // Dispatcher
+      // Check with iliacher if has been done.
+      // Plus this is not safe as if you throw exception record function will be
+      // left enabled. That is a TODO
+      bool prev_value = isRecordFunctionEnabled();
+      if (!prev_value) {
+        // enable only for the RecordFunction
+        enableRecordFunction(true);
+      }
       switch (inst.op) {
         case OP: {
           if (at::hasGlobalCallbacks()) {
@@ -76,23 +87,15 @@ bool InterpreterState::run(Stack& stack) {
             }
           }
 
-          // TODO(iliacher): remove the workaround after RecordFunction is in
-          // Dispatcher
-          bool prev_value = isRecordFunctionEnabled();
-          if (!prev_value) {
-            // enable only for the RecordFunction
-            enableRecordFunction(true);
-          }
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code_->op_names_[inst.X].name, debug_handle, stack);
-          if (!prev_value) {
-            enableRecordFunction(false);
-          }
           code_->operators_[inst.X](stack);
           ++pc;
         } break;
         case OPN: {
           stack.push_back(inst.N);
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              code_->op_names_[inst.X].name, debug_handle, stack);
           code_->operators_[inst.X](stack);
           ++pc;
         } break;
@@ -102,6 +105,8 @@ bool InterpreterState::run(Stack& stack) {
                   .toObject()
                   ->type()
                   ->getMethod(code_->constants_[inst.X].toStringRef());
+          RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
+              method.name(), debug_handle, stack);
           method.run(stack);
           ++pc;
         } break;
@@ -234,6 +239,10 @@ bool InterpreterState::run(Stack& stack) {
         } break;
         default:
           AT_ERROR(toString(inst.op), " is invalid.");
+      }
+
+      if (!prev_value) {
+        enableRecordFunction(false);
       }
       // This exception must be caught first as it derived from c10::Error
     } catch (c10::BackendRuntimeException& e) {

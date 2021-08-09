@@ -343,7 +343,7 @@ TORCH_API void enableProfiler(
  * KinetoEvents.
  * enableProfilerWithEventPostProcess enables profiler to capture
  * specified activities, with specified RecordFunction scope, if any.
- * Additinally it takes functor that does in-place post processing of
+ * Additionally, it takes a functor that does in-place post processing of
  * events, e.g. populate stack trace or module hierarchy information lazily
  * using debug_handle.
  * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
