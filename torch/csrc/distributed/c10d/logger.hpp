@@ -57,6 +57,13 @@ class TORCH_API Logger {
       Timer& timer,
       Timer::Event start_event,
       Timer::Event end_event);
+
+  // Set the absolute time of the event that has been recorded in reducer.
+  void set_event_time(
+    int64_t& event_time,
+    Timer& timer,
+    Timer::Event event
+  );
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
   // to record the run time stats of sampled iterations that previouly ran.
