@@ -1429,21 +1429,20 @@ class TestTracer(JitTestCase):
         x = torch.rand(3, 2)
         y = torch.rand(1, 2)
 
+        # Generate JIT IR.
         traced = torch.jit.trace(Bar(), (x, y))
 
-        for n in traced.graph.nodes():
-            if n.kind() != 'prim::PythonOp':
-                continue
-            for o in n.outputs():
-                if o.type().kind() != 'TupleType':
-                    continue
-                for e in o.type().elements():
-                    # In this test, tensor elements in a tuple output 
-                    # can't have unknown shapes.
-                    assert e.dim()
+        # Output schema of the custom autograd.Function.
+        schema = '(Double(1, 2, strides=[2, 1], requires_grad=0, device=cpu), '\
+            'Double(3, 2, strides=[2, 1], requires_grad=0, device=cpu)) '\
+            '= ^Foo'
 
+        # See of expected schema exists.
+        FileCheck().check(schema).run(traced.graph)
+
+        # Also examine if the graph is runnable and produces
+        # the right result.
         u, v = traced(x, y)
-
         self.assertEqual(u, y)
         self.assertEqual(v, x)
 
