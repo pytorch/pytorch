@@ -775,6 +775,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         the module
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = SingleLayerLinearDynamicModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {
@@ -813,6 +816,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         `fc2`, and `fc1`is not quantized
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = TwoLayerLinearModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {
@@ -843,6 +849,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         'fc1' of submodule 'sub2', 'sub2.fc2' is not quantized
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = NestedModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {
@@ -875,6 +884,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         of submodule sub2
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = NestedModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {
@@ -909,6 +921,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         parent qconfig
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = NestedModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dynamic_dict = {
@@ -942,6 +957,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         'fc1' of submodule 'sub2', All 'torch.nn.Linear' modules are quantized
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = NestedModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {
@@ -1000,6 +1018,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_quantized_rnn(self, qconfig, dtype):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
+        # fp16 dynamic quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+            return
         niter = 10
         x = torch.tensor([[100, -155],
                           [-155, 100],
@@ -1072,9 +1093,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                              [-155, 100],
                              [100, -155]], dtype=torch.float)
 
-            if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
                 continue
-                # fp16 dynamic quant is not supported for qnnpack
 
             if dtype == torch.float16:
                 model_quantized = quantize_dynamic(model=model, dtype=dtype)
@@ -1106,6 +1127,9 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         pre forward and post forward hooks of original model
         """
         for dtype in [torch.qint8, torch.float16]:
+            # fp16 dynamic quant is not supported for qnnpack or mkldnn
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and dtype == torch.float16:
+                continue
             model = SingleLayerLinearDynamicModel().eval()
             qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
             qconfig_dict = {

@@ -232,9 +232,6 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsMkldnn::prepack(
   } else {
     TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
   }
-  TORCH_CHECK(
-      wgt_zero_points.size()<=1,
-      "quantized::linear_prepack: MKLDNN only supports 1-dim zero point right now");
 
   // Prepack weight
   auto w_desc = ideep::matmul_forward::expected_weights_desc(dims, dnnl::memory::data_type::s8,

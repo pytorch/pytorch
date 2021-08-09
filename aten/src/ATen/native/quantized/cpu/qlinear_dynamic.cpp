@@ -449,12 +449,11 @@ at::Tensor PackedLinearWeightsMkldnn::apply_dynamic_impl(at::Tensor input, bool 
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false,
       /*reduce_range=*/reduce_range);
-  x.set_scale(ideep::scale_t(1, 1.0/q_params.scale)); // use reciprocal for MKLDNN
-  x.set_zero_point(std::vector<int32_t>(1, q_params.zero_point));
+  const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, q_params.zero_point);
   // weights, dst
   auto w = *(weight_.get());
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
-  const ideep::scale_t& src_scales = x.get_scale();
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
   const ideep::scale_t& weights_scales = w.get_scale();
   // Compute -> f32
   // Use ideep::matmul_forward instead of ideep::inner_product_forward, since the latter does not support asymmetric quantization
@@ -464,10 +463,17 @@ at::Tensor PackedLinearWeightsMkldnn::apply_dynamic_impl(at::Tensor input, bool 
   ideep::tensor y({dst_dims, ideep::tensor::data_type::f32, {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
   if (bias_.has_value()) {
+    // Bias might be modified outside (e.g. by quantization bias correction).
+    // If so, update the prepacked bias as well.
+    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+    }
     const ideep::tensor b = bias_.value();
-    ideep::matmul_forward::compute(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, ideep::scale_t(), op_attr);
+    ideep::matmul_forward::compute(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, ideep::scale_t(),
+                                   src_zero_point, ideep::zero_point_t(), op_attr);
   } else {
-    ideep::matmul_forward::compute(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, ideep::scale_t(), op_attr);
+    ideep::matmul_forward::compute(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, ideep::scale_t(),
+                                   src_zero_point, ideep::zero_point_t(), op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = w.get_dim(1);

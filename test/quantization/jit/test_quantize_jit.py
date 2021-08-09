@@ -3812,6 +3812,9 @@ class TestQuantizeJit(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_linear_dynamic_fp16(self):
+        # fp16 quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn'):
+            return
         linear_model = SingleLayerLinearModel().eval()
         # Create weight tensor values that are beyond fp16 max
         x = torch.ones(5, 5) * 65532

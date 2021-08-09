@@ -650,6 +650,10 @@ class TestQuantizeFx(QuantizationTestCase):
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_fp16(self):
+        # fp16 dynamic quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn'):
+            return
+
         class Linear(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
@@ -2006,6 +2010,10 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods2_packed_weight_0")
 
     def test_mul_add_fp16_config(self):
+        # fp16 quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn'):
+            return
+
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2261,6 +2269,10 @@ class TestQuantizeFx(QuantizationTestCase):
         Test to make sure the temporary config option to preserve qconfig attributes
         in the model works
         """
+        # fp16 quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn'):
+            return
+
         class Linear(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2698,6 +2710,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_occurrence=convert_node_occurrence)
 
     def test_linear_dynamic_fp16(self):
+        # fp16 quant is not supported for qnnpack or mkldnn
+        if torch.backends.quantized.engine in ('qnnpack', 'mkldnn'):
+            return
+
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
                 super(FuncLinear, self).__init__()
@@ -4215,7 +4231,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         for qconfig, module_type_str in options:
             model_eager = M(module_type_str).eval()
             model_graph = copy.deepcopy(model_eager)
-            if torch.backends.quantized.engine == 'qnnpack' and \
+            if torch.backends.quantized.engine in ('qnnpack', 'mkldnn') and \
                qconfig is float16_dynamic_qconfig:
                 continue
                 # fp16 dynamic quant is not supported for qnnpack

@@ -442,15 +442,14 @@ at::Tensor PackedLinearWeightsMkldnn::apply_impl(
   auto input_desc = ideep::tensor::desc(input_dims, input_data_type);
   ideep::attr_t op_attr = ReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
   ideep::tensor x;
-  x.init(input_desc, input.data_ptr());
-  x.set_scale(ideep::scale_t(1, 1.0/input.q_scale())); // Scales of MKLDNN and PyTorch are reciprocal
-  x.set_zero_point(std::vector<int32_t>(1, input.q_zero_point()));
+  x.init(input_desc, input_contig.data_ptr());
+  const ideep::zero_point_t& src_zero_point = ideep::zero_point_t(1, input.q_zero_point());
   auto w = *(weight_.get());
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
-  const ideep::scale_t& src_scales = x.get_scale();
+  const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input.q_scale());
   const ideep::scale_t& weights_scales = w.get_scale();
   const ideep::scale_t& dst_scales = ideep::scale_t(1, 1.0/output_scale); // Scales of MKLDNN and PyTorch are reciprocal
-  const std::vector<int32_t>& dst_zero_point = std::vector<int32_t>(1, output_zero_point);
+  const ideep::zero_point_t& dst_zero_point = ideep::zero_point_t(1, output_zero_point);
   // Compute: Use ideep::matmul_forward to support asymmetric quantization
   // Allocate output Tensor
   at::Tensor output = at::_empty_affine_quantized(
@@ -463,15 +462,21 @@ at::Tensor PackedLinearWeightsMkldnn::apply_impl(
   }
   ideep::tensor y({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
                   output.data_ptr());
-  y.set_zero_point(dst_zero_point);
   if (bias_.has_value()) {
-    const ideep::tensor b = bias_.value();
+    // Bias might be modified outside (e.g. by quantization bias correction).
+    // If so, update the prepacked bias as well.
+    if (bias_.value().get_data_handle() != orig_bias_.value().data_ptr()) {
+      bias_.value().init(bias_.value().get_desc(), orig_bias_.value().data_ptr());
+    }
+    const auto& b = bias_.value();
     TORCH_CHECK(b.get_dim(0) == 1, "bias should be a vector (1D Tensor), but got [", b.get_dims(), "]");
     TORCH_CHECK(
         b.get_dim(1) == w.get_dim(1), "bias should have N elements: " + std::to_string(w.get_dim(1)), ", but got ", b.get_dim(1));
-    ideep::matmul_forward::compute(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales, op_attr);
+    ideep::matmul_forward::compute(x, w, b, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
+                                   src_zero_point, dst_zero_point, op_attr);
   } else {
-    ideep::matmul_forward::compute(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales, op_attr);
+    ideep::matmul_forward::compute(x, w, y, 1.0f, 1.0f, src_scales, weights_scales, dst_scales,
+                                   src_zero_point, dst_zero_point, op_attr);
   }
   auto out_sizes = input.sizes().vec();
   out_sizes.back() = w.get_dim(1);

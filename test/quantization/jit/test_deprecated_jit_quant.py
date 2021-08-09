@@ -105,6 +105,9 @@ class TestDeprecatedJitQuantized(JitTestCase):
     def test_rnn_quantized(self):
         d_in, d_hid = 2, 2
 
+        # MKLDNN does not support fp16 right now
+        if torch.backends.quantized.engine == 'mkldnn':
+            return
         for cell in [
             torch.nn.LSTM(d_in, d_hid).float(),
             torch.nn.GRU(d_in, d_hid).float(),

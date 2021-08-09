@@ -210,8 +210,9 @@ class QConv1dUnpackWeightsInt8 final {
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::MKLDNN) {
       std::tie(weight, bias) = packed_weight->unpack();
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
-      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(weight, bias);
+      at::Tensor new_weight = weight.clone();
+      new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, c10::optional<at::Tensor>>(new_weight, bias);
     }
 #endif // #if AT_MKLDNN_ENABLED()
 

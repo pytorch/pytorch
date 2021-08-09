@@ -100,6 +100,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
             dummy_scale_,
             dummy_scale_,
             dummy_scale_,
+            dummy_zero_point_,
+            dummy_zero_point_,
             attr_,
             algo_,
             pk_);
@@ -118,6 +120,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
             dummy_scale_,
             dummy_scale_,
             dummy_scale_,
+            dummy_zero_point_,
+            dummy_zero_point_,
             attr_,
             algo_,
             pk_);
@@ -158,6 +162,8 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
   itensor filter_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   iscale dummy_scale_;
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  std::vector<int32_t> dummy_zero_point_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   itensor::descriptor cached_X_descriptor_, cached_weights_descriptor_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
