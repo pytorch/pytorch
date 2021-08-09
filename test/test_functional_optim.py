@@ -41,7 +41,7 @@ class TestFunctionalOptimParity(TestCase):
         if not functional_optim_cls:
             raise ValueError(f"Functional optimizer not implemented for {optim_cls}")
         optim_functional = functional_optim_cls(
-            [], *args, **kwargs, allow_empty_param_list=True
+            [], *args, **kwargs, _allow_empty_param_list=True
         )
         if not hasattr(optim_functional, "step_param"):
             raise ValueError(
