@@ -1,4 +1,4 @@
-from torch.utils.data import IterDataPipe, functional_datapipe
+from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from typing import Callable, TypeVar, Iterator, Optional, Tuple, Dict
 
 from .callable import MapIterDataPipe
@@ -45,12 +45,20 @@ class FilterIterDataPipe(MapIterDataPipe):
         if nesting_level == 0:
             return self._returnIfTrue(data)
         elif nesting_level > 0:
-            if not isinstance(data, list):
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1)
+                                                   for i in data.raw_iterator()])
+                return type(data)(list(result))
+            elif isinstance(data, list):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
+                return list(result)
+            else:
                 raise IndexError(f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)")
-            result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level - 1) for i in data])
-            return list(result)
         else:  # Handling nesting_level == -1
-            if isinstance(data, list):
+            if isinstance(data, DataChunk):
+                result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data.raw_iterator()])
+                return type(data)(list(result))
+            elif isinstance(data, list):
                 result = filter(self._isNonEmpty, [self._applyFilter(i, nesting_level) for i in data])
                 return list(result)
             else:
@@ -64,7 +72,10 @@ class FilterIterDataPipe(MapIterDataPipe):
             return data
 
     def _isNonEmpty(self, data):
-        return data is not None and not (data == [] and self.drop_empty_batches)
+        r = data is not None and \
+            not (isinstance(data, list) and len(data) == 0 and self.drop_empty_batches)
+        return r
+
 
     def __len__(self):
         raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
