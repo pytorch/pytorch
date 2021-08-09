@@ -26,7 +26,7 @@ def fn(base: str) -> str:
 with open(Path(__file__).parent.parent.parent / fn('.'), "r") as f:
     contents = f.read()
 
-yaml = ruamel.yaml.YAML()
+yaml = ruamel.yaml.YAML()  # type: ignore[attr-defined]
 yaml.preserve_quotes = True
 yaml.width = 1000
 yaml.boolean_representation = ['False', 'True']

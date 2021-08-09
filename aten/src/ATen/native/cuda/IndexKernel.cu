@@ -330,9 +330,9 @@ void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulat
     // Cannot use `OpaqueType`, as we need the actual type for `fastSpecializedgpuAtomicAdd`
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(output) ? ScalarType::Int : ScalarType::Long,
         "put_cuda_index", [&] {
-           auto* __restrict__ indexed_ptr = output.template data<scalar_t>();
+           auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
-             const auto numel = output.numel();
+             index_t numel = output.numel();
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
                  [numel, indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                    fastSpecializedAtomicAdd(indexed_ptr, offset, numel, iterated);
@@ -355,7 +355,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];

@@ -301,5 +301,51 @@ static void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
 }
+} // native
 
-}}  // at::native
+namespace meta {
+
+static DimVector get_reduction_shape(
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim) {
+  auto mask = native::make_dim_mask(dims, self.dim());
+  return native::shape_from_dim_mask(self, mask, keepdim);
+}
+
+static TensorIterator make_reduction(
+    const Tensor& self,
+    const Tensor& result,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType in_dtype) {
+  int64_t ndim = self.dim();
+  auto mask = at::native::make_dim_mask(dims, ndim);
+  auto viewed_result =
+      at::native::review_reduce_result(result, ndim, mask, keepdim);
+  if (self.scalar_type() == in_dtype) {
+    return TensorIterator::reduce_op(viewed_result, self);
+  }
+  return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
+}
+
+static TensorIterator make_reduction_from_out_ty(
+    const Tensor& self,
+    const Tensor& result,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  // special case for type promotion in mixed precision, improves computational
+  // efficiency.
+  // not generalize this to common mismatched input/output types to avoid cross
+  // product of templated kernel launches.
+  const bool gpu_lowp_to_f32 =
+      (self.is_cuda() &&
+       (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
+       out_dtype == kFloat);
+  auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
+  return make_reduction(self, result, dims, keepdim, in_dtype);
+}
+
+} // namespace meta
+} // namespace at

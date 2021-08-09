@@ -1,17 +1,54 @@
 import bisect
-import warnings
 import functools
+import warnings
+from typing import (
+    Callable,
+    Dict,
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
-from torch._utils import _accumulate
-from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
-from torch import default_generator
+from torch import default_generator, randperm
+from torch._utils import _accumulate
 from torch.utils.data._typing import _DataPipeMeta
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Dict, Callable
-from ... import Tensor, Generator
+
+from ... import Generator, Tensor
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
+
+
+class DataChunk(List[T]):
+    def __init__(self, items):
+        self.items = items
+
+    def __getitem__(self, key):
+        return self.items[key]
+
+    def __len__(self):
+        return len(self.items)
+
+    def as_str(self, indent=''):
+        res = indent + "[" + ", ".join([str(i) for i in iter(self)]) + "]"
+        return res
+
+    def __str__(self):
+        return self.as_str()
+
+    def __iter__(self) -> Iterator[T]:
+        for i in self.items:
+            yield i
+
+    def raw_iterator(self):
+        for i in self.items:
+            yield i
 
 
 class Dataset(Generic[T_co]):
@@ -272,10 +309,10 @@ class ConcatDataset(Dataset[T_co]):
 
 
 class ChainDataset(IterableDataset):
-    r"""Dataset for chainning multiple :class:`IterableDataset` s.
+    r"""Dataset for chaining multiple :class:`IterableDataset` s.
 
     This class is useful to assemble different existing dataset streams. The
-    chainning operation is done on-the-fly, so concatenating large-scale
+    chaining operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
     Args:

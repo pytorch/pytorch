@@ -177,9 +177,6 @@ class AutocastTestLists(object):
             ("renorm", mat0_fp16 + (2, 0, 1.0)),
             ("sum", pointwise0_fp16),
             ("sum", mat0_fp16 + (1,)),
-            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
-                              torch.randn((2, 22, 11, 2), dtype=torch.float16, device=dev),
-                              0, 0, False)),
         ]
         self.torch_need_autocast_promote = [
             ("addcdiv", pointwise0_fp32 + pointwise1_fp16 + (pointwise2_fp16[0].clamp(0.1, 100),)),
@@ -192,6 +189,9 @@ class AutocastTestLists(object):
             ("cross", (torch.randn(3, dtype=torch.float32, device=dev),
                        torch.randn(3, dtype=torch.float16, device=dev))),
             ("dot", pointwise0_fp16 + pointwise1_fp32),
+            ("grid_sampler", (torch.randn((2, 3, 33, 22), dtype=torch.float16, device=dev),
+                              torch.randn((2, 22, 11, 2), dtype=torch.float32, device=dev),
+                              0, 0, False)),
             ("index_put", pointwise0_fp32 + ((torch.tensor([1], device=dev, dtype=torch.long),),
                                              torch.randn(1, device=dev, dtype=torch.float16))),
             ("index_put", pointwise0_fp16 + ((torch.tensor([1], device=dev, dtype=torch.long),),

@@ -141,7 +141,6 @@ Ops that can autocast to ``float32``
 ``erfinv``,
 ``exp``,
 ``expm1``,
-``grid_sample``,
 ``group_norm``,
 ``hinge_embedding_loss``,
 ``kl_div``,
@@ -189,6 +188,7 @@ autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 ``bilinear``,
 ``cross``,
 ``dot``,
+``grid_sample``,
 ``index_put``,
 ``scatter_add``,
 ``tensordot``
