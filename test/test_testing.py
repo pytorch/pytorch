@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import \
      deviceCountAtLeast)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._asserts import UsageError
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -245,8 +244,6 @@ class TestTesting(TestCase):
             expected = test[2]
             self.assertEqual(actual.item(), expected)
 
-    # torch.close is not implemented for bool tensors
-    # see https://github.com/pytorch/pytorch/issues/33048
     def test_isclose_comparetensors_bool(self, device):
         tests = (
             (True, True, True),
@@ -255,9 +252,7 @@ class TestTesting(TestCase):
             (False, True, False),
         )
 
-        with self.assertRaises(RuntimeError):
-            self._isclose_helper(tests, device, torch.bool, False)
-
+        self._isclose_helper(tests, device, torch.bool, False)
         self._comparetensors_helper(tests, device, torch.bool, False)
 
     @dtypes(torch.uint8,
@@ -444,6 +439,15 @@ class TestTesting(TestCase):
             torch.isclose(t, t, atol=1, rtol=-1)
         with self.assertRaises(RuntimeError):
             torch.isclose(t, t, atol=-1, rtol=-1)
+
+    def test_isclose_equality_shortcut(self):
+        # For values >= 2**53, integers differing by 1 can no longer differentiated by torch.float64 or lower precision
+        # floating point dtypes. Thus, even with rtol == 0 and atol == 0, these tensors would be considered close if
+        # they were not compared as integers.
+        a = torch.tensor(2 ** 53, dtype=torch.int64)
+        b = a + 1
+
+        self.assertFalse(torch.isclose(a, b, rtol=0, atol=0))
 
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
@@ -725,20 +729,35 @@ def assert_close_with_inputs(actual: Any, expected: Any) -> Iterator[Callable]:
 
 
 class TestAssertClose(TestCase):
-    def test_type_inequality(self):
-        actual = torch.empty(2)
-        expected = actual.tolist()
+    def test_mismatching_types_subclasses(self):
+        actual = torch.rand(())
+        expected = torch.nn.Parameter(actual)
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_mismatching_types_type_equality(self):
+        actual = torch.empty(())
+        expected = torch.nn.Parameter(actual)
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, str(type(expected))):
-                fn()
+                fn(allow_subclasses=False)
+
+    def test_mismatching_types(self):
+        actual = torch.empty(2)
+        expected = actual.numpy()
+
+        for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
+            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+                fn(allow_subclasses=allow_subclasses)
 
     def test_unknown_type(self):
         actual = "0"
         expected = "0"
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(UsageError, str(type(actual))):
+            with self.assertRaisesRegex(ValueError, str(type(actual))):
                 fn()
 
     def test_mismatching_shape(self):
@@ -755,7 +774,7 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn()
 
     def test_mismatching_layout(self):
@@ -802,7 +821,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn(rtol=0.0)
 
     def test_only_atol(self):
@@ -810,7 +829,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(UsageError):
+            with self.assertRaises(ValueError):
                 fn(atol=0.0)
 
     def test_mismatching_values(self):
@@ -1275,7 +1294,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("number of specified values in sparse COO tensors")):
                 fn()
 
     def test_mismatching_indices_msg(self):
@@ -1294,7 +1313,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO indices")):
                 fn()
 
     def test_mismatching_values_msg(self):
@@ -1313,7 +1332,7 @@ class TestAssertCloseSparseCOO(TestCase):
         expected = torch.sparse_coo_tensor(expected_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse COO values")):
                 fn()
 
 
@@ -1344,7 +1363,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the crow_indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR crow_indices")):
                 fn()
 
     def test_mismatching_col_indices_msg(self):
@@ -1359,7 +1378,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the col_indices")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR col_indices")):
                 fn()
 
     def test_mismatching_values_msg(self):
@@ -1374,7 +1393,7 @@ class TestAssertCloseSparseCSR(TestCase):
         expected = torch.sparse_csr_tensor(expected_crow_indices, expected_col_indices, expected_values, size=(2, 2))
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, re.escape("The failure occurred for the values")):
+            with self.assertRaisesRegex(AssertionError, re.escape("Sparse CSR values")):
                 fn()
 
 

@@ -75,14 +75,14 @@ struct MagmaStreamSyncGuard {
   MagmaStreamSyncGuard() {
     auto stream = at::cuda::getCurrentCUDAStream();
     if (stream != at::cuda::getDefaultCUDAStream()) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+      at::cuda::stream_synchronize(stream);
     }
   }
 
   ~MagmaStreamSyncGuard() noexcept(false) {
     auto default_stream = at::cuda::getDefaultCUDAStream();
     if (at::cuda::getCurrentCUDAStream() != default_stream) {
-      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+      at::cuda::stream_synchronize(default_stream);
     }
   }
 };

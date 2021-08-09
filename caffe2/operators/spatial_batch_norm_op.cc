@@ -24,10 +24,8 @@ OpSchema::Cost CostInferenceForSpatialBN(
 
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(SpatialBN, SpatialBNOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(SpatialBN)
     .NumInputs({5, 7})
     .NumOutputs({1, 5})

@@ -4,6 +4,7 @@
 
 #include <ATen/MapAllocator.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
 
 #include <new>
 
@@ -118,24 +119,25 @@ void THStorage_(resizeBytes)(THStorage* storage, ptrdiff_t size_bytes) {
 
 void THStorage_(fill)(THStorage *storage, scalar_t value)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = storage->nbytes() / type_meta.itemsize();
-  for (size_t i = 0; i < numel; i++)
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const size_t numel = storage->nbytes() / type_meta.itemsize();
+  for (const auto i : c10::irange(numel)) {
     THStorage_(data)(storage)[i] = value;
+  }
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, scalar_t value)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
-  size_t numel = self->nbytes() / type_meta.itemsize();
+  const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
+  const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }

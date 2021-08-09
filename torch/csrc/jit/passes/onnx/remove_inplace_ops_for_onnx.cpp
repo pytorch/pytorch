@@ -190,6 +190,17 @@ std::pair<Value*, Value*> PrepareCopyForONNX(Node* node) {
   return PrepareIndexPutForONNX(index_put->node());
 }
 
+auto PrepareSetForONNX(Node* n) {
+  TORCH_INTERNAL_ASSERT(n->kind() == aten::set_);
+  auto clone_n = addDummyClone(n->owningGraph(), n->input(1), true, n);
+  clone_n->copyMetadata(n);
+
+  auto orig_input = n->input(0);
+  n->output()->replaceAllUsesWith(clone_n->output());
+  n->destroy();
+  return std::make_pair(orig_input, clone_n->output());
+}
+
 std::pair<Value*, Value*> PrepareInplaceOpsInBlocksForONNX(Node* node) {
   if (!node->kind().is_aten())
     return {};
@@ -332,6 +343,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
 static void PrepareForRemoveMutations(std::shared_ptr<Graph> graph) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
+  GRAPH_DUMP("After PrepareForRemoveMutations: ", graph);
 }
 
 // findSubModuleAttr function chases getAttr chains backwards to locate the
@@ -700,9 +712,7 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 //    %1 : __torch__.___torch_mangle_1.M = prim::CreateObject()
 //    ...
 //    %10 : Tensor = aten::arange(%6, %7, %7, %7, %7)
-//    %26 : bool = prim::Constant[value=0]()
-//    %27 : Tensor?[] = prim::ListConstruct()
-//    %28 : Tensor = aten::index_put_(%19, %27, %10, %26)
+//    %28 : Tensor = aten::set_(%19, %10)
 //     = prim::Loop(%5, %8)
 //      block0(%i.1 : int):
 //        %12 : bool = aten::eq(%i.1, %4)
@@ -711,16 +721,12 @@ void InplaceConverter::gatherAttrNameInitialValueMap(
 //             = prim::Loop(%3, %8)
 //              block0(%j : int):
 //                %15 : Tensor = aten::add_(%19, %2, %9)
-//                %23 : bool = prim::Constant[value=0]()
-//                %24 : Tensor?[] = prim::ListConstruct()
-//                %25 : Tensor = aten::index_put_(%19, %24, %15, %23)
+//                %25 : Tensor = aten::set_(%19, %15)
 //                -> (%8)
 //            -> ()
 //          block1():
 //            %16 : Tensor = aten::arange(%6, %7, %7, %7, %7)
-//            %20 : bool = prim::Constant[value=0]()
-//            %21 : Tensor?[] = prim::ListConstruct()
-//            %22 : Tensor = aten::index_put_(%19, %21, %16, %20)
+//            %22 : Tensor = aten::set_(%19, %16)
 //            -> ()
 //        -> (%8)
 //    %18 : Tensor = aten::add(%19, %x.1, %9)
@@ -739,22 +745,13 @@ void InplaceConverter::replaceAttrWithInplaceOps(
     TORCH_INTERNAL_ASSERT(
         n->kind() == prim::GetAttr || n->kind() == prim::SetAttr);
     if (n->kind() == prim::SetAttr) {
-      // Convert SetAttr to inplace op.
-      // Directly convert to index_put_ instead of copy_, since we know expand
-      // is not required for value.
+      // Convert SetAttr to inplace op aten::set_.
       WithInsertPoint guard(n);
-      auto false_val_ = graph_->insertConstant(false);
-      auto dummy_list =
-          graph_->insertNode(graph_->createList(OptionalType::ofTensor(), {}))
-              ->output();
-
-      auto* index_put_node = graph_->create(aten::index_put_, 1);
-      index_put_node->addInput(find_init_val->second);
-      index_put_node->addInput(dummy_list);
-      index_put_node->addInput(n->input(1));
-      index_put_node->addInput(false_val_);
-      index_put_node->setSourceRange(n->sourceRange());
-      index_put_node->insertBefore(n);
+      auto* set_node = graph_->create(aten::set_, 1);
+      set_node->addInput(find_init_val->second);
+      set_node->addInput(n->input(1));
+      set_node->copyMetadata(n);
+      set_node->insertBefore(n);
     } else if (n->kind() == prim::GetAttr) {
       // Replace use of GetAttr with first seen alias (usually initial value) of
       // that particular value. Correct alias at point of this node will be
@@ -769,10 +766,10 @@ void InplaceConverter::replaceAttrWithInplaceOps(
 void InplaceConverter::convertGetSetAttrToInplaceOps(Block* block) {
   std::unordered_map<std::string, Value*> attr_name_value_map = {};
   std::unordered_map<Node*, std::string> attr_node_fullname_map = {};
-  // First pass over graph, to gather all attribute names, and their intial
+  // First pass over graph, to gather all attribute names, and their initial
   // values. Create dummy initial values for attributes if necessary. By the end
   // of this pass, these dummy initial values should have zero uses, and can be
-  // safely removed. Otherwise it will imply error in model for using
+  // safely removed. Otherwise it will imply an error in the model for using
   // uninitialized values.
   gatherAttrNameInitialValueMap(
       block, attr_name_value_map, attr_node_fullname_map);
@@ -809,6 +806,8 @@ void InplaceConverter::convertInplaceOpsAndTrackAlias(Block* block) {
         }
       } else if (nkind == aten::insert || nkind == aten::append) {
         std::tie(orig_data, new_out) = PrepareListAppendAndInsertForONNX(n);
+      } else if (nkind == aten::set_) {
+        std::tie(orig_data, new_out) = PrepareSetForONNX(n);
       } else if (mr_->inplaceOpVariant(n)) {
         std::tie(orig_data, new_out) = PrepareInplaceOpsInBlocksForONNX(n);
       } else if (nkind == aten::pop) {
