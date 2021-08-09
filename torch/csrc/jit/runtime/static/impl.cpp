@@ -9,6 +9,7 @@
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
@@ -20,6 +21,36 @@
 
 namespace torch {
 namespace jit {
+
+// graph must be frozen or canEnableStaticRuntime would return false if there's
+// any prim::CallMethod op left in the graph
+bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
+  // check for sub-blocks
+  bool can_support = true;
+  bool has_blocks = false;
+  for (auto* node : graph->block()->nodes()) {
+    if (node->blocks().size() > 0) {
+      has_blocks = true;
+      VLOG(1) << "Found nested sub-blocks in graph at node: "
+              << PrintNode(node);
+    }
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    // check if can get op from Node
+    const Operator* op = node->maybeOperator();
+    if (!op && !nativeOpIsRegistered(node->kind())) {
+      can_support = false;
+      LOG(WARNING) << "Found unsupported op: " << node->kind().toQualString();
+    }
+  }
+  if (has_blocks) {
+    LOG(WARNING)
+        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
+    can_support = false;
+  }
+  return can_support;
+}
 
 namespace {
 
@@ -34,6 +65,7 @@ void OptimizeGraph(
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
   FuseInferenceOpsForSparseNN(graph);
+  UseVariadicCat(graph);
 
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
@@ -44,20 +76,6 @@ void OptimizeGraph(
   }
 #endif
   ConstantPropagation(graph);
-}
-
-bool CheckGraphEligibility(const std::shared_ptr<torch::jit::Graph>& graph) {
-  // check for sub-blocks
-  bool can_support = true;
-  for (auto* node : graph->block()->nodes()) {
-    for (Block* sub_block : node->blocks()) {
-      VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
-      can_support = false;
-    }
-  }
-
-  return can_support;
 }
 
 // remove unused input 0 from graph
@@ -464,14 +482,14 @@ GenerateSameStorageValues(
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
     const StaticModuleOptions& opts) {
-  // TODO: call CheckGraphEligibility before trying to enable static runtime
-  TORCH_CHECK(CheckGraphEligibility(graph));
+  TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
 }
 
 std::pair<std::shared_ptr<Graph>, std::shared_ptr<Module>>
 PrepareForStaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
@@ -479,10 +497,14 @@ PrepareForStaticModule(
           << opts.optimize_memory << ", optimize_graph_output_memory"
           << opts.optimize_graph_output_memory;
 
-  auto module = m.copy();
-  module.eval();
-
-  auto module_ptr = std::make_shared<Module>(freeze_module(module));
+  std::shared_ptr<Module> module_ptr;
+  if (!is_frozen) {
+    auto module = m.copy();
+    module.eval();
+    module_ptr = std::make_shared<Module>(freeze_module(module));
+  } else {
+    module_ptr = std::make_shared<Module>(m.copy());
+  }
 
   Method method = module_ptr->get_method("forward");
   auto graph = module_ptr->get_method("forward").graph();
@@ -510,8 +532,9 @@ StaticModule::StaticModule(
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
+    bool is_frozen,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, opts), opts) {}
+    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
@@ -550,8 +573,7 @@ StaticModule::StaticModule(
   std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < graph_->inputs().size(); ++i) {
+  for (auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
     value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
@@ -804,8 +826,7 @@ c10::IValue StaticRuntime::operator()(
   if (static_module_.num_outputs() > 1) {
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < static_module_.num_outputs(); ++i) {
+    for (auto i : c10::irange(static_module_.num_outputs())) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
@@ -914,10 +935,8 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 0; i < iv.toTensor().sizes().size(); ++i) {
+    for (auto i : c10::irange(iv.toTensor().sizes().size())) {
       std::cout << iv.toTensor().sizes()[i];
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
       }
@@ -949,16 +968,14 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < inputs.size(); ++i) {
+  for (auto i : c10::irange(inputs.size())) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (auto i = 0; i < outputs.size(); ++i) {
+  for (auto i : c10::irange(outputs.size())) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
@@ -1372,9 +1389,13 @@ void ProcessedNode::run() {
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
-    stack.reserve(size);
+    stack.reserve(size + 1);
     for (const auto i : c10::irange(size)) {
       stack.emplace_back(Input(i));
+    }
+    // Need to store the number of inputs in stack for variadic ops.
+    if (hasVarArgs(node_)) {
+      stack.emplace_back(static_cast<int>(size));
     }
 
     DCHECK(op_);

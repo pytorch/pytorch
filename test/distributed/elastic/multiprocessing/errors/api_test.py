@@ -45,7 +45,10 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
+if TEST_WITH_TSAN:
+    print("test incompatible with tsan", file=sys.stderr)
+    sys.exit(0)
+
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)

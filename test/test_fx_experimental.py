@@ -1468,6 +1468,7 @@ class TestNormalizeOperators(JitTestCase):
             "gradient",
             "index_put",
             "polygamma",
+            "special.polygamma",
             "repeat",
             "reshape_as",
             "resize_",

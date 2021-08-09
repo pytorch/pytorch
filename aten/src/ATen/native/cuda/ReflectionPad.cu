@@ -580,8 +580,8 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
         auto output_inner = output;
         if (!batch_mode) {
           // non-batch mode
-          auto input_inner = input.unsqueeze(0);
-          auto output_inner = output.unsqueeze(0);
+          input_inner = input.unsqueeze(0);
+          output_inner = output.unsqueeze(0);
         }
 
         auto input_packed = input_inner.packed_accessor64<scalar_t, 5>();
