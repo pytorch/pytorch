@@ -923,8 +923,8 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
   }
 
 #ifdef _WIN32
-  struct timeval timeoutTV = {value.count() / 1000,
-                              (value.count() % 1000) * 1000};
+  struct timeval timeoutTV = {static_cast<long>(value.count() / 1000),
+                              static_cast<long>((value.count() % 1000) * 1000)};
 #else
   struct timeval timeoutTV = {.tv_sec = value.count() / 1000,
                               .tv_usec = (value.count() % 1000) * 1000};
