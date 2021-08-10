@@ -386,6 +386,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max
@@ -574,6 +575,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 
