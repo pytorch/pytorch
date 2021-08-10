@@ -204,8 +204,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 def get_base_name(f: NativeFunction) -> str:
     return f.func.name.name.base  # TODO: should be str(f.func.name.name)?
 
-def get_view_info(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
-    f = fn.func
+def get_view_info(f: NativeFunction) -> Optional[str]:
     base_name = get_base_name(f)
     view_info = VIEW_FUNCTIONS.get(base_name, None)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
@@ -283,7 +282,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
     call = ''
     differentiable_outputs = gen_differentiable_outputs(fn)
     differentiable_output_vars = {r.name for r in differentiable_outputs}
@@ -328,7 +327,11 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     return call, rhs_value
 
 def modifies_arguments(f: NativeFunction) -> bool:
-    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out]
+    # replace_() is a special operator that's only used by the functionalization pass,
+    # and should always call its composite kernel implementation.
+    # The only reason it goes through the dispatcher is to show up in python traces.
+    return f.func.kind() in [SchemaKind.inplace, SchemaKind.out] \
+        and str(f.func.name) != 'replace_'
 
 @with_native_function_with_differentiability_info
 def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
@@ -358,7 +361,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
     else:
-        assert(get_view_info(fn) is not None)
+        assert(get_view_info(f) is not None)
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -386,7 +389,7 @@ def gen_formals(f: NativeFunction) -> str:
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns).cpp_type(),
@@ -398,7 +401,7 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

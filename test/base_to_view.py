@@ -1,0 +1,13 @@
+import torch
+a = torch.rand(2, 4)
+b = a.view(8)
+c = b.view(4, 2)
+const = torch.ones_like(a)
+print('a ', a)
+print('b ', b)
+print('c ', c)
+a.add_(const)
+print('inplace update base tensor a also updates its view tensors')
+print('a ', a)
+print('b ', b)
+print('c ', c)

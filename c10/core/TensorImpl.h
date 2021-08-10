@@ -45,6 +45,8 @@ class Scalar;
 struct IValue;
 struct Storage;
 class OperatorHandle;
+class ViewMeta;
+class Alias;
 } // namespace c10
 
 namespace torch {
@@ -2308,6 +2310,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     owns_pyobj_ = b;
   }
 
+  virtual void replace_(const TensorImpl* other_impl);
+
  protected:
   // Policy for adjusting the behavior of is_contiguous(). Allows
   // subclass customization while still being able to inline
@@ -2568,8 +2572,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 //    DispatchKeySet
 //
 static_assert(
-    sizeof(void*) != sizeof(int64_t) || // if 64-bit...
-        sizeof(TensorImpl) == sizeof(int64_t) * 24,
-    "You changed the size of TensorImpl on 64-bit arch."
-    "See Note [TensorImpl size constraints] on how to proceed.");
+	sizeof(void*) != sizeof(int64_t) || // if 64-bit...
+		sizeof(TensorImpl) == sizeof(int64_t) * 24,
+	"You changed the size of TensorImpl on 64-bit arch."
+	"See Note [TensorImpl size constraints] on how to proceed.");
 } // namespace c10

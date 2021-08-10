@@ -97,7 +97,7 @@ class DispatchKeySet final {
   // Remove a DispatchKey from the DispatchKey set.  This is
   // generally not an operation you should be doing (it's
   // used to implement operator<<)
-  C10_NODISCARD DispatchKeySet remove(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(repr_ & ~DispatchKeySet(t).repr_);
   }
   // Is the set empty?  (AKA undefined tensor)
@@ -242,6 +242,10 @@ constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
     autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
 
+constexpr DispatchKeySet autograd_dispatch_keyset_with_Functionalize=
+    autograd_dispatch_keyset | DispatchKeySet(DispatchKey::Functionalize);
+
+
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
@@ -273,6 +277,19 @@ constexpr DispatchKeySet after_autograd_keyset =
 constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
     DispatchKeySet::FULL_AFTER,
     c10::DispatchKey::ADInplaceOrView);
+
+// The set of dispatch keys that come after Functionalize
+constexpr DispatchKeySet after_func_keyset = DispatchKeySet(
+    DispatchKeySet::FULL_AFTER,
+    c10::DispatchKey::Functionalize).remove(
+        // NOTE: we also need to remove ADInplaceOrView from the keyset when redispatching after the func kernels.
+        // This is because we're not calling the same op; we originally called an inplace op, and now we aren't.
+        // The original key calculation figured out which keys were Fallthrough based on the inplace op.
+        // That means that it did not include the ADInPlaceOrView kernel as a fallthrough key.
+        // However, we WANT the ADInPlaceOrView kernel to be ignored now that we're calling an out-of-place op.
+        // Re-invoking Dispatcher::call would re-run the Fallthrough key calculation and get us that,
+        // But at::redispatch is more performant. We can get away with it by explicitly removing the key here.
+        c10::DispatchKey::ADInplaceOrView);
 
 // true if t is a backend dispatch key
 C10_API bool isBackendDispatchKey(DispatchKey t);

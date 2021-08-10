@@ -1,5 +1,6 @@
 #include <c10/core/Scalar.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/FunctionalTensorImpl.h>
 
 namespace at {
 
@@ -28,4 +29,4 @@ namespace at {
  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_ITEM)
  #undef DEFINE_ITEM
 
- } //namespace at
+} //namespace at

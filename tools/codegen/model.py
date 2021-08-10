@@ -1185,6 +1185,14 @@ class Arguments:
         return ret
 
     @property
+    def flat_all(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        ret.extend(self.out)
+        return ret
+
+    @property
     def flat_positional(self) -> Sequence[Argument]:
         ret: List[Argument] = []
         ret.extend(self.pre_self_positional)

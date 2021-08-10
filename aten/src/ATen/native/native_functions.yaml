@@ -5517,6 +5517,10 @@
     CPU: set_cpu_
     CUDA: set_cuda_
 
+# Used by the functionalization pass.
+- func: replace_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
 - func: is_set_to(Tensor self, Tensor tensor) -> bool
   variants: method
   device_check: NoCheck
@@ -5562,6 +5566,13 @@
   dispatch:
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
+
+- func: view_copy(Tensor self, int[] size) -> Tensor
+  variants: method
+  device_check: NoCheck
+  device_guard: False
+  dispatch:
+    CPU: view_copy
 
 # Warning: If you want to change the name or overload name of this
 # operator, you might also want to change the `isBlockListedSchema`

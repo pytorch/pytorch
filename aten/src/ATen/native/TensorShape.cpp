@@ -5,6 +5,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
@@ -21,6 +22,9 @@
 #include <c10/util/irange.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
+#include <torch/library.h>
+
+#include <ATen/FunctionalTensorImpl.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -2186,6 +2190,10 @@ Tensor view(const Tensor& self,
   return alias_with_sizes_and_strides(self, inferred_size, stride_value);
 }
 
+Tensor view_copy(const Tensor& self, IntArrayRef size) {
+  return self.view(size).clone();
+}
+
 Tensor alias(const Tensor& self) {
     return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
 }
@@ -2445,4 +2453,27 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+Tensor& replace_(Tensor& self, const Tensor& other) {
+  // INVARIANT: inputs to replace_() are always temporaries.
+  // They should never have an alias, or be exposed to python.
+  // This is important because we want to retain all of the
+  // aliasing + python metadata from the original tensor
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other.has_view_meta());
+  // INVARIANT: replace_ is only called by users of the functionalization pass.
+  // The precondition is that every tensor's TensorImpl is wrapped
+  // by a FunctionalTensorImplBase, which can safely do the replace.
+  auto functional_impl = dynamic_cast<FunctionalTensorImplBase*>(self.unsafeGetTensorImpl());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr && self.key_set().has(c10::DispatchKey::Functionalize));
+  functional_impl->replace_(other);
+  return self;
+}
+
+} // namespace native
+} // namespace at
+
+namespace {
+  TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+    // We need this for the functionalization pass: replace_ shouldn't enter the boxed fallback
+    m.impl("replace_", torch::CppFunction::makeFallthrough());
+  }
+}

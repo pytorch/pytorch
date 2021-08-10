@@ -608,6 +608,15 @@ void TensorImpl::copy_tensor_metadata(
   }
 }
 
+void TensorImpl::replace_(const TensorImpl* other_impl) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(typeid(*this) == typeid(*other_impl));
+    // TODO: redundant, delete later
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other_impl->key_set().has(DispatchKey::Batched));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other_impl->key_set().has(DispatchKey::Functionalize));
+
+    copy_tensor_metadata_except_version_counter(other_impl, this, true);
+}
+
 namespace impl {
 
 namespace {

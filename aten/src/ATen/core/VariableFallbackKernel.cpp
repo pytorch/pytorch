@@ -2,6 +2,8 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <torch/library.h>
 
+#include <ATen/FunctionalTensorImpl.h>
+
 /*
  * This file implements a variable fallback kernel for custom operators.
  * Since tensors always have the Autograd set, but custom operators
@@ -58,6 +60,77 @@ TORCH_LIBRARY_IMPL(_, AutogradLazy, m) {
 
 TORCH_LIBRARY_IMPL(_, AutogradMLC, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+namespace {
+  void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
+    const auto& schema = op.schema();
+    const auto num_arguments = schema.arguments().size();
+    const auto arguments_begin = stack->size() - num_arguments;
+    auto arguments = torch::jit::last(stack, num_arguments);
+
+	// NOTE: we need to read from TLS in order to distinguish between the functorch case and the XLA case.
+	// In functorch's functionalization pass, we (need to) add the key to the TLS include set.
+	// We need to do this in order to ensure that free variables created from factory functions
+	// inside of the program are properly wrapped.
+	// We DO NOT want to wrap outputs unconditionally though.
+	// For example, when calling xla_tensor.to('cpu'), the output should not be wrapped.
+	// TLS is the only way to distinguish between these two cases.
+	bool is_modal_pass = c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize);
+
+    for (int64_t idx = 0; idx < num_arguments; ++idx) {
+      const auto& ivalue = arguments[idx];
+      if (ivalue.isTensor()) {
+        at::Tensor t = ivalue.toTensor();
+
+		at::functionalization::maybe_sync(t);
+		auto maybe_unwrapped = at::functionalization::maybeUnwrapFunctional(t);
+		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
+		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
+
+      } else if (ivalue.isTensorList()) {
+        auto tensors = ivalue.toTensorList();
+		at::functionalization::maybe_sync(tensors);
+		auto maybe_unwrapped = at::functionalization::maybeUnwrapFunctional(tensors);
+		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
+		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
+      }
+    }
+    {
+      at::AutoDispatchBelowFunctionalize guard;
+      // redispatchBoxed with specified dispatchKeySet cannot prevent composite kernels
+      // called inside from going back up dispatcher. We still need the RAII guard here.
+      op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
+    }
+
+    const auto num_returns = schema.returns().size();
+    const auto returns_begin = stack->size() - num_returns;
+    auto returns = torch::jit::last(stack, num_returns);
+    int ctr = 0;
+    for (int64_t idx = 0; idx < num_returns; ++idx) {
+      const auto& ivalue = returns[idx];
+      if (ivalue.isTensor()) {
+        at::Tensor t = ivalue.toTensor();
+        if (is_modal_pass) {
+          auto wrapped_t = at::functionalization::makeFunctional(t);
+          auto wrapped_ivalue = c10::IValue(wrapped_t);
+          (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
+        }
+      } else if (ivalue.isTensorList()) {
+        auto tensors = ivalue.toTensorList();
+        if (is_modal_pass) {
+          auto tensors = ivalue.toTensorList();
+          auto wrapped_t = at::functionalization::makeFunctional(tensors);
+          auto wrapped_ivalue = c10::IValue(wrapped_t);
+          (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
+        }
+      }
+    }
+  }
+}
+
+TORCH_LIBRARY_IMPL(_, Functionalize, m) {
+  m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
 
 // see Note [ADInplaceOrView key]

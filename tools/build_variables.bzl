@@ -14,6 +14,8 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/ADInplaceOrViewType_0.cpp",
     "autograd/generated/ADInplaceOrViewType_1.cpp",
+    "autograd/generated/RegisterFunctionalization_0.cpp",
+    "autograd/generated/RegisterFunctionalization_1.cpp",
     "autograd/generated/python_functions.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
@@ -53,6 +55,8 @@ def libtorch_generated_sources(gencode_pattern):
         "autograd/generated/TraceType_4.cpp",
         "autograd/generated/ADInplaceOrViewType_0.cpp",
         "autograd/generated/ADInplaceOrViewType_1.cpp",
+        "autograd/generated/RegisterFunctionalization_0.cpp",
+        "autograd/generated/RegisterFunctionalization_1.cpp",
     ]]
 
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
@@ -761,6 +765,8 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
+    "aten/src/ATen/FunctionalTensorImpl.cpp",
+    "aten/src/ATen/FunctionalTensorImplBase.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
