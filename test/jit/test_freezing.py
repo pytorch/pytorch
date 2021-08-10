@@ -1994,6 +1994,27 @@ class TestFrozenOptimizations(JitTestCase):
                         self.assertTrue(torch.allclose(aten_op(x, inplace=False), m(x).to_dense()))
 
     @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_scalar_mul(self):
+        with set_default_dtype(torch.float):
+            class Mod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.mod = nn.Linear(20, 20)
+
+                def forward(self, x):
+                    a1 = self.mod(x) * 4
+                    return a1 * 4 + a1 * 5.
+
+            mod = Mod().eval()
+            scripted = torch.jit.freeze(torch.jit.script(mod))
+            optimized = torch.jit.optimize_for_inference(scripted)
+            inp = torch.rand([20, 20])
+            print(optimized.graph)
+            # a1 cant be inplaced for first use, can for second
+            FileCheck().check("ScalarMul_").check("ScalarMul(").check("ScalarMul_").run(optimized.graph)
+            self.assertEqual(optimized(inp), mod(inp))
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
     def test_optimize_for_inference(self):
         with set_default_dtype(torch.float):
             mod = nn.Linear(20, 30).eval()
