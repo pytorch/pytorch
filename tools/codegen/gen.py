@@ -215,7 +215,7 @@ class ComputeOperators:
     ]
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> Optional[str]:
+    def __call__(self, f: NativeFunction) -> str:
         sig = DispatcherSignature.from_schema(f.func)
         name = f.func.name.unambiguous_name()
         call_method_name = 'call'
@@ -260,7 +260,15 @@ struct TORCH_API {name} {{
             defns = f"""
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{str(f.func.name)}")
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})"""
+STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
+
+// aten::{f.func}
+static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
+  return c10::Dispatcher::singleton()
+      .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+      .typed<{name}::schema>();
+}}
+"""
 
             for is_redispatching_fn in [False, True]:
                 if is_redispatching_fn:
@@ -275,9 +283,7 @@ STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{sig.type()}>();
+    static auto op = create_{name}_typed_handle();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
@@ -1175,10 +1181,18 @@ def main() -> None:
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    cpu_fm.write('Operators.cpp', lambda: {
-        'definitions': list(mapMaybe(ComputeOperators(
-            Target.DEFINITION), native_functions)),
-    })
+    def key_func(fn: NativeFunction) -> str:
+        return fn.func.name.unambiguous_name()
+
+    cpu_fm.write_sharded(
+        'Operators.cpp',
+        native_functions,
+        key_fn=key_func,
+        env_callable=lambda fn: {
+            'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
+        num_shards=5,
+        sharded_keys={'definitions'}
+    )
     cpu_fm.write('Operators.h', lambda: {
         'declarations': list(mapMaybe(ComputeOperators(
             Target.DECLARATION), native_functions)),
