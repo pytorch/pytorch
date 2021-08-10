@@ -3855,6 +3855,7 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
     # Negative division results throw while rounding mode is being updated
     for sample in samples:
         a, b = sample.input, sample.args[0]
+        assert isinstance(a, Tensor)
         mask = torch.div(a, b, rounding_mode='floor') < 0
         sample.input = (torch.where(mask, -a, a)
                         .detach().requires_grad_(requires_grad))

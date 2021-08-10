@@ -969,6 +969,8 @@ class TestBinaryUfuncs(TestCase):
 
                     expected = python_op(a, b)
                     if not allows_negative and expected < 0:
+                        with self.assertRaises(RuntimeError):
+                            torch_op(a, b)
                         continue
                     actual_scalar = torch_op(a, b)
 
@@ -994,8 +996,8 @@ class TestBinaryUfuncs(TestCase):
                 _scalar_helper(lambda a, b: math.trunc(a / b), torch.floor_divide,
                                allows_negative=False)
             _scalar_helper(lambda a, b: math.trunc(a / b),
-                            partial(torch.div, rounding_mode='floor'),
-                            allows_negative=True)
+                           partial(torch.div, rounding_mode='floor'),
+                           allows_negative=True)
 
     # NOTE: torch.floor_divide currently truncates instead of flooring.
     # See https://github.com/pytorch/pytorch/issues/43874.
