@@ -2534,6 +2534,10 @@ TEST(ComputeFlopsTest, Basic) {
   flops = computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
+  // Test aten::addmm
+  flops = computeFlops(std::string("aten::addmm"), extra_args);
+  ASSERT_EQ(flops, 43200);
+
   // Test mm out of range
   extra_args.clear();
   flops = computeFlops(std::string("aten::mm"), extra_args);

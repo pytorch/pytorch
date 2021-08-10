@@ -1322,7 +1322,7 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   return result;
 }
 
-void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info) {
+void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info, bool upper) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-1) == input.size(-2));
 
@@ -1356,12 +1356,16 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
   info.fill_(0);
 
-  cholesky_stub(result.device().type(), result, info, /*upper=*/false);
+  cholesky_stub(result.device().type(), result, info, upper);
 
-  result.tril_();
+  if (upper) {
+    result.triu_();
+  } else {
+    result.tril_();
+  }
 }
 
-std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool check_errors, Tensor& L, Tensor& info) {
+std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool upper, bool check_errors, Tensor& L, Tensor& info) {
   squareCheckInputs(input);
   checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
   checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
@@ -1397,14 +1401,14 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   if (copy_needed) {
     Tensor L_tmp = at::empty({0}, input.options());
     Tensor info_tmp = at::empty({0}, input.options().dtype(kInt));
-    linalg_cholesky_out_info(input, L_tmp, info_tmp);
+    linalg_cholesky_out_info(input, L_tmp, info_tmp, upper);
     at::native::resize_output(L, L_tmp.sizes());
     L.copy_(L_tmp);
     at::native::resize_output(info, info_tmp.sizes());
     info.copy_(info_tmp);
   } else {
     // use "out" tensors' memory directly
-    linalg_cholesky_out_info(input, L, info);
+    linalg_cholesky_out_info(input, L, info, upper);
   }
 
   if (check_errors) {
@@ -1418,16 +1422,16 @@ std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool ch
   return std::tuple<Tensor&, Tensor&>(L, info);
 }
 
-std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool check_errors) {
+std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool upper, bool check_errors) {
   Tensor L = at::empty({0}, input.options());
   Tensor info = at::empty({0}, input.options().dtype(kInt));
-  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, check_errors, L, info);
+  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, upper, check_errors, L, info);
   return std::make_tuple(L, info);
 }
 
-Tensor linalg_cholesky(const Tensor &self) {
+Tensor linalg_cholesky(const Tensor &self, bool upper) {
   Tensor result, info;
-  std::tie(result, info) = at::linalg_cholesky_ex(self, /*check_errors=*/false);
+  std::tie(result, info) = at::linalg_cholesky_ex(self, upper, /*check_errors=*/false);
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message
@@ -1440,14 +1444,14 @@ Tensor linalg_cholesky(const Tensor &self) {
   return result;
 }
 
-Tensor& linalg_cholesky_out(const Tensor &self, Tensor &result) {
+Tensor& linalg_cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   // linalg_cholesky_ex_outf includes these checks, but we do it here
   // so that the name of the function is correct in the error message
   checkSameDevice("torch.linalg.cholesky", result, self);
   checkLinalgCompatibleDtype("torch.linalg.cholesky", result, self);
 
   Tensor info = at::empty({0}, self.options().dtype(kInt));
-  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, /*check_errors=*/false, result, info);
+  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, upper, /*check_errors=*/false, result, info);
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message

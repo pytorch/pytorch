@@ -530,25 +530,26 @@ class MultiprocessContext(PContext):
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
         if not self._pc:
             return
-        log.warning(f"Closing processes via signal {death_sig}")
         for proc in self._pc.processes:
-            try:
-                os.kill(proc.pid, death_sig)
-            except ProcessLookupError:
-                # If the process exited because of some reason,
-                # `ProcessLookupError` will be rasied, it is safe to ignore it.
-                pass
+            if proc.is_alive():
+                log.warning(f"Closing process {proc.pid} via signal {death_sig.name}")
+                try:
+                    os.kill(proc.pid, death_sig)
+                except ProcessLookupError:
+                    # If the process exited because of some reason,
+                    # `ProcessLookupError` will be rasied, it is safe to ignore it.
+                    pass
         end = time.monotonic() + timeout
         for proc in self._pc.processes:
             time_to_wait = end - time.monotonic()
             if time_to_wait <= 0:
                 break
             proc.join(time_to_wait)
-        log.warning(
-            f"Unable to shutdown processes via {death_sig}, forcefully exitting via {_get_kill_signal()}"
-        )
         for proc in self._pc.processes:
             if proc.is_alive():
+                log.warning(
+                    f"Unable to shutdown process {proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                )
                 try:
                     os.kill(proc.pid, _get_kill_signal())
                 except ProcessLookupError:
@@ -704,18 +705,27 @@ class SubprocessContext(PContext):
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
         if not self.subprocess_handlers:
             return
-        log.warning(f"Sending processes {death_sig}")
         for handler in self.subprocess_handlers.values():
-            handler.close(death_sig=death_sig)
+            if handler.proc.poll() is None:
+                log.warning(
+                    f"Sending process {handler.proc.pid} closing signal {death_sig.name}"
+                )
+                handler.close(death_sig=death_sig)
         end = time.monotonic() + timeout
         for handler in self.subprocess_handlers.values():
             time_to_wait = end - time.monotonic()
             if time_to_wait <= 0:
                 break
-            handler.proc.wait(time_to_wait)
-        log.warning(
-            f"Unable to shutdown processes via {death_sig}, forcefully exitting via {_get_kill_signal()}"
-        )
+            try:
+                handler.proc.wait(time_to_wait)
+            except subprocess.TimeoutExpired:
+                # Ignore the timeout expired exception, since
+                # the child process will be forcefully terminated via SIGKILL
+                pass
         for handler in self.subprocess_handlers.values():
-            handler.close(death_sig=_get_kill_signal())
-            handler.proc.wait()
+            if handler.proc.poll() is None:
+                log.warning(
+                    f"Unable to shutdown process {handler.proc.pid} via {death_sig}, forcefully exitting via {_get_kill_signal()}"
+                )
+                handler.close(death_sig=_get_kill_signal())
+                handler.proc.wait()
