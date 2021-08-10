@@ -3846,11 +3846,20 @@ def sample_inputs_floor_divide(op_info, device, dtype, requires_grad, **kwargs):
     if not (dtype.is_floating_point or dtype.is_complex):
         rhs[rhs == 0] = 1
 
-    return [
+    samples = [
         SampleInput(lhs, args=(rhs,)),
         SampleInput(lhs, args=(rhs[0],)),
         SampleInput(lhs, args=(3.14,)),
     ]
+
+    # Negative division results throw while rounding mode is being updated
+    for sample in samples:
+        a, b = sample.input, sample.args[0]
+        mask = torch.div(a, b, rounding_mode='floor') < 0
+        sample.input = (torch.where(mask, -a, a)
+                        .detach().requires_grad_(requires_grad))
+
+    return samples
 
 def sample_inputs_isin(op_info, device, dtype, requires_grad):
     element = make_tensor((L,), device, dtype, low=None, high=None, requires_grad=requires_grad)
@@ -6047,6 +6056,7 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     OpInfo('floor_divide',
            dtypes=all_types_and(torch.half, torch.bfloat16),
+           ref=np.floor_divide,
            sample_inputs_func=sample_inputs_floor_divide,
            supports_autograd=False,
            ),
