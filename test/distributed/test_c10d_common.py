@@ -54,7 +54,7 @@ def gpus_for_rank(world_size):
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
-            visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process]
+            visible_devices[rank * gpus_per_process : (rank + 1) * gpus_per_process]
         )
     return gpus_for_rank
 
@@ -247,12 +247,12 @@ class AbstractDistributedDataParallelTest(object):
         return 2
 
     def _prepare_single_device_module(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            global_batch_size,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        global_batch_size,
+        gradient_as_bucket_view=False,
     ):
         model = Net()
         device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
@@ -272,12 +272,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _prepare_multi_device_module(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            global_batch_size,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        global_batch_size,
+        gradient_as_bucket_view=False,
     ):
         self.assertTrue(
             len(devices) == 2 or len(devices) == 4,
@@ -302,12 +302,12 @@ class AbstractDistributedDataParallelTest(object):
         return model, ddp_model, input, target
 
     def _test_ddp_with_process_group(
-            self,
-            process_group,
-            devices,
-            device_ids,
-            multi_device=False,
-            gradient_as_bucket_view=False,
+        self,
+        process_group,
+        devices,
+        device_ids,
+        multi_device=False,
+        gradient_as_bucket_view=False,
     ):
         """
         Note: we pass down `device_ids` all the way to DistributedDataParallel
@@ -361,10 +361,10 @@ class AbstractDistributedDataParallelTest(object):
             step_model(
                 ddp_model,
                 input[
-                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
                 target[
-                    self.rank * local_batch_size: (self.rank + 1) * local_batch_size
+                    self.rank * local_batch_size : (self.rank + 1) * local_batch_size
                 ],
             )
 
@@ -382,7 +382,7 @@ class AbstractDistributedDataParallelTest(object):
             input = input[torch.randperm(global_batch_size)]
 
     def _gpu_model_with_ddp_comm_hook(
-            self, process_group, hook=None, gradient_as_bucket_view=False, state=None
+        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -399,7 +399,7 @@ class AbstractDistributedDataParallelTest(object):
         return gpu_model
 
     def _gpu_model_with_builtin_ddp_comm_hook(
-            self, process_group, hook=None, gradient_as_bucket_view=False
+        self, process_group, hook=None, gradient_as_bucket_view=False
     ):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
@@ -425,22 +425,25 @@ class AbstractDistributedDataParallelTest(object):
         [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
 
     def _simple_hook(
-            self, state: object, bucket: dist.GradBucket
-    ) -> torch.futures.Future:
+        self, state: object, bucket: dist.GradBucket
+    ) -> torch.futures.Future[torch.Tensor]:
         fut = torch.futures.Future()
-        fut.set_result([torch.ones_like(bucket.get_tensor())])
+        fut.set_result(torch.ones_like(bucket.buffer()))
 
         def fut_then(fut):
             # Add ones to fut's result.
-            return [t + torch.ones_like(t) for t in fut.value()]
+            t = fut.value()
+            return t + torch.ones_like(t)
 
         return fut.then(fut_then)
 
 
 # TSAN is not fork-safe since we're forking in a multi-threaded environment
 if not TEST_WITH_TSAN:
-    class DistributedDataParallelTest(AbstractDistributedDataParallelTest, MultiProcessTestCase):
 
+    class DistributedDataParallelTest(
+        AbstractDistributedDataParallelTest, MultiProcessTestCase
+    ):
         def setUp(self):
             super(DistributedDataParallelTest, self).setUp()
             if sys.platform == "win32":
@@ -450,14 +453,14 @@ if not TEST_WITH_TSAN:
 
         def test_invalid_powerSGD_state(self):
             for start_powerSGD_iter, use_error_feedback, warm_start in product(
-                    [0, 1], [True, False], [True, False]
+                [0, 1], [True, False], [True, False]
             ):
                 if not use_error_feedback and not warm_start:
                     continue
                 with self.assertRaisesRegex(
-                        ValueError,
-                        "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
-                        "because PowerSGD can only be applied after the first two iterations in DDP.",
+                    ValueError,
+                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                    "because PowerSGD can only be applied after the first two iterations in DDP.",
                 ):
                     state = powerSGD.PowerSGDState(
                         process_group=None,
@@ -476,7 +479,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([100], dtype=torch.float),
             torch.empty([50], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0], [1], [2], [3]], result)
 
     def test_single_limit_multi_dtype(self):
@@ -488,7 +494,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [400]
+        )
+        self.assertTrue(all(size_lim == 400 for size_lim in per_bucket_size_limits))
         self.assertEqual([[0, 2], [1, 3], [4], [5]], result)
 
     def test_multi_limit_single_dtype(self):
@@ -498,7 +507,10 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([10], dtype=torch.float),
             torch.empty([10], dtype=torch.float),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [40, 80])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [40, 80]
+        )
+        self.assertEqual(per_bucket_size_limits, [40, 80, 80])
         self.assertEqual([[0], [1, 2], [3]], result)
 
     def test_multi_limit_multi_dtype(self):
@@ -510,12 +522,14 @@ class ComputeBucketAssignmentTest(TestCase):
             torch.empty([50], dtype=torch.float),
             torch.empty([25], dtype=torch.double),
         ]
-        result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
+        result, per_bucket_size_limits = dist._compute_bucket_assignment_by_size(
+            tensors, [200, 400]
+        )
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+        self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
 class AbstractCommTest(object):
-
     @property
     def op_timeout_sec(self):
         return 1
@@ -645,8 +659,8 @@ class AbstractCommTest(object):
 
 # TSAN is not fork-safe since we're forking in a multi-threaded environment
 if not TEST_WITH_TSAN:
-    class CommTest(AbstractCommTest, MultiProcessTestCase):
 
+    class CommTest(AbstractCommTest, MultiProcessTestCase):
         def setUp(self):
             super(CommTest, self).setUp()
             if sys.platform == "win32":
