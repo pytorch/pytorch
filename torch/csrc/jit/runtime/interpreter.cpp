@@ -825,8 +825,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           const auto& opt_module_info = std::get<2>(p);
           if (opt_module_info.has_value()) {
             const auto& module_instance_info = opt_module_info.value();
-            module_hierarchy =
-                std::move(utils::get_module_info(module_instance_info));
+            module_hierarchy = utils::get_module_info(module_instance_info);
             module_hierarchy.append("::").append(fn_name);
           } else {
             // This is likely a call to free function, not associated with
