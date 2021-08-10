@@ -519,6 +519,7 @@ class OpInfo(object):
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
+                 assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -614,6 +615,8 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+
+        self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
@@ -6469,6 +6472,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
