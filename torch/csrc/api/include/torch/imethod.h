@@ -32,13 +32,13 @@ class IMethod {
   // script and python methods.  This is a more portable dependency
   // than a ScriptMethod FunctionSchema, which has more information
   // than can be generally expected from a python method.
-  const std::vector<std::string>& getArgumentNames();
+  const std::vector<std::string>& getArgumentNames() const;
 
  protected:
   virtual void setArgumentNames(std::vector<std::string>& argumentNames) const = 0;
 
  private:
-  std::vector<std::string> argumentNames_;
+  mutable std::vector<std::string> argumentNames_;
 };
 
 } // namespace torch
