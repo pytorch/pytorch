@@ -56,7 +56,7 @@ c10::optional<size_t> normIndex(int64_t index, size_t len) {
     index = index + len;
   }
   if (index >= 0 && index < static_cast<int64_t>(len)) {
-eturn index;
+    return index;
   } else {
     return c10::nullopt;
   }
