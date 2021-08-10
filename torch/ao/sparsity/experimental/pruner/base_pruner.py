@@ -6,10 +6,13 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .parametrization import PruningParametrization, ActivationReconstruction
+from torch.nn.modules.container import ModuleDict, ModuleList
+
+from .parametrization import PruningParametrization, LinearActivationReconstruction, Conv2dActivationReconstruction
 
 SUPPORTED_MODULES = {
-    nn.Linear
+    nn.Linear,
+    nn.Conv2d
 }
 
 def _module_to_path(model, layer, prefix=''):
@@ -113,7 +116,10 @@ class BasePruner(abc.ABC):
 
     def bias_hook(self, module, input, output):
         if getattr(module, '_bias', None) is not None:
-            output += module._bias
+            idx = [1] * len(output.shape)
+            idx[1] = output.shape[1]
+            bias = module._bias.reshape(idx)
+            output += bias
         return output
 
     def prepare(self, use_path=False, *args, **kwargs):
@@ -132,9 +138,18 @@ class BasePruner(abc.ABC):
                                                  param(module.mask),
                                                  unsafe=True)
 
-            self.activation_handles.append(module.register_forward_hook(
-                ActivationReconstruction(module.parametrizations.weight[0])
-            ))
+            assert isinstance(module.parametrizations, ModuleDict)  # make mypy happy
+            assert isinstance(module.parametrizations.weight, ModuleList)
+            if isinstance(module, nn.Linear):
+                self.activation_handles.append(module.register_forward_hook(
+                    LinearActivationReconstruction(module.parametrizations.weight[0])
+                ))
+            elif isinstance(module, nn.Conv2d):
+                self.activation_handles.append(module.register_forward_hook(
+                    Conv2dActivationReconstruction(module.parametrizations.weight[0])
+                ))
+            else:
+                raise NotImplementedError("This module type is not supported yet.")
 
             if module.bias is not None:
                 module.register_parameter('_bias', nn.Parameter(module.bias.detach()))

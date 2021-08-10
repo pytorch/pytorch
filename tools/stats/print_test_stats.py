@@ -743,8 +743,8 @@ def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
             for test_case in test_suite.test_cases.values()
         ]
     )
-    res = send_to_scribe(logs)
-    print(res)
+    # no need to print send result as exceptions will be captured and print later.
+    send_to_scribe(logs)
 
 
 def assemble_s3_object(
@@ -781,7 +781,7 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('JOB_BASE_NAME')
+    job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
     now = datetime.datetime.utcnow().isoformat()

@@ -23,7 +23,7 @@ import warnings
 import random
 import contextlib
 import shutil
-import pathlib
+from pathlib import Path
 import socket
 import subprocess
 import time
@@ -39,6 +39,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union
+from unittest.mock import MagicMock
 
 import numpy as np
 
@@ -51,6 +52,7 @@ import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
 from torch._six import string_classes
+from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
@@ -199,7 +201,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(pathlib.Path(os.getcwd()))
+CI_TEST_PREFIX = str(Path(os.getcwd()))
 
 def wait_for_process(p):
     try:
@@ -338,6 +340,15 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+
+def is_avx512_vnni_supported():
+    if sys.platform != 'linux':
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return "avx512vnni" in lines
+
+IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
 if IS_WINDOWS:
     @contextmanager
@@ -491,6 +502,21 @@ class DeterministicGuard:
 
     def __exit__(self, exception_type, exception_value, traceback):
         torch.use_deterministic_algorithms(self.deterministic_restore)
+
+# Context manager for setting cuda sync debug mode and reset it
+# to original value
+# we are not exposing it to the core because sync debug mode is
+# global and thus not thread safe
+class CudaSyncGuard:
+    def __init__(self, sync_debug_mode):
+        self.mode = sync_debug_mode
+
+    def __enter__(self):
+        self.debug_mode_restore = torch.cuda.get_sync_debug_mode()
+        torch.cuda.set_sync_debug_mode(self.mode)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
@@ -886,8 +912,9 @@ def check_if_enable(test: unittest.TestCase):
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
                     f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
+                    "If you're seeing this on your local machine and would like to enable this test, " +
+                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
@@ -2492,6 +2519,16 @@ def has_breakpad() -> bool:
     except RuntimeError as e:
         return False
 
+def find_library_location(lib_name: str) -> Path:
+    # return the shared library file in the installed folder if exist,
+    # else the file in the build folder
+    torch_root = Path(torch.__file__).resolve().parent
+    path = torch_root / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
+    torch_root = Path(__file__).resolve().parent.parent.parent
+    return torch_root / 'build' / 'lib' / lib_name
+
 def sandcastle_skip(reason):
     """
     Similar to unittest.skip, however in the sandcastle environment it just
@@ -2511,6 +2548,25 @@ def sandcastle_skip(reason):
         return wrapper
 
     return decorator
+
+def mock_wrapper(method):
+    """
+    Returns a function that calls the real implementation of a method
+    in addition to passing args to a mock object.
+    """
+    mock = MagicMock()
+
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        mock(*args, **kwargs)
+        return method(self, *args, **kwargs)
+    wrapper.mock = mock  # type: ignore[attr-defined]
+    return wrapper
+
+def get_tensors_from(args, kwargs):
+    """ Returns a set of all Tensor objects in the given args and kwargs. """
+    return set([arg for arg in args if isinstance(arg, Tensor)] +
+               [v for v in kwargs.values() if isinstance(v, Tensor)])
 
 def sandcastle_skip_if(condition, reason):
     """

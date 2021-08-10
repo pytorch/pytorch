@@ -53,7 +53,6 @@ struct MapInfo {
   std::atomic<int> refcount;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 const std::string unknown_filename = "filename not specified";
 #ifdef _WIN32
 const std::string unknown_eventname = "eventname not specified";
@@ -353,7 +352,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
   }
 #endif
-  c10::reportMemoryUsageToProfiler(base_ptr_, size_, c10::Device(c10::DeviceType::CPU));
+  c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
 MapAllocator::MapAllocator(std::string filename, int flags, size_t size)
@@ -601,7 +600,7 @@ void* RefcountedMapAllocator::data() const {
 MapAllocator::~MapAllocator() {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   close();
-  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, c10::Device(c10::DeviceType::CPU));
+  c10::reportMemoryUsageToProfiler(base_ptr_, -size_, 0, 0, c10::Device(c10::DeviceType::CPU));
 }
 
 }  // namespace at
