@@ -28,13 +28,11 @@
 XXX: this is still in prototype phase and has much work left to do, including
 but not limited to:
 - Refactor APIs
-- Only iteratively optimize shape function while a change has been made
 - Add decent coverage of common ops
 - Add shape analysis pass on Graph that handles Ifs and Loops
 - Allow concurrent reads to the operator map
 - Successive applications of same inputs to same shape function (e.g. series of
 pointwise ops)
-- Better support for Symbolic Shapes (additional optimizations, etc)
 - Supporting returning partially evaluated shape compute graph
 */
 
@@ -53,10 +51,6 @@ bool symbolicShapeAnalysisTestModeEnabled() {
   return symbolic_shape_analysis_test_mode;
 }
 
-// TODO: better registration mechanism
-std::mutex lock;
-std::unordered_map<std::string, std::shared_ptr<Graph>> operator_functions;
-
 c10::optional<size_t> normIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
@@ -74,7 +68,7 @@ void replaceWithIValue(Value* v, IValue val) {
 }
 
 // Symbolic Shape Analysis works through iteratively partially evaluating
-// a TorchScript shape compute graph by inputting properties from input
+// a TorchScript shape compute graph by inputing properties from input
 // Tensors. We can substitute in properties like `len(x)` and `x[1]`
 // if they are statically on the input Tensors. We can also use
 // assertions like `assert len(x) == 4` in order to refine the input
@@ -82,9 +76,10 @@ void replaceWithIValue(Value* v, IValue val) {
 // substitute in properties until we are unable to make any further
 // optimizations. Finally, we try to extract Tensor properties from the output.
 // For instance `return [1, 2, inp[2] + 1, inp[3]]` we know that the ouptut
-// will be length 4 with first two dimensions equal to 1 and 2.
-// It is not implemented yet but in the future we will also be able to
-// infer that the 4th dimension will have the same symbolic shape as inp[3]
+// will be length 4 with first two dimensions equal to 1 and 2. We can also
+// deduce that the 4th dimension has the same symbolic shape as inp[3], which
+// means that we do know its concrete value statically but we can asssign sets
+// of tensor dimensions which must be equal at runtime.
 
 struct SymbolicShapeAnalyzer {
   SymbolicShapeAnalyzer(Node* n, std::shared_ptr<Graph> shape_compute_graph)
@@ -156,27 +151,30 @@ struct SymbolicShapeAnalyzer {
 
  private:
   void substituteInputTensorProperties(bool substitute_symbolic_dims) {
+    // clang-format off
     // here we iteratively substitute properties of the node's input tensors
-    // into the shape compute graph. in addition to direct constants we can
-    // substitute, like len(inp) or inp[0] if the tensor has fixed length
-    // or first dimension, we also try to resolve symbolic shapes of the same
+    // into the shape compute graph. we can substitute constants into the
+    // like len(inp) or inp[0] if the tensor has a fixed length or a fixed
+    // first dimension. we also try to resolve symbolic shapes of the same
     // symbolic value to the same Value * in the shape compute graph.
     // for the shape logic:
-    // dim1 = inp1[0];
-    // dim2 = inp2[0];
-    // return dim1 if dim2 == 1 else dim2;
+    // dim1 = inp1[0]
+    // dim2 = inp2[0]
+    // return dim1 if dim2 == 1 else dim2
     // if we see that inp1[0] and inp2[0] both have the same symbolic shape
     // value, then it is a valid transformation to replace dim2 with dim1 or
-    // vice versa. to do this we collect  all Value * for a particular symbolic
-    // dimension value and then Value * with their dominator of the same
-    // symbolic dimension value in the example above, this allows us to infer
-    // that the output will be the symbolic dimension value of dim1
+    // vice versa. to do this we collect all Value * for a particular symbolic
+    // shape. Then, we replace all Value * within that set with their dominator.
+    // In the example above, this allows us to infer  that the output will be the
+    // symbolic dimension value of dim1.
+
     // if `substitute_symbolic_dims` is true, then we insert list accesses
-    // which resolve to symbolic dimension values as constants in the graph
-    // because symbolic dimensions are represented as negative numbers and
+    // which resolve to symbolic dimension values as constants in the graph.
+    // Because symbolic dimensions are represented as negative numbers and
     // are not real values, this is only safe to do if you are not running
     // any further optimizations. representing them as constants in the graph
-    // makes extracting output shapes with symbolic dimensions possible.
+    // makes extracting output shapes with symbolic dimensions easier.
+    // clang-format on
 
     std::unordered_map<int64_t, std::vector<Value*>> symbolic_shape_map;
 
@@ -297,7 +295,6 @@ void PropagateShapesWithShapeFunction(
 }
 
 void PropagateShapesOnGraph(std::shared_ptr<Graph>& graph) {
-  std::lock_guard<std::mutex> guard(lock);
   for (Node* n : graph->nodes()) {
     if (n->maybeSchema()) {
       if (auto maybe_graph = shapeComputeGraphForSchema(n->schema())) {
