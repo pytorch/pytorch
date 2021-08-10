@@ -361,7 +361,7 @@ Tensor qnnpack_avg_pool2d(
 } // namespace at
 
 namespace {
-std::vector<float> generate_requantization_scales(
+C10_UNUSED std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale,
@@ -385,7 +385,7 @@ std::vector<float> generate_requantization_scales(
   return requant_scales;
 }
 
-std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
+C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig,
     bool transpose = false,
     uint32_t groups = 1
