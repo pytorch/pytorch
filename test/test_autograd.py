@@ -9314,7 +9314,7 @@ class TestMultithreadAutograd(TestCase):
         for p in threads:
             p.join()
 
-    def test_simple_backward_fail(self):
+    def test_multithreaded_exception_propagation(self):
         # Test whether exception in child thread
         # are propagated to main thread.
         def fn():
