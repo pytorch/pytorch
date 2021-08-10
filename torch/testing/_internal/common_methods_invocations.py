@@ -1798,16 +1798,18 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
-        ((S, S), {'dim': 1}),
-        ((1, 2, 3), {'dim': -1}),
-        ((0,), {'dim': 0}),  # empty tensor
-        ((1,), {})  # dim not passed, fallback to default
+    cases: Tuple[tuple, tuple, dict] = (  # type: ignore[assignment]
+        ((S, S), (S, S), {'dim': 1}),
+        ((M, S), (S, S), {'dim': 0}),  # different shapes
+        ((1, 2, 3), (1, 2, 3), {'dim': -1}),
+        ((0,), (0,), {'dim': 0}),  # empty tensor
+        ((0, S), (S, S), {'dim': 0}),
+        ((1,), (1,), {})  # dim not passed, fallback to default
     )
 
     def generator():
-        for input_shape, kwargs in cases:
-            yield SampleInput([make_arg(input_shape), make_arg(input_shape)], kwargs=kwargs)
+        for input_shape1, input_shape2, kwargs in cases:
+            yield SampleInput([make_arg(input_shape1), make_arg(input_shape2)], kwargs=kwargs)
 
     return list(generator())
 
