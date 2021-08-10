@@ -454,6 +454,11 @@ class TestLinalg(TestCase):
         expected = torch.linalg.cholesky(A)
         self.assertEqual(expected, out)
 
+        # check the upper= variant
+        expected = torch.linalg.cholesky(A).transpose(-2, -1).conj()
+        actual = torch.linalg.cholesky(A, upper=True)
+        self.assertEqual(expected, actual)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -904,16 +909,13 @@ class TestLinalg(TestCase):
             self.assertEqual(actual_w, expected_w)
             # sign of eigenvectors is not unique and therefore absolute values are compared
             self.assertEqual(abs(actual_v), abs(expected_v))
-            # additionally we can flip the sign and then compare the values
-            # let's choose the convention that the first element of the eigenvector should be positive,
-            # otherwise flip the sign of the eigenvector
+            # additionally we can multiply the eigenvector with a phase factor e^{i\phi} and then compare the values
+            # let's choose the convention that the first element of the eigenvectors from torch and numpy be the same
+            # for real inputs, this phase factor is plus or minus one
             if matrix.numel() > 0:
-                sign = np.sign(expected_v[..., 0, :]).reshape(batch + (1, shape))
-                expected_v = sign * expected_v
-                torch_real_slice = actual_v[..., 0, :].real if dtype.is_complex else actual_v[..., 0, :]
-                sign = torch.sign(torch_real_slice).reshape(batch + (1, shape))
-                actual_v = sign * actual_v
-                self.assertEqual(actual_v, expected_v)
+                phase = torch.from_numpy(expected_v[..., 0, :]).to(device=device).div(actual_v[..., 0, :])
+                actual_v_rotated = actual_v * phase.unsqueeze(-2).expand_as(actual_v)
+                self.assertEqual(actual_v_rotated, expected_v)
 
             # check the out= variant
             out_w = torch.empty_like(actual_w)
@@ -2971,6 +2973,26 @@ class TestLinalg(TestCase):
         ns = [5, 2, 0]
         for batch, (m, n) in itertools.product(batches, product(ns, ns)):
             run_test((*batch, m, n))
+
+    @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
+    @skipCUDAIfRocm
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_svd_memory_allocation(self, device, dtype):
+        # test for https://github.com/pytorch/pytorch/issues/61949
+        # the problem was that tensors of incorrect size were allocated and then narrowed
+        m = 3
+        n = 2**20
+        a = make_tensor((m, n), dtype=dtype, device=device)
+        # the following should run without errors
+        result = torch.linalg.svdvals(a)
+        result = torch.linalg.svd(a, full_matrices=False)
+
+        out0 = torch.empty_like(result[0])
+        out1 = torch.empty_like(result[1])
+        out2 = torch.empty_like(result[2])
+        torch.linalg.svdvals(a, out=out0)
+        torch.linalg.svd(a, full_matrices=False, out=(out0, out1, out2))
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
