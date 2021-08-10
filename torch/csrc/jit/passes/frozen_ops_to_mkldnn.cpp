@@ -5,6 +5,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -34,6 +35,7 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ideep.hpp>
 #endif
@@ -272,19 +274,6 @@ Operation createUnaryOp(
   };
 }
 
-static Tensor to_dense(const Tensor input) {
-  auto input_it = at::native::itensor_from_mkldnn(input);
-  auto input_raw_data = input_it.get_data_handle();
-
-  auto input_options_with_strided = input.options().layout(c10::kStrided);
-  auto in_aten = at::from_blob(
-      input_raw_data,
-      input.sizes(),
-      input_it.get_strides(),
-      input_options_with_strided);
-  return in_aten;
-}
-
 void MKLDNNLayerNormOp(Stack* stack) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
 
@@ -292,54 +281,24 @@ void MKLDNNLayerNormOp(Stack* stack) {
   pop(stack);
   auto eps = pop(stack).toDouble();
 
-  // TODO: avoid doing these unwrappings
   Tensor bias{};
   Tensor weight{};
   auto bias_ival = pop(stack);
-  if (!bias_ival.isNone()) {
-    bias = to_dense(bias_ival.toTensor());
-  }
+  TORCH_INTERNAL_ASSERT(bias_ival.isTensor());
+  bias = bias_ival.toTensor();
+
   auto weight_ival = pop(stack);
-  if (!weight_ival.isNone()) {
-    weight = to_dense(weight_ival.toTensor());
-  }
+  TORCH_INTERNAL_ASSERT(weight_ival.isTensor());
+  weight = weight_ival.toTensor();
 
   auto shape = pop(stack).toIntVector();
-  auto mkldnn_input = pop(stack).toTensor();
+  auto input = pop(stack).toTensor();
 
-  auto input_it = at::native::itensor_from_mkldnn(mkldnn_input);
-  auto input_options_with_strided =
-      mkldnn_input.options().layout(c10::kStrided);
-  auto input = (input_it.get_desc().is_plain()) ? to_dense(mkldnn_input)
-                                                : mkldnn_input.to_dense();
-
-  auto tgt_desc = input_it.get_desc();
-  // this isn't great if layernorm is followed by a convolution
-  if (!input_it.get_desc().is_plain()) {
-    tgt_desc = input_it.get_desc().to_default_format();
-  }
-
-  auto it_empty = ideep::tensor(tgt_desc);
-  TORCH_INTERNAL_ASSERT(it_empty.get_desc() == tgt_desc);
-  auto out = at::native::new_with_itensor_mkldnn(
-      std::move(it_empty),
-      optTypeMetaToScalarType(input.options().dtype_opt()),
-      input.options().device_opt());
-
-  auto out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
-  auto out_aten = at::from_blob(
-      out_raw_data, input.sizes(), input.strides(), input_options_with_strided);
-
-  auto M_N = at::native::_check_layer_norm_inputs(input, shape, weight, bias);
-  auto M = M_N.first;
-  auto N = M_N.second;
-
-  at::Tensor mean = at::empty({M}, input_options_with_strided);
-  at::Tensor rstd = at::empty({M}, input_options_with_strided);
-
-  at::native::layer_norm_cpu_out(
-      out_aten, mean, rstd, input, shape, weight, bias, eps, M, N);
-  push(stack, out);
+  at::Tensor dst, mean, rstd;
+  std::tie(dst, mean, rstd) =
+      at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
+          input, shape, weight, bias, eps);
+  push(stack, dst);
 };
 
 Operation BroadOp(const Node* node) {
@@ -1004,8 +963,12 @@ class MKLDNNSubgraphSlicer {
     }
 
     if (n->matches(
-            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor")) {
-      return true;
+            "aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enable=True) -> Tensor") &&
+        n->namedInput("weight")->type() != NoneType::get() &&
+        n->namedInput("bias")->type() != NoneType::get()) {
+      auto norm_shape =
+          constant_as<std::vector<int64_t>>(n->namedInput("normalized_shape"));
+      return norm_shape.has_value() && norm_shape->size() == 1;
     }
 
     // unary ops we dont need to prove anything else than
