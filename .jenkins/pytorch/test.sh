@@ -503,15 +503,15 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 else
   install_torchvision
   install_monkeytype
-  test_python
-  test_aten
-  test_vec256
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
-  test_torch_function_benchmark
-  test_distributed
-  test_benchmarks
+  # test_python
+  # test_aten
+  # test_vec256
+  # test_libtorch
+  # test_custom_script_ops
+  # test_custom_backend
+  # test_torch_function_benchmark
+  # test_distributed
+  # test_benchmarks
   test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
