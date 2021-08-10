@@ -133,10 +133,6 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 }
 
 Tensor dot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
-  dot_check(self, other);
-
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
@@ -149,6 +145,9 @@ Tensor dot(const Tensor &self, const Tensor &other){
     }
   }
 
+  at::NoNamesGuard guard;
+  dot_check(self, other);
+
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(dot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
@@ -157,8 +156,6 @@ Tensor dot(const Tensor &self, const Tensor &other){
 }
 
 Tensor vdot(const Tensor &self, const Tensor &other){
-  at::NoNamesGuard guard;
-
   // Dispatch to `dot` for real dtypes.
   if (!self.is_complex()){
     return at::dot(self, other);
@@ -174,8 +171,10 @@ Tensor vdot(const Tensor &self, const Tensor &other){
     return (at::dot(self, other.conj())).conj();
   }
 
+  at::NoNamesGuard guard;
   // For complex dtypes.
   dot_check(self, other);
+
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
     result.fill_(vdot_impl<scalar_t>(self.numel(), self.data_ptr<scalar_t>(), self.stride(0), other.data_ptr<scalar_t>(), other.stride(0)));
