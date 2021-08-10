@@ -1,7 +1,7 @@
 from abc import ABC
 from dataclasses import dataclass
 from typing import List, Union
-from torch.distributed.remote_device import _RemoteDevice
+import torch
 
 from ._internals import (
     ShardMetadata,
@@ -23,14 +23,14 @@ class DevicePlacementSpec(PlacementSpec):
     Associates placement of an entity with a single device.
 
     Args:
-        device(:class:`torch.distributed.remote_device._RemoteDevice`): The device to place the entity on.
+        device(:class:`torch.distributed._remote_device`): The device to place the entity on.
     """
 
-    device: _RemoteDevice
+    device: torch.distributed._remote_device
 
     def __post_init__(self):
-        if not isinstance(self.device, _RemoteDevice):
-            self.device = _RemoteDevice(self.device)
+        if not isinstance(self.device, torch.distributed._remote_device):
+            self.device = torch.distributed._remote_device(self.device)
 
 
 class ShardingSpec(PlacementSpec):
@@ -58,26 +58,26 @@ class ChunkShardingSpec(ShardingSpec):
             The dimension to shard on, could be an integer representing the
             dimension or a string in case of named tensors where dimensions are
             named.
-        placement(List[_RemoteDevice] or List[str]):
+        placement(List[Union[_remote_device, str]]):
             Specifies the placement of each shard of the Tensor. The size of
             the list represents the number of shards to be created. This could
             be a list of
-            :class:`torch.distributed.remote_device._RemoteDevice`'s. This could
-            also should be a ``List[str]`` where each string represents remote
+            :class:`torch.distributed._remote_device`'s. This list
+            could also contain a string which represents remote
             device as accepted by
-            :class:`torch.distributed.remote_device._RemoteDevice`
+            :class:`torch.distributed._remote_device`
     """
 
     ShardingDim = Union[int, str]
 
     dim: ShardingDim
-    placements: List[_RemoteDevice]
+    placements: List[Union[torch.distributed._remote_device, str]]
 
     def __post_init__(self):
         self._verify_dim(self.dim)
         for i, remote_device in enumerate(self.placements):
-            if not isinstance(remote_device, _RemoteDevice):
-                self.placements[i] = _RemoteDevice(remote_device)
+            if not isinstance(remote_device, torch.distributed._remote_device):
+                self.placements[i] = torch.distributed._remote_device(remote_device)
 
     @staticmethod
     def _verify_dim(dim):

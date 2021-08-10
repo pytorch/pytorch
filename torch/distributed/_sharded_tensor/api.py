@@ -21,7 +21,6 @@ from torch.distributed._sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata
 )
-from torch.distributed.remote_device import _RemoteDevice
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -387,7 +386,7 @@ class ShardedTensor(object):
                     f'sharded_tensor_metadata pin_memory: {sharded_tensor_metadata.pin_memory}'
                 )
 
-            if str(local_shard_tensor.device) != local_device:
+            if local_shard_tensor.device != local_device:
                 raise ValueError(
                     f'Local shard tensor device does not match with local Shard placement! '
                     f'local shard tensor device: {local_shard_tensor.device}, '
@@ -537,28 +536,29 @@ class ShardedTensor(object):
             pin_memory,
         )
 
-    def _parse_and_validate_remote_device(self, remote_device: _RemoteDevice):
+    def _parse_and_validate_remote_device(self, remote_device: torch.distributed._remote_device):
 
-        remote_worker = remote_device.remote_worker()
+        worker_name = remote_device.worker_name()
+        rank = remote_device.rank()
         device = remote_device.device()
 
         # Validate rank, skip validation if rank is not part of process group.
         if not distributed_c10d._rank_not_in_group(self._process_group):
-            if isinstance(remote_worker, int) and (remote_worker < 0 or remote_worker >= dist.get_world_size(self._process_group)):
-                raise ValueError(f'Invalid rank: {remote_worker}')
+            if rank is not None and (rank < 0 or rank >= dist.get_world_size(self._process_group)):
+                raise ValueError(f'Invalid rank: {rank}')
 
-        if isinstance(remote_worker, str):
+        if worker_name is not None:
             if not rpc._is_current_rpc_agent_set():
-                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {remote_worker}')
+                raise RuntimeError(f'RPC framework needs to be initialized for using worker names: {worker_name}')
 
             workers = rpc._get_current_rpc_agent().get_worker_infos()
             for worker in workers:
-                if worker.name == remote_worker:
+                if worker.name == worker_name:
                     return worker.id, device
 
-            raise ValueError(f'Invalid worker name: {remote_worker}')
+            raise ValueError(f'Invalid worker name: {worker_name}')
 
-        return remote_worker, device
+        return rank, device
 
     def sharding_spec(self) -> ShardingSpec:
         """

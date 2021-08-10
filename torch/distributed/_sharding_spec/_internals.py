@@ -1,7 +1,7 @@
 from typing import List
 from dataclasses import dataclass
 
-from torch.distributed.remote_device import _RemoteDevice
+import torch
 
 @dataclass
 class ShardMetadata(object):
@@ -16,7 +16,7 @@ class ShardMetadata(object):
         shard_lengths(List[int]): Lengths indicating the length of each
             dimension for this shard. Should have the same rank as the
             original tensor.
-        placement(:class:`torch.distributed.remote_device._RemoteDevice`):
+        placement(:class:`torch.distributed._remote_device`):
             Specifies the placement of this shard.
     """
 
@@ -24,11 +24,11 @@ class ShardMetadata(object):
 
     shard_offsets: List[int]
     shard_lengths: List[int]
-    placement: _RemoteDevice
+    placement: torch.distributed._remote_device
 
     def __post_init__(self):
         if isinstance(self.placement, str):
-            self.placement = _RemoteDevice(self.placement)
+            self.placement = torch.distributed._remote_device(self.placement)
 
         if len(self.shard_offsets) != len(self.shard_lengths):
             raise ValueError(

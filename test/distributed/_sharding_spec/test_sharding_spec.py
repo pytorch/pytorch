@@ -13,7 +13,7 @@ class TestShardingSpec(TestCase):
     def test_device_placement(self):
         # valid devices
         DevicePlacementSpec("cuda:0")
-        DevicePlacementSpec(0)
+        DevicePlacementSpec(torch.device(0))
         DevicePlacementSpec(torch.device("cuda:0"))
         DevicePlacementSpec("rank:0/cuda:0")
         DevicePlacementSpec("rank:0/cpu")
@@ -31,7 +31,7 @@ class TestShardingSpec(TestCase):
 
     def test_chunked_sharding_spec(self):
         # Test valid specs.
-        ChunkShardingSpec(0, [0, 1])
+        ChunkShardingSpec(0, [torch.device(0), torch.device(1)])
         # Named dimension.
         ChunkShardingSpec("N", ["cuda:0", "cuda:1"])
         ChunkShardingSpec(0, [torch.device("cuda:0"), torch.device("cuda:1")])

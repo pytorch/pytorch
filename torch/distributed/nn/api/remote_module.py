@@ -21,7 +21,7 @@ import torch
 import torch.distributed.rpc as rpc
 from torch import Tensor, device, dtype, nn
 from torch.distributed.nn.jit import instantiator
-from torch.distributed.remote_device import _RemoteDevice
+from torch.distributed import _remote_device
 from torch.distributed.rpc.internal import _internal_rpc_pickler
 from torch.nn import Module
 from torch.nn.parameter import Parameter
@@ -420,8 +420,8 @@ class _RemoteModule(nn.Module):
         # Sanity check.
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
-        remote_device = _RemoteDevice(remote_device_str)
-        self.on = remote_device.remote_worker()
+        remote_device = _remote_device(remote_device_str)
+        self.on = remote_device.worker_name()
         self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
