@@ -763,7 +763,7 @@ class TestNamedTensor(TestCase):
             fn_method_and_inplace('pow'),
             fn_method_and_inplace('atan2'),
             method('copy_'),
-            function('floor_divide'),
+            [Function('floor_divide', lambda a, b: torch.floor_divide(a.abs(), b.abs()))],
             function('true_divide'),
         ]
         tests = flatten(tests)
