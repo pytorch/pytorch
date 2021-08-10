@@ -100,7 +100,8 @@ const std::string shape_compute_functions =
           assert len(self) == 1 and len(tensor) == 1
           assert self[0] == tensor[0]
           # TODO: return self
-          return [self[0]]
+          out: List[int] = []
+          return out
 
         def mv(self: List[int], vec: List[int]):
           assert len(self) == 2 and len(vec) == 1
@@ -318,7 +319,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
-      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "linear"},
+      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
