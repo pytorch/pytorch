@@ -2,6 +2,7 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
@@ -223,8 +224,7 @@ void general_trace_function(
           // doubles in the list are constants
           auto value = iter->toDoubleVector();
           std::vector<Value*> info(value.size());
-          for (size_t value_index = 0; value_index < value.size();
-                ++value_index) {
+          for (const auto value_index : c10::irange(value.size())) {
             info[value_index] = graph->insertConstant(value[value_index]);
             tracer::recordSourceLocation(info[value_index]->node());
           }
