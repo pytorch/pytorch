@@ -38,13 +38,13 @@ class IOSNightlyJob:
             "requires": extra_requires,
             "context": "org-member",
             "filters": {"branches": {"only": "nightly"}},
-            "use_metal": miniutils.quote(str(int(True))),
         }
 
         if not self.is_upload:
             props_dict["ios_arch"] = self.variant
             props_dict["ios_platform"] = ios_definitions.get_platform(self.variant)
             props_dict["name"] = self.gen_job_name()
+            props_dict["use_metal"] = miniutils.quote(str(int(True)))
 
         template_name = "_".join([
             "binary",
