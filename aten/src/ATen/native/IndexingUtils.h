@@ -16,7 +16,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
 }
 
 
-static std::vector<Tensor> expandTensors(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
+static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
   // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (c10::optional<Tensor> index_opt : indices) {
@@ -51,7 +51,7 @@ static std::vector<Tensor> expandTensors(const Tensor & self, const torch::List<
 }
 
 
-static void checkIndexTensorTypes(const torch::List<c10::optional<Tensor>>& indices) {
+static C10_UNUSED void checkIndexTensorTypes(const torch::List<c10::optional<Tensor>>& indices) {
   for (c10::optional<Tensor> tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
@@ -80,7 +80,7 @@ inline torch::List<c10::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   return result;
 }
 
-static bool hasContiguousSubspace(TensorList tl) {
+static C10_UNUSED bool hasContiguousSubspace(TensorList tl) {
   // true if all the non-null tensors are adjacent
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
   auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
@@ -97,7 +97,7 @@ static bool hasContiguousSubspace(TensorList tl) {
 // transposeToFront(tensor, {nullptr, a, nullptr, b})
 // returns
 // tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
-static std::tuple<Tensor, std::vector<Tensor>>
+static C10_UNUSED std::tuple<Tensor, std::vector<Tensor>>
 transposeToFront(Tensor self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
