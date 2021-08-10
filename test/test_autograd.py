@@ -9353,13 +9353,17 @@ class TestMultithreadAutograd(TestCase):
             return x
 
         _self = self
+        warnings.simplefilter('always')
 
         class Model(torch.nn.Module):
             def forward(self, x):
-                warnings.simplefilter('always')
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
-                    _self.assertEqual(len(w), 2)
+                    if torch.cuda.device_count() >= 2:
+                        # hooks should not be called here
+                        _self.assertEqual(len(w), 0)
+                    else:
+                        _self.assertEqual(len(w), 2)
 
         x = torch.ones(5, 5, requires_grad=True)
         model = torch.nn.DataParallel(Model())
@@ -9367,6 +9371,10 @@ class TestMultithreadAutograd(TestCase):
         try:
             torch.autograd.graph.set_saved_tensors_default_hooks(pack, lambda x: x)
             model(x)
+            with warnings.catch_warnings(record=True) as w:
+                y = x * x
+                # hooks should be called here
+                _self.assertEqual(len(w), 2)
         finally:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
 

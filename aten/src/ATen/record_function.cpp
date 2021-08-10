@@ -630,4 +630,5 @@ bool shouldRunRecordFunction(bool* pre_sampled) {
     return false;
   }
 }
+
 } // namespace at
