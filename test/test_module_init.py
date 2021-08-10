@@ -95,6 +95,7 @@ def build_constructor_arg_db():
         torch.nn.LazyInstanceNorm3d: ((), {}),
         torch.nn.LazyLinear: ((5,), {}),
         torch.nn.LeakyReLU: ((), {}),
+        torch.nn.Bias: ((5,), {}),
         torch.nn.Linear: ((10, 5), {}),
         torch.nn.LocalResponseNorm: ((2,), {}),
         torch.nn.LogSigmoid: ((), {}),
