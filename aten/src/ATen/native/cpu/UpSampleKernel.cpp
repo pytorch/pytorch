@@ -342,6 +342,44 @@ void cpu_upsample_nearest_channels_last(
   }
 }
 
+using namespace vec;
+template <typename scalar_t, typename accscalar_t>
+inline Vectorized<scalar_t> interpolate(const scalar_t* t, accscalar_t w) {
+  return Vectorized<scalar_t>::loadu(t) * Vectorized<scalar_t>(scalar_t(w));
+}
+
+template <typename scalar_t, typename accscalar_t, typename... Args>
+inline Vectorized<scalar_t> interpolate(const scalar_t* t, accscalar_t w, Args... args) {
+  return Vectorized<scalar_t>::loadu(t) * Vectorized<scalar_t>(scalar_t(w)) + interpolate(args...);
+}
+
+// use float as immediate dtype for bfloat16 input so as to reduce rouding error
+// and improve performance.
+using Vec2f = std::tuple<Vectorized<float>, Vectorized<float>>;
+inline Vec2f interpolate(const BFloat16* t, float w) {
+  Vectorized<float> t0, t1;
+  std::tie(t0, t1) = convert_bfloat16_float(Vectorized<BFloat16>::loadu(t));
+  return std::make_tuple(t0 * Vectorized<float>(w), t1 * Vectorized<float>(w));
+}
+
+template <typename... Args>
+inline Vec2f interpolate(const BFloat16* t, float w, Args... args) {
+  Vectorized<float> t0, t1;
+  std::tie(t0, t1) = convert_bfloat16_float(Vectorized<BFloat16>::loadu(t));
+  Vectorized<float> s0, s1;
+  std::tie(s0, s1) = interpolate(args...);
+  return std::make_tuple(t0 * Vectorized<float>(w) + s0, t1 * Vectorized<float>(w) + s1);
+}
+
+template <typename scalar_t>
+static inline void store(scalar_t* t, const Vectorized<scalar_t>& v) {
+  v.store(t);
+}
+
+static inline void store(BFloat16* t, const Vec2f& v) {
+  store(t, convert_float_bfloat16(std::get<0>(v), std::get<1>(v)));
+}
+
 template <typename scalar_t, typename scale_type>
 void cpu_upsample_linear_channels_last(
     const Tensor& output_,
@@ -375,6 +413,7 @@ void cpu_upsample_linear_channels_last(
   TORCH_CHECK(channels > 0, "expected input and output channels greater than 0 but got ", channels);
   int64_t output_slice_size = output_depth * output_height * output_width * channels;
 
+  using accscalar_t = at::acc_type<scalar_t, false>;
   using Vec = vec::Vectorized<scalar_t>;
   auto loop2d = [&](int64_t begin, int64_t end) {
     const scalar_t height_scale = area_pixel_compute_scale<scalar_t>(
@@ -404,23 +443,19 @@ void cpu_upsample_linear_channels_last(
           scalar_t* i01 = input_indexr(n, ih0, iw1);
           scalar_t* i10 = input_indexr(n, ih1, iw0);
           scalar_t* i11 = input_indexr(n, ih1, iw1);
+          accscalar_t w00 = h0lambda * w0lambda;
+          accscalar_t w01 = h0lambda * w1lambda;
+          accscalar_t w10 = h1lambda * w0lambda;
+          accscalar_t w11 = h1lambda * w1lambda;
 
           int64_t size = channels;
           int64_t d = 0;
           for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec out_vec =
-                Vec(h0lambda * w0lambda) * Vec::loadu(i00 + d) + /* h0 * w0 * i00 */
-                Vec(h0lambda * w1lambda) * Vec::loadu(i01 + d) + /* h0 * w1 * i01 */
-                Vec(h1lambda * w0lambda) * Vec::loadu(i10 + d) + /* h1 * w0 * i10 */
-                Vec(h1lambda * w1lambda) * Vec::loadu(i11 + d);  /* h1 * w1 * i11 */
-            out_vec.store(out + d);
+            auto out_vec = interpolate(i00 + d, w00, i01 + d, w01, i10 + d, w10, i11 + d, w11);
+            store(out + d, out_vec);
           }
           for (; d < size; d++) {
-            out[d] =
-                h0lambda * w0lambda * i00[d] + /* h0 * w0 * i00 */
-                h0lambda * w1lambda * i01[d] + /* h0 * w1 * i01 */
-                h1lambda * w0lambda * i10[d] + /* h1 * w0 * i10 */
-                h1lambda * w1lambda * i11[d];  /* h1 * w1 * i11 */
+            out[d] = i00[d] * w00 + i01[d] * w01 + i10[d] * w10 + i11[d] * w11;
           }
         }
       }
@@ -466,31 +501,27 @@ void cpu_upsample_linear_channels_last(
             scalar_t* i101 = input_indexr(n, id1, ih0, iw1);
             scalar_t* i110 = input_indexr(n, id1, ih1, iw0);
             scalar_t* i111 = input_indexr(n, id1, ih1, iw1);
+            accscalar_t w000 = d0lambda * h0lambda * w0lambda;
+            accscalar_t w001 = d0lambda * h0lambda * w1lambda;
+            accscalar_t w010 = d0lambda * h1lambda * w0lambda;
+            accscalar_t w011 = d0lambda * h1lambda * w1lambda;
+            accscalar_t w100 = d1lambda * h0lambda * w0lambda;
+            accscalar_t w101 = d1lambda * h0lambda * w1lambda;
+            accscalar_t w110 = d1lambda * h1lambda * w0lambda;
+            accscalar_t w111 = d1lambda * h1lambda * w1lambda;
 
             int64_t size = channels;
             int64_t d = 0;
             for (; d < size - (size % Vec::size()); d += Vec::size()) {
-              Vec out_vec =
-                  Vec(d0lambda * h0lambda * w0lambda) * Vec::loadu(i000 + d) + /* d0 * h0 * w0 * i000 */
-                  Vec(d0lambda * h0lambda * w1lambda) * Vec::loadu(i001 + d) + /* d0 * h0 * w1 * i001 */
-                  Vec(d0lambda * h1lambda * w0lambda) * Vec::loadu(i010 + d) + /* d0 * h1 * w0 * i010 */
-                  Vec(d0lambda * h1lambda * w1lambda) * Vec::loadu(i011 + d) + /* d0 * h1 * w1 * i011 */
-                  Vec(d1lambda * h0lambda * w0lambda) * Vec::loadu(i100 + d) + /* d1 * h0 * w0 * i100 */
-                  Vec(d1lambda * h0lambda * w1lambda) * Vec::loadu(i101 + d) + /* d1 * h0 * w1 * i101 */
-                  Vec(d1lambda * h1lambda * w0lambda) * Vec::loadu(i110 + d) + /* d1 * h1 * w0 * i110 */
-                  Vec(d1lambda * h1lambda * w1lambda) * Vec::loadu(i111 + d);  /* d1 * h1 * w1 * i111 */
-              out_vec.store(out + d);
+              auto out_vec = interpolate(
+                  i000 + d, w000, i001 + d, w001, i010 + d, w010, i011 + d, w011,
+                  i100 + d, w110, i101 + d, w101, i110 + d, w110, i111 + d, w111);
+              store(out + d, out_vec);
             }
             for (; d < size; d++) {
               out[d] =
-                  d0lambda * h0lambda * w0lambda * i000[d] + /* d0 * h0 * w0 * i000 */
-                  d0lambda * h0lambda * w1lambda * i001[d] + /* d0 * h0 * w1 * i001 */
-                  d0lambda * h1lambda * w0lambda * i010[d] + /* d0 * h1 * w0 * i010 */
-                  d0lambda * h1lambda * w1lambda * i011[d] + /* d0 * h1 * w1 * i011 */
-                  d1lambda * h0lambda * w0lambda * i100[d] + /* d1 * h0 * w0 * i100 */
-                  d1lambda * h0lambda * w1lambda * i101[d] + /* d1 * h0 * w1 * i101 */
-                  d1lambda * h1lambda * w0lambda * i110[d] + /* d1 * h1 * w0 * i110 */
-                  d1lambda * h1lambda * w1lambda * i111[d];  /* d1 * h1 * w1 * i111 */
+                  i000[d] * w000 + i001[d] * w001 + i010[d] * w010 + i011[d] * w011 +
+                  i100[d] * w100 + i101[d] * w101 + i110[d] * w110 + i111[d] * w111;
             }
           }
         }
@@ -570,8 +601,8 @@ struct HelperInterpNearest : public HelperInterpBase {
     HelperInterpNearest::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpNearest::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_nearest", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_nearest", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
@@ -615,8 +646,8 @@ struct HelperInterpLinear : public HelperInterpBase {
     HelperInterpLinear::init_indices_weights(
       scalar_type, output, output_size, ndims, reshape_dim, HelperInterpLinear::interp_size);
 
-    AT_DISPATCH_FLOATING_TYPES(
-      scalar_type, "compute_indices_weights_linear", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, scalar_type, "compute_indices_weights_linear", [&] {
 
         scalar_t scale = area_pixel_compute_scale<scalar_t>(input_size, output_size, align_corners, opt_scale);
 
@@ -738,8 +769,7 @@ void upsample_generic_Nd_kernel_impl(
 
   constexpr int interp_size = F::interp_size;
   auto input_scalar_type = input.scalar_type();
-  if ((interp_size == 1 && input_scalar_type == at::ScalarType::Byte) ||
-      input_scalar_type == at::ScalarType::BFloat16) {
+  if ((interp_size == 1 && input_scalar_type == at::ScalarType::Byte)) {
     // nearest also supports uint8 tensor, but we have to use float
     // with compute_indices_weights
     input_scalar_type = at::ScalarType::Float;
