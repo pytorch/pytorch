@@ -292,7 +292,6 @@ test_distributed() {
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    # ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_TEST_DIR"
 
     # NB: the ending test_distributed must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
