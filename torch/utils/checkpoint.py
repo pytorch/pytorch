@@ -302,7 +302,8 @@ class Checkpoint(torch.nn.Module):
             # Don't eagerly initialize the cuda context by accident.
             # (If the user intends that the context is initialized later, within their
             # run_function, we SHOULD actually stash the cuda state here.  Unfortunately,
-            # we have no way to anticipate this will happen before we run the function.)
+            # we have no way to anticipate this will happen before we run the function.
+            # If they do so, we raise an error.)
             self.had_cuda_in_fwd = False
             if torch.cuda._initialized:
                 self.had_cuda_in_fwd = True
@@ -347,7 +348,7 @@ class Checkpoint(torch.nn.Module):
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
                         try:
                             torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, inner_unpack)
-                            y = self.function(*args)
+                            _unused = self.function(*args)
                         finally:
                             torch.autograd.graph.reset_saved_tensors_default_hooks()
 
@@ -356,7 +357,14 @@ class Checkpoint(torch.nn.Module):
 
         try:
             torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
-            y = self.function(*args)
+            output = self.function(*args)
+            if torch.cuda._initialized and not self.had_cuda_in_fwd:
+                # Cuda was not initialized before running the forward, so we didn't
+                # stash the CUDA state.
+                raise RuntimeError(
+                    "PyTorch's CUDA state was initialized in the forward pass "
+                    "of a Checkpoint, which is not allowed. Please open an issue "
+                    "if you need this feature.")
         finally:
             torch.autograd.graph.reset_saved_tensors_default_hooks()
-        return y
+        return output
