@@ -1093,12 +1093,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::InitMagicZero* node) {
-    indent() << "DEFINE_MAGIC_ZERO\n";
+  void visit(const kir::InitMagicZero* node) final {
+    indent() << "NVFUSER_DEFINE_MAGIC_ZERO\n";
   }
 
-  void visit(const kir::UpdateMagicZero* node) {
-    indent() << "UPDATE_MAGIC_ZERO\n";
+  void visit(const kir::UpdateMagicZero* node) final {
+    indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
   }
 
  private:

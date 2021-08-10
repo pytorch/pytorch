@@ -1,4 +1,4 @@
-#define DEFINE_MAGIC_ZERO                  \
+#define NVFUSER_DEFINE_MAGIC_ZERO          \
   __shared__ int nvfuser_zero_s;           \
   if (threadIdx.x == 0)                    \
     nvfuser_zero_s = 0;                    \
@@ -6,12 +6,26 @@
   atomicMin(&nvfuser_zero_s, threadIdx.x); \
   int nvfuser_zero = nvfuser_zero_s;
 
-#define UPDATE_MAGIC_ZERO \
-  do {                    \
-    nvfuser_zero <<= 1;   \
+#define NVFUSER_UPDATE_MAGIC_ZERO \
+  do {                            \
+    nvfuser_zero <<= 1;           \
   } while (0);
 
-#define ceilDiv(a, b) ((((a) + (b)) - 1) / (b))
+__device__ constexpr int ceilDiv(int a, int b) {
+  return (a + b - 1) / b;
+}
+
+__device__ constexpr int64_t ceilDiv(int64_t a, int64_t b) {
+  return (a + b - 1) / b;
+}
+
+__device__ constexpr int64_t ceilDiv(int64_t a, int b) {
+  return ceilDiv(a, (int64_t)b);
+}
+
+__device__ constexpr int64_t ceilDiv(int a, int64_t b) {
+  return ceilDiv((int64_t)a, b);
+}
 
 __device__ constexpr int alignBufferSize(int buffer, int size) {
   return (buffer + (size - 1)) & ~(size - 1);

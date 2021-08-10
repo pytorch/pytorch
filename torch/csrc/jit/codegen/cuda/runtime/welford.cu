@@ -153,7 +153,7 @@ __host__ __device__ __forceinline__ nvfuser_index_t size(const _dim3& d) {
   return (nvfuser_index_t)d.x * (nvfuser_index_t)d.y * (nvfuser_index_t)d.z;
 }
 
-#define isize(d) d.x* d.y* d.z
+#define isize(d) ((d).x * (d).y * (d).z)
 
 template <typename _dim3pos, typename _dim3dim>
 __host__ __device__ __forceinline__ nvfuser_index_t
@@ -163,7 +163,8 @@ offset(const _dim3pos& pos, const _dim3dim& dim) {
       (nvfuser_index_t)pos.z * (nvfuser_index_t)dim.x * (nvfuser_index_t)dim.y;
 }
 
-#define ioffset(pos, dim) pos.x + pos.y* dim.x + pos.z* dim.x* dim.y
+#define ioffset(pos, dim) \
+  ((pos).x + (pos).y * (dim).x + (pos).z * (dim).x * (dim).y)
 
 // Returns dim3 of each reduction segment.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK, typename _dim3>
@@ -434,3 +435,6 @@ __device__ bool gridWelford(
   }
 }
 } // namespace welford
+
+#undef isize
+#undef ioffset
