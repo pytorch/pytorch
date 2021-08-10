@@ -154,10 +154,10 @@ Context* context() {
       return new Context(adapter);
     }
     catch (const std::exception& e) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: ", e.what());
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
     }
     catch (...) {
-      TORCH_WARN("Vulkan: Failed to initialize context! Error: Unknown");
+      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
     }
 
     return nullptr;
