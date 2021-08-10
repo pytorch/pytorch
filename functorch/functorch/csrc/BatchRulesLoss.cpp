@@ -136,6 +136,16 @@ std::tuple<at::Tensor,at::Tensor> nll_loss_forward_plumbing(
     std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(*weight, cur_level);
   }
 
+  if (self_bdim && target_bdim && (!weight || !weight->defined()) && ignore_index < 0) {
+    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+    auto results = nll_loss_forward_self_target_batch_rule(
+        self_value, self_bdim, target_value, target_bdim, reduction);
+    return std::make_tuple(
+      makeBatched(std::get<0>(results), std::get<1>(results), cur_level),
+      makeBatched(std::get<2>(results), std::get<3>(results), cur_level)
+    );
+  }
+
   if ((!weight || !weight->defined()) && ignore_index < 0) {
     // Decomposition: gather to get unreduced loss. 1 is for the C dim, that's always 1.
     // gather can handle arbitrary strides so it's a good candidate for a decomposition.
@@ -148,22 +158,12 @@ std::tuple<at::Tensor,at::Tensor> nll_loss_forward_plumbing(
     // Apply the reduction
     switch (reduction) {
       case Reduction::None:
-        return std::make_tuple(result, total_weight);
+        return std::make_tuple(-result, total_weight);
       case Reduction::Sum:
-        return std::make_tuple(result.sum(), total_weight);
+        return std::make_tuple(-result.sum(), total_weight);
       case Reduction::Mean:
-        return std::make_tuple(result.mean(), total_weight);
+        return std::make_tuple(-result.mean(), total_weight);
     }
-  }
-
-  if (self_bdim && target_bdim && (!weight || !weight->defined()) && ignore_index < 0) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    auto results = nll_loss_forward_self_target_batch_rule(
-        self_value, self_bdim, target_value, target_bdim, reduction);
-    return std::make_tuple(
-      makeBatched(std::get<0>(results), std::get<1>(results), cur_level),
-      makeBatched(std::get<2>(results), std::get<3>(results), cur_level)
-    );
   }
 
   static auto op = c10::Dispatcher::singleton()
