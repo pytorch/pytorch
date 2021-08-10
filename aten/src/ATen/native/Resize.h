@@ -18,7 +18,8 @@ namespace at { namespace native {
 //   needs resizing
 // NOTE: In the future the warning will become an error
 // Returns a bool saying whether or not the resize actually happened or not
-TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape);
+TORCH_API bool resize_output(const Tensor& output, IntArrayRef shape,
+                             c10::optional<MemoryFormat> optional_memory_format = c10::nullopt);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 

@@ -192,20 +192,8 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   result_size[dim] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
-  if (result.sizes() != result_size) {
-    // raise a warning while resizing if output has one or more elements
-    if (result.numel() != 0) {
-      TORCH_WARN(
-        "An output with one or more elements was resized since it had ",
-        "shape ", result.sizes(), ", which does not match the required ",
-        "output shape ", result_size, ".",
-        "This behavior is deprecated, and in a future PyTorch release outputs ",
-        "will not be resized unless they have zero elements. You can explicitly ",
-        "reuse an out tensor t by resizing it, inplace, to zero elements with ",
-        "t.resize_(0).");
-    }
-    result.resize_(result_size, first_tensor_mem_format);
-  }
+  // raise a warning while resizing if output has one or more elements
+  at::native::resize_output(result, result_size, first_tensor_mem_format);
 
   if (result.numel() == 0) {
     return result;
