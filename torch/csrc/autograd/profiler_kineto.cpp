@@ -343,7 +343,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             }
             ctx_ptr->stack = callstackStr(cs);
           }
-          if (config.with_module_hierarchy &&
+          if (config.with_modules &&
               fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
             ctx_ptr->module_hierarchy = jit::currentModuleHierarchy();
           }

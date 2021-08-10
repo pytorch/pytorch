@@ -18,7 +18,7 @@ class TORCH_API KinetoEdgeCPUProfiler {
    * @param report_input_shapes: whether to record shapes of op's inputs.
    * @param with_stack: whether to record model's python stacktrace for the op.
    * @param with_flops: whether to report flops corresponding to the op.
-   * @param with_module_hierarchy: whether to report original python module
+   * @param with_modules: whether to report original python module
    *        hierarchy to which the op belongs.
    *
    * Usage pattern for this profiler must be as follows:
@@ -51,7 +51,7 @@ class TORCH_API KinetoEdgeCPUProfiler {
       const bool profile_memory = false,
       const bool with_stack = false,
       const bool with_flops = false,
-      const bool with_module_hierarchy = false);
+      const bool with_modules = false);
 
   ~KinetoEdgeCPUProfiler();
 

@@ -14,7 +14,7 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
     const bool profile_memory,
     const bool with_stack,
     const bool with_flops,
-    const bool with_module_hierarchy)
+    const bool with_modules)
     : m_(m), trace_file_name_(fname) {
   profiler::ProfilerConfig config(
       profiler::ProfilerState::KINETO,
@@ -22,13 +22,13 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
       profile_memory,
       with_stack,
       with_flops,
-      with_module_hierarchy);
+      with_modules);
   profiler::prepareProfiler(config, {profiler::ActivityType::CPU});
-  if (with_module_hierarchy || with_stack) {
-    auto post_processing = [this, with_stack, with_module_hierarchy](
+  if (with_modules || with_stack) {
+    auto post_processing = [this, with_stack, with_modules](
                                std::vector<profiler::KinetoEvent>& events) {
       for (auto& e : events) {
-        if (with_module_hierarchy) {
+        if (with_modules) {
           // Since KinetoEvents's module hierarchy takes vector of strings we
           // just construct a temporary vector using one string element
           e.moduleHierarchy(std::vector<std::string>(
