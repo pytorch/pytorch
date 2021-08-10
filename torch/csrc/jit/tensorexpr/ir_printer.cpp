@@ -212,9 +212,9 @@ static void formatImm(std::ostream& os, T v) {
 }
 
 // NOLINTNEXTLINE
-#define IMM_PRINT_VISIT(Type, Name)           \
-  void IRPrinter::visit(const Name##Imm* v) { \
-    formatImm(os(), v->value());              \
+#define IMM_PRINT_VISIT(Type, Name)     \
+  void IRPrinter::visit(Name##Imm* v) { \
+    formatImm(os(), v->value());        \
   }
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_PRINT_VISIT);
 #undef IMM_PRINT_VISIT
