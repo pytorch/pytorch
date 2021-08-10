@@ -4568,18 +4568,15 @@ for shape in [(1,), ()]:
     def test_checkpointing_with_hooks_parameter_used_in_an_out(self):
         w = torch.randn(10, 10, requires_grad=True)
 
-        warnings.simplefilter('always')
-
         def hook(grad):
             warnings.warn("hook")
 
         w.register_hook(hook)
-
         x = torch.rand(10, 10, requires_grad=True)
-
         h = w * x  # Using w outisde the checkpoint
         out = Checkpoint(lambda x: w * x)(h)  # Using w inside the checkpoint
 
+        warnings.simplefilter('always')
         with warnings.catch_warnings(record=True) as w:
             out.sum().backward()
             # should only call hook once
