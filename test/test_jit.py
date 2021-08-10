@@ -1686,6 +1686,13 @@ graph(%Ra, %Rb):
         self.assertEqual(a + b, torch.ops.aten.add(a, b))
         self.assertEqual(a + 1, torch.ops.aten.add(a, 1))
 
+    def test_torch_ops_kwonly(self):
+        a, b = torch.rand(3, 4), torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, "positional argument"):
+            torch.ops.aten.add(a, b, 2)
+        # h/t Chillee for this ambiguous case
+        self.assertEqual(a.prod(1), torch.ops.aten.prod(a, 1))
+
     def test_torch_complex(self):
         def fn(real, img):
             return torch.complex(real, img)
