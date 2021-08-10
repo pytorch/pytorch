@@ -195,10 +195,12 @@ const std::string shape_compute_functions =
           return out
 
         def check_non_negative(array: List[int]) -> bool:
+          # TODO: look into rewriting with early return and getting loop unrolling to fire
+          non_negative = False
           for val in array:
             if val < 0:
-              return True
-          return False
+              non_negative = True
+          return non_negative
 
         def check_shape_forward(input: List[int], weight_sizes: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
           k = len(input)
