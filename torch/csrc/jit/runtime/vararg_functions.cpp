@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace torch {
 namespace jit {
@@ -342,7 +343,7 @@ void tupleSlice(Stack& stack, size_t begin, size_t end) {
   auto tuple = pop(stack).toTuple();
   std::vector<IValue> output_elems;
   output_elems.reserve(end - begin);
-  for (size_t i = begin; i < end; ++i) {
+  for (const auto i : c10::irange(begin, end)) {
     output_elems.emplace_back(tuple->elements()[i]);
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
