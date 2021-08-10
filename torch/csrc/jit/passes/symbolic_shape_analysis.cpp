@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -122,25 +123,31 @@ struct SymbolicShapeAnalyzer {
   }
 
   c10::SymbolicShape run() {
-    // TODO: only run while the last iteration has made a change
-    constexpr size_t num_optimization_iters = 6;
-    for (const auto i : c10::irange(num_optimization_iters)) {
-      (void)i; // Suppress unused variable warning
+    bool made_change = true;
+    constexpr size_t MAX_ATTEMPTS = 8;
+    size_t curr_attempt = 0;
+    while (made_change && curr_attempt < MAX_ATTEMPTS) {
+      curr_attempt++;
+      made_change = false;
       // XXX: we cannot substitute symbolic dims before passes like constant
       // propagation, or we might inadvertently use them in arithmetic or
       // other operators
       substituteInputTensorProperties(/*substitute_symbolic_dims*/ false);
-      LowerSimpleTuples(graph_);
-      RemoveListMutation(graph_);
-      UnrollConstantLoops(graph_);
-      ConstantPropagation(graph_);
-      PeepholeOptimizeNonTensor(graph_);
-      PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
-      RefineIntegerValues(graph_);
-      ConstantPropagation(graph_);
-      EliminateCommonSubexpression(graph_);
+      // TODO: lower simple tuples ?
+      made_change |= RemoveListMutation(graph_);
+      made_change |= UnrollConstantLoops(graph_);
+      made_change |= ConstantPropagation(graph_);
+      made_change |= PeepholeOptimizeNonTensor(graph_);
+      made_change |=
+          PeepholeOptimizeListIdioms(graph_, /*refine_list_len*/ true);
+      made_change |= RefineIntegerValues(graph_);
+      made_change |= ConstantPropagation(graph_);
+      made_change |= EliminateCommonSubexpression(graph_);
+      EliminateDeadCode(graph_);
     }
     substituteInputTensorProperties(/*substitute_symbolic_dims*/ true);
+    GRAPH_DEBUG("Done with partial evaluation", graph_);
+
     // XXX: do not run any passes after we have substituted in symbolic
     // dimension value, we do it so they can be easily extracted into the output
     // shape
