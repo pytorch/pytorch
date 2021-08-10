@@ -366,7 +366,7 @@ class TestProfiler(TestCase):
             "TOP(C)::forward.A0(A)::forward.SELF(A)::forward_impl_.",
             "TOP(C)::forward.SELF(C)::call_b.B0(B)::forward.", "TOP(C)::forward."]
         with TemporaryFileName(mode="w+") as fname:
-            with profile(activities=[torch.profiler.ProfilerActivity.CPU], with_module_hierarchy=True,) as prof:
+            with profile(activities=[torch.profiler.ProfilerActivity.CPU], with_modules=True,) as prof:
                 model(input_a, input_b)
             prof.export_chrome_trace(fname)
             with io.open(fname, 'r') as f:
