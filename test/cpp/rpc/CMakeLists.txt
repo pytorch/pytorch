@@ -45,6 +45,7 @@ endif()
 
 if(INSTALL_TEST)
   install(TARGETS test_cpp_rpc DESTINATION bin)
+  SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
     install(FILES $<TARGET_PDB_FILE:test_cpp_rpc> DESTINATION bin OPTIONAL)
