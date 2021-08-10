@@ -51,7 +51,7 @@ class Bias(Module):
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(Bias, self).__init__()
         self.num_features = num_features
-        self.bias_values = Parameter(torch.randn(self.num_features))
+        self.bias_values = Parameter(torch.randn(self.num_features, **factory_kwargs))
 
     def forward(self, input: Tensor) -> Tensor:
         return input + self.bias_values

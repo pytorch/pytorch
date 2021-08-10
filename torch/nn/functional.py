@@ -1827,7 +1827,6 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
         return torch._C._nn.hardsigmoid_(input)
     return torch._C._nn.hardsigmoid(input)
 
-# This one calls operator
 def bias(input: Tensor, bias_values: Tensor) -> Tensor:
     r""" Adds a tensor of normally distributed bias values to the last dimension
     of the incoming data :math:`y = x + b`
