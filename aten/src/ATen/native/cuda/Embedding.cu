@@ -312,8 +312,8 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       num_indices
     );
 
-    dim3 grid(num_unique_indices.item<int64_t>());
-    dim3 block(128);
+    dim3 grid = num_unique_indices.item<int64_t>();
+    dim3 block = 128;
     int dim = self.stride(0);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
