@@ -365,8 +365,22 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
 // Computes the rank of 'input' and saves the result in-place in 'result'
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-// TODO: this function can be made public, see: https://github.com/pytorch/pytorch/issues/54151
-static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& atol, const Tensor& rtol, bool hermitian, Tensor& result) {
+Tensor& linalg_matrix_rank_out(const Tensor& input, const optional<Tensor>& atol_opt, const optional<Tensor>& rtol_opt, bool hermitian, Tensor& result) {
+  // default value for atol is zero
+  auto atol = atol_opt.has_value() ? atol_opt.value() : at::zeros({}, input.options().dtype(ScalarType::Double));
+
+  // if both atol and rtol are specified then rtol is set to zero
+  Tensor rtol;
+  if (atol_opt.has_value() && rtol_opt.has_value()) {
+    rtol = at::zeros({}, input.options().dtype(ScalarType::Double));
+  } else if (rtol_opt.has_value()) {
+    rtol = rtol_opt.value();
+  } else {
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    double rtol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+    rtol = at::full({}, rtol_value, input.options().dtype(ScalarType::Double));
+  }
+
   checkSameDevice("torch.linalg.matrix_rank", result, input);
   checkSameDevice("torch.linalg.matrix_rank", atol, input, "atol");
   checkSameDevice("torch.linalg.matrix_rank", rtol, input, "rtol");
@@ -414,33 +428,48 @@ static Tensor& linalg_matrix_rank_out_helper(const Tensor& input, const Tensor& 
   return result;
 }
 
+Tensor& linalg_matrix_rank_out(const Tensor& input, double atol, optional<double> rtol, bool hermitian, Tensor& result) {
+  double rtol_value;
+  if (rtol.has_value()) {
+    rtol_value = rtol.value();
+  } else {
+    // default relative tolerance is atol > 0 ? 0.0 : eps*max(rows, cols)
+    ScalarType real_dtype = toValueType(input.scalar_type());
+    rtol_value = (atol > 0.0) ? 0.0 : _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
+  }
+  auto rtol_tensor = at::full({}, rtol_value, input.options().dtype(ScalarType::Double));
+  auto atol_tensor = at::full({}, atol, input.options().dtype(ScalarType::Double));
+  result = linalg_matrix_rank_out(input, atol_tensor, rtol_tensor, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, const optional<Tensor>& rtol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
+  return result;
+}
+
+Tensor linalg_matrix_rank(const Tensor& input, double atol, optional<double> rtol, bool hermitian) {
+  Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
+  result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
+  return result;
+}
+
 Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool hermitian, Tensor& result) {
   // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
   // It is assumed that the provided value is the absolute tolerance
   Tensor rtol = at::zeros({}, tol.options());
-  result = linalg_matrix_rank_out_helper(input, tol, rtol, hermitian, result);
+  result = at::linalg_matrix_rank_outf(input, tol, rtol, hermitian, result);
   return result;
 }
 
 Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
-  double tol_value;
-  Tensor atol, rtol;
+  // For NumPy compatibility atol is zero if tol is None, else tol value is used as absolute tolerance
   if (tol.has_value()) {
-    tol_value = tol.value();
-    // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
-    // It is assumed that the provided value is the absolute tolerance
-    atol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
-    rtol = at::zeros({}, input.options().dtype(ScalarType::Double));
+    result = at::linalg_matrix_rank_outf(input, tol.value(), 0.0, hermitian, result);
   } else {
-    ScalarType real_dtype = toValueType(input.scalar_type());
-    // This is NumPy compatible default value
-    tol_value = _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
-    // It is assumed that the default tolerance is the relative tolerance
-    atol = at::zeros({}, input.options().dtype(ScalarType::Double));
-    rtol = at::full({}, tol_value, input.options().dtype(ScalarType::Double));
+    result = at::linalg_matrix_rank_outf(input, 0.0, tol, hermitian, result);
   }
-
-  result = linalg_matrix_rank_out_helper(input, atol, rtol, hermitian, result);
   return result;
 }
 

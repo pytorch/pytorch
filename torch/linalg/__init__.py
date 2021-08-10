@@ -923,13 +923,15 @@ Examples::
 """)
 
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
-matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
+linalg.matrix_rank(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
+linalg.matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
 
 The matrix rank is computed as the number of singular values
 (or eigenvalues in absolute value when :attr:`hermitian`\ `= True`)
-that are greater than the specified :attr:`tol` threshold.
+that are greater than `max(atol, σ₁*rtol)` threshold,
+where :math:`\sigma_1` is the largest singular value (or eigenvalue).
 
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
@@ -939,18 +941,18 @@ If :attr:`hermitian`\ `= True`, :attr:`A` is assumed to be Hermitian if complex 
 symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
-If :attr:`tol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
-the tolerance is set to be
+If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+the relative tolerance is set to be
 
 .. math::
 
-    \text{tol} = \sigma_1 \max(m, n) \varepsilon
+    \text{rtol} = \max(m, n) \varepsilon
 
-where :math:`\sigma_1` is the largest singular value
-(or eigenvalue in absolute value when :attr:`hermitian`\ `= True`), and
-:math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
-If :attr:`A` is a batch of matrices, :attr:`tol` is computed this way for every element of
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
 the batch.
+
+If both :attr:`atol` and :attr:`rtol` are specified then the value for :attr:`rtol` is ignored.
 
 """ + fr"""
 .. note:: The matrix rank is computed using singular value decomposition
@@ -961,12 +963,16 @@ the batch.
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
-    tol (float, Tensor, optional): the tolerance value. See above for the value it takes when `None`.
+    tol (float, Tensor, optional): the tolerance value.
+                                   If the value of `tol` is not specified then `rtol=tol` and  `atol=tol` otherwise.
                                    Default: `None`.
-    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
-                               or symmetric if real. Default: `False`.
 
 Keyword args:
+    atol (float, Tensor): the absolute tolerance value. Default: `0.0`.
+    rtol (float, Tensor): the relative tolerance value. See above for the value it takes when `None`.
+                         Default: `None`.
+    hermitian(bool): indicates whether :attr:`A` is Hermitian if complex
+                     or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Examples::
@@ -995,10 +1001,10 @@ Examples::
     >>> torch.linalg.matrix_rank(A, hermitian=True)
     tensor([[3, 3, 3, 3],
             [3, 3, 3, 3]])
-    >>> torch.linalg.matrix_rank(A, tol=1.0)
+    >>> torch.linalg.matrix_rank(A, atol=1.0)
     tensor([[3, 2, 2, 2],
             [1, 2, 1, 2]])
-    >>> torch.linalg.matrix_rank(A, tol=1.0, hermitian=True)
+    >>> torch.linalg.matrix_rank(A, atol=1.0, hermitian=True)
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
 """)
