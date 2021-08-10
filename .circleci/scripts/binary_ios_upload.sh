@@ -27,11 +27,13 @@ lipo -i ${ZIP_DIR}/install/lib/*.a
 cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
-ZIPFILE=libtorch_ios_nightly_build.zip
+export DATE="$(date -u +%Y%m%d)"
+# libtorch_ios_nightly_build_20210810.zip
+ZIPFILE="libtorch_ios_nightly_build_$DATE.zip"
 cd ${ZIP_DIR}
 #for testing
 touch version.txt
-echo $(date +%s) > version.txt
+echo "$DATE" > version.txt
 zip -r ${ZIPFILE} install src version.txt LICENSE
 # upload to aws
 # Install conda then 'conda install' awscli
