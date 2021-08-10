@@ -197,6 +197,12 @@ void testStaticRuntime(
     auto smodule = test_context->makeStaticModule(
         {true, enable_out_variant, enable_out_variant});
     auto actual = smodule(args, {});
+    if (actual.isTensor()) {
+      EXPECT_GE(smodule.nodes().size(), 2)
+          << "If we only have one node, the output of the op we are testing is "
+          << "not being managed by the memory planner! A failure here "
+          << "can typically be fixed by clone()ing the output of the test script.";
+    }
     smodule.runtime().check_for_memory_leak();
     // first run
     compareResults(expect, actual, use_allclose, use_equalnan);
