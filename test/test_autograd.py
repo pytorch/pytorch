@@ -9295,7 +9295,7 @@ class TestMultithreadAutograd(TestCase):
             def run(self):
                 self.exception = None
                 try:
-                    self.ret = self._target(*self._args, **self._kwargs)
+                    self.ret = super(PropagatingThread, self).run()
                 except Exception as e:
                     self.exception = e
 
