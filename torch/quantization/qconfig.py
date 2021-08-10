@@ -109,7 +109,7 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-def get_default_qat_qconfig(backend='fbgemm', version=None):
+def get_default_qat_qconfig(backend='fbgemm', version=1):
     # Histogram observer is too slow for quantization aware training
     if version is None:
         if backend == 'fbgemm':
