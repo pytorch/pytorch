@@ -238,9 +238,9 @@ TORCH_IMPL_FUNC(topk_out_cuda)
     int collapseTopKDim = 0;                                              \
     int collapseIndicesDim = 0;                                           \
     if (input.dim() > 1) {                                                \
-      int collapseInputDim = inputInfo.collapseDims(dim);                 \
-      int collapseTopKDim = topKInfo.collapseDims(dim);                   \
-      int collapseIndicesDim = indicesInfo.collapseDims(dim);             \
+      collapseInputDim = inputInfo.collapseDims(dim);                     \
+      collapseTopKDim = topKInfo.collapseDims(dim);                       \
+      collapseIndicesDim = indicesInfo.collapseDims(dim);                 \
     }                                                                     \
     int64_t inputSlices = 1;                                              \
     for (int i = 0; i < inputInfo.dims; ++i) {                            \
