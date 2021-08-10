@@ -581,14 +581,41 @@ class TestQuantizeFx(QuantizationTestCase):
             node_occurrence = dict()
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
-            # TODO: extra checks to make sure weight_activation_post_process is attached
-            # to the float modules in reference patterns
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
+                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        # make sure seralization works
+                        state_dict = copy.deepcopy(model.state_dict())
+                        self.assertTrue(module_name + "._weight_qparams" in state_dict)
+
+                        # check load_state_dict restores states
+                        module = getattr(model, module_name)
+                        prev_scale = module._weight_qparams["scale"]
+                        module._weight_qparams["scale"] = None
+                        model.load_state_dict(state_dict)
+                        self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -3600,17 +3627,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 else:
                     return self.op(input, self.inplace)
 
-        options = itertools.product([True, False], [True, False], self.static_quant_types)
+        options = itertools.product([True, False], [True, False], self.static_quant_types, [True, False])
         quantized_nodes = {
             # is_module
-            True: ns.call_module(quantized_module),
-            False: ns.call_function(quantized_op),
+            True: {
+                # is_reference
+                True: ns.call_module(float_module),
+                False: ns.call_module(quantized_module),
+            },
+            False: {
+                True: ns.call_function(float_op),
+                False: ns.call_function(quantized_op),
+            }
         }
 
-        for is_module, is_inplace, quant_type in options:
+        for is_module, is_inplace, quant_type, is_reference in options:
             self.checkGraphModeFxOp(
                 M(is_module, is_inplace), self.img_data_2d,
-                quant_type, quantized_nodes[is_module])
+                quant_type, quantized_nodes[is_module][is_reference], is_reference=is_reference)
 
     def test_hardswish(self):
         self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
