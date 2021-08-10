@@ -123,16 +123,27 @@ PyObject* createPyObject(
 
 bool isStorage(PyObject* obj)
 {
-  return py_storage_type_to_attype.count(Py_TYPE(obj));
+  auto obj_type = Py_TYPE(obj);
+  for (auto const& item : py_storage_type_to_attype) {
+    auto const& storage_type = item.first;
+    if ((obj_type == storage_type) || PyType_IsSubtype(obj_type, storage_type)) {
+      return true;
+    }
+  }
+  return false;
 }
+
 at::Storage createStorage(PyObject* obj)
 {
-  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
-  if (it == py_storage_type_to_attype.end()) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+  auto obj_type = Py_TYPE(obj);
+  for (auto const& item : py_storage_type_to_attype) {
+    auto const& storage_type = item.first;
+    if ((obj_type == storage_type) || PyType_IsSubtype(obj_type, storage_type)) {
+      auto& type = *item.second;
+      return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+    }
   }
-  auto& type = *it->second;
-  return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+  throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
 }
 
 }  // namespace

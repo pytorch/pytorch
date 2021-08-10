@@ -450,7 +450,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'map2_': ['def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ...'],
-        'storage': ['def storage(self) -> Storage: ...'],
+        'storage': ['def _storage(self) -> Storage: ...'],
         'storage_type': ['def storage_type(self) -> Storage: ...'],
         'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
@@ -548,9 +548,14 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
 
     # TODO: These are deprecated, maybe we shouldn't type hint them
     legacy_storage_base_hints = []
-
-    legacy_storage_base_hints.append('class ByteStorageBase(object): ...')
-    legacy_storage_base_hints.append('class CudaByteStorageBase(object): ...')
+    dt = ('Double', 'Float', 'Long', 'Int',
+          'Short', 'Char', 'Byte', 'Bool',
+          'Half', 'BFloat16', 'ComplexDouble',
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+    for c in dt:
+        legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
+    for c in dt:
+        legacy_storage_base_hints.append('class Cuda{}StorageBase(object): ...'.format(c))
 
     legacy_class_hints = []
     for c in ('DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',

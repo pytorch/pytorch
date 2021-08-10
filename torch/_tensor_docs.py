@@ -3640,13 +3640,6 @@ See :func:`torch.std`
 See :func:`torch.std`
 """)
 
-add_docstr_all('storage',
-               r"""
-storage() -> torch.Storage
-
-Returns the underlying storage.
-""")
-
 add_docstr_all('storage_offset',
                r"""
 storage_offset() -> int

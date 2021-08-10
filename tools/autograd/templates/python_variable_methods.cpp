@@ -1219,7 +1219,7 @@ PyMethodDef variable_methods[] = {
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
   {"size", castPyCFunctionWithKeywords(THPVariable_size), METH_VARARGS | METH_KEYWORDS, NULL},
-  {"storage", THPVariable_storage, METH_NOARGS, NULL},
+  {"_storage", THPVariable_storage, METH_NOARGS, NULL},
   {"storage_offset", THPVariable_storage_offset, METH_NOARGS, NULL},
   {"storage_type", THPVariable_storage_type, METH_NOARGS, NULL},
   {"stride", castPyCFunctionWithKeywords(THPVariable_stride), METH_VARARGS | METH_KEYWORDS, NULL},

@@ -415,7 +415,7 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
                 dtype = obj.dtype
-                storage_numel = obj.numel()
+                storage_numel = obj.size()
 
             else:
                 storage = obj
@@ -521,7 +521,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
                 storage = obj.storage
                 storage_type_str = obj.pickle_storage_type()
                 storage_type = getattr(torch, storage_type_str)
-                storage_numel = obj.numel()
+                storage_numel = obj.size()
 
             else:
                 storage = obj
@@ -769,7 +769,9 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     obj = restore_location(obj, location)
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
-                    deserialized_objects[key] = torch.storage.TypedStorage(obj, dtype)
+                    deserialized_objects[key] = torch.storage.TypedStorage(
+                        wrap_storage=obj, 
+                        dtype=dtype)
 
                 storage_views = pickle_module.load(f, **pickle_load_args)
                 for target_cdata, root_cdata, offset, numel in storage_views:
@@ -779,8 +781,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
                     deserialized_objects[target_cdata] = torch.storage.TypedStorage(
-                        root.storage[offset_bytes:offset_bytes + numel * element_size],
-                        root.dtype)
+                        wrap_storage=root.storage[offset_bytes:offset_bytes + numel * element_size],
+                        dtype=root.dtype)
 
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
@@ -830,8 +832,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                 # TODO: Once we decide to break serialization FC, we can
                 # stop wrapping with TypedStorage
                 deserialized_objects[root_key] = torch.storage.TypedStorage(
-                    restore_location(obj, location),
-                    dtype)
+                    wrap_storage=restore_location(obj, location),
+                    dtype=dtype)
 
             typed_storage = deserialized_objects[root_key]
             if view_metadata is not None:
@@ -842,8 +844,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     # TODO: Once we decide to break serialization FC, we can
                     # stop wrapping with TypedStorage
                     deserialized_objects[view_key] = torch.storage.TypedStorage(
-                        typed_storage.storage[offset_bytes:offset_bytes + view_size_bytes],
-                        dtype)
+                        wrap_storage=typed_storage.storage[offset_bytes:offset_bytes + view_size_bytes],
+                        dtype=dtype)
                 res = deserialized_objects[view_key]
 
             else:
@@ -955,8 +957,8 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
         loaded_storages[key] = torch.storage.TypedStorage(
-            restore_location(storage, location),
-            dtype)
+            wrap_storage=restore_location(storage, location),
+            dtype=dtype)
 
     def persistent_load(saved_id):
         assert isinstance(saved_id, tuple)

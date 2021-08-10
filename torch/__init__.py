@@ -527,68 +527,135 @@ __all__.extend(['e', 'pi', 'nan', 'inf'])
 ################################################################################
 
 from ._tensor import Tensor
-from .storage import _StorageBase
+from .storage import _StorageBase, _StorageOverrides, TypedStorage
 
-class ByteStorage(_C.ByteStorageBase, _StorageBase):
+class ByteStorage(_StorageOverrides, _C.ByteStorageBase, _StorageBase):
     pass
 
-class FakeStorage():
+class DoubleStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.double
+
     def __init__(self, *args, **kwargs):
-        raise RuntimeError('Only ByteStorage can be instantiated')
+        super().__init__(*args, **kwargs)
 
-# TODO: These fake storage types are only used for pickling. PyTorch's pickle
-# format historically includes the storage type, and pickle requires class
-# names to be importable. So for BC and FC, we need to have these class names.
-# However, there could be some trick that would let us get rid of these and
-# still have the same pickle format.
+class FloatStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.float
 
-class DoubleStorage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class FloatStorage(FakeStorage):
-    pass
+class HalfStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.half
 
-class HalfStorage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class LongStorage(FakeStorage):
-    pass
+class LongStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.long
 
-class IntStorage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class ShortStorage(FakeStorage):
-    pass
+class IntStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.int
 
-class CharStorage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class BoolStorage(FakeStorage):
-    pass
+class ShortStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.short
 
-class BFloat16Storage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class ComplexDoubleStorage(FakeStorage):
-    pass
+class CharStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.int8
 
-class ComplexFloatStorage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class QUInt8Storage(FakeStorage):
-    pass
+class BoolStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.bool
 
-class QInt8Storage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-class QInt32Storage(FakeStorage):
-    pass
+class BFloat16Storage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.bfloat16
 
-class QUInt4x2Storage(FakeStorage):
-    pass
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class ComplexDoubleStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.cdouble
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class ComplexFloatStorage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.cfloat
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class QUInt8Storage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.quint8
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class QInt8Storage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.qint8
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class QInt32Storage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.qint32
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+class QUInt4x2Storage(TypedStorage):
+    @property
+    def dtype(self):
+        return torch.quint4x2
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 _storage_classes = {
-    ByteStorage
+    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
+    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
+    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage,
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()

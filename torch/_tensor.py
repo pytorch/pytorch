@@ -88,6 +88,7 @@ class Tensor(torch._C._TensorBase):
                         self._backward_hooks)
                 else:
                     new_tensor = self.new_empty([])
+                    # TODO: Tensor.set_ needs to accept TypedStorage
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     if self.is_conj():
                         new_tensor = new_tensor.conj_physical()
@@ -108,6 +109,21 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.__reduce_ex__, relevant_args, self, proto)
         func, args = self._reduce_ex_internal(proto)
         return (_rebuild_from_type, (func, type(self), args, self.__dict__))
+
+    def storage(self):
+        r"""
+        storage() -> torch.Storage
+
+        Returns the underlying storage.
+        """
+        storage = self._storage()
+
+        if self.dtype != torch.uint8:
+            # If dtype is not byte, need to change it to the proper storage type
+            storage_name = torch.storage._dtype_to_pickle_storage_type_map()[self.dtype]
+            storage_class = eval(type(storage).__module__ + '.' + storage_name)
+            storage = storage_class(wrap_storage=storage)
+        return storage
 
     def _reduce_ex_internal(self, proto):
         if has_torch_function_unary(self):
@@ -178,7 +194,9 @@ class Tensor(torch._C._TensorBase):
         else:
             # TODO: Once we decide to break serialization FC, no longer
             # need to wrap with TypedStorage
-            args = (torch.storage.TypedStorage(self.storage(), self.dtype),
+            args = (torch.storage.TypedStorage(
+                        wrap_storage=self.storage(),
+                        dtype=self.dtype),
                     self.storage_offset(),
                     tuple(self.size()),
                     self.stride(),
