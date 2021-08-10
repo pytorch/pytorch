@@ -28,8 +28,8 @@ cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
-# libtorch_ios_nightly_build_20210810.zip
-ZIPFILE="libtorch_ios_nightly_build_$DATE.zip"
+# libtorch_lite_ios_nightly_1.10.0dev20210810.zip
+ZIPFILE="libtorch_lite_ios_nightly_1.10.0.dev$DATE.zip"
 cd ${ZIP_DIR}
 #for testing
 touch version.txt
