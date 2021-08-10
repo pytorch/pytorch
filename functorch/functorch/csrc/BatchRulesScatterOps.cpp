@@ -57,6 +57,46 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
 }
 
+Tensor ensure_has_bdim(const Tensor& tensor, bool has_bdim, int64_t batch_size) {
+  if (has_bdim) {
+    return tensor;
+  }
+  const auto sizes = tensor.sizes();
+  DimVector expanded_shape;
+  expanded_shape.reserve(sizes.size());
+  expanded_shape.emplace_back(batch_size);
+  expanded_shape.insert(expanded_shape.end(), sizes.begin(), sizes.end());
+  return tensor.expand(expanded_shape);
+}
+
+int64_t bdim_size(
+    const Tensor& a, optional<int64_t> a_bdim,
+    const Tensor& b, optional<int64_t> b_bdim,
+    const Tensor& c, optional<int64_t> c_bdim) {
+  if (a_bdim) {
+    return a.size(*a_bdim);
+  }
+  if (b_bdim) {
+    return b.size(*b_bdim);
+  }
+  if (c_bdim) {
+    return c.size(*c_bdim);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
+int64_t bdim_size(
+    const Tensor& a, optional<int64_t> a_bdim,
+    const Tensor& b, optional<int64_t> b_bdim) {
+  if (a_bdim) {
+    return a.size(*a_bdim);
+  }
+  if (b_bdim) {
+    return b.size(*b_bdim);
+  }
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     int64_t dim,
@@ -64,47 +104,70 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
     bool sparse_grad) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
+  auto batch_size = bdim_size(self, self_bdim, index, index_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
 
-  auto physical_dim = dim;
   if (self_logical_rank == 0) {
-    TORCH_CHECK(dim == 0 || dim == -1,
-        "Dimension out of range (expected to be in range of [-1, 0], but got ", dim, ")");
-    physical_dim = -1;
-  } else {
-    physical_dim = getPhysicalDim(self_, self_bdim.has_value(), dim);
-  }
-  if (!self_bdim) {
-    TORCH_INTERNAL_ASSERT(index_bdim);
-    DimVector expanded_shape(self_.sizes().begin(), self_.sizes().end());
-    expanded_shape.insert(expanded_shape.begin(), index_.size(0));
-    self_ = self_.expand(expanded_shape);
-    physical_dim += 1;
-  }
-  if (!index_bdim) {
-    TORCH_INTERNAL_ASSERT(self_bdim);
-    DimVector expanded_shape(index_.sizes().begin(), index_.sizes().end());
-    expanded_shape.insert(expanded_shape.begin(), self_.size(0));
-    index_ = index_.expand(expanded_shape);
-  }
-  // Ridiculous special case for scalar tensors
-  if (self_logical_rank == 1 && index_logical_rank == 0) {
-    index_ = index_.unsqueeze(-1);
-    auto result = at::gather(self_, physical_dim, index_, sparse_grad).squeeze(-1);
-    return std::make_tuple(result, 0);
-  }
-  if (self_logical_rank == 0 && index_logical_rank == 1) {
     self_ = self_.unsqueeze(-1);
   }
+  if (index_logical_rank == 0) {
+    index_ = index_.unsqueeze(-1);
+  }
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
+  auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
 
-  return std::make_tuple(at::gather(self_, physical_dim, index_, sparse_grad), 0);
+  auto result = at::gather(self_, physical_dim, index_, sparse_grad);
+  // result should have same shape as index
+  if (index_logical_rank == 0) {
+    result = result.squeeze(-1);
+  }
+  return std::make_tuple(result, 0);
+}
+
+std::tuple<Tensor,optional<int64_t>> gather_backward_batch_rule(
+    const Tensor& grad, optional<int64_t> grad_bdim,
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    bool sparse_grad) {
+  auto batch_size = bdim_size(grad, grad_bdim, self, self_bdim, index, index_bdim);
+  auto grad_ = moveBatchDimToFront(grad, grad_bdim);
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto index_ = moveBatchDimToFront(index, index_bdim);
+
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
+  auto grad_logical_rank = rankWithoutBatchDim(grad, grad_bdim);
+
+  if (grad_logical_rank == 0) {
+    grad_ = grad_.unsqueeze(-1);
+  }
+  if (self_logical_rank == 0) {
+    self_ = self_.unsqueeze(-1);
+  }
+  if (index_logical_rank == 0) {
+    index_ = index_.unsqueeze(-1);
+  }
+  grad_ = ensure_has_bdim(grad_, grad_bdim.has_value(), batch_size);
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  index_ = ensure_has_bdim(index_, index_bdim.has_value(), batch_size);
+
+  auto physical_dim = getPhysicalDim(self_, /*has_batch_dim*/true, dim);
+  auto result = at::gather_backward(grad_, self_, physical_dim, index_, sparse_grad);
+  // result should has same shape as self
+  if (self_logical_rank == 0) {
+    result = result.squeeze(-1);
+  }
+  return std::make_tuple(result, 0);
 }
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     // m.impl("index.Tensor", index_plumbing);
   VMAP_SUPPORT("gather", gather_batch_rule);
+  VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
 }
 
 }}
