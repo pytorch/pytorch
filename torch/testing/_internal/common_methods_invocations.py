@@ -1798,17 +1798,16 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_cat_concat(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    tensors = [
-        make_arg((S, S)),
-        make_arg((S, S)),
-        make_arg((S, S)),
-    ]
-
-    dim_cases = (-1, 0, 1)
+    cases = (
+            ((S, S), {'dim': 1}),
+            ((1, 2, 3), {'dim': -1}),
+            ((0,), {'dim': 0}),  # empty tensor
+            ((1,), {})  # dim not passed, fallback to default
+    )
 
     def generator():
-        for dim in dim_cases:
-            yield SampleInput(tensors, args=(dim,))
+        for input_shape, kwargs in cases:
+            yield SampleInput([make_arg(input_shape), make_arg(input_shape)], kwargs=kwargs)
 
     return list(generator())
 
@@ -7558,14 +7557,17 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/58507
                SkipInfo('TestJit', 'test_variant_consistency_jit'),),),
     OpInfo('cat',
-           ref=np.concatenate,
+           ref=lambda input_seq, dim=0, **kwargs: np.concatenate(input_seq, axis=dim, **kwargs),
            aliases=('concat',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_cat_concat,
            supports_forward_ad=True,
+           assert_autodiffed=True,
            skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-               SkipInfo('TestJit', 'test_jit_alias_remapping'))),
+               # RuntimeError: Arguments for call not valid.
+               #               Expected a value of type 'List[Tensor]' for argument
+               #               'tensors' but instead found type 'Tensor (inferred)'.
+               SkipInfo('TestJit', 'test_jit_alias_remapping'),)),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
