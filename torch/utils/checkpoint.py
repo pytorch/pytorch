@@ -346,7 +346,7 @@ class Checkpoint(torch.nn.Module):
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
                         try:
-                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack,inner_unpack)
+                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, inner_unpack)
                             y = self.function(*args)
                         finally:
                             torch.autograd.graph.reset_saved_tensors_default_hooks()

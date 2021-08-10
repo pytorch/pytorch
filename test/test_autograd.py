@@ -4551,7 +4551,7 @@ for shape in [(1,), ()]:
         self.assertEqual(b_grad, c_grad)
         self.assertEqual(b_grad, d_grad)
 
-    def test_checkpointing_with_dataparallel(self):
+    def test_checkpointing_with_hooks_dataparallel(self):
         a = torch.randn(20, 20, requires_grad=True)
 
         b = torch.exp(a).sum()
@@ -4564,6 +4564,26 @@ for shape in [(1,), ()]:
         c_grad = a.grad
 
         self.assertEqual(b_grad, c_grad)
+
+    def test_checkpointing_with_hooks_parameter_used_in_an_out(self):
+        w = torch.randn(10, 10, requires_grad=True)
+
+        warnings.simplefilter('always')
+
+        def hook(grad):
+            warnings.warn("hook")
+
+        w.register_hook(hook)
+
+        x = torch.rand(10, 10, requires_grad=True)
+
+        h = w * x  # Using w outisde the checkpoint
+        out = Checkpoint(lambda x: w * x)(h)  # Using w inside the checkpoint
+
+        with warnings.catch_warnings(record=True) as w:
+            out.sum().backward()
+            # should only call hook once
+            self.assertEqual(len(w), 2)
 
     def test_callback_adds_callback(self):
         called = [0]
