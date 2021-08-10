@@ -8311,8 +8311,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_dropout,
         gradcheck_wrapper=gradcheck_wrapper_set_seed,
         supports_forward_ad=True,
-        inplace_variant=partial(torch.nn.functional.dropout, inplace=True),
-  OpInfo(
+        inplace_variant=partial(torch.nn.functional.dropout, inplace=True)),
+    OpInfo(
         "nn.functional.one_hot",
         ref=reference_one_hot,
         supports_out=False,
