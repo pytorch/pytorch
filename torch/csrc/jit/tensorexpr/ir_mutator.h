@@ -57,52 +57,51 @@ class ExternalCall;
 class TORCH_API IRMutator {
  public:
   virtual ~IRMutator() = default;
-  virtual const Expr* mutate(const Add* v);
-  virtual const Expr* mutate(const Sub* v);
-  virtual const Expr* mutate(const Mul* v);
-  virtual const Expr* mutate(const Div* v);
-  virtual const Expr* mutate(const Mod* v);
-  virtual const Expr* mutate(const Max* v);
-  virtual const Expr* mutate(const Min* v);
-  virtual const Expr* mutate(const And* v);
-  virtual const Expr* mutate(const Or* v);
-  virtual const Expr* mutate(const Xor* v);
-  virtual const Expr* mutate(const Lshift* v);
-  virtual const Expr* mutate(const Rshift* v);
-  virtual const Expr* mutate(const CompareSelect* v);
-#define IMM_MUTATE_DECLARE(Type, Name) \
-  virtual const Expr* mutate(const Name##Imm* v);
+  virtual Expr* mutate(Add* v);
+  virtual Expr* mutate(Sub* v);
+  virtual Expr* mutate(Mul* v);
+  virtual Expr* mutate(Div* v);
+  virtual Expr* mutate(Mod* v);
+  virtual Expr* mutate(Max* v);
+  virtual Expr* mutate(Min* v);
+  virtual Expr* mutate(And* v);
+  virtual Expr* mutate(Or* v);
+  virtual Expr* mutate(Xor* v);
+  virtual Expr* mutate(Lshift* v);
+  virtual Expr* mutate(Rshift* v);
+  virtual Expr* mutate(CompareSelect* v);
+#define IMM_MUTATE_DECLARE(Type, Name) virtual Expr* mutate(Name##Imm* v);
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
-  virtual const Expr* mutate(const Cast* v);
-  virtual const Expr* mutate(const BitCast* v);
-  virtual const Expr* mutate(const Var* v);
-  virtual const Expr* mutate(Buf* v);
-  virtual const Expr* mutate(const Ramp* v);
-  virtual const Expr* mutate(const Load* v);
-  virtual const Expr* mutate(const Broadcast* v);
-  virtual const Expr* mutate(const IfThenElse* v);
-  virtual const Expr* mutate(const Intrinsics* v);
+  virtual Expr* mutate(Cast* v);
+  virtual Expr* mutate(BitCast* v);
+  virtual Expr* mutate(Var* v);
+  virtual Expr* mutate(Buf* v);
+  virtual Expr* mutate(Ramp* v);
+  virtual Expr* mutate(Load* v);
+  virtual Expr* mutate(Broadcast* v);
+  virtual Expr* mutate(IfThenElse* v);
+  virtual Expr* mutate(Intrinsics* v);
 
-  virtual const Expr* mutate(const Term* v);
-  virtual const Expr* mutate(const Polynomial* v);
-  virtual const Expr* mutate(const RoundOff* v);
-  virtual const Expr* mutate(const MaxTerm* v);
-  virtual const Expr* mutate(const MinTerm* v);
+  virtual Expr* mutate(Term* v);
+  virtual Expr* mutate(Polynomial* v);
+  virtual Expr* mutate(RoundOff* v);
+  virtual Expr* mutate(MaxTerm* v);
+  virtual Expr* mutate(MinTerm* v);
 
-  virtual const Expr* mutate(const ReduceOp* v);
+  virtual Expr* mutate(ReduceOp* v);
 
-  virtual Stmt* mutate(const For* v);
-  virtual Stmt* mutate(const Block* v);
-  virtual Stmt* mutate(const Store* v);
-  virtual Stmt* mutate(const AtomicAdd* v);
-  virtual Stmt* mutate(const SyncThreads* v);
-  virtual Stmt* mutate(const ExternalCall* v);
+  virtual Stmt* mutate(For* v);
+  virtual Stmt* mutate(Block* v);
+  virtual Stmt* mutate(Store* v);
+  virtual Stmt* mutate(AtomicAdd* v);
+  virtual Stmt* mutate(SyncThreads* v);
+  virtual Stmt* mutate(ExternalCall* v);
 
-  virtual Stmt* mutate(const Allocate* v);
-  virtual Stmt* mutate(const Free* v);
-  virtual Stmt* mutate(const Let* v);
-  virtual Stmt* mutate(const Cond* v);
+  virtual Stmt* mutate(Allocate* v);
+  virtual Stmt* mutate(Free* v);
+  virtual Stmt* mutate(Let* v);
+  virtual Stmt* mutate(Cond* v);
 };
 
 } // namespace tensorexpr
