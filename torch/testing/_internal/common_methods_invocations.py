@@ -4815,6 +4815,13 @@ def reference_mvlgamma(x, d):
     return scipy.special.multigammaln(x, d)
 
 
+def gradcheck_wrapper_set_seed(op, input, *args, **kwargs):
+    """Gradcheck wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(input, *args, **kwargs)
+
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
     """Gradcheck wrapper for functions that take Hermitian matrices as input.
 
@@ -7893,6 +7900,8 @@ op_db: List[OpInfo] = [
         supports_out=False,
         dtypes=floating_types(),
         sample_inputs_func=sample_inputs_dropout,
+        gradcheck_wrapper=gradcheck_wrapper_set_seed,
+        supports_forward_ad=True,
         inplace_variant=partial(torch.nn.functional.dropout, inplace=True),
     ),
 ]
