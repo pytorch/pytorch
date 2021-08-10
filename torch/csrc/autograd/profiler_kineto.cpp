@@ -54,8 +54,13 @@ static inline uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
 }
 
 struct KinetoThreadLocalState : public ProfilerThreadLocalState {
-  explicit KinetoThreadLocalState(const ProfilerConfig& config)
-    : ProfilerThreadLocalState(config) {
+  explicit KinetoThreadLocalState(const ProfilerConfig& config, bool is_service = false, bool is_waiting = false, bool init = true)
+    : ProfilerThreadLocalState(config), is_service_(is_service), is_waiting_(is_waiting) {
+    if(init) initState();
+  }
+  ~KinetoThreadLocalState() override = default;
+
+  void initState() {
     start_time_ = getTimeUs();
 #ifdef USE_KINETO
     cpu_trace = std::make_unique<libkineto::CpuTraceBuffer>();
@@ -64,71 +69,82 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     cpu_trace->span.name = "PyTorch Profiler";
 #endif // USE_KINETO
   }
-  ~KinetoThreadLocalState() override = default;
+
+  void setConfig(const ProfilerConfig& config) {
+    config_ = config;
+  }
+
+  void setIsWaiting(bool is_waiting) {
+    is_waiting_ = is_waiting;
+  }
 
   void reportClientActivity(
       const std::string& evt_name,
+      const uint64_t comm_id,
       const bool is_async,
       const KinetoObserverContext* ctx) {
-    if (!ctx) {
-      return;
-    }
-    auto end_time = ctx->endUS;
+    if (is_service_) service_client_mutex_.lock();
+    if (ctx && !is_waiting_) {
+      auto end_time = ctx->endUS;
 #ifdef USE_KINETO
-    libkineto::GenericTraceActivity op(
-        cpu_trace->span,
-        libkineto::ActivityType::CPU_OP,
-        evt_name);
-    op.device = libkineto::processId();
-    op.resource = libkineto::systemThreadId();
-    op.id = ctx->correlationId;
-    op.startTime = ctx->startUs;
-    op.endTime = end_time;
-    // optimization - postpone shapesToStr till finalizeCPUTrace
-    // is called from disableProfiler
-    // if (ctx->shapes && !ctx->shapes->empty()) {
-    //   op.inputDims = shapesToStr(*ctx->shapes);
-    // }
+      libkineto::GenericTraceActivity op(
+          cpu_trace->span,
+          libkineto::ActivityType::CPU_OP,
+          evt_name);
+      op.device = libkineto::processId();
+      op.resource = libkineto::systemThreadId();
+      op.id = ctx->correlationId;
+      op.startTime = ctx->startUs;
+      op.endTime = end_time;
+      // optimization - postpone shapesToStr till finalizeCPUTrace
+      // is called from disableProfiler
+      // if (ctx->shapes && !ctx->shapes->empty()) {
+      //   op.inputDims = shapesToStr(*ctx->shapes);
+      // }
+      if(comm_id > 0) op.addMetadata("Communication Id", std::to_string(comm_id));
 
-    libkineto::api().activityProfiler().recordThreadInfo();
+      libkineto::api().activityProfiler().recordThreadInfo();
 #endif // USE_KINETO
-    {
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      kineto_events_.emplace_back();
-      kineto_events_.back()
-          .name(evt_name)
-          .startUs(ctx->startUs)
-          .durationUs(end_time - ctx->startUs)
-          .correlationId(ctx->correlationId)
-          .deviceType(c10::DeviceType::CPU)
-          .startThreadId(ctx->startThreadId)
-          .endThreadId(ctx->endThreadId)
-          .sequenceNr(ctx->sequenceNr)
-          .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope)
-          .setAsync(is_async)
-          .debugHandle(ctx->debug_handle);
-      if (ctx->shapes && !ctx->shapes->empty()) {
-        kineto_events_.back().shapes(*ctx->shapes);
-      }
-      if (ctx->dtypes && !ctx->dtypes->empty()) {
-        kineto_events_.back().dtypes(*ctx->dtypes);
-      }
-      if (ctx->stack && !ctx->stack->empty()) {
-        kineto_events_.back().stack(*ctx->stack);
-      }
-      if (ctx->module_hierarchy) {
-        kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
-      }
-      if (ctx->extraArgs && !ctx->extraArgs->empty()) {
-        kineto_events_.back().flops(computeFlops(std::string(evt_name), *ctx->extraArgs));
-      }
-      kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
-      kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
+      {
+        std::lock_guard<std::mutex> guard(state_mutex_);
+        kineto_events_.emplace_back();
+        kineto_events_.back()
+            .name(evt_name)
+            .startUs(ctx->startUs)
+            .durationUs(end_time - ctx->startUs)
+            .correlationId(ctx->correlationId)
+            .deviceType(c10::DeviceType::CPU)
+            .startThreadId(ctx->startThreadId)
+            .endThreadId(ctx->endThreadId)
+            .sequenceNr(ctx->sequenceNr)
+            .fwdThreadId(ctx->fwdThreadId)
+            .scope(ctx->recFunScope)
+            .setAsync(is_async)
+            .debugHandle(ctx->debug_handle);
+        if (ctx->shapes && !ctx->shapes->empty()) {
+          kineto_events_.back().shapes(*ctx->shapes);
+        }
+        if (ctx->dtypes && !ctx->dtypes->empty()) {
+          kineto_events_.back().dtypes(*ctx->dtypes);
+        }
+        if (ctx->stack && !ctx->stack->empty()) {
+          kineto_events_.back().stack(*ctx->stack);
+        }
+        if (ctx->module_hierarchy) {
+          kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
+        }
+        if (ctx->extraArgs && !ctx->extraArgs->empty()) {
+          kineto_events_.back().flops(computeFlops(std::string(evt_name), *ctx->extraArgs));
+        }
+        kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
+        kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
 #ifdef USE_KINETO
-      cpu_trace->activities.emplace_back(std::move(op));
+        cpu_trace->activities.emplace_back(std::move(op));
 #endif // USE_KINETO
+      }
     }
+    
+    if (is_service_) service_client_mutex_.unlock();
   }
 
   // TODO: use kineto
@@ -138,7 +154,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       int64_t total_allocated,
       int64_t total_reserved,
       c10::Device device) override {
-    if (config_.profile_memory && config_.state != ProfilerState::Disabled) {
+    if (is_service_) service_memory_mutex_.lock();
+    if (config_.profile_memory && config_.state != ProfilerState::Disabled && !is_waiting_) {
       std::lock_guard<std::mutex> guard(state_mutex_);
       auto start_time = getTimeUs();
 #ifdef USE_KINETO
@@ -176,6 +193,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
           .nBytes(alloc_size)
           .startThreadId(at::RecordFunction::currentThreadId());
     }
+    if (is_service_) service_memory_mutex_.unlock();
   }
 
   const std::function<void(std::vector<KinetoEvent>&)>& getEventPostProcessingCallback() const {
@@ -319,6 +337,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   std::vector<KinetoEvent> kineto_events_;
   // Optional, if event post-processing is enabled.
   std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
+  
+  const bool is_service_;
+  bool is_waiting_;
+  std::mutex service_client_mutex_;
+  std::mutex service_memory_mutex_;
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -354,7 +377,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr) {
+        if (!state_ptr || state_ptr->is_waiting_) {
           return nullptr;
         }
         const auto& config = state_ptr->config();
@@ -420,7 +443,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
       },
       [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
         auto state_ptr = getProfilerTLSState();
-        if (!state_ptr) {
+        if (!state_ptr || (state_ptr->is_service_ && !ctx_ptr)) {
           return;
         }
         const auto& config = state_ptr->config();
@@ -441,7 +464,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           }
 
           kineto_ctx_ptr->endUS = getTimeUs();
-          state_ptr->reportClientActivity(fn.name().str(), fn.isAsync(), kineto_ctx_ptr);
+          state_ptr->reportClientActivity(fn.name().str(), fn.commId(), fn.isAsync(), kineto_ctx_ptr);
 #ifdef USE_KINETO
           libkineto::api().activityProfiler().popCorrelationId();
 #endif // USE_KINETO
@@ -540,7 +563,7 @@ void reportBackendEventToActiveKinetoProfiler(
   ctx_ptr->startUs = start_time_us;
   ctx_ptr->endUS = end_time_us;
   ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
-  state_ptr->reportClientActivity(event_name, false, ctx_ptr.get());
+  state_ptr->reportClientActivity(event_name, 0, false, ctx_ptr.get());
   state_ptr->kineto_events_.back().backend(backend_name);
 }
 
@@ -602,6 +625,18 @@ void enableProfilerWithEventPostProcess(
   state_ptr->setEventPostProcessingCallback(std::move(cb));
 }
 
+void useMainTLS(const at::ThreadLocalState& main_TLS) {
+  at::ThreadLocalStateGuard g(main_TLS);
+}
+
+void initThreadLocalState(const std::unordered_set<at::RecordScope>& scopes) {
+  auto state_ptr = getProfilerTLSState();
+  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+  auto state = std::make_shared<KinetoThreadLocalState>(ProfilerConfig(ProfilerState::Disabled), true, true, false);
+  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+  pushProfilingCallbacks(scopes);
+}
+
 void enableProfiler(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
@@ -615,14 +650,22 @@ void enableProfiler(
     TORCH_CHECK(cudaStubs()->enabled(),
         "Can't use NVTX profiler - PyTorch was compiled without CUDA");
   }
-
+  
   auto state_ptr = getProfilerTLSState();
-  TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
-  auto state = std::make_shared<KinetoThreadLocalState>(config);
-  c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
+  if(state_ptr && state_ptr->is_service_) {
+    auto state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
+    auto state_ptr = static_cast<KinetoThreadLocalState*>(state.get());
+    state_ptr->initState();
+    state_ptr->setConfig(config);
+    state_ptr->setIsWaiting(false);
+  } else {
+    TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
+    auto state = std::make_shared<KinetoThreadLocalState>(config);
+    c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
 
-  if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
-    pushProfilingCallbacks(scopes);
+    if (activities.count(ActivityType::CPU) || config.state == ProfilerState::NVTX) {
+      pushProfilingCallbacks(scopes);
+    }
   }
 
 #ifdef USE_KINETO
@@ -634,9 +677,10 @@ void enableProfiler(
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
-  auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
-
+  auto state = c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
   auto state_ptr = static_cast<KinetoThreadLocalState*>(state.get());
+  if (!state_ptr->is_service_) c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
+
   const auto& config = state_ptr->config();
   TORCH_CHECK(state_ptr && (
       config.state == ProfilerState::KINETO ||
@@ -644,35 +688,47 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
       config.state == ProfilerState::NVTX),
       "Can't disable Kineto profiler when it's not running");
 
-  if (state_ptr->hasCallbackHandle()) {
+  if (!state_ptr->is_service_ && state_ptr->hasCallbackHandle()) {
     at::removeCallback(state_ptr->callbackHandle());
+  } else {
+    state_ptr->setIsWaiting(true);
   }
 
+  std::unique_ptr<ProfilerResult> result;
   if (state_ptr->config().state == ProfilerState::NVTX) {
-    return std::make_unique<ProfilerResult>();
-  }
-
+    result = std::make_unique<ProfilerResult>();
+  } else {
+    if (state_ptr->is_service_) {
+      state_ptr->service_client_mutex_.lock();
+      state_ptr->service_memory_mutex_.lock();
+    }
 #ifdef USE_KINETO
-  state_ptr->cpu_trace->span.endTime = getTimeUs();
+    state_ptr->cpu_trace->span.endTime = getTimeUs();
 
-  // Call events post processing callback before finalizing trace, if there is one.
-  if (state_ptr->getEventPostProcessingCallback()) {
-    state_ptr->getEventPostProcessingCallback()(state_ptr->kineto_events_);
-  }
-  state_ptr->finalizeCPUTrace();
-  libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
+    // Call events post processing callback before finalizing trace, if there is one.
+    if (state_ptr->getEventPostProcessingCallback()) {
+      state_ptr->getEventPostProcessingCallback()(state_ptr->kineto_events_);
+    }
+    state_ptr->finalizeCPUTrace();
+    libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
 
-  auto trace = libkineto::api().activityProfiler().stopTrace();
-  TORCH_CHECK(trace);
-  state_ptr->addTraceEvents(*trace);
-  return std::make_unique<ProfilerResult>(
-      state_ptr->start_time_,
-      std::move(state_ptr->kineto_events_),
-      std::move(trace));
+    auto trace = libkineto::api().activityProfiler().stopTrace();
+    TORCH_CHECK(trace);
+    state_ptr->addTraceEvents(*trace);
+    result = std::make_unique<ProfilerResult>(
+        state_ptr->start_time_,
+        std::move(state_ptr->kineto_events_),
+        std::move(trace));
 #else
-  return std::make_unique<ProfilerResult>(
-      std::move(state_ptr->kineto_events_));
+    result = std::make_unique<ProfilerResult>(
+        std::move(state_ptr->kineto_events_));
 #endif // USE_KINETO
+    if (state_ptr->is_service_) {
+      state_ptr->service_client_mutex_.unlock();
+      state_ptr->service_memory_mutex_.unlock();
+    }
+  }
+  return result;
 }
 
 void addMetadataJson(const std::string& key, const std::string& value) {

@@ -1,8 +1,10 @@
 import contextlib
 import io
+import os
 import logging
 import os
 import pickle
+import socket
 import time
 import warnings
 from datetime import timedelta
@@ -553,6 +555,7 @@ def init_process_group(
     elif init_method is None:
         init_method = "env://"
 
+    master_host = None
     backend = Backend(backend)
 
     if backend == Backend.MPI:
@@ -573,7 +576,7 @@ def init_process_group(
             rendezvous_iterator = rendezvous(
                 init_method, rank, world_size, timeout=timeout
             )
-            store, rank, world_size = next(rendezvous_iterator)
+            store, rank, world_size, master_host = next(rendezvous_iterator)
             store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
@@ -609,7 +612,23 @@ def init_process_group(
         # Set sequence numbers for gloo and nccl process groups.
         if get_backend(default_pg) in [Backend.GLOO, Backend.NCCL]:
             default_pg._set_sequence_number_for_group()
+    
+    if os.environ.get('ENABLE_SERVICE') == 'TRUE':
+        from torch.profiler._service import Listener, BASE_PORT
+        host = 'localhost' if socket.gethostbyname(master_host) in ['127.0.0.1', get_local_ip()] else '0.0.0.0'
+        listener = Listener(host, BASE_PORT + rank if rank >= 0 else BASE_PORT, False, master_host)
+        listener.open()
 
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.255.255.255', 1))
+        IP = s.getsockname()[0]
+    except Exception:
+        IP = '127.0.0.1'
+    finally:
+        s.close()
+    return IP
 
 def _new_process_group_helper(
     world_size,

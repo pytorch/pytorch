@@ -20,6 +20,7 @@
 #include <torch/csrc/autograd/python_mode.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
+#include <ATen/ThreadLocalState.h>
 
 #include <set>
 #include <unordered_set>
@@ -228,10 +229,24 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
 #endif // USE_KINETO
     ;
 
+  py::class_<at::ThreadLocalState>(m, "_ThreadLocalState")
+    .def(py::init<>());
+  
+  py::class_<at::ThreadLocalStateGuard>(m, "_ThreadLocalStateGuard")
+    .def(py::init<at::ThreadLocalState&>());
+  
+  py::class_<at::ThreadLocalStateManualGuard>(m, "_ThreadLocalStateManualGuard")
+    .def(py::init<at::ThreadLocalState&>())
+    .def("destruct_guard", &at::ThreadLocalStateManualGuard::DestructGuard);
+
   m.def("_enable_profiler",
         &enableProfiler,
         py::arg("config"),
         py::arg("activities"),
+        py::arg("scopes") = std::unordered_set<at::RecordScope>());
+  m.def("_use_main_TLS", useMainTLS);
+  m.def("_init_kineto_TLS", 
+        &initThreadLocalState,
         py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
   m.def("_prepare_profiler", prepareProfiler);

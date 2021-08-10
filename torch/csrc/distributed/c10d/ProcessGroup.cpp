@@ -77,6 +77,9 @@ ProcessGroup::Work::Work(
         }
       }
       recordingFunction->before(profilingTitle, inputs);
+      // Assume all communication operators are called serially
+      static uint64_t comm_id = 0;
+      recordingFunction->setCommId(++comm_id);
       std::function<void()> end_handler = [this, recordingFunction]() {
         recordingFunction->end();
       };

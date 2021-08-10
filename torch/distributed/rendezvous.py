@@ -121,7 +121,7 @@ def _file_rendezvous_handler(url: str, **kwargs):
     rank = int(query["rank"])
     world_size = int(query["world_size"])
     store = FileStore(path, world_size)
-    yield (store, rank, world_size)
+    yield (store, rank, world_size, None)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform rerendezvous using file:// method")
@@ -182,7 +182,7 @@ def _tcp_rendezvous_handler(
 
     store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout)
 
-    yield (store, rank, world_size)
+    yield (store, rank, world_size, result.hostname)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform re-rendezvous using tcp:// method")
@@ -228,7 +228,7 @@ def _env_rendezvous_handler(
 
     store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout)
 
-    yield (store, rank, world_size)
+    yield (store, rank, world_size, master_addr)
 
     # If this configuration is invalidated, there is nothing we can do about it
     raise RuntimeError("Unable to perform re-rendezvous using env:// method")

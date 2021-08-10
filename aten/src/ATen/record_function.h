@@ -276,6 +276,16 @@ struct TORCH_API RecordFunction {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setDebugHandle() on inactive RecordFunction");
     state_->debug_handle_ = debug_handle;
   }
+  
+  uint64_t commId() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called commId() on inactive RecordFunction");
+    return state_->comm_id_;
+  }
+
+  void setCommId(uint64_t comm_id) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setCommId() on inactive RecordFunction");
+    state_->comm_id_ = comm_id;
+  }
 
  private:
 
@@ -344,6 +354,10 @@ struct TORCH_API RecordFunction {
     // This is specifically is useful for mobile runtime, where generated
     // debug handles can be lazily symbolicated using debug information
     int64_t debug_handle_{-1};
+    
+    // The id for communication operator, used to associate communication
+    // operators across different devices.
+    uint64_t comm_id_ = 0;
   };
 
   std::unique_ptr<State> state_;

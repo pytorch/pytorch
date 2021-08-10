@@ -2,6 +2,7 @@
 
 #include <torch/csrc/autograd/profiler_legacy.h>
 #include <vector>
+#include <ATen/ThreadLocalState.h>
 
 #ifdef USE_KINETO
 // skip Kineto dependency on mobile
@@ -372,6 +373,10 @@ TORCH_API void reportBackendEventToActiveKinetoProfiler(
     const at::RecordScope scope,
     const std::string& event_name,
     const std::string& backend_name);
+
+TORCH_API void useMainTLS(const at::ThreadLocalState& main_TLS);
+
+TORCH_API void initThreadLocalState(const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API void enableProfiler(
     const ProfilerConfig& config,
