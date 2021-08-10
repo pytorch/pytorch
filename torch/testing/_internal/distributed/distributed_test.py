@@ -7874,6 +7874,7 @@ class DistributedTest:
                 device_ids=[self.rank]
             )
             inp = torch.randn(10, 2)
+            rebuilt_bucket_index = 2
             for i in range(6):
                 out = ddp(inp).sum()
                 out.backward()
@@ -7881,9 +7882,9 @@ class DistributedTest:
                 bucket_size_limits = [
                     int(b) for b in logging_data[
                         "{}_bucket_size_limits".format(
-                            "initial" if i < 2 else "rebuilt"
+                            "initial" if i < rebuilt_bucket_index else "rebuilt"
                         )
-                        ].split(", ")
+                    ].split(", ")
                 ]
                 # first_bucket_bytes is actually the last because we reverse
                 # parameter bucket order under DDP_SET_LAST_BUCKET_CAP flag.
