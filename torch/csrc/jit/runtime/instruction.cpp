@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <cstring>
 #include <iostream>
@@ -64,7 +65,7 @@ static constexpr const char* strOpCode[] = {
 
 OpCode parseOpCode(const char* str) {
   const int n = sizeof(strOpCode) / sizeof(strOpCode[0]);
-  for (int i = 0; i < n; ++i) {
+  for (const auto i : c10::irange(n)) {
     if (strcmp(strOpCode[i], str) == 0)
       return (OpCode)i;
   }
