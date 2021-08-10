@@ -288,7 +288,7 @@ class TestReductions(TestCase):
         for args, kwargs in op.generate_args_kwargs(t, dim=0):
             res = op(t, *args, **kwargs)
             ref = op.reference(t, *args, **kwargs)
-            self.assertEqual(res, ref, exact_device=False)
+            self.assertEqual(res, ref, exact_dtype=False)
 
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
@@ -303,7 +303,7 @@ class TestReductions(TestCase):
                 for args, kwargs in op.generate_args_kwargs(t, dim=dim):
                     res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
                     ref = op.reference(t, *args, dim=dim, keepdim=keepdim, **kwargs)
-                    self.assertEqual(res, ref, exact_device=False)
+                    self.assertEqual(res, ref, exact_dtype=False)
 
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
@@ -313,7 +313,7 @@ class TestReductions(TestCase):
         for args, kwargs in op.generate_args_kwargs(t):
             res = op(t, *args, **kwargs)
             ref = op.reference(t, *args, **kwargs)
-            self.assertEqual(res, ref, atol=1e-03, rtol=1e-03, exact_device=False)
+            self.assertEqual(res, ref, atol=1e-03, rtol=1e-03, exact_dtype=False)
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
