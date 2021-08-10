@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -162,8 +163,7 @@ struct CodeImpl {
 
   void request_bailout(size_t index) {
     auto count = index;
-    for (size_t instr_index = 0; instr_index < instructions_.size();
-         instr_index++) {
+    for (const auto instr_index : c10::irange(instructions_.size())) {
       if (instructions_[instr_index].op == GUARD ||
           instructions_[instr_index].op == FAIL_GUARD) {
         if (count-- == 0) {
@@ -405,7 +405,7 @@ struct CodeImpl {
     // Emit the expected type.
     size_t types_start = type_table_.size();
     auto types = node->tys(attr::types);
-    for (size_t i = 0; i < num_inputs; i++) {
+    for (const auto i : c10::irange(num_inputs)) {
       emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
@@ -702,7 +702,7 @@ struct CodeImpl {
 
   void dump(std::ostream& out) const {
     out << *graph_ << "\n";
-    for (size_t i = 0; i < instructions_.size(); ++i) {
+    for (const auto i : c10::irange(instructions_.size())) {
       dump(out, i);
     }
   }
