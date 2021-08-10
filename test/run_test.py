@@ -233,7 +233,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
 ]
