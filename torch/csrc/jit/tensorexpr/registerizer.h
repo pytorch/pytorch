@@ -23,7 +23,7 @@ For example it can replace:
 
 {
   A[0] = 0;
-  for(const auto x : c10::irange(10)) {
+  for(auto x : c10::irange(10)) {
     A[0] = (A[0]) + x;
   }
 }
@@ -32,7 +32,7 @@ with:
 
 {
   int A_ = 0;
-  for(const auto x : c10::irange(10)) {
+  for(auto x : c10::irange(10)) {
     A_ = x + A_;
   }
   A[0] = A_;
@@ -54,8 +54,8 @@ class AccessInfo {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   AccessInfo(
       SimplifierHashType h,
-      const Buf* b,
-      std::vector<const Expr*> i,
+      Buf* b,
+      std::vector<Expr*> i,
       size_t accessOrder)
       : hash_(h),
         buf_(b),
@@ -65,14 +65,11 @@ class AccessInfo {
         accessOrder_(accessOrder) {}
 
   // Adds a Store to this access, which is in the provided scope.
-  void addStore(const Store* store, const std::shared_ptr<Scope>& scope);
+  void addStore(Store* store, const std::shared_ptr<Scope>& scope);
 
   // Adds a Load to this access, which occurs in the usage Stmt in the provided
   // scope.
-  void addLoad(
-      const Load* load,
-      const std::shared_ptr<Scope>& scope,
-      const Stmt* usage);
+  void addLoad(Load* load, const std::shared_ptr<Scope>& scope, Stmt* usage);
 
   // Merge another AccessInfo into this one.
   void merge(const std::shared_ptr<AccessInfo>& other);
@@ -81,7 +78,7 @@ class AccessInfo {
   bool overlaps(const std::shared_ptr<AccessInfo>& other);
 
   // Returns true if the indices of this access depend on the provided Var.
-  bool dependsOnVar(const Var* v);
+  bool dependsOnVar(Var* v);
 
   // Clone this AccessInfo, and set this as the new accesses' hiddenAccess.
   static std::shared_ptr<AccessInfo> cloneWithHiddenInfo(
@@ -94,30 +91,30 @@ class AccessInfo {
     return hash_;
   }
 
-  const Buf* buf() const {
+  Buf* buf() const {
     return buf_;
   }
 
-  const std::vector<const Expr*>& indices() const {
+  const std::vector<Expr*>& indices() const {
     return indices_;
   }
 
-  const Block* block() const {
+  Block* block() const {
     return block_;
   }
 
-  void setEnclosingBlock(const Block* b) {
+  void setEnclosingBlock(Block* b) {
     block_ = b;
   }
 
-  const Stmt* first_usage() const {
+  Stmt* first_usage() const {
     return first_usage_;
   }
-  const Stmt* last_usage() const {
+  Stmt* last_usage() const {
     return last_usage_;
   }
 
-  void setUsageMarks(const Stmt* first, const Stmt* last) {
+  void setUsageMarks(Stmt* first, Stmt* last) {
     first_usage_ = first;
     last_usage_ = last;
   }
@@ -126,23 +123,23 @@ class AccessInfo {
     return firstUsageOverlapped_;
   }
 
-  const Expr* store_cost() const {
+  Expr* store_cost() const {
     return store_cost_;
   }
 
-  const Expr* load_cost() const {
+  Expr* load_cost() const {
     return load_cost_;
   }
 
-  const std::vector<const Store*>& stores() const {
+  const std::vector<Store*>& stores() const {
     return stores_;
   }
 
-  const std::vector<const Load*>& loads() const {
+  const std::vector<Load*>& loads() const {
     return loads_;
   }
 
-  void hoistCosts(const Expr* extent) {
+  void hoistCosts(Expr* extent) {
     store_cost_ = IRSimplifier::simplify(new Mul(store_cost_, extent));
     load_cost_ = IRSimplifier::simplify(new Mul(load_cost_, extent));
   }
@@ -177,12 +174,12 @@ class AccessInfo {
 
  private:
   SimplifierHashType hash_;
-  const Buf* buf_;
-  std::vector<const Expr*> indices_;
-  const Block* block_{nullptr};
+  Buf* buf_;
+  std::vector<Expr*> indices_;
+  Block* block_{nullptr};
 
-  const Stmt* first_usage_{nullptr};
-  const Stmt* last_usage_{nullptr};
+  Stmt* first_usage_{nullptr};
+  Stmt* last_usage_{nullptr};
 
   // Whether or not this access is overlapped in the first Stmt it appears. This
   // means we cannot use it's first Store as the initializer.
@@ -190,13 +187,13 @@ class AccessInfo {
 
   // The cost in real ops that this access represents, to enable
   // filtering accesses that wont save any loads or stores.
-  const Expr* store_cost_;
-  const Expr* load_cost_;
+  Expr* store_cost_;
+  Expr* load_cost_;
 
   // The actual Stores and Loads which represent this access.
   // Be careful with these, any mutator will invalidate these pointers.
-  std::vector<const Store*> stores_;
-  std::vector<const Load*> loads_;
+  std::vector<Store*> stores_;
+  std::vector<Load*> loads_;
 
   // An identifier representing the conditional block, if any, this access
   // depends on.
@@ -222,12 +219,12 @@ using AccessHashMap =
 class Scope {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Scope(const Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
+  Scope(Block* b, std::shared_ptr<Scope> parent, size_t conditionId = 0)
       : block_(b), parent_(std::move(parent)), conditionId_(conditionId) {}
 
-  AccessHashMap& getAccessMapByBuf(const Buf* b);
+  AccessHashMap& getAccessMapByBuf(Buf* b);
 
-  std::unordered_map<const Buf*, AccessHashMap>& openAccesses() {
+  std::unordered_map<Buf*, AccessHashMap>& openAccesses() {
     return openAccesses_;
   }
 
@@ -235,7 +232,7 @@ class Scope {
     return closedAccesses_;
   }
 
-  const Block* block() const {
+  Block* block() const {
     return block_;
   }
 
@@ -247,10 +244,10 @@ class Scope {
     return conditionId_;
   }
 
-  const std::unordered_set<const Var*>& localVars() const {
+  const std::unordered_set<Var*>& localVars() const {
     return localVars_;
   }
-  void addLocalVar(const Var* v) {
+  void addLocalVar(Var* v) {
     localVars_.insert(v);
   }
 
@@ -264,11 +261,11 @@ class Scope {
   // overlap with other accesses to the same buf. Buf ->
   //    Hash ->
   //        Access
-  std::unordered_map<const Buf*, AccessHashMap> openAccesses_;
+  std::unordered_map<Buf*, AccessHashMap> openAccesses_;
   std::vector<std::shared_ptr<AccessInfo>> closedAccesses_;
 
   // The Block object this scope represents.
-  const Block* block_;
+  Block* block_;
 
   // The enclosing scope object.
   std::shared_ptr<Scope> parent_;
@@ -277,7 +274,7 @@ class Scope {
   size_t conditionId_;
 
   // A set of variables local to this scope (e.g. loop vars).
-  std::unordered_set<const Var*> localVars_;
+  std::unordered_set<Var*> localVars_;
 };
 
 /* Analyzes the graph and collects accesses to the same symbolic tensor element
@@ -323,25 +320,25 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
       : currentScope_(std::make_shared<Scope>(nullptr, nullptr, 0)) {}
   ~RegisterizerAnalysis() override = default;
 
-  void visit(const For* v) override;
+  void visit(For* v) override;
 
-  void visit(const Cond* v) override;
+  void visit(Cond* v) override;
 
-  void visit(const Block* v) override;
+  void visit(Block* v) override;
 
-  void visit(const Store* v) override;
+  void visit(Store* v) override;
 
-  void visit(const Load* v) override;
+  void visit(Load* v) override;
 
-  void visit(const IfThenElse* v) override;
+  void visit(IfThenElse* v) override;
 
-  void visit(const Let* v) override;
+  void visit(Let* v) override;
 
-#define STMT_ON_STACK(Op)            \
-  void visit(const Op* v) override { \
-    stmtStack_.push_front(v);        \
-    IRVisitor::visit(v);             \
-    stmtStack_.pop_front();          \
+#define STMT_ON_STACK(Op)      \
+  void visit(Op* v) override { \
+    stmtStack_.push_front(v);  \
+    IRVisitor::visit(v);       \
+    stmtStack_.pop_front();    \
   }
 
   STMT_ON_STACK(AtomicAdd);
@@ -362,7 +359,7 @@ class TORCH_API RegisterizerAnalysis : public IRVisitor {
   std::unordered_set<size_t> exprConditionals_;
 
   // A stack of enclosing Stmts for tracking the usage Stmt of Loads.
-  std::deque<const Stmt*> stmtStack_;
+  std::deque<Stmt*> stmtStack_;
 
   // The current scope being analyzed.
   std::shared_ptr<Scope> currentScope_;
@@ -384,17 +381,17 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
     buildReplacements();
   }
 
-  const Expr* mutate(const Load* v) override;
+  Expr* mutate(Load* v) override;
 
-  Stmt* mutate(const Store* v) override;
+  Stmt* mutate(Store* v) override;
 
-  Stmt* mutate(const Block* v) override;
+  Stmt* mutate(Block* v) override;
 
  private:
   struct ReplacerScope {
-    std::unordered_map<const Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
+    std::unordered_map<Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
         initializerPoints_;
-    std::unordered_map<const Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
+    std::unordered_map<Stmt*, std::deque<std::shared_ptr<AccessInfo>>>
         finalizePoints_;
   };
 
@@ -403,18 +400,18 @@ class TORCH_API RegisterizerReplacer : public IRMutator {
 
   // State relating to the accesses yet to be replaced.
   std::vector<std::shared_ptr<AccessInfo>>& infoSet_;
-  std::unordered_map<const Store*, std::shared_ptr<AccessInfo>> storeToAccess_;
-  std::unordered_map<const Load*, std::shared_ptr<AccessInfo>> loadToAccess_;
-  std::unordered_map<const Block*, ReplacerScope> parentToAccesses_;
+  std::unordered_map<Store*, std::shared_ptr<AccessInfo>> storeToAccess_;
+  std::unordered_map<Load*, std::shared_ptr<AccessInfo>> loadToAccess_;
+  std::unordered_map<Block*, ReplacerScope> parentToAccesses_;
 
   // Holds the set of Stores that should be pulled into an initializer, so they
   // can be eliminated.
-  std::set<const Store*> eliminatedIntializers_;
+  std::set<Store*> eliminatedIntializers_;
 
   // Tracks the number of times we've seen each buffer, so we can name the
   // scalar Vars appropriately.
-  std::unordered_map<const Buf*, unsigned int> bufferAccessCounts_;
-  unsigned int getBufferAccessCount(const Buf* b) {
+  std::unordered_map<Buf*, unsigned int> bufferAccessCounts_;
+  unsigned int getBufferAccessCount(Buf* b) {
     return ++bufferAccessCounts_[b];
   }
 };

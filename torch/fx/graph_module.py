@@ -71,26 +71,25 @@ def reduce_graph_module(body: Dict[Any, Any], import_block: str) -> torch.nn.Mod
     return _deserialize_graph_module(forward, body)
 
 
-def reduce_package_graph_module(importer: PackageImporter,
-                                body: Dict[Any, Any],
-                                generated_module_name: str) -> torch.nn.Module:
+def reduce_package_graph_module(
+    importer: PackageImporter, body: Dict[Any, Any], generated_module_name: str
+) -> torch.nn.Module:
     forward = importer.import_module(generated_module_name).forward
     return _deserialize_graph_module(forward, body)
 
 
-def reduce_deploy_graph_module(importer: PackageImporter,
-                               body: Dict[Any, Any],
-                               import_block: str,
-                               tracer_cls: Type) -> torch.nn.Module:
+def reduce_deploy_graph_module(
+    importer: PackageImporter, body: Dict[Any, Any], import_block: str
+) -> torch.nn.Module:
     ns = dict()
     ns["__builtins__"] = importer.patched_builtins
     fn_src = body.get('_code')
     assert fn_src is not None
     forward = _forward_from_src(import_block + fn_src, ns)
-    return _deserialize_graph_module(forward, body, tracer_cls)
+    return _deserialize_graph_module(forward, body)
 
 
-def _deserialize_graph_module(forward, body: Dict[Any, Any], tracer_cls: Type = None) -> torch.nn.Module:
+def _deserialize_graph_module(forward, body: Dict[Any, Any]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -107,9 +106,12 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], tracer_cls: Type = 
     # Try to retrieve the forward source in a backward-compatible way
     CodeOnlyModule.forward = forward
 
+    tracer_cls = body.get('_tracer_cls')
     if tracer_cls is None:
         from ._symbolic_trace import Tracer
         tracer_cls = Tracer
+
+    graphmodule_cls_name = body.get('_graphmodule_cls_name', 'GraphModule')
 
     # This is a workaround for a mypy linter issue related to
     # passing base class as an argument - https://github.com/python/mypy/issues/5865.
@@ -122,7 +124,22 @@ def _deserialize_graph_module(forward, body: Dict[Any, Any], tracer_cls: Type = 
             return True
 
     com = CodeOnlyModule(body)
-    return GraphModule(com, KeepModules().trace(com))
+
+    graph = KeepModules().trace(com)
+
+    # Manually set Tracer class on the reconstructed Graph, to avoid
+    # referencing the private local subclass KeepModules.
+    graph._tracer_cls = tracer_cls
+    gm = GraphModule(com, graph, class_name=graphmodule_cls_name)
+
+    # The GraphModule constructor only retains attributes referenced by the graph.
+    # In this case, our goal is return a GraphModule as close to identical as the one
+    # put into the package. If any additional attributes were present in body,
+    # we should keep them.
+    for k, v in body.items():
+        if not hasattr(gm, k):
+            setattr(gm, k, v)
+    return gm
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -250,6 +267,10 @@ class GraphModule(torch.nn.Module):
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
 
         self.graph = graph
+
+        # Store the Tracer class responsible for creating a Graph separately,
+        # because torch.package will serialize a GraphModule without retaining the Graph.
+        self._tracer_cls = self.graph._tracer_cls
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -548,12 +569,12 @@ class {module_name}(torch.nn.Module):
 
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
-    def __reduce_deploy__(self, importer: Importer, tracer_cls: Type = None):
+    def __reduce_deploy__(self, importer: Importer):
         dict_without_graph = self.__dict__.copy()
         python_code = self.recompile()
         import_block = _format_import_block(python_code.globals, importer)
         del dict_without_graph['_graph']
-        return (reduce_deploy_graph_module, (dict_without_graph, import_block, tracer_cls))
+        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         generated_module_name = f'fx-generated._{exporter.get_unique_id()}'
@@ -563,6 +584,7 @@ class {module_name}(torch.nn.Module):
         exporter.save_source_string(generated_module_name, module_code)
 
         dict_without_graph = self.__dict__.copy()
+        dict_without_graph['_graphmodule_cls_name'] = self.__class__.__name__
         del dict_without_graph['_graph']
         return (reduce_package_graph_module, (dict_without_graph, generated_module_name))
 
