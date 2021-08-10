@@ -20,6 +20,9 @@ void SavedTensorDefaultHooks::enable() {
 }
 
 void SavedTensorDefaultHooks::set_hooks(PyObject* pack_hook, PyObject* unpack_hook) {
+  if (!is_enabled) {
+    return;
+  }
   pack_hook_ = pack_hook;
   unpack_hook_ = unpack_hook;
 }
