@@ -127,6 +127,7 @@ class _DDPBucketAssignment():
     meaning a (possibly non-strict) subset of the parameters corresponding to
     a DDP bucket assigned to a rank to update.
 
+    Attributes:
         bucket_index (int): index of the bucket determined by the DDP gradient
             bucket all-reduce order.
         parameters (List[torch.Tensor]): model parameters in the bucket
@@ -891,8 +892,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         overlap_info.assigned_ranks_per_bucket = [set() for _ in range(num_buckets)]
         assigned_ranks_per_bucket = overlap_info.assigned_ranks_per_bucket
         if not overlap_info.uniform_bucket_assignment:
+            # Assign each DDP bucket entirely to a single rank
             for bucket_index, bucket_params in enumerate(params_per_bucket):
-                # Assign the entire DDP bucket to a single rank
                 assert len(bucket_params) > 0, "Empty bucket"
                 assigned_rank = self._get_assigned_rank(bucket_index)
                 self._assign_bucket_subset_to_rank(
@@ -903,14 +904,19 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     assigned_ranks_per_bucket,
                 )
         else:
+            # Assign each DDP bucket to possibly multiple ranks
+            # Specifically, sort the DDP buckets by increasing size, and for
+            # each bucket, iteratively assign the maximal unassigned subset
+            # with size less than `threshold` to the rank with the least total
+            # size so far -- each such assignment is represented by a
+            # `_DDPBucketAssignment` instance and only contains parameters from
+            # a single DDP bucket
             params_per_bucket_enum = sorted(
-                list(enumerate(params_per_bucket)),
-                key=lambda x: sum([p.numel() for p in x[1]])
+                enumerate(params_per_bucket),
+                key=lambda x: sum(p.numel() for p in x[1])
             )
             for bucket_index, bucket_params in params_per_bucket_enum:
                 assert len(bucket_params) > 0, "Empty bucket"
-                # Assign the DDP bucket to possibly multiple ranks, determined
-                # greedily and subject to the capacity given by `threshold`
                 bucket_offset = 0
                 assignment_size = 0
                 for param_index, param in enumerate(bucket_params):
@@ -930,8 +936,8 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                         bucket_offset = param_index
                         assignment_size = 0
                     assignment_size += param_numel
-                # Assign the remainder of the bucket so that no assignment spans across
-                # two buckets
+                # Assign the remainder of the bucket so that no assignment
+                # spans across two buckets
                 assigned_rank = self._get_min_index(size_per_rank, assigned_ranks_per_bucket[bucket_index])
                 self._assign_bucket_subset_to_rank(
                     bucket_index,
@@ -1372,7 +1378,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
             # Log information about the DDP and ZeRO bucketing
             if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
-                local_numel = sum([p.numel() for p in params])
+                local_numel = sum(p.numel() for p in params)
                 num_assigned_buckets = len(self._bucket_assignments_per_rank[self.global_rank])
                 logging.info(
                     f"rank {self.global_rank} with {local_numel} parameters "
