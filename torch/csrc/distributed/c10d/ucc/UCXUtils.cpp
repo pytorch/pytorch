@@ -1,6 +1,4 @@
-#ifdef USE_C10D_UCC
-
-#include <c10d/UCXUtils.hpp>
+#include <torch/csrc/distributed/c10d/ucc/UCXUtils.hpp>
 #include <string>
 
 namespace c10d {
@@ -78,5 +76,3 @@ UCPEndpoint::~UCPEndpoint() {
 }
 
 } // namespace c10d
-
-#endif
