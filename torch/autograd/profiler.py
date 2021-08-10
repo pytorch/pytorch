@@ -565,10 +565,10 @@ class emit_nvtx(object):
             ProfilerConfig(
                 ProfilerState.NVTX,
                 self.record_shapes,
-                profile_memory=False,
-                with_stack=False,
-                with_flops=False,
-                with_modules=False),
+                False,
+                False,
+                False,
+                False),
             set()
         )
         return self
