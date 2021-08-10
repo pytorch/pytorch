@@ -25,17 +25,17 @@ static void* checkDL(void* x) {
 
   return x;
 }
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool allow_fail) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   handle = dlopen(name, RTLD_LOCAL | RTLD_NOW);
   if (!handle) {
     if (alt_name) {
       handle = dlopen(alt_name, RTLD_LOCAL | RTLD_NOW);
       if (!handle) {
-        AT_ERROR("Error in dlopen for library ", name, "and ", alt_name);
+        TORCH_CHECK(allow_fail, "Error in dlopen for library ", name, "and ", alt_name);
       }
     } else {
-      AT_ERROR("Error in dlopen: ", dlerror());
+      TORCH_CHECK(allow_fail, "Error in dlopen: ", dlerror());
     }
   }
 }
@@ -55,7 +55,7 @@ DynamicLibrary::~DynamicLibrary() {
 
 // Windows
 
-DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
+DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name, bool allow_fail) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
   HMODULE theModule;
   bool reload = true;
@@ -83,7 +83,7 @@ DynamicLibrary::DynamicLibrary(const char* name, const char* alt_name) {
     FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                   NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                   buf, (sizeof(buf) / sizeof(char)), NULL);
-    AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
+    TORCH_CHECK(allow_fail, "error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }
 
