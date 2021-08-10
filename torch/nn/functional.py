@@ -2376,6 +2376,10 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
                 dim
             )
         )
+
+    if input.numel() == 0:
+        return input
+
     div = input.mul(input).unsqueeze(1)
     if dim == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
