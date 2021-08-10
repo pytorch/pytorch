@@ -140,7 +140,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        return at::vdot(self.conj(), other.clone());
+        return (at::dot(self.conj(), other.conj())).conj();
        } else {
          return at::vdot(self.conj(), other);
        }
@@ -166,12 +166,12 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
   if (self.is_conj()) {
     if (other.is_conj()) {
-      return at::vdot(self.conj(), other.clone());
+      return at::vdot(other.conj(), self.conj());
     } else {
       return at::dot(self.conj(), other);
     }
   } else if (other.is_conj()) {
-    return at::vdot(other.conj(), self);
+    return (at::dot(self, other.conj())).conj();
   }
 
   // For complex dtypes.

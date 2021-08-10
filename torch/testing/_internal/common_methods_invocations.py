@@ -519,6 +519,7 @@ class OpInfo(object):
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
+                 assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -614,6 +615,8 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+
+        self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
@@ -1356,14 +1359,24 @@ def sample_inputs_bmm(self, device, dtype, requires_grad, **kwargs):
     )
 
 def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
-    return (
-        SampleInput(
+    sample_inputs=[]
+    sample_inputs.append(SampleInput(
+        make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(
+            make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        )
+    ))
+    if dtype.is_complex:
+        # dot/vdot for (conj(input), conj(arg_tensor)) and (conj(input), arg_tensor)
+        # is tested in test_conj_view (which tests operations with only conjugated input tensor
+        # -- not conjugated arg tensors)
+        sample_inputs.append(SampleInput(
             make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
             args=(
-                make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad),
+                torch.conj(make_tensor((S, ), device, dtype, low=None, high=None, requires_grad=requires_grad)),
             )
-        ),
-    )
+        ))
+    return sample_inputs
 
 def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -6469,6 +6482,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
@@ -7636,9 +7650,6 @@ op_db: List[OpInfo] = [
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
-           skips=(
-               # Because reshape_as does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False,
            supports_forward_ad=True,
            ),
@@ -7863,10 +7874,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -7875,10 +7882,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
