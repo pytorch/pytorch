@@ -320,6 +320,6 @@ inline void unique(InputIteratorT input, OutputIteratorT output, NumSelectedIter
     "cub unique does not support more than INT_MAX elements");
   CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSelect::Unique,
     input, output, num_selected_out, num_items, at::cuda::getCurrentCUDAStream());
-}	
+}
 
 }}}  // namespace at::cuda::cub
