@@ -72,8 +72,6 @@ class InstanceNorm1d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -81,7 +79,9 @@ class InstanceNorm1d(_InstanceNorm):
     If :attr:`track_running_stats` is set to ``True``, during training this
     layer keeps running estimates of its computed mean and variance, which are
     then used for normalization during evaluation. The running estimates are
-    kept with a default :attr:`momentum` of 0.1.
+    kept with a default :attr:`momentum` of 0.1. Note that the standard-deviation is calculated
+    via the biased estimator, equivalent to `torch.var(input, unbiased=False)` but unbiased
+    version is used in the running estimate.
 
     .. note::
         This :attr:`momentum` argument is different from one used in optimizer
@@ -192,8 +192,6 @@ class InstanceNorm2d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -201,7 +199,9 @@ class InstanceNorm2d(_InstanceNorm):
     If :attr:`track_running_stats` is set to ``True``, during training this
     layer keeps running estimates of its computed mean and variance, which are
     then used for normalization during evaluation. The running estimates are
-    kept with a default :attr:`momentum` of 0.1.
+    kept with a default :attr:`momentum` of 0.1. Note that the standard-deviation is calculated
+    via the biased estimator, equivalent to `torch.var(input, unbiased=False)` but unbiased
+    version is used in the running estimate.
 
     .. note::
         This :attr:`momentum` argument is different from one used in optimizer
@@ -297,8 +297,6 @@ class InstanceNorm3d(_InstanceNorm):
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -306,7 +304,9 @@ class InstanceNorm3d(_InstanceNorm):
     If :attr:`track_running_stats` is set to ``True``, during training this
     layer keeps running estimates of its computed mean and variance, which are
     then used for normalization during evaluation. The running estimates are
-    kept with a default :attr:`momentum` of 0.1.
+    kept with a default :attr:`momentum` of 0.1. Note that the standard-deviation is calculated
+    via the biased estimator, equivalent to `torch.var(input, unbiased=False)` but unbiased
+    version is used in the running estimate.
 
     .. note::
         This :attr:`momentum` argument is different from one used in optimizer
