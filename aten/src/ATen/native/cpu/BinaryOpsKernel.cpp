@@ -962,7 +962,15 @@ void igammac_kernel(TensorIteratorBase& iter) {
 }
 
 void nextafter_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
+  if (iter.common_dtype() == kBFloat16) {
+    using scalar_t = c10::BFloat16;
+    cpu_kernel(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::nextafter(a, b);
+        });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -972,6 +980,7 @@ void nextafter_kernel(TensorIteratorBase& iter) {
             return a.nextafter(b);
         });
   });
+  }
 }
 
 void heaviside_kernel(TensorIteratorBase& iter) {
