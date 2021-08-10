@@ -11,6 +11,7 @@ COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
+TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
 TORCH_TEST_DIR="$TORCH_INSTALL_DIR"/test
 
@@ -313,11 +314,14 @@ test_distributed() {
 test_rpc() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
+    ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ln -sf "$TORCH_LIB_DIR"/libtbb* "$TORCH_BIN_DIR"
     # NB: the ending test_rpc must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-rpc/test_rpc
     mkdir -p $TEST_REPORTS_DIR
-    build/bin/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
+    "$TORCH_BIN_DIR"/test_cpp_rpc --gtest_output=xml:$TEST_REPORTS_DIR/test_cpp_rpc.xml
   fi
 }
 
@@ -502,15 +506,15 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
 else
   install_torchvision
   install_monkeytype
-  test_python
-  test_aten
-  test_vec256
-  test_libtorch
-  test_custom_script_ops
-  test_custom_backend
-  test_torch_function_benchmark
-  test_distributed
-  test_benchmarks
+  # test_python
+  # test_aten
+  # test_vec256
+  # test_libtorch
+  # test_custom_script_ops
+  # test_custom_backend
+  # test_torch_function_benchmark
+  # test_distributed
+  # test_benchmarks
   test_rpc
   if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-test* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-test* ]]; then
     test_python_gloo_with_tls
