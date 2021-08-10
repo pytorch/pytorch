@@ -41,25 +41,26 @@ const std::string shape_compute_functions =
           assert len(out) == 2
           return [out[0], out[1]]
 
-        # TODO: maybe make it customary that extra arguments are unused ?
-        # TODO: return self directly
-        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+        def _copy(self: List[int]):
           out: List[int] = []
           for elem in self:
             out.append(elem)
           return out
+
+        def unary_five_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any, inp4: Any):
+          return _copy(self)
+
+        def unary_two_unused_inputs(self: List[int], inp0: Any, inp1: Any):
+          return _copy(self)
 
         def unary_one_unused_input(self: List[int], inp0: Any):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
+          return _copy(self)
+
+        def unary_four_unused_inputs(self: List[int], inp0: Any, inp1: Any, inp2: Any, inp3: Any):
+          return _copy(self)
 
         def unary(self: List[int]):
-          out: List[int] = []
-          for elem in self:
-            out.append(elem)
-          return out
+          return _copy(self)
 
         def view(self: List[int], sizes: List[int]):
           # TODO: add assertions to check whether requested dims are valid
@@ -308,11 +309,21 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
       {"aten::div.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary_one_unused_input"},
+      {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", "unary_one_unused_input"},
       {"aten::gt.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
+      {"aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast_one_unused_input"},
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1) -> Tensor", "unary_two_unused_inputs"},
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
+      {"aten::gelu(Tensor self) -> Tensor", "unary"},
+      {"aten::tanh(Tensor self) -> Tensor", "unary"},
+      {"aten::erf(Tensor self) -> (Tensor)", "unary"},
+      {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
+      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
+       "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
