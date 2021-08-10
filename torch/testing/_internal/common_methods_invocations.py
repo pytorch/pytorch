@@ -5219,16 +5219,36 @@ def gradcheck_wrapper_triangular_input(op, input, *args, upper=False, **kwargs):
     return op(input.triu() if upper else input.tril(), upper)
 
 
-def reference_reduction_numpy(f):
+def reference_reduction_numpy(f, supports_keepdims=True):
     @wraps(f)
-    def wrapper(t: torch.Tensor, *args, dim=None, keepdim=False, **kwargs):
-        # NumPy reductions don't accept dim=0 for scalar inputs
-        if t.ndim == 0 and (dim == 0 or dim == -1):
-            dim = None
+    def wrapper(t: torch.Tensor, *args, **kwargs):
+        keys = kwargs.keys()
 
-        return f(t.cpu().numpy(), *args, axis=dim, keepdims=keepdim, **kwargs)
+        if 'dim' in keys:
+            dim = kwargs.pop('dim')
+
+            # NumPy reductions don't accept dim=0 for scalar inputs
+            kwargs['axis'] = None if t.ndim == 0 and (dim == 0 or dim == -1) else dim
+
+        if 'keepdim' in keys:
+            if not supports_keepdims:
+                # NumPy does not support keepdims kwarg so we manually unsqueeze result
+                if kwargs.pop('keepdim'):
+                    res = f(t.cpu().numpy(), *args, **kwargs)
+                    dims = kwargs.get('axis', list(range(t.ndim)))
+                    return np.expand_dims(res, dims)
+            else:
+                kwargs['keepdims'] = kwargs.pop('keepdim')
+
+        return f(t.cpu().numpy(), *args, **kwargs)
 
     return wrapper
+
+
+def reference_logsumexp(t, dim=None, keepdim=False):
+    if TEST_SCIPY:
+        return reference_reduction_numpy(scipy.special.logsumexp)(t, dim=dim, keepdim=keepdim)
+    return t.exp().sum(dim=dim, keepdim=keepdim).log_()
 
 
 # Operator database (sorted alphabetically)
@@ -5490,14 +5510,6 @@ op_db: List[OpInfo] = [
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
                SkipInfo('TestCommon', 'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
-    OpInfo('argmax',
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,),
-    OpInfo('argmin',
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           supports_autograd=False,
-           sample_inputs_func=sample_inputs_argmax_argmin,),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -6699,15 +6711,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
-    # TODO(@heitorschueroff) Add test for dtype kwarg
-    OpInfo('mean',
-           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-           assert_autodiffed=True,
-           supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_reduction_wrapper(supports_multiple_dims=True),
-           # Need to skip out test because one of the overload for mean does not support it
-           # TODO(@heitorschueroff) fix this when implementing ReductionInfo
-           skips=(SkipInfo('TestCommon', 'test_out'),)),
     OpInfo('quantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile),
@@ -8076,12 +8079,6 @@ op_db: List[OpInfo] = [
                SkipInfo("TestJit", "test_variant_consistency_jit"),
            ),
            sample_inputs_func=sample_inputs_zeta),
-    OpInfo('logsumexp',
-           aliases=('special.logsumexp',),
-           dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
-           assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -8483,6 +8480,34 @@ reduction_op_db: List[ReductionOpInfo] = [
         ),
     ),
     ReductionOpInfo(
+        'argmax',
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        result_dtype=torch.int64,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_argmax_argmin,
+        reference=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # FIXME: keepdim parameter is ignored when dim=None
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
+        'argmin',
+        supports_multiple_dims=False,
+        supports_autograd=False,
+        result_dtype=torch.int64,
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_argmax_argmin,
+        reference=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # FIXME: keepdim parameter is ignored when dim=None
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
         'all',
         identity=True,
         supports_multiple_dims=False,
@@ -8576,6 +8601,30 @@ reduction_op_db: List[ReductionOpInfo] = [
         ),
     ),
     ReductionOpInfo(
+        'logsumexp',
+        aliases=('special.logsumexp',),
+        identity=-inf,
+        nan_policy='propagate',
+        promotes_int_to_float=True,
+        assert_autodiffed=True,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+        sample_inputs_func=sample_inputs_logsumexp,
+        reference=reference_logsumexp,
+        skips=(
+            # dim parameter is not optional
+            SkipInfo('TestReductions', 'test_dim_default'),
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            SkipInfo('TestReductions', 'test_ref_scalar_input'),
+            SkipInfo('TestReductions', 'test_ref_random_input_large'),
+            # FIXME: logsumexp reduces all dimensions when dim=[]
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+        ),
+    ),
+    ReductionOpInfo(
         'prod',
         identity=1,
         nan_policy='propagate',
@@ -8599,6 +8648,30 @@ reduction_op_db: List[ReductionOpInfo] = [
             # FIXME: failed to compare as equal with error 0.000102996826171875
             SkipInfo('TestReductions', 'test_ref_random_input_small',
                      device_type='cpu', dtypes=[torch.complex64]),
+        ),
+    ),
+    ReductionOpInfo(
+        'mean',
+        nan_policy='propagate',
+        promotes_int_to_float=True,
+        supports_forward_ad=True,
+        assert_autodiffed=True,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        reference=reference_reduction_numpy(np.mean),
+        skips=(
+            # FIXME: out= not supported for allreduce version
+            SkipInfo('TestCommon', 'test_out'),
+            # FIXME: cannot specify keepdim without dim
+            SkipInfo('TestReductions', 'test_dim_default_keepdim'),
+            # FIXME: dim=None not supported
+            SkipInfo('TestReductions', 'test_dim_none'),
+            SkipInfo('TestReductions', 'test_dim_none_keepdim'),
+            # FIXME: dim=[] reduces all dimensions
+            SkipInfo('TestReductions', 'test_dim_empty'),
+            SkipInfo('TestReductions', 'test_dim_empty_keepdim'),
+            # FIXME: improve stability
+            SkipInfo('TestReductions', 'test_ref_random_input_small'),
+            SkipInfo('TestReductions', 'test_ref_random_input_large'),
         ),
     ),
 ]

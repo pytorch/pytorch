@@ -231,7 +231,7 @@ class TestReductions(TestCase):
         """Tests that the result has the correct dtype"""
         t = make_tensor((5,), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t))
-        result: torch.Tensor = op(t, *args, **kwargs)
+        result: torch.Tensor = op(t, *args, dim=0, **kwargs)
         is_integral = dtype in integral_types_and(torch.bool)
         if op.promotes_int_to_float and is_integral:
             self.assertTrue(torch.is_floating_point(result.dtype))
@@ -249,7 +249,7 @@ class TestReductions(TestCase):
         """Tests that nan is propagated to the output by default"""
         t = torch.tensor([0, torch.nan, 2])
         args, kwargs = next(op.generate_args_kwargs(t))
-        result = op(t, *args, **kwargs)
+        result = op(t, *args, dim=0, **kwargs)
         self.assertEqual(result, torch.nan)
 
     @ops(filter(lambda op: op.nan_policy == 'omit', reduction_op_db),
