@@ -87,7 +87,7 @@ class TestReductions(TestCase):
         """Tests that the default behavior is to reduce all dimensions."""
         t = make_tensor((2, 3), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t))
-        self.assertEqual(op(t, *args, **kwargs).ndim, 0)
+        self.assertEqual(op(t, *args, **kwargs).shape, [])
 
     @ops(reduction_op_db, allowed_dtypes=[torch.float])
     def test_dim_default_keepdim(self, device, dtype, op: ReductionOpInfo):
@@ -101,7 +101,7 @@ class TestReductions(TestCase):
         """Tests that dim=None reduces all dimensions."""
         t = make_tensor((2, 3), device, dtype)
         args, kwargs = next(op.generate_args_kwargs(t, dim=None))
-        self.assertEqual(op(t, *args, dim=None, **kwargs).ndim, 0)
+        self.assertEqual(op(t, *args, dim=None, **kwargs).shape, [])
 
     @ops(reduction_op_db, allowed_dtypes=[torch.float])
     def test_dim_none_keepdim(self, device, dtype, op: ReductionOpInfo):
@@ -179,23 +179,37 @@ class TestReductions(TestCase):
     @ops(reduction_op_db, allowed_dtypes=[torch.float])
     def test_empty_slice(self, device, dtype, op: ReductionOpInfo):
         """Tests for consistent behavior when reducing over an empty slice."""
-        t = make_tensor((0, 2, 3), device, dtype)
-        for dim in [0] + [[0, 1]] if op.supports_multiple_dims else []:
-            args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
-            if op.identity is not None:
-                # Reducing along empty slice should return identity
-                result = op(t, *args, dim=dim, **kwargs)
-                self.assertEqual(result.shape, reduced_shape(t.shape, dim))
-                self.assertEqual(result, torch.full_like(result, op.identity))
-            elif op.promotes_int_to_float:
-                # Reducing along empty slice should return NaN
-                result = op(t, *args, dim=dim, **kwargs)
-                self.assertEqual(result.shape, reduced_shape(t.shape, dim))
-                self.assertEqual(result, torch.full_like(result, torch.nan))
-            else:
-                # Reducing along empty slice should raise an error
-                with self.assertRaises(IndexError):
-                    op(t, *args, dim=dim, **kwargs)
+
+        # (<shape>, <list of dim arguments>)
+        test_cases = (
+            ([0], [0]),
+            ([2, 0, 3], [1, [0, 1], [1, 2]]),
+        )
+
+        for shape, dims in test_cases:
+            t = make_tensor(shape, device, dtype)
+
+            for dim, keepdim in product(dims, [True, False]):
+                if isinstance(dim, Sequence) and not op.supports_multiple_dims:
+                    continue
+
+                args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
+                expected_shape = reduced_shape(t.shape, dim, keepdim)
+
+                if op.identity is not None:
+                    # Reducing along empty slice should return identity
+                    result = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+                    self.assertEqual(result.shape, expected_shape)
+                    self.assertEqual(result, torch.full_like(result, op.identity))
+                elif op.promotes_int_to_float:
+                    # Reducing along empty slice should return NaN
+                    result = op(t, *args, dim=dim, **kwargs)
+                    self.assertEqual(result.shape, reduced_shape(t.shape, dim))
+                    self.assertEqual(result, torch.full_like(result, torch.nan))
+                else:
+                    # Reducing along empty slice should raise an error
+                    with self.assertRaises(IndexError):
+                        op(t, *args, dim=dim, **kwargs)
 
     @ops(reduction_op_db, allowed_dtypes=[torch.float])
     def test_non_empty_slice_of_empty_tensor(self, device, dtype, op: ReductionOpInfo):
@@ -203,10 +217,14 @@ class TestReductions(TestCase):
         allowed and returns an empty tensor with the dimensions reduced
         """
         t = make_tensor((0, 2, 3), device, dtype)
-        for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
+        for dim, keepdim in product([1, [1, 2]], [True, False]):
+            if isinstance(dim, Sequence) and not op.supports_multiple_dims:
+                continue
+
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
-            result = op(t, *args, dim=dim, **kwargs)
-            self.assertEqual(result.shape, reduced_shape(t.shape, dim))
+            result = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
+            expected_shape = reduced_shape(t.shape, dim, keepdim)
+            self.assertEqual(result.shape, expected_shape)
 
     @ops(reduction_op_db, dtypes=OpDTypes.supported)
     def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
@@ -258,7 +276,9 @@ class TestReductions(TestCase):
                     self.assertEqual(res, ref)
 
     # NumPy does not support BFloat16 so we don't test that agains
-    # reference implementations
+    # reference implementations. We also don't compare dtypes because NumPy
+    # seems to be returning a different dtype for sum/prod on Windows. Also, we
+    # already specific test for checking output dtype.
 
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
@@ -268,7 +288,7 @@ class TestReductions(TestCase):
         for args, kwargs in op.generate_args_kwargs(t, dim=0):
             res = op(t, *args, **kwargs)
             ref = op.reference(t, *args, **kwargs)
-            self.assertEqual(res, ref)
+            self.assertEqual(res, ref, exact_device=False)
 
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
@@ -283,7 +303,7 @@ class TestReductions(TestCase):
                 for args, kwargs in op.generate_args_kwargs(t, dim=dim):
                     res = op(t, *args, dim=dim, keepdim=keepdim, **kwargs)
                     ref = op.reference(t, *args, dim=dim, keepdim=keepdim, **kwargs)
-                    self.assertEqual(res, ref)
+                    self.assertEqual(res, ref, exact_device=False)
 
     @ops(filter(lambda op: op.reference is not None, reduction_op_db),
          allowed_dtypes=get_all_dtypes(include_bfloat16=False))
@@ -293,7 +313,7 @@ class TestReductions(TestCase):
         for args, kwargs in op.generate_args_kwargs(t):
             res = op(t, *args, **kwargs)
             ref = op.reference(t, *args, **kwargs)
-            self.assertEqual(res, ref, atol=1e-03, rtol=1e-03)
+            self.assertEqual(res, ref, atol=1e-03, rtol=1e-03, exact_device=False)
 
     ###########################################################################
     # TODO: Legacy tests - port to ReductionOpInfo
@@ -1647,7 +1667,7 @@ class TestReductions(TestCase):
         x = torch.randn(20, dtype=torch.float32, device=device)
         y = torch.randn(1, dtype=torch.float32)
 
-        err_string = "Expected all tensors to be on the same device, but found at least two devices, {0}".format(device)
+        err_string = f"Expected out tensor to have device {device}, but got cpu instead"
 
         with self.assertRaisesRegex(RuntimeError, err_string):
             torch.sum(x, dim=[0], dtype=torch.float32, out=y)
@@ -2971,6 +2991,7 @@ class TestReductions(TestCase):
             self.assertEqual(torch.ones((2, 4), device=device, dtype=out_dtype), xb.all(1))
             self.assertEqual(torch.ones((2, 1, 4), device=device, dtype=out_dtype), xb.all(1, keepdim=True))
             self.assertEqual(torch.ones((), device=device, dtype=out_dtype), xb.all())
+
 
 instantiate_device_type_tests(TestReductions, globals())
 
