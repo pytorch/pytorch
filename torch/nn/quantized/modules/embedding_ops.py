@@ -51,12 +51,18 @@ class EmbeddingPackedParams(torch.nn.Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        self.dtype = state_dict[prefix + 'dtype']
-        state_dict.pop(prefix + 'dtype')
-
-        weight = state_dict[prefix + '_packed_weight']
-        state_dict.pop(prefix + '_packed_weight')
-        self.set_weight(weight)
+        emb_module_name = '.'.join(prefix.split('.')[:-2])
+        if emb_module_name + '.weight' in state_dict.keys():
+            error_msgs.append('Attempting to load a floating point embedding bag module into a quantized version.\n '
+                              'If you are using the quantize_dynamic API to create your model, please check \n '
+                              'the version argument version=0 creates a model with floating point embedding \n '
+                              'bag, and version =1 creates a quantized version')
+        else:
+            self.dtype = state_dict[prefix + 'dtype']
+            state_dict.pop(prefix + 'dtype')
+            weight = state_dict[prefix + '_packed_weight']
+            state_dict.pop(prefix + '_packed_weight')
+            self.set_weight(weight)
 
         super(EmbeddingPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                                  missing_keys, unexpected_keys, error_msgs)
@@ -209,6 +215,14 @@ class EmbeddingBag(Embedding):
 
     def _get_name(self):
         return 'QuantizedEmbeddingBag'
+
+    def extra_repr(self):
+        return 'weight dtype={}, qscheme={}'.format(
+            self.dtype, self.weight().qscheme()
+        )
+
+    def __repr__(self):
+        return hide_packed_params_repr(self, EmbeddingPackedParams)
 
     @classmethod
     def from_float(cls, mod):

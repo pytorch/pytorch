@@ -174,13 +174,13 @@ The kernel function can take any of the following types as inputs or outputs:
 * `double` (note: `float` is not supported)
 * `int64_t` (note: other integer types like `int`, `uint64_t`, `int32_t`, `...` are not supported)
 * `bool`
-* `std::string`
+* `c10::string_view`
 * `at::Scalar` (this is a type that can hold either an integer or a floating point value)
 * `at::optional<T>` with T being any type from the list above
 
 The kernel function can take and return list inputs by using `torch::List<T>`. `T` must be one of the supported types from above excluding `at::Scalar`.
 
-The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `std::string`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
+The kernel function can take and return dicts by using `torch::Dict<Key, Value>`. `Key` must be `int64_t`, `c10::string_view`, `double` or `bool`, and `Value` must be from the list of supported types above excluding `at::Scalar`.
 
 When taken as input, any of these types can be taken by value (i.e. `Tensor`) or by const-reference (i.e. `const Tensor&`). We recommend taking all arguments by value, even Tensors. They will be moved in, so there is no performance overhead.
 
@@ -254,5 +254,3 @@ Also, there's some requirements on the operator schema for it to be callable fro
 * Except for `Tensor` or `Tensor[]`, only arguments of type `int`, `double` and `bool` are supported. These can be in any position in the argument list and will be read from the caffe2 operator arguments, based on the argument name in the operator schema.
 * We do not support lists (`int[]`, `double[]` or `bool[]`) or optionals (`int?`, `double?`, `bool?`) yet.
 * The operator must return a single `Tensor` or multiple tensors as in `(Tensor, Tensor, Tensor)`. It cannot return a list `Tensor[]`, optional `Tensor?` or any primitive types.
-    
-

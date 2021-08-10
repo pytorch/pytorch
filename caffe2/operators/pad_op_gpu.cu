@@ -2,6 +2,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/pad_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -161,7 +162,7 @@ __global__ void PadImageGradientReflectNCHW(
     w = max(w, -w);
     h = min(h, 2 * height - h - 2);
     w = min(w, 2 * width - w - 2);
-    atomicAdd(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
+    gpu_atomic_add(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
   }
 }
 
@@ -178,7 +179,7 @@ __global__ void PadImageGradientEdgeNCHW(
     nc /= padded_height;
     const int h = min(height - 1, max(ph - pad_t, 0));
     const int w = min(width - 1, max(pw - pad_l, 0));
-    atomicAdd(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
+    gpu_atomic_add(&bottom_diff[(nc * height + h) * width + w], top_diff[index]);
   }
 }
 
@@ -219,7 +220,7 @@ __global__ void PadImageGradientReflectNHWC(
     w = max(w, -w);
     h = min(h, 2 * height - h - 2);
     w = min(w, 2 * width - w - 2);
-    atomicAdd(
+    gpu_atomic_add(
         &bottom_diff[((n * height + h) * width + w) * channels + c],
         top_diff[index]);
   }
@@ -240,7 +241,7 @@ __global__ void PadImageGradientEdgeNHWC(
     n /= padded_height;
     const int h = min(height - 1, max(ph - pad_t, 0));
     const int w = min(width - 1, max(pw - pad_l, 0));
-    atomicAdd(
+    gpu_atomic_add(
         &bottom_diff[((n * height + h) * width + w) * channels + c],
         top_diff[index]);
   }
@@ -283,6 +284,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_l(),
           value_,
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::REFLECT:
       PadImageReflectNCHW<float><<<
@@ -301,6 +303,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::EDGE:
       PadImageEdgeNCHW<float><<<
@@ -319,6 +322,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
   }
 
@@ -360,6 +364,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_l(),
           value_,
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::REFLECT:
       PadImageReflectNHWC<float><<<
@@ -378,6 +383,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::EDGE:
       PadImageEdgeNHWC<float><<<
@@ -396,6 +402,7 @@ bool PadImageOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           Ydata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
   }
 
@@ -440,6 +447,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::REFLECT:
       PadImageGradientReflectNCHW<float><<<
@@ -458,6 +466,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::EDGE:
       PadImageGradientEdgeNCHW<float><<<
@@ -476,6 +485,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
   }
 
@@ -520,6 +530,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::REFLECT:
       PadImageGradientReflectNHWC<float><<<
@@ -538,6 +549,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
     case PadMode::EDGE:
       PadImageGradientEdgeNHWC<float><<<
@@ -556,6 +568,7 @@ bool PadImageGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
           pad_t(),
           pad_l(),
           dXdata);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
   }
 

@@ -52,7 +52,7 @@ run it. Ensuring that the inputs and outputs of your FX transform are a
         import torch
         import torch.fx
 
-        def transform(m : nn.Module) -> nn.Module):
+        def transform(m : nn.Module) -> nn.Module:
             gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
 
             # Modify gm.graph
@@ -228,7 +228,7 @@ Graph Manipulation Examples
 -  `Replace one
    op <https://github.com/pytorch/examples/blob/master/fx/replace_op.py>`__
 -  `Conv/Batch Norm
-   fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
+   fusion <https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50>`__
 -  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
 -  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
 -  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
@@ -247,7 +247,7 @@ multiplication after the ``F.relu``, and then clean up the original
 objects to automatically record operations into the :class:`Graph`.
 
 To use this method, we write the operations that we want inserted as regular
-PyTorch code and invoke that code with :class:`Proxy` objects as arugments.
+PyTorch code and invoke that code with :class:`Proxy` objects as arguments.
 These :class:`Proxy` objects will capture the operations that are performed
 on them and append them to the :class:`Graph`.
 
@@ -397,7 +397,7 @@ Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
-   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
 -  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
@@ -415,6 +415,21 @@ process of transformations that led to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
 :ref:`Available Debuggers`.
+
+
+Common Pitfalls in Transform Authoring
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Nondeterministic ``set`` iteration order. In Python, the ``set`` datatype is
+  unordered. Using ``set`` to contain collections of objects like ``Node``\ s,
+  for example, can cause unexpected nondeterminism. An example is iterating
+  over a set of ``Node``\ s to insert them into a ``Graph``. Because the
+  ``set`` data type is unordered, the ordering of the operations in the output
+  program will be nondeterministic and can change across program invocations.
+  The recommended alternative is to use a ``dict`` data type, which is
+  `insertion ordered <https://mail.python.org/pipermail/python-dev/2017-December/151283.html>`_
+  as of Python 3.7 (and as of cPython 3.6). A ``dict`` can be used equivalently
+  to a set by storing values to be deduplicated in the keys of the ``dict``.
 
 Checking Correctness of Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -474,7 +489,7 @@ Debugging the Generated Code
 
 Because FX generates the ``forward()`` function on :class:`GraphModule`\s, using
 traditional debugging techniques like ``print`` statements or ``pdb`` is
-not as straightfoward. Luckily, we have several techniques we can use
+not as straightforward. Luckily, we have several techniques we can use
 for debugging the generated code.
 
 Use ``pdb``
@@ -725,8 +740,7 @@ For example, let’s examine the following program:
 ::
 
     def func_to_trace(x):
-        dim0 = x.size[0]
-        if dim0 == 3:
+        if x.sum() > 0:
             return torch.relu(x)
         else:
             return torch.neg(x)
@@ -735,7 +749,7 @@ For example, let’s examine the following program:
     """
       <...>
       File "dyn.py", line 6, in func_to_trace
-        if dim0 == 3:
+        if x.sum() > 0:
       File "pytorch/torch/fx/proxy.py", line 155, in __bool__
         return self.tracer.to_bool(self)
       File "pytorch/torch/fx/proxy.py", line 85, in to_bool
@@ -743,8 +757,8 @@ For example, let’s examine the following program:
     torch.fx.proxy.TraceError: symbolically traced variables cannot be used as inputs to control flow
     """
 
-The condition to the ``if`` statement relies on the value of ``dim0``,
-which eventually relies on the value of ``x``, a function input. Since
+The condition to the ``if`` statement relies on the value of ``x.sum()``,
+which relies on the value of ``x``, a function input. Since
 ``x`` can change (i.e. if you pass a new input tensor to the traced
 function), this is *dynamic control flow*. The traceback walks back up
 through your code to show you where this situation happens.
@@ -832,9 +846,9 @@ FX uses ``__torch_function__`` as the mechanism by which it intercepts
 calls (see the `technical
 overview <https://github.com/pytorch/pytorch/blob/master/torch/fx/OVERVIEW.md#technical-details>`__
 for more information about this). Some functions, such as builtin Python
-functions or those in the ``math`` module, are things that are not
-covered by ``__torch_function__``, but we would still like to capture
-them in symbolic tracing. For example:
+functions or those in the ``math`` module, are not covered by
+``__torch_function__``, but we would still like to capture them in
+symbolic tracing. For example:
 
 ::
 
@@ -1011,6 +1025,7 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+  :inherited-members:
 
 .. autoclass:: torch.fx.Proxy
 

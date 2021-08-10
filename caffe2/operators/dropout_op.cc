@@ -14,6 +14,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     }
     return true;
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     float scale = 1. / (1. - ratio_);
     // mask=true means keep, and mask=false means not keep, so we will
     // generate probability depending on 1-ratio.
@@ -26,6 +27,7 @@ bool DropoutOp<float, CPUContext>::RunOnDevice() {
     auto* gen = context_.RandGenerator();
     for (int i = 0; i < X.numel(); ++i) {
       mask_data[i] = dist(gen) > 0.5;
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       Ydata[i] = Xdata[i] * scale * mask_data[i];
     }
     return true;
@@ -49,8 +51,10 @@ bool DropoutGradientOp<float, CPUContext>::RunOnDevice() {
     const float* dYdata = dY.data<float>();
     const bool* mask_data = mask.data<bool>();
     float* dXdata = dX->template mutable_data<float>();
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     float scale = 1. / (1. - ratio_);
     for (int i = 0; i < dY.numel(); ++i) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       dXdata[i] = dYdata[i] * mask_data[i] * scale;
     }
     return true;
@@ -171,6 +175,7 @@ class GetDropoutGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     ArgumentHelper argshelper(def_);
+    // NOLINTNEXTLINE(modernize-use-bool-literals)
     auto is_test = argshelper.GetSingleArgument<bool>("is_test", 0);
     if (is_test) {
       return SingleGradientDef(

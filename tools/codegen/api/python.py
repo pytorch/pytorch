@@ -1,10 +1,12 @@
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence, Set, List, Dict, Tuple
 
-from tools.codegen.api.types import *
-import tools.codegen.api.cpp as cpp
+from tools.codegen.api.types import Binding, CppSignature, CppSignatureGroup
+from tools.codegen.api import cpp
 from tools.codegen.gen import pythonify_default
-from tools.codegen.model import *
+from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
+                                 NativeFunction, OptionalType, Return, Type,
+                                 Variant)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -588,7 +590,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         elif t.name == BaseTy.float:
             return 'double'
         elif t.name == BaseTy.str:
-            return 'std::string'
+            return 'c10::string_view'
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
                         BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
                         BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
@@ -611,7 +613,7 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
         size = t.size if not simple_type else None
         if str(t.elem) == 'bool':
             assert t.size is not None
-            return f'std::array<bool,{t.size}>'
+            return f'::std::array<bool,{t.size}>'
         elif str(t.elem) == 'int':
             return f'IntArrayRef[{size}]' if size is not None else 'IntArrayRef'
         elif str(t.elem) == 'Tensor':
@@ -701,7 +703,7 @@ def signature(f: NativeFunction, *, method: bool = False, pyi: bool = False) -> 
             name='layout',
             type=OptionalType(BaseType(BaseTy.Layout)),
             default='strided' if pyi else 'torch.strided',
-            default_init='layout_from_backend(self.options().backend())' if is_like_or_new_function else None,
+            default_init='self.layout()' if is_like_or_new_function else None,
         ))
         tensor_options_args.append(PythonArgument(
             name='device',
@@ -796,7 +798,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.Dimname:
             ret = 'Union[str, ellipsis, None]'
         elif t.name in [BaseTy.Tensor, BaseTy.Generator,
-                        BaseTy.Storage, BaseTy.Stream, BaseTy.str]:
+                        BaseTy.Storage, BaseTy.Stream]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -812,7 +814,7 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = 'Union[Tensor, Tuple[Tensor, ...], List[Tensor]]' if t.size is not None else \
                   'Union[Tuple[Tensor, ...], List[Tensor]]'
         elif str(t.elem) == 'float':
-            ret = 'Sequence[float]'
+            ret = 'Sequence[_float]'
         else:
             elem = argument_type_str_pyi(t.elem)
             ret = f'Sequence[{elem}]'
@@ -883,8 +885,8 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
         type_str = cpp_arg.type
         is_out_arg = cpp_arg.name in out_args
         if ps.method and cpp_arg.name == 'self':
-            # For method's 'self', we can use 'Tensor &' and simply ignore mutability!
-            type_str = 'Tensor &'
+            # For method's 'self', we can use 'const Tensor &' and simply ignore mutability!
+            type_str = 'const at::Tensor &'
         else:
             # For other cases we need prevent dangling refs to temps (unless it's
             # unpacked scattered output)
@@ -893,7 +895,7 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
             ensure_temp_safe = len(out_args) <= 1 or not is_out_arg
             if ensure_temp_safe:
                 type_str = {
-                    'Tensor &': 'Tensor',
+                    'at::Tensor &': 'at::Tensor',
                 }.get(type_str, type_str)
         return DispatchLambdaArgument(
             name=cpp_arg.name,
@@ -907,21 +909,21 @@ def dispatch_lambda_args(ps: PythonSignature, f: NativeFunction) -> Tuple[Dispat
 # it's enough to just extend the list here. Before you do this, make sure
 # to add an appropriate wrap() overload in torch/csrc/autograd/utils/wrap_outputs.h.
 SUPPORTED_RETURN_TYPES = {
-    'Tensor',
-    'std::tuple<Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
-    'std::tuple<Tensor,Tensor,Tensor,int64_t>',
-    'std::tuple<Tensor,Tensor,double,int64_t>',
-    'std::tuple<Tensor,Tensor,Tensor,Tensor,int64_t>',
-    'std::tuple<Tensor,Tensor,double,Tensor,int64_t>',
-    'std::tuple<double,int64_t>',
-    'std::vector<Tensor>',
-    'Scalar', 'bool', 'int64_t', 'void*', 'void',
-    'QScheme', 'double',
-    'IntArrayRef',
-    'ScalarType'
+    'at::Tensor',
+    '::std::tuple<at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,double,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>',
+    '::std::tuple<at::Tensor,at::Tensor,double,at::Tensor,int64_t>',
+    '::std::tuple<double,int64_t>',
+    '::std::vector<at::Tensor>',
+    'at::Scalar', 'bool', 'int64_t', 'void*', 'void',
+    'at::QScheme', 'double',
+    'at::IntArrayRef',
+    'at::ScalarType'
 }
 
 def dispatch_lambda_return_str(f: NativeFunction) -> str:
@@ -945,7 +947,7 @@ def dispatch_lambda_return_str(f: NativeFunction) -> str:
     # mutable reference to temporary.  Maybe we could assign it to a
     # variable itself.)
     returns_without_annotation = tuple(map(lambda r: Return(r.name, r.type, None), f.func.returns))
-    return_str = cpp.returns_type(returns_without_annotation)
+    return_str = cpp.returns_type(returns_without_annotation).cpp_type()
     if return_str not in SUPPORTED_RETURN_TYPES:
         raise RuntimeError(f'{f.func.name} returns unsupported type {return_str}')
     return return_str
@@ -1014,7 +1016,7 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
         elif t.name == BaseTy.float:
             return 'toDouble'
         elif t.name == BaseTy.str:
-            return 'string'
+            return 'stringView'
 
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
@@ -1032,6 +1034,8 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'generator'
             elif t.elem.name == BaseTy.Layout:
                 return 'layoutWithDefault' if has_default else 'layoutOptional'
+            elif t.elem.name == BaseTy.Device:
+                return 'deviceWithDefault' if has_default else 'deviceOptional'
 
         elif isinstance(t.elem, ListType):
             if str(t.elem.elem) == 'int':

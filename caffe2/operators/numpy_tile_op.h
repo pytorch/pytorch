@@ -32,6 +32,7 @@ class NumpyTileOp : public Operator<Context> {
         "repeats input have the same"
         " number of elements as `inputs` has dimensions.");
     const int64_t* repeats_data = repeats.template data<int64_t>();
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (size_t i = 0; i < repeats.numel(); ++i) {
       CAFFE_ENFORCE_GE(repeats_data[i], 0);
     }

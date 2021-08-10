@@ -50,7 +50,7 @@ C10_DEFINE_string(
 C10_DEFINE_bool(
     no_inputs,
     false,
-    "Whether the model has any input. Will ignore other input arugments if true");
+    "Whether the model has any input. Will ignore other input arguments if true");
 C10_DEFINE_bool(
     use_caching_allocator,
     false,
@@ -224,6 +224,7 @@ int main(int argc, char** argv) {
   float tolerance = 0;
   ss >> tolerance;
 
+  c10::InferenceMode mode;
   torch::autograd::AutoGradMode guard(false);
   torch::jit::GraphOptimizerEnabledGuard no_optimizer_guard(false);
   auto module = torch::jit::load(FLAGS_model);

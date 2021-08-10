@@ -7,7 +7,7 @@ from ..parameter import is_lazy
 
 
 class _LazyProtocol(Protocol):
-    """This is to avoid errors with mypy checks for 
+    """This is to avoid errors with mypy checks for
     The attributes in a mixin:
     https://mypy.readthedocs.io/en/latest/more_types.html#mixin-classes
     """
@@ -59,15 +59,17 @@ class LazyModuleMixin:
     Modules that lazily initialize parameters, or "lazy modules",
     derive the shapes of their parameters from the first input(s)
     to their forward method. Until that first forward they contain
-    :class:`torch.nn.UninitializedParameter`s that should not be accessed
-    or used, and afterward they contain regular :class:`torch.nn.Parameter`s.
+    :class:`torch.nn.UninitializedParameter` s that should not be accessed
+    or used, and afterward they contain regular :class:`torch.nn.Parameter` s.
     Lazy modules are convenient since they don't require computing some
-    module arguments, like the `in_features` argument of a
+    module arguments, like the :attr:`in_features` argument of a
     typical :class:`torch.nn.Linear`.
 
     After construction, networks with lazy modules should first
-    be converted to the desired dtype and placed on the desired device.
-    The lazy modules should then be initialized with one or more "dry runs".
+    be converted to the desired dtype and placed on the expected device.
+    This is because lazy modules only perform shape inference so the usual dtype
+    and device placement behavior applies.
+    The lazy modules should then perform "dry runs" to initialize all the components in the module.
     These "dry runs" send inputs of the correct size, dtype, and device through
     the network and to each one of its lazy modules. After this the network can be used as usual.
 
@@ -89,8 +91,7 @@ class LazyModuleMixin:
     >>> # NOTE: these transforms can and should be applied after construction and before any 'dry runs'
     >>> lazy_mlp = mlp.cuda().double()
     >>> lazy_mlp
-    LazyMLP(
-      (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
+    LazyMLP( (fc1): LazyLinear(in_features=0, out_features=10, bias=True)
       (relu1): ReLU()
       (fc2): LazyLinear(in_features=0, out_features=1, bias=True)
       (relu2): ReLU()
@@ -110,11 +111,13 @@ class LazyModuleMixin:
 
     A final caveat when using lazy modules is that the order of initialization of a network's
     parameters may change, since the lazy modules are always initialized after other modules.
-    This can cause the parameters of a network using lazy modules to be initialized differently
-    than the parameters of a network without lazy modules.
     For example, if the LazyMLP class defined above had a :class:`torch.nn.LazyLinear` module
     first and then a regular :class:`torch.nn.Linear` second, the second module would be
     initialized on construction and the first module would be initialized during the first dry run.
+    This can cause the parameters of a network using lazy modules to be initialized differently
+    than the parameters of a network without lazy modules as the order of parameter initializations,
+    which often depends on a stateful random number generator, is different.
+    Check :doc:`/notes/randomness` for more details.
 
     Lazy modules can be serialized with a state dict like other modules. For example:
 
@@ -129,8 +132,8 @@ class LazyModuleMixin:
                  ('fc2.bias', tensor([0.0019]))])
 
 
-    Lazy modules can also load regular :class:`torch.nn.Parameter` s,
-    which replace their :class:`torch.nn.UninitializedParameter` s:
+    Lazy modules can load regular :class:`torch.nn.Parameter` s (i.e. you can serialize/deserialize
+    initialized LazyModules and they will remain initialized)
 
 
     >>> full_mlp = LazyMLP()
@@ -159,8 +162,8 @@ class LazyModuleMixin:
                             0.2479,  0.1091]])),
                  ('fc2.bias', tensor([0.0019]))])
 
-    Note, however, that lazy modules cannot validate that the shape of parameters they load is correct.
-
+    Note, however, that the loaded parameters will not be replaced when doing a "dry run" if they are initialized
+    when the state is loaded. This prevents using initialized modules in different contexts.
     """
 
     # modules inheriting from this will change their __class__ to the specified
@@ -169,14 +172,14 @@ class LazyModuleMixin:
 
     def __init__(self: _LazyProtocol, *args, **kwargs):
         # Mypy doesnt like this super call in a mixin
-        super().__init__(*args, **kwargs)  # type: ignore
+        super().__init__(*args, **kwargs)  # type: ignore[misc]
         self._load_hook = self._register_load_state_dict_pre_hook(self._lazy_load_hook)
         self._initialize_hook = self.register_forward_pre_hook(self._infer_parameters)
         warnings.warn('Lazy modules are a new feature under heavy development '
                       'so changes to the API or functionality can happen at any moment.')
 
     def _save_to_state_dict(self: _LazyProtocol, destination, prefix, keep_vars):
-        # This should be ideally implemented as a hook, 
+        # This should be ideally implemented as a hook,
         # but we should override `detach` in the UninitializedParameter to return itself
         # which is not clean
         for name, param in self._parameters.items():
@@ -242,7 +245,7 @@ class LazyModuleMixin:
         The module is set into evaluation mode before running the forward pass in order
         to avoid saving statistics or calculating gradients
         """
-        module.initialize_parameters(*input) 
+        module.initialize_parameters(*input)
         if module.has_uninitialized_params():
             raise RuntimeError('module {} has not been fully initialized'.format(self._get_name()))
         module._initialize_hook.remove()
@@ -255,4 +258,4 @@ class LazyModuleMixin:
 
     def _replicate_for_data_parallel(self: _LazyProtocol):
         raise RuntimeError('Modules with uninitialized parameters can\'t be used with `DataParallel`. '
-                           'Run a dummy forward pass to correctly initialize the modules')                    
+                           'Run a dummy forward pass to correctly initialize the modules')

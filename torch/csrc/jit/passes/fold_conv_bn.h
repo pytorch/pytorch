@@ -5,8 +5,8 @@
 namespace torch {
 namespace jit {
 
-/** \brief Fold Conv2d-BatchNorm2d into Conv2d in forward method of this module
- * and all its submodules.
+/** \brief Fold Conv2d-BatchNorm2d into Conv2d in all methods of this
+ * module and all its submodules, forward is included by default.
  *
  * The weight and bias of the Conv2d are correspondingly updated. Should only be
  * used on modules in eval mode.

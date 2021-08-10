@@ -63,6 +63,7 @@ TEST(InterfaceTest, ModuleInterfaceSerialization) {
       "subMod",
       cu->get_interface("__torch__.OneForward"),
       subMod._ivalue(),
+      // NOLINTNEXTLINE(bugprone-argument-comment)
       /*is_parameter=*/false);
   parentMod.define(parentForward, nativeResolver());
   ASSERT_TRUE(parentMod.hasattr("subMod"));

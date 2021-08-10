@@ -38,7 +38,7 @@ class SGD(Optimizer):
                 p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
             \end{aligned}
 
-        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
@@ -110,11 +110,11 @@ class SGD(Optimizer):
             F.sgd(params_with_grad,
                   d_p_list,
                   momentum_buffer_list,
-                  weight_decay,
-                  momentum,
-                  lr,
-                  dampening,
-                  nesterov)
+                  weight_decay=weight_decay,
+                  momentum=momentum,
+                  lr=lr,
+                  dampening=dampening,
+                  nesterov=nesterov)
 
             # update momentum_buffers in state
             for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):

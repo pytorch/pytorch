@@ -36,6 +36,22 @@ class TestXNNPACKOps(TestCase):
         output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
 
+    @given(input_size=st.integers(2, 32),
+           weight_output_dim=st.integers(2, 64),
+           use_bias=st.booleans())
+    def test_linear_1d_input(self, input_size, weight_output_dim, use_bias):
+        input_data = torch.rand(input_size)
+        weight = torch.rand((weight_output_dim, input_data.shape[-1]))
+        if use_bias:
+            bias = torch.rand((weight_output_dim))
+        else:
+            bias = None
+        ref_result = F.linear(input_data, weight, bias)
+        packed_weight_bias = torch.ops.prepacked.linear_clamp_prepack(weight, bias)
+        output_linearprepacked = torch.ops.prepacked.linear_clamp_run(input_data, packed_weight_bias)
+        torch.testing.assert_allclose(ref_result, output_linearprepacked, rtol=1e-2, atol=1e-3)
+
+
     @given(batch_size=st.integers(0, 3),
            input_channels_per_group=st.integers(1, 32),
            height=st.integers(5, 64),
@@ -604,8 +620,8 @@ class TestXNNPACKRewritePass(TestCase):
         class Linear(torch.nn.Module):
             def __init__(self):
                 super(Linear, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 return F.linear(x, self.weight, self.bias)
@@ -613,7 +629,7 @@ class TestXNNPACKRewritePass(TestCase):
         class LinearNoBias(torch.nn.Module):
             def __init__(self):
                 super(LinearNoBias, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
 
             def forward(self, x):
                 return F.linear(x, self.weight, None)
@@ -651,8 +667,8 @@ class TestXNNPACKRewritePass(TestCase):
         class Conv2D(torch.nn.Module):
             def __init__(self):
                 super(Conv2D, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -665,8 +681,8 @@ class TestXNNPACKRewritePass(TestCase):
         class Conv2DT(torch.nn.Module):
             def __init__(self):
                 super(Conv2DT, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_transpose_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(conv_transpose_weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.output_paddings = output_paddings
@@ -701,10 +717,10 @@ class TestXNNPACKRewritePass(TestCase):
         class M(torch.nn.Module):
             def __init__(self, activation_fn=F.relu):
                 super(M, self).__init__()
-                self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand((conv_bias_shape))), requires_grad=False)
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                self.conv_bias = torch.nn.Parameter(torch.rand((conv_bias_shape)), requires_grad=False)
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -813,8 +829,8 @@ class TestXNNPACKRewritePass(TestCase):
         class MFusionAntiPattern(torch.nn.Module):
             def __init__(self):
                 super(MFusionAntiPattern, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -841,8 +857,8 @@ class TestXNNPACKRewritePass(TestCase):
         class MFusionAntiPatternParamMinMax(torch.nn.Module):
             def __init__(self):
                 super(MFusionAntiPatternParamMinMax, self).__init__()
-                self.linear_weight = torch.nn.Parameter(torch.Tensor(torch.rand(linear_weight_shape)), requires_grad=False)
-                self.linear_bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.linear_weight = torch.nn.Parameter(torch.rand(linear_weight_shape), requires_grad=False)
+                self.linear_bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
                 self.strides = strides
                 self.paddings = paddings
                 self.dilations = dilations
@@ -874,8 +890,8 @@ class TestXNNPACKRewritePass(TestCase):
         class DecomposedLinearAddmm(torch.nn.Module):
             def __init__(self):
                 super(DecomposedLinearAddmm, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()
@@ -884,8 +900,8 @@ class TestXNNPACKRewritePass(TestCase):
         class DecomposedLinearMatmulAdd(torch.nn.Module):
             def __init__(self):
                 super(DecomposedLinearMatmulAdd, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()
@@ -896,8 +912,8 @@ class TestXNNPACKRewritePass(TestCase):
         class DecomposedLinearMatmul(torch.nn.Module):
             def __init__(self):
                 super(DecomposedLinearMatmul, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand((weight_output_dim))), requires_grad=False)
+                self.weight = torch.nn.Parameter(torch.rand(weight_shape), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.rand((weight_output_dim)), requires_grad=False)
 
             def forward(self, x):
                 weight_t = self.weight.t()
@@ -998,8 +1014,8 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             class Conv1D(torch.nn.Module):
                 def __init__(self):
                     super(Conv1D, self).__init__()
-                    self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                    self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                    self.weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                    self.bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                     self.stride = stride
                     self.padding = padding
                     self.dilation = dilation
@@ -1060,15 +1076,15 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             class Net(torch.nn.Module):
                 def __init__(self):
                     super(Net, self).__init__()
-                    self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                    self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                    self.conv_weight = torch.nn.Parameter(torch.rand(conv_weight_shape), requires_grad=False)
+                    self.conv_bias = torch.nn.Parameter(torch.rand(conv_bias_shape), requires_grad=False)
                     self.stride = stride
                     self.padding = padding
                     self.dilation = dilation
                     self.groups = groups
 
-                    self.fc_weight = torch.nn.Parameter(torch.Tensor(torch.rand(fc_weight_shape)), requires_grad=False)
-                    self.fc_bias = torch.nn.Parameter(torch.Tensor(torch.rand(fc_bias_shape)), requires_grad=False)
+                    self.fc_weight = torch.nn.Parameter(torch.rand(fc_weight_shape), requires_grad=False)
+                    self.fc_bias = torch.nn.Parameter(torch.rand(fc_bias_shape), requires_grad=False)
 
                 def forward(self, x):
                     x = F.conv1d(x, self.conv_weight, self.conv_bias,

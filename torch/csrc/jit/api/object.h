@@ -2,6 +2,7 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
 
 namespace torch {
@@ -19,8 +20,10 @@ class ObjectAttributeError : public std::runtime_error {
   ObjectAttributeError(const std::string& what) : std::runtime_error(what) {}
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API Object {
   Object() = default;
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -33,6 +36,12 @@ struct TORCH_API Object {
   c10::ClassTypePtr type() const {
     return _ivalue()->type();
   }
+
+  struct Property {
+    std::string name;
+    Method getter_func;
+    c10::optional<Method> setter_func;
+  };
 
   void setattr(const std::string& name, c10::IValue v) {
     if (_ivalue()->type()->hasConstant(name)) {
@@ -99,6 +108,38 @@ struct TORCH_API Object {
   const std::vector<Method> get_methods() const {
     return c10::fmap(type()->methods(), [&](Function* func) {
       return Method(_ivalue(), func);
+    });
+  }
+
+  bool has_property(const std::string& name) const {
+    for (const auto& prop : type()->properties()) {
+      if (prop.name == name) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const Property get_property(const std::string& name) const {
+    for (const auto& prop : type()->properties()) {
+      if (prop.name == name) {
+        c10::optional<Method> setter = c10::nullopt;
+        if (prop.setter) {
+          setter = Method(_ivalue(), prop.setter);
+        }
+        return Property{prop.name, Method(_ivalue(), prop.getter), setter};
+      }
+    }
+    AT_ERROR("Property '", name, "' is not defined.");
+  }
+
+  const std::vector<Property> get_properties() const {
+    return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
+      c10::optional<Method> setter = c10::nullopt;
+      if (prop.setter) {
+        setter = Method(_ivalue(), prop.setter);
+      }
+      return Property{prop.name, Method(_ivalue(), prop.getter), setter};
     });
   }
 

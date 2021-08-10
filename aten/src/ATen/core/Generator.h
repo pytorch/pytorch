@@ -143,7 +143,7 @@ namespace detail {
 /**
  * Helper function for checking the validity of new random generator
  * state. Right now following conditions are checked:
- * 
+ *
  * - The new state tensor must be a torch.ByteTensor
  * - Data of the new state tensor must be contiguous
  */

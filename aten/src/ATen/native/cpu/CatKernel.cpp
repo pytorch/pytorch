@@ -2,8 +2,8 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/cpu/CatKernel.h>
-#include <ATen/cpu/vec256/functional.h>
-#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vec/functional.h>
+#include <ATen/cpu/vec/vec.h>
 
 namespace at { namespace native {
 
@@ -31,25 +31,22 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
     inputs.emplace_back(tensor, dim, result.strides()[dim]);
   }
 
-  using Vec = vec256::Vec256<scalar_t>;
+  using Vec = vec::Vectorized<scalar_t>;
   scalar_t* result_ptr = result_data;
   for (int64_t i = 0; i < outer; ++i) {
     for (int64_t j = 0; j < ninputs; j++) {
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
-      if (local_inner < Vec::size()) {
-        #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-        # pragma unroll
-        #endif
-        for (int64_t k = 0; k < local_inner; k++) {
-          result_ptr[k] = input_ptr[k];
-        }
-      } else {
-        vec256::map(
-            [](Vec x) { return x; },
-            result_ptr,
-            input_ptr,
-            local_inner);
+      int64_t d = 0;
+      for (; d < local_inner - (local_inner % Vec::size()); d += Vec::size()) {
+        Vec in_vec = Vec::loadu(input_ptr + d);
+        in_vec.store(result_ptr + d);
+      }
+      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+      # pragma unroll
+      #endif
+      for (; d < local_inner; d++) {
+        result_ptr[d] = input_ptr[d];
       }
       result_ptr += local_inner;
     }
@@ -57,7 +54,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "cat_serial_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
     cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
   });
 }

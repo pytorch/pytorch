@@ -45,8 +45,9 @@ class TestWith(JitTestCase):
                 self.count.add_(0.3)
                 return self.count
 
-            def __exit__(self, type: Any, value: Any, tb: Any):
+            def __exit__(self, type: Any, value: Any, tb: Any) -> bool:
                 self.count.sub_(0.3)
+                return True
 
         make_global(Context)
 
@@ -412,15 +413,15 @@ class TestWith(JitTestCase):
         # checkScript and checkScriptRaisesRegex cannot be used because the string frontend will
         # not compile class types (of which Context, the context manager being used for this test
         # is one).
-        with self.assertRaisesRegex(Exception, r"raised exception"):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegex(Exception, r"raised exception"):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception_nested(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
-        with self.assertRaisesRegex(Exception, r"raised exception"):
+        with self.assertRaisesRegexWithHighlight(Exception, r"raised exception", "raise Exception(\""):
             test_exception_fn_call(torch.randn(2), c)
         self.assertEqual(c.count, 1)
 
@@ -441,7 +442,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadEnter(object):
             """
-            This class is has an __enter__ method with an incorrect signature.
+            This class has an __enter__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -456,7 +457,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class BadExit(object):
             """
-            This class is has an __exit__ method with an incorrect signature.
+            This class has an __exit__ method with an incorrect signature.
             """
 
             def __init__(self):
@@ -471,7 +472,7 @@ class TestWith(JitTestCase):
         @torch.jit.script
         class ExitIncorrectTypes(object):
             """
-            This class is has an __exit__ method with unsupported argument types.
+            This class has an __exit__ method with unsupported argument types.
             """
 
             def __init__(self):
@@ -483,53 +484,60 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: int, tb: int):
                 pass
 
-        def test_no_enter_no_exit(x: torch.Tensor, c: NoEnterNoExit) -> torch.Tensor:
-            with c as _:
+        def test_no_enter_no_exit(x: torch.Tensor, cm: NoEnterNoExit) -> torch.Tensor:
+            with cm as _:
                 pass
 
             return x
 
-        def test_bad_enter(x: torch.Tensor, c: BadEnter) -> torch.Tensor:
-            with c as _:
+        def test_bad_enter(x: torch.Tensor, cm: BadEnter) -> torch.Tensor:
+            with cm as _:
                 pass
 
             return x
 
-        def test_bad_exit(x: torch.Tensor, c: BadExit) -> torch.Tensor:
-            with c as _:
+        def test_bad_exit(x: torch.Tensor, cm: BadExit) -> torch.Tensor:
+            with cm as _:
                 pass
 
             return x
 
-        def test_exit_incorrect_types(x: torch.Tensor, c: ExitIncorrectTypes) -> torch.Tensor:
-            with c as _:
+        def test_exit_incorrect_types(x: torch.Tensor, cm: ExitIncorrectTypes) -> torch.Tensor:
+            with cm as _:
                 pass
 
             return x
+
+        def test_enter_without_object():
+            with "not_object" as obj:
+                pass
 
         test_tensor = torch.randn(5, dtype=torch.double)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"does not define __enter__ and __exit__ methods"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"does not define __enter__ and __exit__ methods", "cm"
         ):
             self.checkScript(test_no_enter_no_exit, (test_tensor, NoEnterNoExit()))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"__enter__ must have only one argument and one return value"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"__enter__ must have only one argument and one return value", "cm"
         ):
             self.checkScript(test_bad_enter, (test_tensor, BadEnter()))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"__exit__ must have four arguments and no return value"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"__exit__ must have four arguments", "cm"
         ):
             self.checkScript(test_bad_exit, (test_tensor, BadExit()))
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"argument 2 of __exit__ must have Any type"
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"argument 2 of __exit__ must have Any type", "cm"
         ):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"must return an object", "\"not_object\""):
+            self.checkScript(test_enter_without_object, ())
 
     def test_with_no_grad(self):
         """

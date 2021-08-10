@@ -10,6 +10,18 @@ extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void 
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 #endif  // AT_BUILD_WITH_BLAS()
 
+#if AT_BUILD_WITH_BLAS()
+extern "C" void cswap_(int *n, const void *x, int *incx, void *y, int *incy);
+extern "C" void dcopy_(int *n, const double *x, int *incx, double *y, int *incy);
+extern "C" void scopy_(int *n, const float *x, int *incx, float *y, int *incy);
+extern "C" void zcopy_(int *n, const void *x, int *incx, void *y, int *incy);
+extern "C" void ccopy_(int *n, const void *x, int *incx, void *y, int *incy);
+extern "C" void daxpy_(int *n, double *a, const double *x, int *incx, double *y, int *incy);
+extern "C" void saxpy_(int *n, float *a, const float *x, int *incx, float *y, int *incy);
+extern "C" void caxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
+extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *incy);
+#endif  // AT_BUILD_WITH_BLAS()
+
 #ifdef USE_FBGEMM
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
@@ -248,6 +260,174 @@ void gemm(
   gemm_stub(
       kCPU, kLong,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+}
+
+DEFINE_DISPATCH(axpy_stub);
+
+void axpy(int64_t n, double a, const double *x, int64_t incx, double *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    daxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  axpy_stub(
+      kCPU, at::kDouble,
+      n, a, x, incx, y, incy);
+}
+
+void axpy(int64_t n, float a, const float *x, int64_t incx, float *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    saxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  axpy_stub(
+      kCPU, at::kFloat,
+      n, a, x, incx, y, incy);
+}
+
+void axpy(int64_t n, c10::complex<double> a, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    zaxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  axpy_stub(
+      kCPU, at::kComplexDouble,
+      n, a, x, incx, y, incy);
+}
+
+void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) )
+  {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    caxpy_(&i_n, &a, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  axpy_stub(
+      kCPU, at::kComplexFloat,
+      n, a, x, incx, y, incy);
+}
+
+DEFINE_DISPATCH(copy_stub);
+
+void copy(int64_t n, const double *x, int64_t incx, double *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    dcopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  copy_stub(
+      kCPU, at::kDouble,
+      n, x, incx, y, incy);
+}
+
+void copy(int64_t n, const float *x, int64_t incx, float *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    scopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  copy_stub(
+      kCPU, at::kFloat,
+      n, x, incx, y, incy);
+}
+
+void copy(int64_t n, const c10::complex<double> *x, int64_t incx, c10::complex<double> *y, int64_t incy) {
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    zcopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  copy_stub(
+      kCPU, at::kComplexDouble,
+      n, x, incx, y, incy);
+}
+
+void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<float> *y, int64_t incy){
+  if(n == 1)
+  {
+    incx = 1;
+    incy = 1;
+  }
+  #if AT_BUILD_WITH_BLAS()
+  if( (n <= INT_MAX) && (incx <= INT_MAX) && (incy <= INT_MAX) ) {
+    int i_n = (int)n;
+    int i_incx = (int)incx;
+    int i_incy = (int)incy;
+    ccopy_(&i_n, x, &i_incx, y, &i_incy);
+    return;
+  }
+  #endif
+  copy_stub(
+      kCPU, at::kComplexFloat,
+      n, x, incx, y, incy);
 }
 
 }}}  // namespace at::native::cpublas

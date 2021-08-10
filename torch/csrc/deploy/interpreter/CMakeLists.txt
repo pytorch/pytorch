@@ -6,6 +6,7 @@ SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../")
 # Build cpython
 SET(PYTHON_INSTALL_DIR "${INTERPRETER_DIR}/cpython")
 SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8")
+SET(PYTHON_INC_DIR "${PYTHON_INSTALL_DIR}/include/python3.8" PARENT_SCOPE)
 SET(PYTHON_LIB "${PYTHON_INSTALL_DIR}/lib/libpython3.8.a")
 SET(PYTHON_BIN "${PYTHON_INSTALL_DIR}/bin/python3")
 ExternalProject_Add(
@@ -14,11 +15,12 @@ ExternalProject_Add(
   GIT_REPOSITORY https://github.com/python/cpython.git
   GIT_TAG v3.8.6
   UPDATE_COMMAND ""
+  PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/cpython_patch.diff
   BUILD_IN_SOURCE True
-  CONFIGURE_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC <SOURCE_DIR>/configure --prefix ${PYTHON_INSTALL_DIR}
+  CONFIGURE_COMMAND PYTHON_INSTALL_DIR=${PYTHON_INSTALL_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/configure_cpython.sh
   BUILD_COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
   INSTALL_COMMAND make install
-  BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB} ${PYTHON_BIN}
+  BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB} ${PYTHON_BIN} ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a
   LOG_OUTPUT_ON_FAILURE True
 )
 
@@ -64,13 +66,16 @@ set(FROZEN_FILES
   ${FROZEN_DIR}/bytecode_3.c
   ${FROZEN_DIR}/bytecode_4.c
 )
+
+file(GLOB_RECURSE PYTORCH_PYTHON_SOURCE_FILES ${PYTORCH_ROOT}/torch/*.py)
+
 # Packages to freeze: python stdlib, typing extension, and torch
 add_custom_command(
    OUTPUT ${FROZEN_FILES}
    WORKING_DIRECTORY ${INTERPRETER_DIR}
    COMMAND mkdir -p ${FROZEN_DIR}
    COMMAND ${PYTHON_BIN} freeze.py ${PYTHON_STDLIB_DIR} ${TYPING_PKG} ${PYTORCH_ROOT}/torch --oss --install_dir ${FROZEN_DIR} --verbose
-   DEPENDS cpython typing
+   DEPENDS cpython typing ${PYTORCH_PYTHON_SOURCE_FILES}
    VERBATIM
 )
 
@@ -80,36 +85,24 @@ target_include_directories(torch_python_obj BEFORE PRIVATE ${PYTHON_INC_DIR})
 add_library(torch_python_static STATIC $<TARGET_OBJECTS:torch_python_obj>)
 # Build the interpreter lib, designed to be standalone and dlopened
 # We bake the python and torch_python binding objs into libinterpreter
-set(LINKER_SCRIPT "${INTERPRETER_DIR}/hide_symbols.script")
 set(INTERPRETER_LIB_SOURCES
-  ${INTERPRETER_DIR}/interpreter.cpp
+  ${INTERPRETER_DIR}/interpreter_impl.cpp
+  ${INTERPRETER_DIR}/import_find_sharedfuncptr.cpp
   ${FROZEN_FILES}
   ${LINKER_SCRIPT}
 )
-add_library(interpreter ${INTERPRETER_LIB_SOURCES} ${LINKER_SCRIPT})
-set_property(TARGET interpreter APPEND_STRING PROPERTY
-             LINK_FLAGS " -Wl,--version-script=${LINKER_SCRIPT}")
+add_library(torch_deployinterpreter ${INTERPRETER_LIB_SOURCES} ${LINKER_SCRIPT})
 # need to ensure headers are present before any .cpp in interpreter are compiled,
 # but cpp themselves don't clearly depend on cpython so there is a race otherwise
-add_dependencies(interpreter cpython)
-target_compile_options(
-    interpreter PRIVATE
-    -fvisibility=hidden
-)
-target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
-target_include_directories(interpreter PUBLIC ${PYTHON_INC_DIR})
-target_link_libraries(interpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
-target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m z ffi lzma readline nsl ncursesw panelw) # for python builtins
-target_link_libraries(interpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
+add_dependencies(torch_deployinterpreter cpython)
+add_dependencies(torch_python_obj cpython)
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+  target_compile_options(torch_deployinterpreter PRIVATE -fno-gnu-unique)
+endif()
 
-# handy to have a standalone app to verify linkage and usage of interpreter before embedding it in another lib
-set(INTERPRETER_TEST_SOURCES
-  ${INTERPRETER_DIR}/test_main.cpp
-)
-add_executable(interpreter_test ${INTERPRETER_TEST_SOURCES})
-target_include_directories(interpreter_test PRIVATE ${PYTORCH_ROOT}/torch)
-target_include_directories(interpreter_test PRIVATE ${PYTHON_INC_DIR})
-target_link_libraries(interpreter_test PUBLIC gtest dl)
-# no-as-needed to ensure shm and torch are included to satisfy runtime dlopen
-# dependencies for libinterpreter, regardless of whether they are used in interpreter_test
-target_link_libraries(interpreter_test PUBLIC "-Wl,--no-as-needed" shm torch protobuf::libprotobuf-lite)
+target_include_directories(torch_deployinterpreter PRIVATE ${INTERPRETER_DIR})
+target_include_directories(torch_deployinterpreter BEFORE PUBLIC ${PYTHON_INC_DIR})
+
+target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_LIB} ${PYTHON_STDLIB} torch_python_static)
+target_link_libraries(torch_deployinterpreter PRIVATE fmt::fmt-header-only protobuf::libprotobuf-lite)
+target_link_libraries(torch_deployinterpreter PRIVATE ${PYTHON_INSTALL_DIR}/lib/libssl.a ${PYTHON_INSTALL_DIR}/lib/libcrypto.a)

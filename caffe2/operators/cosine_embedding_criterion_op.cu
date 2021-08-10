@@ -26,7 +26,7 @@ template <>
 bool CosineEmbeddingCriterionOp<CUDAContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
-  
+
   CAFFE_ENFORCE(S.numel() == Y.numel(),
                 "The embedding and label should have the same size.");
   auto* output = Output(0, S.sizes(), at::dtype<float>());
@@ -38,6 +38,8 @@ bool CosineEmbeddingCriterionOp<CUDAContext>::RunOnDevice() {
   CECKernel<<<CAFFE_GET_BLOCKS(S.numel()), CAFFE_CUDA_NUM_THREADS,
               0, context_.cuda_stream()>>>(
       S.numel(), Sdata, Ydata, margin_, output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -46,7 +48,7 @@ bool CosineEmbeddingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   auto& S = Input(0);
   auto& Y = Input(1);
   auto& dOutput = Input(2);
-  
+
 
   auto* dS = Output(0, S.sizes(), at::dtype<float>());
 
@@ -57,6 +59,8 @@ bool CosineEmbeddingCriterionGradientOp<CUDAContext>::RunOnDevice() {
   CECGradientKernel<<<CAFFE_GET_BLOCKS(S.numel()), CAFFE_CUDA_NUM_THREADS,
                       0, context_.cuda_stream()>>>(
       S.numel(), Sdata, Ydata, dOutput_data, margin_, dSdata);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -108,7 +108,9 @@ void modifyTensorShapeDimSize(
       "] = ",
       tensor_shape->dims(dim_index),
       " cannot be divided by old_size ",
-      old_size);
+      old_size,
+      " tensor name: ",
+      tensor_shape->name());
   int64_t modified_size = (tensor_shape->dims(dim_index) * new_size) / old_size;
   tensor_shape->set_dims(dim_index, modified_size);
 }
@@ -165,6 +167,7 @@ ShapeInfoMap extractShapeInfoFromTensorBoundShapes(
         new_max_batch_size,
         new_max_feature_len);
     shape_info_map[tensor_bound_shape.name()] =
+        // NOLINTNEXTLINE(performance-move-const-arg)
         ShapeInfo(dim_types, std::move(tensor_bound_shape.shape()));
   }
   return shape_info_map;
@@ -213,6 +216,7 @@ void parseShapeInfoMapFromString(
     }
 
     bool valid = true;
+    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (int i = 1; i < size; i++) {
       auto dim = kv[i];
       try {

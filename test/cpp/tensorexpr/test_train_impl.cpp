@@ -95,6 +95,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
     // Every time we "stay left," add the other consumers to q
     // If we find y -- add the whole route to need_grad
     // If we can't find y -- add the whole route to no_grad
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     VTensor* var;
     std::unordered_set<VTensor*> route;
     std::tie(var, route) = q.front();
@@ -193,6 +194,7 @@ VTensor* grad(VTensor* y, VTensor* x, VTensor* j) {
 
 VOp::VOp(
     const std::string& name,
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     const std::vector<VTensor*>& inputs_,
     size_t num_outputs,
     VGraph* graph_)
@@ -210,7 +212,9 @@ std::vector<DimArg> get_vars(
     std::vector<std::string> dims,
     const std::map<std::string, torch::jit::tensorexpr::VarHandle>& vbindings) {
   std::vector<DimArg> vars;
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto k : dims) {
+    // NOLINTNEXTLINE(performance-inefficient-vector-operation)
     vars.emplace_back(vbindings.at(k));
   }
   if (vars.size() == 0) {
@@ -229,7 +233,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) + inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) + inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -252,7 +256,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) - inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) - inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -274,7 +278,7 @@ REGISTER_METHOD(
       TORCH_CHECK(inputs.size() == 1);
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return FloatImm::make(-1.0f) * inputs.at(0)->call(i);
+        return FloatImm::make(-1.0f) * inputs.at(0)->load(i);
       });
       return {o};
     },
@@ -297,7 +301,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) * inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) * inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -322,7 +326,7 @@ REGISTER_METHOD(
       TORCH_CHECK(vinputs.at(0)->shape.size() == vinputs.at(1)->shape.size());
       auto vars = get_vars(vinputs.at(0)->shape, vbindings);
       Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
-        return inputs.at(0)->call(i) / inputs.at(1)->call(i);
+        return inputs.at(0)->load(i) / inputs.at(1)->load(i);
       });
       return {o};
     },
@@ -352,7 +356,7 @@ REGISTER_METHOD(
           {},
           Sum(),
           [=](const VarHandle& i) -> ExprHandle {
-            return inputs.at(0)->call(i);
+            return inputs.at(0)->load(i);
           },
           vars);
 
@@ -375,7 +379,7 @@ REGISTER_METHOD(
       TORCH_CHECK(inputs.size() == 2);
       auto vars = get_vars(vinputs.at(1)->shape, vbindings);
       Tensor* o = Compute(
-          "o", vars, [&](const VarHandle& i) { return inputs.at(0)->call(0); });
+          "o", vars, [&](const VarHandle& i) { return inputs.at(0)->load(0); });
 
       return {o};
     },
@@ -464,6 +468,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
 
   for (const auto& t : graph.vtensors) {
     auto id = reinterpret_cast<size_t>(&t);
+    // NOLINTNEXTLINE(performance-for-range-copy)
     for (auto d : t.shape) {
       if (!vbindings.count(d)) {
         VarHandle D(d, kInt);
@@ -474,6 +479,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     if (!t.op) {
       std::vector<DimArg> vars;
       std::vector<ExprHandle> exprs;
+      // NOLINTNEXTLINE(performance-for-range-copy)
       for (auto k : t.shape) {
         vars.emplace_back(vbindings.at(k));
         exprs.emplace_back(vbindings.at(k));
@@ -484,7 +490,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
       Placeholder inpB(BufHandle(get_name(id), exprs, kFloat));
       auto inpT =
           Compute("input" + get_name(id), vars, [&](const VarHandle& i) {
-            return Load::make(BufHandle(inpB.data()), {i}, 1);
+            return Load::make(BufHandle(inpB.data()), {i});
           });
       inputs.emplace(&t, inpB);
       bindings.emplace(&t, inpT);
@@ -505,6 +511,10 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
   }
 
   std::vector<Tensor*> toutputs;
+  std::vector<Tensor*> t_all;
+  for (auto& vtensor : graph.vtensors) {
+    t_all.emplace_back(bindings.at(&vtensor));
+  }
   if (outputs.size() == 0) {
     for (auto& vtensor : graph.vtensors) {
       if (vtensor.consumers.size() == 0) {
@@ -517,7 +527,7 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
     }
   }
 
-  LoopNest l(toutputs);
+  LoopNest l(toutputs, t_all);
   l.prepareForCodegen();
   Stmt* s = l.root_stmt();
   return std::make_tuple(s, inputs, bindings, vbindings);

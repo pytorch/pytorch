@@ -108,7 +108,7 @@ private:
     caffe2::TypeMeta type_meta = typeMetaFor(src);
     at::Device device = src.device();
 #ifdef __HIP_PLATFORM_HCC__
-    if (device.type() == at::DeviceType::CUDA) {
+    if (device.is_cuda()) {
       device = at::Device(at::DeviceType::HIP, device.index());
     }
 #endif
@@ -149,7 +149,7 @@ private:
     return s.toDouble();
   }
 
-  void assignTo(Tensor* dst, at::ScalarType scalar_type, at::Scalar scalar) {
+  void assignTo(Tensor* dst, at::ScalarType scalar_type, const at::Scalar& scalar) {
     switch(scalar_type) {
       #define DEFINE_CASE(ctype,aten_name) \
         case at::k##aten_name: { \

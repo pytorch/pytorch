@@ -23,7 +23,7 @@ class Pareto(TransformedDistribution):
 
     def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
-        base_dist = Exponential(self.alpha)
+        base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
         super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
 

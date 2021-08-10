@@ -8,7 +8,6 @@
 
 #ifndef C10_MOBILE
 #include "onnx/checker.h"
-#include "onnx/optimizer/optimize.h"
 #endif
 
 #include "google/protobuf/io/coded_stream.h"
@@ -68,21 +67,6 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   d.set_device_id(onnx_device.device_id);
   return d;
 }
-
-#ifndef C10_MOBILE
-ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
-  std::vector<std::string> passes{"fuse_consecutive_transposes",
-                                  "eliminate_nop_transpose",
-                                  "fuse_transpose_into_gemm"};
-
-  if (init) {
-    passes.emplace_back("split_init");
-  } else {
-    passes.emplace_back("split_predict");
-  }
-  return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
-}
-#endif
 
 template <class T, class U>
 U LookUpWithDefault(
@@ -1409,6 +1393,7 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   c2_op->mutable_output()->MergeFrom(node.output());
   c2_op->set_name(node.name());
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   const auto onnx_op_type = node.op_type();
   auto broken_version = caffe2::get_default(
       get_broken_operators(), onnx_op_type, std::numeric_limits<int>::max());
@@ -1521,14 +1506,9 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
-#ifndef C10_MOBILE
-  ModelProto init_model = OptimizeOnnx(onnx_model, true);
-  ModelProto pred_model = OptimizeOnnx(onnx_model, false);
-#else
   ModelProto init_model = ModelProto();
   ModelProto pred_model = onnx_model;
   pred_model.mutable_graph()->mutable_initializer()->Clear();
-#endif
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");
@@ -1773,6 +1753,7 @@ void Caffe2Backend::BuildTensorFillingOp(
       ConvertIntegralValueToCaffe2<::google::protobuf::int64>(c2_op, c2_values, onnx_tensor);
     } else if (onnx_tensor.data_type() == TensorProto::UINT32) {
       ConvertIntegralValueToCaffe2<::google::protobuf::uint64>(c2_op, c2_values, onnx_tensor);
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     } else if (onnx_tensor.data_type() == TensorProto::BOOL) {
       ConvertIntegralValueToCaffe2<::google::protobuf::int8>(c2_op, c2_values, onnx_tensor);
     } else if (onnx_tensor.data_type() == TensorProto::UINT8) {
@@ -1815,6 +1796,7 @@ void Caffe2Backend::BuildTensorFillingOp(
         c2_values->set_f(onnx_tensor.float_data(0));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(float));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         float f;
         memcpy(&f, onnx_tensor.raw_data().c_str(), sizeof(float));
         c2_values->set_f(f);
@@ -1825,6 +1807,7 @@ void Caffe2Backend::BuildTensorFillingOp(
         c2_values->set_f(static_cast<float>(onnx_tensor.double_data(0)));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(double));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         double d;
         memcpy(&d, onnx_tensor.raw_data().c_str(), sizeof(double));
         c2_values->set_f(static_cast<float>(d));
@@ -1835,6 +1818,7 @@ void Caffe2Backend::BuildTensorFillingOp(
         c2_values->set_i(onnx_tensor.int64_data(0));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int64_t));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int64_t i;
         memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int64_t));
         c2_values->set_i(i);
@@ -1845,6 +1829,7 @@ void Caffe2Backend::BuildTensorFillingOp(
         c2_values->set_i(onnx_tensor.int32_data(0));
       } else {
         CAFFE_ENFORCE(onnx_tensor.raw_data().size() == sizeof(int32_t));
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         int32_t i;
         memcpy(&i, onnx_tensor.raw_data().c_str(), sizeof(int32_t));
         c2_values->set_i(i);

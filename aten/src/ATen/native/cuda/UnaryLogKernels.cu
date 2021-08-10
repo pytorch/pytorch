@@ -10,7 +10,7 @@
 
 namespace at { namespace native {
 
-void log_kernel_cuda(TensorIterator& iter) {
+void log_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::log(a);
@@ -18,7 +18,7 @@ void log_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void log10_kernel_cuda(TensorIterator& iter) {
+void log10_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log10_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::log10(a);
@@ -26,7 +26,7 @@ void log10_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void log1p_kernel_cuda(TensorIterator& iter) {
+void log1p_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log1p_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::log1p(a);
@@ -34,7 +34,7 @@ void log1p_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void log2_kernel_cuda(TensorIterator& iter) {
+void log2_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "log2_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::log2(a);

@@ -30,9 +30,10 @@ namespace cuda {
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  public:
-  virtual ~IterVisitor() = default;
+  ~IterVisitor() override = default;
 
   IterVisitor() = default;
 
@@ -48,6 +49,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // to inputs based on depth first traversal. Next could be called on a node
   // multiple times.
   virtual std::vector<Statement*> next(Statement* stmt) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (stmt->isVal()) {
       return next(stmt->as<Val>());
     } else if (stmt->isExpr()) {
@@ -68,6 +70,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
 
   virtual std::vector<Statement*> next(Expr* expr) {
     FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<Statement*> next_stmts{
         expr->inputs().begin(), expr->inputs().end()};
     return next_stmts;
@@ -94,10 +97,12 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // guarenteed to be all siblings throughout traversal). stmt_stack.front()
   // contains the outputs we started with (not guarenteed to be all outputs
   // throughout traversal).
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<std::vector<Statement*>> stmt_stack;
 
   // Statements to stop traversal on if they're hit (pretends they're leaf
   // nodes in next)
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::unordered_set<Statement*> termination_stmts;
 
   void traverse_(
@@ -147,9 +152,10 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
  public:
-  virtual ~BackwardVisitor() = default;
+  ~BackwardVisitor() override = default;
 
   BackwardVisitor() = default;
 
@@ -171,17 +177,17 @@ class TORCH_CUDA_CU_API BackwardVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Statement* stmt) override {
+  void handle(Statement* stmt) override {
     OptOutDispatch::handle(stmt);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Expr* expr) override {
+  void handle(Expr* expr) override {
     OptOutDispatch::handle(expr);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Val* val) override {
+  void handle(Val* val) override {
     OptOutDispatch::handle(val);
   }
 

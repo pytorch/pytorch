@@ -4,6 +4,7 @@
 #include "caffe2/operators/batch_gather_ops.h"
 // Shared batch kernel
 #include "caffe2/operators/gather_op.cuh"
+#include "caffe2/utils/GpuAtomics.cuh"
 
 namespace caffe2 {
 
@@ -47,7 +48,7 @@ __global__ void BatchGatherGradientKernel(
     const float* src_offset =
         grad_data + i * gathered_batch_size + j * block_size;
     float* dst_offset = out + i * data_batch_size + idx * block_size;
-    atomicAdd(dst_offset + k, src_offset[k]);
+    gpu_atomic_add(dst_offset + k, src_offset[k]);
   }
 }
 
@@ -119,7 +120,8 @@ bool BatchGatherGradientOp<CUDAContext>::DoRunWithType2() {
       gathered_batch_size,
       block_size,
       src_indexing_axis_dim,
-      false); // TBD: Add proper index wrapping support to Gather gradients.
+      false);
+  C10_CUDA_KERNEL_LAUNCH_CHECK(); // TBD: Add proper index wrapping support to Gather gradients.
 
   return true;
 }

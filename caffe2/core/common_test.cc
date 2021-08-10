@@ -10,7 +10,7 @@ namespace caffe2 {
 
 #ifndef __ANDROID__
 
-// Simple tests to make sure that our stoi and stod implementations are 
+// Simple tests to make sure that our stoi and stod implementations are
 // matching the std implementations, but not testing it very extensively
 // as one should be using the std version most of the time.
 TEST(CommonTest, TestStoi) {
@@ -41,5 +41,3 @@ TEST(CommonTest, TestStod) {
 #endif // __ANDROID__
 
 }  // namespace caffe2
-
-

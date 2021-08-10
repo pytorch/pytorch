@@ -15,8 +15,8 @@
 #  x2: k
 #  x3: a
 #  x4: a_stride
-#  x5: w 
-#  x6: c 
+#  x5: w
+#  x6: c
 #  x7: c_stride
 #
 

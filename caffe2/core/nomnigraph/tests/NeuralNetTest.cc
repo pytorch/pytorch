@@ -1,9 +1,9 @@
 #include <algorithm>
+#include <memory>
 
 #include "test_util.h"
 
 #include "nomnigraph/Representations/NeuralNet.h"
-#include "nomnigraph/Support/Pointer.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
 
 #include <gtest/gtest.h>
@@ -16,14 +16,14 @@ using namespace nom::repr::nn;
 TEST(NeuralNetGraph, ReplaceGraph) {
   NNGraph graph;
 
-  auto input1 = graph.createNode(util::make_unique<Tensor>("input1"));
-  auto input2 = graph.createNode(util::make_unique<Tensor>("input2"));
+  auto input1 = graph.createNode(std::make_unique<Tensor>("input1"));
+  auto input2 = graph.createNode(std::make_unique<Tensor>("input2"));
   // Test renaming blob
   nn::get<Tensor>(input2)->setName("input2_renamed");
-  auto sum = graph.createNode(util::make_unique<Sum>());
-  auto sumOutput = graph.createNode(util::make_unique<Tensor>("sumOutput"));
-  auto relu = graph.createNode(util::make_unique<Relu>());
-  auto reluOutput = graph.createNode(util::make_unique<Tensor>("reluOutput"));
+  auto sum = graph.createNode(std::make_unique<Sum>());
+  auto sumOutput = graph.createNode(std::make_unique<Tensor>("sumOutput"));
+  auto relu = graph.createNode(std::make_unique<Relu>());
+  auto reluOutput = graph.createNode(std::make_unique<Tensor>("reluOutput"));
 
   graph.createEdge(input1, sum);
   graph.createEdge(input2, sum);
@@ -70,7 +70,7 @@ TEST(NeuralNetGraph, ReplaceGraph) {
           NNGraph& g,
           NNGraph::NodeRef relu,
           const NNMatchGraph::SubgraphMatchResultType& matchResult) {
-        auto fusedNode = g.createNode(util::make_unique<SumRelu>());
+        auto fusedNode = g.createNode(std::make_unique<SumRelu>());
         auto sumNode =
             getProducer(matchResult.getMatchNodeMap()->at(matchSumOutput));
         g.replaceOutEdges(relu, fusedNode);

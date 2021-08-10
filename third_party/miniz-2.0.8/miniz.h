@@ -120,7 +120,7 @@
    If all macros here are defined the only functionality remaining will be CRC-32, adler-32, tinfl, and tdefl. */
 
 /* Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O. */
-#define MINIZ_NO_STDIO
+// #define MINIZ_NO_STDIO  // enable STDIO API mz_zip_reader_init_file for pytorch file extractor, see D28168870
 
 /* If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or */
 /* get/set file times, and the C run-time funcs that get/set times won't be called. */

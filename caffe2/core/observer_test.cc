@@ -20,6 +20,7 @@ class DummyObserver final : public ObserverBase<T> {
   void Start() override;
   void Stop() override;
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~DummyObserver() override {}
 };
 

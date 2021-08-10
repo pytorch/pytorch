@@ -5,7 +5,6 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantizable as nnqa
 from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (
@@ -13,12 +12,18 @@ from .quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
+    no_observer_set,
     _has_special_act_post_process,
     _get_special_act_post_process,
 )
 
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_weight_only_qconfig
+from .qconfig import (
+    add_module_to_qconfig_obs_ctr,
+    default_dynamic_qconfig,
+    float16_dynamic_qconfig,
+    get_default_dynamic_qconfig,
+    float_qparams_weight_only_qconfig)
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.quantization.ObserverBase) or
@@ -52,11 +57,13 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
 
     torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
-    module.qconfig = module_qconfig
+    qconfig_with_device_check = add_module_to_qconfig_obs_ctr(module_qconfig, module)
+    module.qconfig = qconfig_with_device_check
+
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, allow_list,
-                                  module_qconfig, module_prefix)
+                                  qconfig_with_device_check, module_prefix)
 
 # TODO(jerryzh): expose allow_list
 def propagate_qconfig_(module, qconfig_dict=None, allow_list=None):
@@ -132,7 +139,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
-            m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
+            m.add_module('activation_post_process', get_activation_post_process(
+                m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
             handle = register_activation_post_process_hook(m)
@@ -157,7 +165,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if custom_module_class_mapping[type(child)] != nnqa.LSTM:
+            if custom_module_class_mapping[type(child)] not in no_observer_set():
                 insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
@@ -310,7 +318,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
     return model
 
 def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
-                     mapping=None, inplace=False):
+                     mapping=None, inplace=False, version=1):
     r"""Converts a float model to dynamic (i.e. weights-only) quantized model.
 
     Replaces specified modules with dynamic weight-only quantized versions and output the quantized model.
@@ -342,37 +350,49 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     torch._C._log_api_usage_once("quantization_api.quantize.quantize_dynamic")
     if qconfig_spec is None:
         if dtype == torch.qint8:
-            qconfig_spec = {
-                nn.Linear : default_dynamic_qconfig,
-                nn.LSTM : default_dynamic_qconfig,
-                nn.GRU : default_dynamic_qconfig,
-                nn.LSTMCell : default_dynamic_qconfig,
-                nn.RNNCell : default_dynamic_qconfig,
-                nn.GRUCell : default_dynamic_qconfig,
-            }
+            qconfig_int8 = get_default_dynamic_qconfig(dtype=dtype, version=version)
+            qconfig_embedding_bag = get_default_dynamic_qconfig(dtype=torch.quint8, version=version)
+            if version == 0:
+                qconfig_spec = {
+                    nn.Linear : qconfig_int8,
+                    nn.LSTM : qconfig_int8,
+                    nn.GRU : qconfig_int8,
+                    nn.LSTMCell : qconfig_int8,
+                    nn.RNNCell : qconfig_int8,
+                    nn.GRUCell : qconfig_int8,
+                }
+            else:
+                qconfig_spec = {
+                    nn.Linear : qconfig_int8,
+                    nn.LSTM : qconfig_int8,
+                    nn.GRU : qconfig_int8,
+                    nn.LSTMCell : qconfig_int8,
+                    nn.RNNCell : qconfig_int8,
+                    nn.GRUCell : qconfig_int8,
+                    nn.EmbeddingBag : qconfig_embedding_bag
+                }
         elif dtype == torch.float16:
+            qconfig_float16 = get_default_dynamic_qconfig(dtype=dtype, version=version)
             qconfig_spec = {
-                nn.Linear : float16_dynamic_qconfig,
-                nn.LSTM : float16_dynamic_qconfig,
-                nn.GRU : float16_dynamic_qconfig,
-                nn.LSTMCell : float16_dynamic_qconfig,
-                nn.RNNCell : float16_dynamic_qconfig,
-                nn.GRUCell : float16_dynamic_qconfig,
+                nn.Linear : qconfig_float16,
+                nn.LSTM : qconfig_float16,
+                nn.GRU : qconfig_float16,
+                nn.LSTMCell : qconfig_float16,
+                nn.RNNCell : qconfig_float16,
+                nn.GRUCell : qconfig_float16,
             }
         elif dtype == torch.quint8:
+            qconfig_embedding_bag = get_default_dynamic_qconfig(dtype=dtype, version=version)
+
             qconfig_spec = {
-                nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+                nn.EmbeddingBag : qconfig_embedding_bag,
             }
         else:
             raise ValueError(
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
     elif isinstance(qconfig_spec, set):
-        if dtype is torch.qint8:
-            default_qconfig = default_dynamic_qconfig
-        elif dtype is torch.float16:
-            default_qconfig = float16_dynamic_qconfig
-        elif dtype is torch.quint8:
-            default_qconfig = float_qparams_weight_only_qconfig
+        if dtype in [torch.qint8, torch.quint8, torch.float16]:
+            default_qconfig = get_default_dynamic_qconfig(dtype=dtype, version=version)
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
@@ -505,7 +525,7 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     custom_module_class_mapping)
+                     convert_custom_config_dict)
         reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
 
     for key, value in reassign.items():

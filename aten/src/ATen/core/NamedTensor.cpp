@@ -16,12 +16,12 @@ void NamesMode::set_enabled(bool enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::Named, !enabled);
 }
 
-Tensor& internal_set_names_inplace(Tensor& tensor, optional<DimnameList> names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, optional<DimnameList> names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), names, /*validate_names=*/true);
   return tensor;
 }
 
-Tensor& internal_set_names_inplace(Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
+const Tensor& internal_set_names_inplace(const Tensor& tensor, std::vector<Dimname>&& names, bool validate_names) {
   impl::internal_set_names_inplace(tensor.unsafeGetTensorImpl(), std::move(names), validate_names);
   return tensor;
 }
@@ -141,8 +141,7 @@ DimnameList get_names(const TensorImpl* impl) {
 }
 
 bool has_names(const TensorImpl* impl) {
-  const auto* named_tensor_meta = get_named_tensor_meta(impl);
-  return named_tensor_meta != nullptr;
+  return impl->has_named_tensor_meta() && NamesMode::is_enabled();
 }
 
 } // namespace impl

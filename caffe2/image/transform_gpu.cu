@@ -64,6 +64,8 @@ bool TransformOnGPU(
     T_IN, T_OUT><<<N, dim3(16, 16), 0, context->cuda_stream()>>>(
       N, C, H, W, mean.template data<float>(), std.template data<float>(),
       input_data, output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 };
 

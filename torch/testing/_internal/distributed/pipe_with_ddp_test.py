@@ -1,6 +1,5 @@
 import torch
 import torch.distributed as dist
-import unittest
 
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
@@ -39,17 +38,15 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_nccl()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_nccl_ckpt_always(self):
-        self._run_basic_test("nccl", "always")
+        self._run_basic_test("nccl", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_nccl_ckpt_except_last(self):
-        self._run_basic_test("nccl", "except_last")
+        self._run_basic_test("nccl", "except_last", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
@@ -69,21 +66,19 @@ class PipeWithDDPTest(RpcAgentTestFixture):
     @requires_gloo()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_gloo_ckpt_always(self):
-        self._run_basic_test("gloo", "always")
+        self._run_basic_test("gloo", "always", static_graph=True)
 
     @skip_if_lt_x_gpu(4)
     @requires_gloo()
     @dist_init
     @skip_if_rocm
-    @unittest.skip("DDP doesn't work with checkpointing")
     def test_basic_gloo_ckpt_except_last(self):
-        self._run_basic_test("gloo", "except_last")
+        self._run_basic_test("gloo", "except_last", static_graph=True)
 
-    def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False):
+    def _run_basic_test(self, backend, checkpoint, find_unused_parameters=False, static_graph=False):
         dist.init_process_group(
-            backend="nccl",
+            backend=backend,
             init_method=INIT_METHOD_TEMPLATE.format(file_name=self.file_name),
             world_size=self.world_size,
             rank=self.rank,
@@ -112,12 +107,28 @@ class PipeWithDDPTest(RpcAgentTestFixture):
         )
         model = Pipe(model, chunks=2, checkpoint=checkpoint)
         model = DistributedDataParallel(model, find_unused_parameters=find_unused_parameters)
-        out = model(torch.rand(16, 16).cuda(2 * self.rank)).local_value()
+        if static_graph:
+            model._set_static_graph()
+
+        # Ensure inputs are different across ranks to verify that gradient
+        # sync indeed occurs.
+        model_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+        out = model(model_input).local_value()
         out.sum().backward()
 
         # Run forward again for find_unused_parameters to trigger any potential errors.
         if find_unused_parameters:
-            model(torch.rand(16, 16).cuda(2 * self.rank))
+            # Ensure inputs are different across ranks to verify that gradient
+            # sync indeed occurs.
+            unused_param_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+            model(unused_param_input).local_value().sum().backward()
+
+        # Run a few more iterations of fwd + bwd to ensure gradient synchronization
+        # occurs properly across iterations via delay_all_reduce/bucketized allreduce.
+        for _ in range(3):
+            model_input = torch.rand(16, 16).cuda(2 * self.rank) * (self.rank + 1)
+            out = model(model_input).local_value()
+            out.sum().backward()
 
         # Check grads
         output = [torch.empty_like(fc1.weight.grad), torch.empty_like(fc1.weight.grad)]

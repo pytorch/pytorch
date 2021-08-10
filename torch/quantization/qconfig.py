@@ -1,9 +1,17 @@
 from collections import namedtuple
-from .observer import *
-from .fake_quantize import *
+from .observer import (HistogramObserver, MovingAverageMinMaxObserver,
+                       PlaceholderObserver, default_debug_observer,
+                       default_dynamic_quant_observer,
+                       default_float_qparams_observer, default_observer,
+                       default_per_channel_weight_observer,
+                       default_placeholder_observer, default_weight_observer)
+from .fake_quantize import (FakeQuantize, default_fake_quant,
+                            default_per_channel_weight_fake_quant,
+                            default_weight_fake_quant)
+import torch
 import torch.nn as nn
 
-from typing import Union
+from typing import Union, Optional, Any
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -62,11 +70,14 @@ class QConfigDynamic(namedtuple('QConfigDynamic', ['activation', 'weight'])):
                              "Use MyObserver.with_args(x=1) to override arguments to constructor if needed")
         return super(QConfigDynamic, cls).__new__(cls, activation, weight)
 
+default_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
+                                             weight=default_weight_observer)
 float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
                                          weight=PlaceholderObserver.with_args(dtype=torch.float16))
+float16_static_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float16),
+                                        weight=PlaceholderObserver.with_args(dtype=torch.float16))
 per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                              weight=default_per_channel_weight_observer)
-default_dynamic_qconfig = per_channel_dynamic_qconfig
 # TODO: this is weight only quant, change this to QConfigWeightOnly
 # or remove the QConfigDynamic later
 float_qparams_weight_only_qconfig = QConfigDynamic(
@@ -80,6 +91,31 @@ default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
 default_activation_only_qconfig = QConfig(activation=default_fake_quant,
                                           weight=torch.nn.Identity)
+
+def get_default_dynamic_qconfig(dtype, version=1):
+    if dtype not in [torch.qint8, torch.quint8, torch.float16]:
+        raise ValueError('dtype needs to be torch.qint8,uint8 or float16')
+    if version not in [0, 1]:
+        raise ValueError('Version needs to be 0 or 1')
+
+
+    if version == 0:
+        if dtype == torch.qint8:
+            return default_dynamic_qconfig
+        if dtype == torch.quint8:
+            return float_qparams_weight_only_qconfig
+        if dtype == torch.float16:
+            return float16_dynamic_qconfig
+
+    if version == 1:
+        if dtype == torch.qint8:
+            return per_channel_dynamic_qconfig
+        if dtype == torch.quint8:
+            return float_qparams_weight_only_qconfig
+        if dtype == torch.float16:
+            return float16_dynamic_qconfig
+
+
 
 def get_default_qconfig(backend='fbgemm'):
     if backend == 'fbgemm':
@@ -110,8 +146,10 @@ def get_default_qat_qconfig(backend='fbgemm'):
         qconfig = default_qat_qconfig
     return qconfig
 
-def assert_valid_qconfig(qconfig: Union[QConfig, QConfigDynamic],
+def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
+    if qconfig is None:
+        return
     is_conv_transpose_mod = (
         isinstance(mod, torch.nn.ConvTranspose1d) or
         isinstance(mod, torch.nn.ConvTranspose2d) or
@@ -124,3 +162,52 @@ def assert_valid_qconfig(qconfig: Union[QConfig, QConfigDynamic],
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'
+
+QConfigAny = Union[QConfig,
+                   QConfigDynamic, None]
+
+
+def add_module_to_qconfig_obs_ctr(
+        qconfig: QConfigAny,
+        module: Union[nn.Module, None]) -> Any:
+    r"""This is a helper function for use in quantization prepare that updates a qconfig so that
+    the constructors stored in the qconfig will create observers on the same device that
+    'module' is on. This is intended to be used when the qconfigs are propagated to each
+    module in order to avoid potential device alignment issues.
+
+    Args:
+        qconfig: QConfig or QConfigDynamic with obs constructors stored in activation and weight
+        module: module which the qconfig is related to
+
+    Return:
+        qconfig: configured so that obs constructors set to construct on the same device as module
+    """
+
+    if module is None or qconfig is None or qconfig._fields != ('activation', 'weight'):
+        return qconfig
+
+    def get_factory_kwargs_based_on_module_device():
+        assert isinstance(module, torch.nn.Module)
+        devices = {p.device for p in module.parameters()} | \
+            {p.device for p in module.buffers()}
+        device = next(iter(devices)) if len(devices) > 0 else None
+        return None if device is None else {'device': device}
+
+    def configure_constructor_to_put_obs_on_module_device(original_constructor):
+        try:
+            # check if constructor can accept factory_kwargs
+            check = original_constructor.with_args(factory_kwargs=None)
+            check()
+            return original_constructor.with_callable_args(factory_kwargs=get_factory_kwargs_based_on_module_device)
+        except AttributeError:  # qconfig doesn't have activation or weight
+            return original_constructor
+        except TypeError:  # the class doesn't accept factory_kwargs argument
+            return original_constructor
+
+    activation = configure_constructor_to_put_obs_on_module_device(qconfig.activation)
+    weight = configure_constructor_to_put_obs_on_module_device(qconfig.weight)
+
+    if isinstance(qconfig, QConfig):
+        return QConfig(activation, weight)
+    else:
+        return QConfigDynamic(activation, weight)

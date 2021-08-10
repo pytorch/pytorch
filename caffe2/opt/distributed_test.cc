@@ -86,6 +86,7 @@ TEST(Distributed, InsertDeviceOptions) {
     for (auto& node : ns) {
       auto op = nn::get<NeuralNetOperator>(node);
       auto annot = dyn_cast<caffe2::Caffe2Annotation>(op->getAnnotation());
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto d = annot->getDeviceOption();
       EXPECT_EQ(d.device_type(), 1337);
     }
@@ -99,6 +100,7 @@ TEST(Distributed, InsertDeviceOptionsFailureCase) {
   caffe2::DeviceOption d;
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       {
         caffe2::addBlobDeviceOptions(
@@ -153,6 +155,7 @@ TEST(Converter, OverloadedConvertToNNModule) {
     for (auto& node : ns) {
       auto op = nn::get<NeuralNetOperator>(node);
       auto annot = dyn_cast<caffe2::Caffe2Annotation>(op->getAnnotation());
+      // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
       auto d = annot->getDeviceOption();
       EXPECT_EQ(d.device_type(), 1337);
     }
@@ -164,6 +167,7 @@ TEST(Converter, OverloadedConvertToNNModuleFailure) {
   caffe2::DeviceOption d;
   d.set_device_type(1337);
   // We can only use correct blob names, expect failure otherwise
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(
       {
         auto nn = caffe2::convertToNNModule(

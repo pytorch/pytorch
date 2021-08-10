@@ -12,7 +12,6 @@ allprojects {
             rulesVersion = "1.2.0"
             junitVersion = "4.12"
 
-            androidSupportAppCompatV7Version = "28.0.0"
             fbjniJavaOnlyVersion = "0.0.3"
             soLoaderNativeLoaderVersion = "0.8.0"
         }
@@ -25,10 +24,8 @@ allprojects {
         }
 
         dependencies {
-            classpath 'com.android.tools.build:gradle:3.3.2'
-            classpath "com.jfrog.bintray.gradle:gradle-bintray-plugin:${GRADLE_BINTRAY_PLUGIN_VERSION}"
-            classpath "com.github.dcendents:android-maven-gradle-plugin:${ANDROID_MAVEN_GRADLE_PLUGIN_VERSION}"
-            classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.9.8"
+            classpath 'com.android.tools.build:gradle:4.1.2'
+            classpath 'com.vanniktech:gradle-maven-publish-plugin:0.14.2'
         }
     }
 

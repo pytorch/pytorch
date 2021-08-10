@@ -56,7 +56,7 @@ namespace {
       nframe = input.size(0);
       dim = input.size(1);
     }
-    
+
     TORCH_CHECK(
                 valid_inputs,
                 "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",

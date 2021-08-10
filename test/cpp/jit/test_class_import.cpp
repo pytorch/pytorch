@@ -97,6 +97,7 @@ TEST(ClassImportTest, ScriptObject) {
 
   // Incorrect arguments for constructor should throw
   c10::QualifiedName base("__torch__");
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_ANY_THROW(m1.create_class(c10::QualifiedName(base, "FooTest"), {1}));
   auto x = torch::ones({2, 3});
   auto obj = m2.create_class(c10::QualifiedName(base, "FooTest"), x).toObject();

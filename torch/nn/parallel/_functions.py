@@ -56,8 +56,11 @@ class Gather(Function):
         assert all(i.device.type != 'cpu' for i in inputs), (
             'Gather function not implemented for CPU tensors'
         )
-        target_device = _get_device_index(target_device, True)
-        ctx.target_device = target_device
+        if (target_device == 'cpu'):
+            ctx.target_device = 'cpu'
+        else:
+            target_device = _get_device_index(target_device, True)
+            ctx.target_device = target_device
         ctx.dim = dim
         ctx.input_gpus = tuple(i.get_device() for i in inputs)
         if all(t.dim() == 0 for t in inputs) and dim == 0:

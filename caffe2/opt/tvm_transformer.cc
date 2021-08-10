@@ -7,6 +7,7 @@ NetDef TvmTransformer::buildTvmOp(
     const caffe2::NetDef& net,
     const std::unordered_set<std::string>& weights,
     const ShapeInfoMap& shape_hints) {
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   if (opts_.min_ops > net.op_size()) {
     return net;
   }
@@ -275,7 +276,7 @@ NetDef TvmTransformer::applyTvmTransform(
         return buildTvmOp(net, weights, shape_hints);
       };
 
-  return opt::OptimizeForBackend(*pred_net, tvm_supports, tvm_op_converter);
+  return opt::OptimizeForBackend(*pred_net, tvm_supports, tvm_op_converter).net;
 }
 
 void tvmTransform(

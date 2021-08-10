@@ -63,6 +63,7 @@ constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
   bool collect();
+  void clear_shared_blocks();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
   uint64_t size() {
     return shared_blocks_.size();
@@ -83,7 +84,7 @@ struct CudaIPCRefCountersFile final {
       : next_offset_(0),
         size_(size),
         used_slots_(0),
-        handle_(handle),
+        handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
   int64_t* counter_ptr() {
@@ -134,7 +135,6 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
-  ~CudaIPCCollectCallback() {};
   bool Execute() override {
     return torch::CudaIPCCollect();
   }

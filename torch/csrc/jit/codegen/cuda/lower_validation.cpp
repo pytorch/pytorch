@@ -1,3 +1,5 @@
+#include <c10/util/irange.h>
+
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -21,7 +23,7 @@ void validateIr(Fusion* fusion) {
 
   std::unordered_set<TensorView*> used_tvs;
 
-  for (auto val : used_vals) {
+  for (const auto& val : used_vals) {
     if (ir_utils::isTV(val)) {
       used_tvs.emplace(val->as<TensorView>());
     }
@@ -29,8 +31,8 @@ void validateIr(Fusion* fusion) {
 
   fusion->validateInputs();
 
-  for (auto tv : used_tvs) {
-    for (decltype(tv->nDims()) i{0}; i < tv->nDims(); i++) {
+  for (const auto& tv : used_tvs) {
+    for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->getComputeAtAxis(i).first;
 
       if (id->isBlockDim()) {
@@ -52,7 +54,7 @@ void validateIr(Fusion* fusion) {
         std::unordered_set<IterDomain*> non_ca_inputs_set(
             non_ca_inputs.begin(), non_ca_inputs.end());
 
-        for (auto id : tv->getRootDomain()) {
+        for (const auto& id : tv->getRootDomain()) {
           if (id->isBroadcast()) {
             // If a broadcast dimension is an input to both an axis within the
             // computeAt point and outside the compute at point we would have to

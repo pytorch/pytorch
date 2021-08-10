@@ -1,1 +1,2 @@
-import torch.utils.data.datapipes.iter
+from . import iter
+from . import map

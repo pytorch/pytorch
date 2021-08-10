@@ -18,6 +18,16 @@ using fake_quant_tensor_cachemask_fn = void (*)(
     int64_t quant_min,
     int64_t quant_max);
 
+using fake_quant_tensor_cachemask_tensor_qparams_fn = void (*)(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    const Tensor& sc,
+    const Tensor& z_point,
+    const Tensor& fake_quant_enabled,
+    int64_t quant_min,
+    int64_t quant_max);
+
 using fake_quant_learnable_grad_tensor_fn = void (*)(
     TensorIterator& iter,
     float scale,
@@ -28,6 +38,7 @@ using fake_quant_learnable_grad_tensor_fn = void (*)(
     float grad_factor);
 
 DECLARE_DISPATCH(fake_quant_tensor_cachemask_fn, fake_quant_tensor_cachemask_stub);
+DECLARE_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_fn, fake_quant_tensor_cachemask_tensor_qparams_stub);
 DECLARE_DISPATCH(fake_quant_learnable_grad_tensor_fn, fake_quant_grad_learnable_tensor_stub);
 
 using fake_quant_per_channel_fn = void (*)(
@@ -44,9 +55,7 @@ using fake_quant_per_channel_cachemask_fn = void (*)(
 DECLARE_DISPATCH(fake_quant_per_channel_cachemask_fn, fake_quant_per_channel_cachemask_stub);
 
 using fake_quant_learnable_per_channel_fn = void (*)(
-    TensorIterator &iter_x,
-    TensorIterator &iter_scale,
-    TensorIterator &iter_zero_point,
+    TensorIterator &iter,
     int64_t quant_min,
     int64_t quant_max,
     float grad_factor);

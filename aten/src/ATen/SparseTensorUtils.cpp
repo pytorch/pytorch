@@ -37,6 +37,7 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
     }
     auto indices_mult_cpu = at::from_blob(
         indices_mult_cpu_vec.data(),
+        // NOLINTNEXTLINE(bugprone-argument-comment)
         /*size=*/{sparse_dim, 1},
         indices.options().device(kCPU));
     // NB: must be blocking because this blob may be freed after this closure,
@@ -95,6 +96,7 @@ Tensor coo_to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     auto csr_accessor = csr.accessor<int64_t, 1>();
     // Convert the sparse matrix to CSR format
     at::parallel_for(0, nnz, 10000, [&](int64_t start, int64_t end) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t h, hp0, hp1;
       for (auto i = start; i < end; i++) {
         hp0 = indices[i];

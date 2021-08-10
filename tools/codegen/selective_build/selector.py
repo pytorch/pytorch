@@ -4,7 +4,9 @@ import yaml
 from dataclasses import dataclass
 
 from tools.codegen.model import NativeFunction
-from tools.codegen.selective_build.operator import *
+from tools.codegen.selective_build.operator import (
+    SelectiveBuildOperator, merge_debug_info, merge_operator_dicts,
+    strip_operator_overload_name)
 
 # A SelectiveBuilder holds information extracted from the selective build
 # YAML specification.
@@ -95,13 +97,13 @@ class SelectiveBuilder:
 
     @staticmethod
     def from_yaml_str(config_contents: str) -> 'SelectiveBuilder':
-        contents = yaml.load(config_contents)
+        contents = yaml.safe_load(config_contents)
         return SelectiveBuilder.from_yaml_dict(contents)
 
     @staticmethod
     def from_yaml_path(config_path: str) -> 'SelectiveBuilder':
         with open(config_path, 'r') as f:
-            contents = yaml.load(f)
+            contents = yaml.safe_load(f)
             return SelectiveBuilder.from_yaml_dict(contents)
 
     @staticmethod
@@ -198,9 +200,9 @@ class SelectiveBuilder:
         ret['operators'] = operators
 
         if self._debug_info is not None:
-            ret['debug_info'] = self._debug_info
+            ret['debug_info'] = sorted(self._debug_info)
 
-        ret['kernel_metadata'] = {k: list(v) for (k, v) in self.kernel_metadata.items()}
+        ret['kernel_metadata'] = {k: sorted(list(v)) for (k, v) in self.kernel_metadata.items()}
 
         return ret
 

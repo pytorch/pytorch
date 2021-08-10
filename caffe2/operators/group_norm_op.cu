@@ -367,6 +367,7 @@ void GroupNormOp<float, CUDAContext>::ComputeFusedParams(
   ComputeFusedParamsCUDAKernel<float>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, G, K, mu, rsig, gamma, beta, scale, bias);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -382,6 +383,7 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNCHW(
   GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, X, scale, bias, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <>
@@ -397,6 +399,7 @@ void GroupNormOp<float, CUDAContext>::GroupNormForwardNHWC(
   GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, X, scale, bias, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 // Math:
@@ -432,12 +435,15 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
   ComputeInternalGradientsNCHWCUDAKernel<float>
       <<<N * C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           HxW, dY_data, X_data, ds_data, db_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Computes dL/dX.
   int M = math::DivUp(N * C, CAFFE_CUDA_NUM_THREADS);
   ComputeYGradientScaleCUDAKernel<float>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, G, K, rsig_data, gamma_data, dY_scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   ComputeXScaleAndBiasCUDAKernel<float>
       <<<dim3(N, G), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           G,
@@ -450,6 +456,8 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
           gamma_data,
           X_scale_data,
           bias_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
@@ -463,11 +471,14 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
           X_data,
           bias_data,
           dX_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Computes dL/dgamma and dL/dbeta.
   GammaBetaBackwardCUDAKernel<
       float><<<dim3(G, K), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
       N, G, K, ds_data, db_data, mu_data, rsig_data, dgamma_data, dbeta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -540,6 +551,8 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
   ComputeYGradientScaleCUDAKernel<float>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, G, K, rsig_data, gamma_data, dY_scale_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   ComputeXScaleAndBiasCUDAKernel<float>
       <<<dim3(N, G), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           G,
@@ -552,6 +565,8 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
           gamma_data,
           X_scale_data,
           bias_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   M = math::DivUp(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
@@ -565,11 +580,14 @@ bool GroupNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
           X_data,
           bias_data,
           dX_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // Computes dL/dgamma and dL/dbeta.
   GammaBetaBackwardCUDAKernel<
       float><<<dim3(G, K), CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
       N, G, K, ds_data, db_data, mu_data, rsig_data, dgamma_data, dbeta_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

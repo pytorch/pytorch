@@ -26,6 +26,7 @@ struct MyCaffeClass {
 
  private:
   struct MyStats {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(MyStats);
     CAFFE_EXPORTED_STAT(num_runs);
     CAFFE_EXPORTED_STAT(num_successes);
@@ -69,6 +70,7 @@ TEST(StatsTest, StatsTestClass) {
 
 TEST(StatsTest, StatsTestDuration) {
   struct TestStats {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STAT(count);
     CAFFE_AVG_EXPORTED_STAT(time_ns);
@@ -90,6 +92,7 @@ TEST(StatsTest, StatsTestDuration) {
 
 TEST(StatsTest, StatsTestSimple) {
   struct TestStats {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STAT(s1);
     CAFFE_STAT(s2);
@@ -119,6 +122,7 @@ TEST(StatsTest, StatsTestSimple) {
 
 TEST(StatsTest, StatsTestStatic) {
   struct TestStats {
+    // NOLINTNEXTLINE(modernize-pass-by-value)
     CAFFE_STAT_CTOR(TestStats);
     CAFFE_STATIC_STAT(cpuUsage);
     CAFFE_STATIC_STAT(memUsage);

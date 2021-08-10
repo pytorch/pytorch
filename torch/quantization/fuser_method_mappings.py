@@ -50,7 +50,8 @@ def fuse_conv_bn_relu(conv, bn, relu):
 
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
-        >>> m2 = fuse_conv_bn(m1, b1)
+        >>> r1 = nn.ReLU(inplace=False)
+        >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
@@ -93,7 +94,7 @@ def fuse_linear_bn(linear, bn):
 
         >>> m1 = nn.Linear(20, 10)
         >>> b1 = nn.BatchNorm1d(10)
-        >>> m2 = fuse_conv_bn(m1, b1)
+        >>> m2 = fuse_linear_bn(m1, b1)
     """
     assert(linear.training == bn.training),\
         "Linear and BN both must be in the same mode (train or eval)."

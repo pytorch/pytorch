@@ -73,6 +73,7 @@ class AdamW(Optimizer):
             max_exp_avg_sqs = []
             state_steps = []
             amsgrad = group['amsgrad']
+            beta1, beta2 = group['betas']
 
             for p in group['params']:
                 if p.grad is None:
@@ -101,7 +102,6 @@ class AdamW(Optimizer):
                 if amsgrad:
                     max_exp_avg_sqs.append(state['max_exp_avg_sq'])
 
-                beta1, beta2 = group['betas']
                 # update the steps for each param group update
                 state['step'] += 1
                 # record the step after step update
@@ -113,11 +113,11 @@ class AdamW(Optimizer):
                     exp_avg_sqs,
                     max_exp_avg_sqs,
                     state_steps,
-                    amsgrad,
-                    beta1,
-                    beta2,
-                    group['lr'],
-                    group['weight_decay'],
-                    group['eps'])
+                    amsgrad=amsgrad,
+                    beta1=beta1,
+                    beta2=beta2,
+                    lr=group['lr'],
+                    weight_decay=group['weight_decay'],
+                    eps=group['eps'])
 
         return loss

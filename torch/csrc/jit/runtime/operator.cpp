@@ -241,6 +241,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CudaFusionGuard, // optimization pass adds it
       prim::TensorExprGroup, // optimization pass adds it
       prim::StaticSubgraph, // optimization pass adds it
+      prim::ConstantMKLDNNTensor, // optimization pass adds it
+      prim::BroadcastMKLDNNTensors, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
@@ -300,6 +302,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::PythonOp,
       prim::ConstantChunk,
       prim::BroadcastingChunk,
+      prim::MKLDNNGroup,
+      prim::ConstantMKLDNNTensor,
+      prim::BroadcastMKLDNNTensors,
       prim::fork,
       prim::CreateObject,
       prim::AutogradAdd,

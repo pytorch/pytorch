@@ -46,6 +46,8 @@ bool StumpFuncOp<float, float, CUDAContext>::RunOnDevice() {
   StumpFuncKernel<<<CAFFE_GET_BLOCKS(in.numel()), CAFFE_CUDA_NUM_THREADS,
     0, context_.cuda_stream()>>>(
       in.numel(), threshold_, low_value_, high_value_, in_data, out_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

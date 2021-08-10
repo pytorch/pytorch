@@ -1297,11 +1297,7 @@ class TestOperators(hu.HypothesisTestCase):
           original matrices.
         """
         import threading
-        try:
-            import queue
-        except ImportError:
-            # Py3
-            import Queue as queue
+        import queue
         op = core.CreateOperator(
             "CreateBlobsQueue",
             [],

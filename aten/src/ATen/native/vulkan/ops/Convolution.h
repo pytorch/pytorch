@@ -10,6 +10,13 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+enum Conv2dMethod {
+  Conv2dDepthwise,
+  Conv2dPointwise,
+  Conv2dSlidingWindow,
+  Conv2dWinograd_2_3,
+};
+
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
   static Conv2dOpContext create(
@@ -22,8 +29,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
+      const c10::optional<Scalar>& output_min = c10::nullopt,
+      const c10::optional<Scalar>& output_max = c10::nullopt);
 
   using State = std::tuple<
       Tensor,
@@ -49,8 +56,18 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
       bool transposed,
       IntArrayRef output_padding,
       int64_t groups,
-      c10::optional<Scalar> output_min = c10::nullopt,
-      c10::optional<Scalar> output_max = c10::nullopt);
+      const Conv2dMethod method,
+      const c10::optional<Scalar>& output_min = c10::nullopt,
+      const c10::optional<Scalar>& output_max = c10::nullopt);
+
+  void conv2d_sliding_window(
+      const api::Shader::Descriptor& shader,
+      vTensor& v_output,
+      const vTensor& v_input) const;
+
+  void conv2d_winograd_2_3(
+      vTensor& v_output,
+      const vTensor& v_input) const;
 
  private:
   struct {
@@ -76,6 +93,8 @@ class Conv2dOpContext final : public torch::jit::CustomClassHolder {
     c10::optional<Scalar> output_min;
     c10::optional<Scalar> output_max;
   } unpacked_;
+
+  Conv2dMethod method_;
 };
 
 Tensor conv2d_clamp_run(
@@ -89,8 +108,8 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     const int64_t groups,
-    const c10::optional<Scalar> output_min,
-    const c10::optional<Scalar> output_max);
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max);
 
 } // namespace ops
 } // namespace vulkan

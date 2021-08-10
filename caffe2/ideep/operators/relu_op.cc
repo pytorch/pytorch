@@ -23,6 +23,7 @@ class IDEEPReluOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluOp() override {}
 
   bool RunOnDevice() override {
@@ -61,6 +62,7 @@ class IDEEPReluGradientOp final : public IDEEPOperator {
       LOG(FATAL) << "Unsupported Relu method: " << operator_def.type();
     }
   }
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~IDEEPReluGradientOp() override {}
 
   bool RunOnDevice() override {

@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/MapAllocator.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 
@@ -60,6 +61,7 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   THWStoragePtr new_storage(THWStorage_(new)(LIBRARY_STATE_NOARGS));
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   PyObject *_ret = THPStorage_(New)(new_storage);
   new_storage.release();
   return _ret;
@@ -101,7 +103,9 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   const char* byte_order_str = nullptr;
   Py_ssize_t count = -1, offset = 0;
   Py_buffer buffer = {};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
   static char *kwlist[] = {"buffer", "byte_order", "count", "offset", nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char* argtypes;
 #if defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR)
   argtypes = "O|snn";
@@ -115,6 +119,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
 #if !(defined(TH_REAL_IS_BYTE) || defined(TH_REAL_IS_CHAR))
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   torch::utils::THPByteOrder byte_order;
   if (strcmp(byte_order_str, "native") == 0) {
     byte_order = torch::utils::THP_nativeByteOrder();
@@ -212,16 +217,18 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObject *keywds)
 {
   HANDLE_TH_ERRORS
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const char *filename;
   Py_ssize_t size = 0;
   int shared = 0;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
   static char *kwlist[] = {"filename", "shared", "size", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, keywds, "s|in", kwlist,
               &filename, &shared, &size)) {
     return nullptr;
   }
   if (shared)
-    shared = TH_ALLOCATOR_MAPPED_SHARED;
+    shared = at::ALLOCATOR_MAPPED_SHARED;
   THWStorage *storage = THWStorage_(newWithMapping)(LIBRARY_STATE filename, size, shared);
   return (PyObject*)THPStorage_(New)(storage);
   END_HANDLE_TH_ERRORS
@@ -337,6 +344,7 @@ PyObject * THPStorage_(_setCdata)(PyObject *_self, PyObject *new_cdata)
   END_HANDLE_TH_ERRORS
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static PyMethodDef THPStorage_(methods)[] = {
   {"copy_", castPyCFunctionWithKeywords(THPStorage_(copy_)),
     METH_VARARGS | METH_KEYWORDS, nullptr},

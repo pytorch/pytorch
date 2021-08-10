@@ -31,6 +31,7 @@ bool PairWiseLossOp<T, Context>::RunOnDevice() {
     return true;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const int32_t* lengths_vec;
   int len_size = 1;
   if (InputSize() > LENGTHS) {
@@ -102,6 +103,7 @@ bool PairWiseLossGradientOp<T, Context>::RunOnDevice() {
     return true;
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const int32_t* lengths_vec;
   int len_size = 1;
   if (InputSize() > LENGTHS) {

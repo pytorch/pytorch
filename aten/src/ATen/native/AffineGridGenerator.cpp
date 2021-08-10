@@ -3,7 +3,7 @@
 
 namespace at { namespace native {
 
-at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps, 
+at::Tensor linspace_from_neg_one(const Tensor& grid, int64_t num_steps,
                                  bool align_corners) {
   if (num_steps <= 1) {
     return at::tensor(0, grid.options());

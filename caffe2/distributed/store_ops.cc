@@ -103,6 +103,7 @@ bool StoreWaitOp::RunOnDevice() {
     std::vector<std::string> blobNames;
     auto* namesPtr = Input(1).data<std::string>();
     for (int i = 0; i < Input(1).size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       blobNames.push_back(namesPtr[i]);
     }
     handler->wait(blobNames);

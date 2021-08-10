@@ -1,6 +1,9 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#ifdef FBCODE_CAFFE2
+#include <folly/synchronization/SanitizeThread.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,13 +20,9 @@ C10_DEFINE_bool(
     "of throwing an exception.");
 
 namespace c10 {
-namespace enforce_detail {
-/* implicit */ EnforceFailMessage::EnforceFailMessage(std::string&& msg) {
-  msg_ = new std::string(std::move(msg));
-}
-} // namespace enforce_detail
 
 namespace {
+// NOLINTNEXTLINE(modernize-redundant-void-arg)
 std::function<string(void)>* GetFetchStackTrace() {
   static std::function<string(void)> func = []() {
     return get_backtrace(/*frames_to_skip=*/1);
@@ -49,6 +48,15 @@ void ThrowEnforceNotMet(
   throw e;
 }
 
+void ThrowEnforceNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceNotMet(file, line, condition, std::string(msg), caller);
+}
+
 void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
@@ -59,6 +67,14 @@ void ThrowEnforceFiniteNotMet(
       file, line, condition, msg, (*GetFetchStackTrace())(), caller);
 }
 
+void ThrowEnforceFiniteNotMet(
+    const char* file,
+    const int line,
+    const char* condition,
+    const char* msg,
+    const void* caller) {
+  ThrowEnforceFiniteNotMet(file, line, condition, std::string(msg), caller);
+}
 // PyTorch-style error message
 // (This must be defined here for access to GetFetchStackTrace)
 Error::Error(SourceLocation source_location, std::string msg)
@@ -70,7 +86,7 @@ Error::Error(SourceLocation source_location, std::string msg)
               (*GetFetchStackTrace())())) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
-using DDPUsageLoggerType = std::function<void(const c10::DDPLoggingData&)>;
+using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
@@ -90,7 +106,7 @@ APIUsageLoggerType* GetAPIUsageLogger() {
 };
 
 DDPUsageLoggerType* GetDDPUsageLogger() {
-  static DDPUsageLoggerType func = [](const c10::DDPLoggingData&) {};
+  static DDPUsageLoggerType func = [](const DDPLoggingData&) {};
   return &func;
 };
 } // namespace
@@ -100,7 +116,8 @@ void SetAPIUsageLogger(std::function<void(const std::string&)> logger) {
   *GetAPIUsageLogger() = logger;
 }
 
-void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger) {
+void SetPyTorchDDPUsageLogger(
+    std::function<void(const DDPLoggingData&)> logger) {
   TORCH_CHECK(logger);
   *GetDDPUsageLogger() = logger;
 }
@@ -112,7 +129,7 @@ void LogAPIUsage(const std::string& event) try {
   // static destructor race
 }
 
-void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData) try {
+void LogPyTorchDDPUsage(const DDPLoggingData& ddpData) try {
   if (auto logger = GetDDPUsageLogger())
     (*logger)(ddpData);
 } catch (std::bad_function_call&) {
@@ -200,6 +217,10 @@ bool InitCaffeLogging(int* argc, char** argv) {
 }
 
 void UpdateLoggingLevelsFromFlags() {
+#ifdef FBCODE_CAFFE2
+  // TODO(T82645998): Fix data race exposed by TSAN.
+  folly::annotate_ignore_thread_sanitizer_guard g(__FILE__, __LINE__);
+#endif
   // If caffe2_log_level is set and is lower than the min log level by glog,
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
@@ -245,8 +266,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
   }
   if (FLAGS_caffe2_log_level > GLOG_FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
-              << GLOG_FATAL << "). Capping it to GLOG_FATAL."
-              << std::endl;
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << std::endl;
     FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
@@ -278,17 +298,16 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           std::chrono::high_resolution_clock::now().time_since_epoch());
   */
-  stream_
-      << "["
-      << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-      //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-      //<< std::setfill('0')
-      //<< " " << std::setw(2) << timeinfo->tm_hour
-      //<< ":" << std::setw(2) << timeinfo->tm_min
-      //<< ":" << std::setw(2) << timeinfo->tm_sec
-      //<< "." << std::setw(9) << ns.count() % 1000000000
-      << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
-      << "] ";
+  stream_ << "["
+          << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          //<< std::setfill('0')
+          //<< " " << std::setw(2) << timeinfo->tm_hour
+          //<< ":" << std::setw(2) << timeinfo->tm_min
+          //<< ":" << std::setw(2) << timeinfo->tm_sec
+          //<< "." << std::setw(9) << ns.count() % 1000000000
+          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+          << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -307,8 +326,7 @@ MessageLogger::~MessageLogger() {
       ANDROID_LOG_DEBUG, // VLOG(1)
       ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
-  int android_level_index =
-      GLOG_FATAL - std::min(GLOG_FATAL, severity_);
+  int android_level_index = GLOG_FATAL - std::min(GLOG_FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, "%s", stream_.str().c_str());

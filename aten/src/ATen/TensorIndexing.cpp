@@ -41,16 +41,20 @@ std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& t
 
 // This mirrors `THPVariable_setitem` in torch/csrc/autograd/python_variable_indexing.cpp
 // for "the assigned value is a Scalar" case
-static inline void set_item(Tensor& self, ArrayRef<TensorIndex> indices, Scalar v) {
+static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, const Scalar& v) {
   Tensor value;
 
   {
-    at::AutoNonVariableTypeMode guard;
+    at::AutoDispatchBelowADInplaceOrView guard;
+    at::Device self_device = self.device();
+
     // TODO: This qint special case looks very suspicious...
     if (isQIntType(self.scalar_type())) {
       value = at::indexing::scalarToTensor(v, device(kCPU).dtype(kFloat), at::Device(kCPU));
+    } else if (self_device.is_cuda()) {
+      value = at::indexing::scalarToTensor(v, self.options(), at::Device(kCPU));
     } else {
-      value = at::indexing::scalarToTensor(v, self.options(), self.device());
+      value = at::indexing::scalarToTensor(v, self.options(), self_device);
     }
   }
 
@@ -74,7 +78,7 @@ Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor 
   at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
-Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar v) {
+Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, const Scalar& v) {
   TORCH_CHECK(indices.size() > 0, "Passing an empty index list to Tensor::index_put_() is not valid syntax");
   OptionalDeviceGuard device_guard(device_of(*this));
   at::indexing::set_item(*this, indices, v);
@@ -83,7 +87,7 @@ Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Scalar 
 Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Tensor const & rhs) {
   return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), rhs);
 }
-Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, Scalar v) {
+Tensor & Tensor::index_put_(std::initializer_list<at::indexing::TensorIndex> indices, const Scalar& v) {
   return index_put_(ArrayRef<at::indexing::TensorIndex>(indices), v);
 }
 

@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -124,7 +125,7 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       IValue s = module._ivalue()->getSlot(i);
       std::string attr_name = type->getAttributeName(i);
       TypePtr attr_type = type->getAttribute(i);
@@ -1084,6 +1085,7 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // offset of input for the caller node, since the first
         // input of CallFunction is the function node and the graph
         // for CallFunction start with actual input
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
           auto m_opt = getInvokedModuleOpt(module, n, self);
@@ -1418,6 +1420,7 @@ InsertObserversHelper::insertObserversFor(
       if (n->kind() == prim::CallMethod || userDefinedCallFunction(n)) {
         script::Module m;
         std::shared_ptr<Graph> g;
+        // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {

@@ -40,6 +40,7 @@ inline Tensor embedding(const Tensor& input,
 
   if (max_norm != c10::nullopt) {
     input_ = input_.contiguous();
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
   return torch::embedding(weight, input_, *padding_idx, scale_grad_by_freq, sparse);
@@ -81,7 +82,8 @@ inline Tensor embedding_bag(
     EmbeddingBagMode mode,
     bool sparse,
     const Tensor& per_sample_weights,
-    bool include_last_offset) {
+    bool include_last_offset,
+    c10::optional<int64_t> padding_idx) {
   auto input_ = input;
   auto offsets_ = offsets;
   auto per_sample_weights_ = per_sample_weights;
@@ -106,6 +108,7 @@ inline Tensor embedding_bag(
     TORCH_CHECK(false, "input has to be 1D or 2D Tensor, but got Tensor of dimension ", input_.dim());
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int mode_enum;
   if (c10::get_if<enumtype::kSum>(&mode)) {
     mode_enum = 0;
@@ -120,6 +123,7 @@ inline Tensor embedding_bag(
   }
 
   if (max_norm != c10::nullopt) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     _no_grad_embedding_renorm_(weight, input_, *max_norm, norm_type);
   }
 
@@ -138,7 +142,8 @@ inline Tensor embedding_bag(
       mode_enum,
       sparse,
       per_sample_weights_,
-      include_last_offset));
+      include_last_offset,
+      padding_idx));
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -165,7 +170,8 @@ inline Tensor embedding_bag(const Tensor& input, const Tensor& weight, const Emb
     options.mode(),
     options.sparse(),
     options.per_sample_weights(),
-    options.include_last_offset());
+    options.include_last_offset(),
+    options.padding_idx());
 }
 
 } // namespace functional
