@@ -2687,21 +2687,69 @@ def sample_inputs_squeeze(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
     assert mode in ('constant', 'reflect', 'replicate', 'circular')
-    if dtype == torch.bool and mode == 'circular':
-        # test_dtypes fails on ASAN with for the case below
-        # runtime error: load of value 190, which is not a valid value for type 'bool'
-        # Reference: https://github.com/pytorch/pytorch/pull/62814#issuecomment-894156562
-        shapes = ((1, 3), (2, 3, 3), (1, 3, 3), (3, 3, 3, 3), (3, 3, 5, 5))
-        pads = ((1, 2),)
-        negative_pad_case = ()
-    else:
-        # Supports 2-D, 3-D, 4-D, 5-D tensors
-        shapes = ((1, 3), (0, 3, 3), (1, 3, 3), (0, 3, 3, 3), (3, 3, 5, 5), (1, 3, 3, 3, 3))  # type: ignore[assignment]
-        pads = ((1, 2), (0, 1), (0, 2, 0, 1), (1, 1, 1, 1, 1, 1))  # type: ignore[assignment]
-        negative_pad_case = (
-            # (shape, pad)
-            ((1, 3, 4, 4), (-1, 1, -2, 1)),  # type: ignore[assignment]
+    if mode in ['reflect', 'replicate']:
+        cases: tuple = (  # ignore
+            ((1, 3), (1, 2)),
+            ((1, 3), (0, 1)),
+            ((0, 3, 3), (1, 2)),
+            ((0, 3, 3), (0, 1)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 3, 3), (0, 1)),
+            ((1, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3, 3), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
         )
+    elif mode == 'constant':
+        cases = (
+            ((1, 3), (1, 2)),
+            ((1, 3), (0, 1)),
+            ((1, 3), (0, 2, 0, 1)),
+            ((0, 3, 3), (1, 2)),
+            ((0, 3, 3), (0, 1)),
+            ((0, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3), (1, 2)),
+            ((1, 3, 3), (0, 1)),
+            ((1, 3, 3), (0, 2, 0, 1)),
+            ((1, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((0, 3, 3, 3), (1, 2)),
+            ((0, 3, 3, 3), (0, 1)),
+            ((0, 3, 3, 3), (0, 2, 0, 1)),
+            ((0, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((3, 3, 5, 5), (1, 2)),
+            ((3, 3, 5, 5), (0, 1)),
+            ((3, 3, 5, 5), (0, 2, 0, 1)),
+            ((3, 3, 5, 5), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 3, 3, 3), (1, 2)),
+            ((1, 3, 3, 3, 3), (0, 1)),
+            ((1, 3, 3, 3, 3), (0, 2, 0, 1)),
+            ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+            ((1, 3, 4, 4), (-1, 1, -2, 1)),
+        )
+    else:  # mode == 'circular'
+        if dtype == torch.bool:
+            # test_dtypes fails on ASAN with for the case ab
+            # runtime error: load of value 190, which is not a valid value for type 'bool'
+            # Reference: https://github.com/pytorch/pytorch/pull/62814#issuecomment-894156562
+            # Reference Issue: https://github.com/pytorch/pytorch/issues/63034
+            cases = (
+                ((2, 3, 3), (1, 2)),
+                ((1, 3, 3), (1, 2)),
+            )
+        else:
+            cases = (
+                ((0, 3, 3), (1, 2)),
+                ((0, 3, 3), (0, 1)),
+                ((1, 3, 3), (1, 2)),
+                ((1, 3, 3), (0, 1)),
+                ((0, 3, 3, 3), (0, 2, 0, 1)),
+                ((3, 3, 5, 5), (0, 2, 0, 1)),
+                ((1, 3, 3, 3, 3), (1, 1, 1, 1, 1, 1)),
+                ((1, 3, 4, 4), (-1, 1, -2, 1)),
+            )
 
     make_inp = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2710,46 +2758,15 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
             # Default args
             yield SampleInput(make_inp((1, 3, 3)), args=((2, 2),))
 
-        for shape, pad in chain(product(shapes, pads), negative_pad_case):
-            # Not all combinations of shapes and pads are valid
-            # Below are the checks to remove skip invalid combinations
-
-            # Function requires len(pad)/2 <= len(shape)
-            if not (len(pad) // 2 <= len(shape)):
-                continue
-
-            if mode in ['reflect', 'replicate', 'circular']:
-                input_dim = len(shape)
-                # Valid pad length for given input dim
-                if len(pad) == 2 and not (input_dim in (2, 3)):
-                    continue
-                if len(pad) == 4 and not (input_dim in (3, 4)):
-                    continue
-                if len(pad) == 6 and not (input_dim in (4, 5)):
-                    continue
-
-                # Expected XD or YD (batch mode) tensor with possibly 0 batch size
-                # and other non-zero dimensions for input
-                if len(pad) == 2 and input_dim == 2 and shape[0] == 0:
-                    continue
-                if len(pad) == 4 and input_dim == 3 and shape[0] == 0:
-                    continue
-                if len(pad) == 6 and input_dim == 4 and shape[0] == 0:
-                    continue
-
-            if mode == 'circular':
-                if not (len(pad) == 2 * (input_dim - 2)):
-                    continue
-
-            if mode in ['reflect', 'replicate', 'circular']:
+        if mode in ['reflect', 'replicate', 'circular']:
+            for shape, pad in cases:
                 yield SampleInput(make_inp(shape), args=(pad, mode))
-            else:
-                for pad_value in (1., 2.):
+        else:  # mode == 'constant'
+            for pad_value in (1., 2.):
+                for shape, pad in cases:
                     yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
-    samples = list(generator())
-    assert len(samples) > 0
-    return samples
+    return list(generator())
 
 
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
