@@ -573,7 +573,7 @@ StaticModule::StaticModule(
   std::unordered_map<Value*, DefInfo> value_to_ssa_def;
 
   // N inputs map to the first N entries in storage
-  for (auto i : c10::irange(graph_->inputs().size())) {
+  for (const auto i : c10::irange(graph_->inputs().size())) {
     Value* input = graph_->inputs()[i];
     value_to_ivalue[input] = nullptr;
     value_to_ssa_def[input] = std::make_pair(INPUT_VALUE, i);
@@ -682,7 +682,7 @@ StaticRuntime::StaticRuntime(const StaticModule& sm) : static_module_(sm) {
     nodes_[idx] = n_ref; // copy the node
     auto& n = nodes_[idx];
     // hook up the inputs
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+
     for (const auto i : c10::irange(n.inputs().size())) {
       if (n.inputs()[i] == nullptr) {
         int node_idx = 0;
@@ -826,7 +826,7 @@ c10::IValue StaticRuntime::operator()(
   if (static_module_.num_outputs() > 1) {
     std::vector<c10::IValue> outputs;
     outputs.reserve(static_module_.num_outputs());
-    for (auto i : c10::irange(static_module_.num_outputs())) {
+    for (const auto i : c10::irange(static_module_.num_outputs())) {
       // use move here. Otherwise, clean up outputs_[i] explicitly
       outputs.emplace_back(std::move(*outputs_[i]));
     }
@@ -935,7 +935,7 @@ float StaticRuntime::benchmark_model(
 bool display_ivalue(const IValue& iv) {
   if (iv.isTensor()) {
     std::cout << "Tensor " << iv.toTensor().toString() << " {";
-    for (auto i : c10::irange(iv.toTensor().sizes().size())) {
+    for (const auto i : c10::irange(iv.toTensor().sizes().size())) {
       std::cout << iv.toTensor().sizes()[i];
       if (iv.toTensor().sizes().size() > i + 1) {
         std::cout << ", ";
@@ -968,14 +968,14 @@ bool display_ivalue(const IValue& iv) {
 void display_pnode_info(const ProcessedNode& pnode) {
   pnode.node()->print(std::cout, 0, nullptr, false);
   const std::vector<const IValue*>& inputs = pnode.inputs();
-  for (auto i : c10::irange(inputs.size())) {
+  for (const auto i : c10::irange(inputs.size())) {
     std::cout << "\ti" << i << ": ";
     if (!display_ivalue(*inputs[i])) {
       std::cout << *(pnode.node()->inputs()[i]->type()) << '\n';
     }
   }
   const std::vector<IValue>& outputs = pnode.outputs();
-  for (auto i : c10::irange(outputs.size())) {
+  for (const auto i : c10::irange(outputs.size())) {
     std::cout << "\to" << i << ": ";
     if (!display_ivalue(outputs[i])) {
       std::cout << *(pnode.node()->outputs()[i]->type()) << '\n';
@@ -1225,7 +1225,6 @@ MemoryPlanner::MemoryPlanner(
   if (enable_out_variant) {
     for (ProcessedNode& pnode : runtime->nodes()) {
       if (pnode.has_out_variant()) {
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (const auto i : c10::irange(pnode.outputs().size())) {
           const Value* out_v = pnode.node()->outputs()[i];
           if (external_values.count(out_v)) {
@@ -1248,7 +1247,6 @@ MemoryPlanner::MemoryPlanner(
   // collect unmanaged output ivalues
   std::unordered_set<IValue*> unmanaged_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (const auto i : c10::irange(pnode.outputs().size())) {
       // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
