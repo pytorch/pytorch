@@ -127,13 +127,13 @@ int main(int argc, char* argv[]) {
     // Let's start with defining a domain. We do this by creating a Buf object.
 
     // First, let's specify the sizes:
-    std::vector<const Expr*> dims = {
+    std::vector<Expr*> dims = {
         new IntImm(64), new IntImm(32)}; // IntImm stands for Integer Immediate
     // and represents an integer constant
 
     // Now we can create a Buf object by providing a name, dimensions, and a
     // data type of the elements:
-    const Buf* buf = new Buf("X", dims, kInt);
+    Buf* buf = new Buf("X", dims, kInt);
 
     // Next we need to spefify the computation. We can do that by either
     // constructing a complete tensor statement for it (statements are
@@ -144,9 +144,9 @@ int main(int argc, char* argv[]) {
 
     // Let's define two variables, i and j - they will be axis in our
     // computation.
-    const Var* i = new Var("i", kInt);
-    const Var* j = new Var("j", kInt);
-    std::vector<const Var*> args = {i, j};
+    Var* i = new Var("i", kInt);
+    Var* j = new Var("j", kInt);
+    std::vector<Var*> args = {i, j};
 
     // Now we can define the body of the tensor computation using these
     // variables. What this means is that values in our tensor are:
