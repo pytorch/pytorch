@@ -1066,6 +1066,24 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         return inputs
 
 
+def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as: input, running_mean, running_var, weight=None, bias=None, training=False, momentum=0.1, eps=1e-5
+    # bs, n_feat, size_feat = 4, 5, 6
+    #     input = torch.arange(bs * n_feat * size_feat, device=device,
+    #                          requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
+    #     weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
+    #     bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
+    #     running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
+    #     running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
+    #     for training in [False, True]:
+    #         _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
+                                                              # training, 0.1, 0.0001))
+    cases = (
+        ( (S, S, S), )
+    )
+
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -6689,6 +6707,9 @@ op_db: List[OpInfo] = [
                # Topk is not raising a warning when the out is resized
                SkipInfo('TestCommon', 'test_out'),
            )),
+    OpInfo('nn.functional.batch_norm',
+           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_batch_norm)
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
