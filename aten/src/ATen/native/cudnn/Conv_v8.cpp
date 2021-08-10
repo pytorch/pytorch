@@ -195,7 +195,7 @@ void run_conv_plan(cudnnHandle_t handle, const Tensor& x, const Tensor& y, const
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w'};
   auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
       .build();
@@ -208,7 +208,7 @@ void run_conv_plan_fused(cudnnHandle_t handle, const Tensor& x, const Tensor& y,
   void *data_ptrs[] = {x.data_ptr(), y.data_ptr(), w.data_ptr(), z.data_ptr(), b.data_ptr()};
   int64_t uids[] = {'x', 'y', 'w', 'z', 'b'};
   auto variantPack = cudnn_frontend::VariantPackBuilder()
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
       .build();
@@ -372,7 +372,7 @@ auto get_plans_from_find(const cudnnHandle_t handle, const cudnnBackendDescripto
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(3, data_ptrs)
       .setUids(3, uids)
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
       .build();
 
   auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
@@ -401,7 +401,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
   auto variantPack = cudnn_frontend::VariantPackBuilder()
       .setDataPointers(5, data_ptrs)
       .setUids(5, uids)
-      .setWorkspacePointer(workspace.data_ptr())
+      .setWorkspacePointer(workspace.has_storage() ? workspace.data_ptr() : NULL)
       .build();
 
   auto options = cudnn_frontend::time_sorted_plan<cudnn_frontend::CudnnFindSamplingTechnique::CUDNN_FIND_SAMPLE_TILL_STABLE>(handle, std::move(valid_plans), variantPack);
