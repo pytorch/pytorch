@@ -73,17 +73,16 @@ const std::string shape_compute_functions =
 
         def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt : Any):
           out: List[int] = []
-          idx : int = 0
-          for elem in self:
+          for idx in range(len(self)):
             is_mean_dim : bool = False
             for reduce_dim in dims:
-              if idx == reduce_dim:
+              if idx == maybe_wrap_dim(reduce_dim, len(self)):
                 is_mean_dim = True
             if is_mean_dim:
               if keep_dim:
                 out.append(1)
             else:
-              out.append(elem)
+              out.append(self[idx])
           return out
 
         def broadcast_one_unused_input(self: List[int], other: List[int], unused: Any):
@@ -99,8 +98,8 @@ const std::string shape_compute_functions =
         def dot(self: List[int], tensor: List[int]):
           assert len(self) == 1 and len(tensor) == 1
           assert self[0] == tensor[0]
-          # TODO: return self
-          return [self[0]]
+          out: List[int] = []
+          return out
 
         def mv(self: List[int], vec: List[int]):
           assert len(self) == 2 and len(vec) == 1
@@ -188,16 +187,15 @@ const std::string shape_compute_functions =
           return out
 
         def addmm(self: List[int], mat1: List[int], mat2: List[int], beta: Any, alpha: Any):
-          out = matmul(mat1, t(mat2))
-          if self is not None:
-            assert broadcast(self, out) == out
-          return out
+          return broadcast(self, mm(mat1, mat2))
 
         def check_non_negative(array: List[int]) -> bool:
+          # TODO: look into rewriting with early return and getting loop unrolling to fire
+          non_negative = False
           for val in array:
             if val < 0:
-              return True
-          return False
+              non_negative = True
+          return non_negative
 
         def check_shape_forward(input: List[int], weight_sizes: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], groups: int):
           k = len(input)
@@ -318,7 +316,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::mm(Tensor self, Tensor mat2) -> Tensor", "mm"},
       {"aten::dot(Tensor self, Tensor tensor) -> Tensor", "dot"},
       {"aten::mv(Tensor self, Tensor vec) -> Tensor", "mv"},
-      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "linear"},
+      {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},

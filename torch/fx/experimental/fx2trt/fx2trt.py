@@ -296,6 +296,7 @@ class BaseTRTInterpreter(torch.fx.Interpreter):
                 shape = shape[1:]
         else:
             for i, shape_range in enumerate(shape_ranges):
+                assert self.optimization_profiles
                 self.optimization_profiles[i].set_shape(target, *shape_range)
 
         return self.network.add_input(name=target, shape=tuple(shape), dtype=torch_dtype_to_trt(dtype))

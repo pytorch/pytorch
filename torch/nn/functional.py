@@ -2376,6 +2376,10 @@ def local_response_norm(input: Tensor, size: int, alpha: float = 1e-4, beta: flo
                 dim
             )
         )
+
+    if input.numel() == 0:
+        return input
+
     div = input.mul(input).unsqueeze(1)
     if dim == 3:
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
@@ -4097,7 +4101,7 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0) -> Tensor:
+def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0.0) -> Tensor:
     r"""Pads tensor.
 
     Padding size:
@@ -4162,7 +4166,7 @@ def _pad(input: Tensor, pad: List[int], mode: str = "constant", value: float = 0
     if mode == "constant":
         return _VF.constant_pad_nd(input, pad, value)
     else:
-        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        assert value == 0.0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
         if len(pad) == 2 and (input.dim() == 2 or input.dim() == 3):
             if mode == "reflect":
                 return torch._C._nn.reflection_pad1d(input, pad)
@@ -4254,14 +4258,15 @@ Supports :ref:`type promotion <type-promotion-doc>`.
 
 Args:
     x1 (Tensor): First input.
-    x2 (Tensor): Second input (of size matching x1).
+    x2 (Tensor): Second input (with the same number of dimensions as x1, matching x1 size at dimension `dim`,
+        and broadcastable with x1 at other dimensions).
     dim (int, optional): Dimension of vectors. Default: 1
     eps (float, optional): Small value to avoid division by zero.
         Default: 1e-8
 
 Shape:
     - Input: :math:`(\ast_1, D, \ast_2)` where D is at position `dim`.
-    - Output: :math:`(\ast_1, \ast_2)` where 1 is at position `dim`.
+    - Output: :math:`(\ast_1, \ast_2)`
 
 Example::
 
