@@ -32,7 +32,7 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
     if (node->blocks().size() > 0) {
       has_blocks = true;
       VLOG(1) << "Found nested sub-blocks in graph at node: "
-              << PrintNode(node);
+      << PrintNode(node);
     }
     if (node->kind() == prim::Constant) {
       continue;
@@ -46,7 +46,7 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   }
   if (has_blocks) {
     LOG(WARNING)
-        << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
+    << "Found nested sub-block in graph. Static Runtime doesn't support nested sub-blocks.";
     can_support = false;
   }
   return can_support;
@@ -70,12 +70,12 @@ void OptimizeGraph(
   // TODO: we can avoid this guard by moving operations
   // to exposed folders.
 #ifdef FBCODE_CAFFE2
-  if (opts.enable_out_variant) {
-    FuseListUnpack(graph);
-    ReplaceWithCopy(graph);
-  }
+if (opts.enable_out_variant) {
+  FuseListUnpack(graph);
+  ReplaceWithCopy(graph);
+}
 #endif
-  ConstantPropagation(graph);
+ConstantPropagation(graph);
 }
 
 // remove unused input 0 from graph
@@ -204,14 +204,14 @@ GenerateSameStorageValues(
     const LivenessMap& alive_during,
     const std::unordered_set<const Value*>& always_alive,
     const std::pair<std::vector<const Value*>, std::vector<const Value*>>&
-        optimizable,
+    optimizable,
     AliasDb& db) {
   const auto& optimizable_values = optimizable.first;
   const auto& all_values = optimizable.second;
 
   // map Value* to a set Value* that can share the same storage with it
   std::unordered_map<const Value*, std::vector<const Value*>>
-      same_storage_values;
+  same_storage_values;
 
   // make new_v and old_v map to the same storage (i.e., add to each other's
   // same_storage_values set)
@@ -267,17 +267,17 @@ GenerateSameStorageValues(
   auto compute_liveset_fn =
       [&always_alive, &alive_during, &same_storage_values](
           std::set<const Value*>& live, const Value* v) {
-        for (const auto* sv : same_storage_values.at(v)) {
-          const auto& l = alive_during.count(sv) ? alive_during.at(sv)
-                                                 : std::set<const Value*>{};
-          live.insert(l.begin(), l.end());
-        }
-        live.insert(always_alive.begin(), always_alive.end());
-      };
+    for (const auto* sv : same_storage_values.at(v)) {
+      const auto& l = alive_during.count(sv) ? alive_during.at(sv)
+          : std::set<const Value*>{};
+      live.insert(l.begin(), l.end());
+    }
+    live.insert(always_alive.begin(), always_alive.end());
+  };
 
   // check if same_storage_values[s] intersects with live
   auto intersect_fn = [&same_storage_values](
-                          std::set<const Value*>& live, const Value* s) {
+      std::set<const Value*>& live, const Value* s) {
     bool intersect = false;
     for (const auto* v : same_storage_values.at(s)) {
       if (live.count(v)) {
@@ -324,10 +324,10 @@ PrepareForStaticModule(
     bool is_frozen,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
-          << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory"
-          << opts.optimize_memory << ", optimize_graph_output_memory"
-          << opts.optimize_graph_output_memory;
+  << opts.cleanup_activations << ", enable_out_variant "
+  << opts.enable_out_variant << ", optimize_memory"
+  << opts.optimize_memory << ", optimize_graph_output_memory"
+  << opts.optimize_graph_output_memory;
 
   std::shared_ptr<Module> module_ptr;
   if (!is_frozen) {
@@ -362,19 +362,19 @@ StaticModule::StaticModule(
     const StaticModuleOptions& opts)
     : StaticModule(PrepareForStaticModule(g, opts), opts) {}
 
-StaticModule::StaticModule(
-    const torch::jit::Module& m,
-    bool is_frozen,
-    const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
+    StaticModule::StaticModule(
+        const torch::jit::Module& m,
+        bool is_frozen,
+        const StaticModuleOptions& opts)
+        : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
 
-StaticModule::StaticModule(
-    std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
-        graph_and_module,
-    const StaticModuleOptions& opts)
-    : opts_(opts),
-      graph_(std::move(graph_and_module.first)),
-      module_(std::move(graph_and_module.second)) {
+        StaticModule::StaticModule(
+            std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
+            graph_and_module,
+            const StaticModuleOptions& opts)
+            : opts_(opts),
+            graph_(std::move(graph_and_module.first)),
+            module_(std::move(graph_and_module.second)) {
   // check opt flags
   if (opts.optimize_graph_output_memory) {
     TORCH_CHECK(
@@ -680,7 +680,7 @@ void StaticRuntime::benchmark(
     const int main_runs) {
   float time_per_iter = benchmark_model(args, kwargs, warmup_runs, main_runs);
   std::cout << "Static runtime ms per iter: " << time_per_iter
-            << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
+  << ". Iters per second: " << 1000.0 / time_per_iter << std::endl;
 
   IndividualMetrics results =
       benchmark_individual_ops(args, kwargs, warmup_runs, main_runs);
@@ -688,12 +688,12 @@ void StaticRuntime::benchmark(
   for (const auto i : c10::irange(nodes_.size())) {
     const Node* node = nodes_[i].node();
     std::cout << "Node #" << i << ": " << results.time_per_node[i]
-              << " ms/iter, ";
+    << " ms/iter, ";
     node->print(std::cout, 0, nullptr, false);
   }
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
-      results.time_per_node_type.begin(), results.time_per_node_type.end()};
+    results.time_per_node_type.begin(), results.time_per_node_type.end()};
   std::sort(
       time_per_node_type_vec.begin(),
       time_per_node_type_vec.end(),
@@ -704,8 +704,8 @@ void StaticRuntime::benchmark(
     const std::string& kind = p.first;
     const double ms = p.second;
     std::cout << std::setw(15) << ms << " ms. " << std::setw(10)
-              << results.percent_per_node_type[kind] << "%. " << kind << " ("
-              << results.instances_per_node_type[kind] << " nodes";
+    << results.percent_per_node_type[kind] << "%. " << kind << " ("
+    << results.instances_per_node_type[kind] << " nodes";
     if (results.out_nodes.count(kind) == 0) {
       std::cout << ")" << std::endl;
     } else {
@@ -713,29 +713,29 @@ void StaticRuntime::benchmark(
     }
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
-            << std::endl;
+  << std::endl;
   std::cout << "StaticRuntime setup time: " << results.setup_time << " ms"
-            << std::endl;
+  << std::endl;
   std::cout << "Memory allocation time: " << results.memory_alloc_time
-            << " ms\n";
+  << " ms\n";
   std::cout << "Memory deallocation time: " << results.memory_dealloc_time
-            << " ms" << std::endl;
+  << " ms" << std::endl;
   std::cout << "Outputs deallocation time: " << results.output_dealloc_time
-            << " ms" << std::endl;
+  << " ms" << std::endl;
 
   if (planner_) {
     std::cout << "Total memory managed: " << planner_->total_managed()
-              << " bytes" << std::endl;
+    << " bytes" << std::endl;
     if (static_module_.opts().optimize_memory) {
       std::cout << "Total number of reused tensors: "
-                << planner_->total_reused_tensors() << std::endl;
+      << planner_->total_reused_tensors() << std::endl;
     }
     std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-              << results.out_nodes_count << "/" << results.total_nodes_count
-              << " ("
-              << 100.0 * (results.out_nodes_count) /
-            static_cast<float>(results.total_nodes_count)
-              << "%)" << std::endl;
+    << results.out_nodes_count << "/" << results.total_nodes_count
+    << " ("
+    << 100.0 * (results.out_nodes_count) /
+    static_cast<float>(results.total_nodes_count)
+    << "%)" << std::endl;
   }
   check_for_memory_leak();
 
@@ -1008,7 +1008,7 @@ static void assign_storage_to_managed_tensors(
     StaticRuntime* runtime,
     const std::unordered_set<const Value*>& managed_tensor_values,
     const std::unordered_map<const Value*, std::vector<const Value*>>&
-        value_to_same_storage_values,
+    value_to_same_storage_values,
     std::vector<std::pair<size_t, std::vector<at::Tensor*>>>& managed_tensors) {
   // map Value to index to managed_storage, where multiple values can
   // map to the same index (i.e., sharing the same storage)
@@ -1047,7 +1047,7 @@ static void assign_storage_to_managed_tensors(
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     const std::unordered_map<const Value*, std::vector<const Value*>>&
-        value_to_same_storage_values,
+    value_to_same_storage_values,
     const std::unordered_set<const Value*>& external_values,
     bool enable_out_variant,
     bool manage_graph_output_memory) {
@@ -1159,7 +1159,7 @@ std::unordered_set<const Value*> GetAlwaysAliveValues(
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
-std::pair<LivenessMap, LiveRanges> GetLiveness(
+std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const std::unordered_set<const Value*>& always_alive,
     AliasDb& db) {
@@ -1255,7 +1255,7 @@ std::pair<LivenessMap, LiveRanges> GetLiveness(
   };
 
   auto traverse_node_fn = [&](const Node* node,
-                              std::vector<const Value*>& dead) {
+      std::vector<const Value*>& dead) {
     if (live_nodes_def_chain.count(node)) {
       for (const auto* v : live_nodes_def_chain.at(node)) {
         live_values_use_chain.at(v).erase(node);
@@ -1296,13 +1296,13 @@ std::pair<LivenessMap, LiveRanges> GetLiveness(
     }
   }
 
-  LiveRanges live_ranges;
+  LiveRangesMap live_ranges;
   for (const auto& item : value_use_idxs) {
     auto value = item.first;
     auto idxs = item.second;
 
-    live_ranges[value] = std::make_pair(
-        value_creation_idx[value], *max_element(begin(idxs), end(idxs)));
+    live_ranges[value] = {
+        value_creation_idx[value], *max_element(begin(idxs), end(idxs))};
   }
 
   return std::make_pair(liveness_map, live_ranges);
@@ -1435,7 +1435,7 @@ void ProcessedNode::run() {
 }
 
 bool ProcessedNode::verify_outputs_not_overlapping_with_immutable_inputs()
-    const {
+const {
   auto schema = node()->maybeSchema();
   if (!schema || schema->is_mutable()) {
     return true;

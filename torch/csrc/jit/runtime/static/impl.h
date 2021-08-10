@@ -97,7 +97,7 @@ class TORCH_API StaticModule {
  private:
   explicit StaticModule(
       std::pair<std::shared_ptr<torch::jit::Graph>, std::shared_ptr<Module>>
-          graph_and_module,
+      graph_and_module,
       const StaticModuleOptions& opts);
 
   // for <kind, idx>
@@ -186,7 +186,7 @@ class TORCH_API StaticModule {
   std::unordered_set<const Value*> external_values_;
   // map a value to the set of values that may share the same storage with it
   std::unordered_map<const Value*, std::vector<const Value*>>
-      value_to_same_storage_values_;
+  value_to_same_storage_values_;
 };
 
 class TORCH_API StaticRuntime {
@@ -342,7 +342,9 @@ class TORCH_API MemoryPlanner {
   }
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
-  static at::DataPtr allocate_buffer(size_t size, at::DeviceType deviceType = at::kCPU);
+  static at::DataPtr allocate_buffer(
+      size_t size,
+      at::DeviceType deviceType = at::kCPU);
 
  private:
   // ivalues created in one run but not managed by MemoryPlanner
@@ -363,7 +365,6 @@ class TORCH_API MemoryPlanner {
   // size_t managed_output_bytes_{0};
   // size_t reused_output_tensors_{0};
   // at::DataPtr output_buffer_; // allocated each time we call Run()
-
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -423,13 +424,17 @@ class TORCH_API ProcessedNode {
 
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = std::unordered_map<const Value*, std::set<const Value*>>;
-using LiveRanges = std::unordered_map<const Value*, std::pair<size_t, size_t>>;
+typedef struct LiveRange {
+  size_t begin;
+  size_t end;
+} LiveRange;
+using LiveRangesMap = std::unordered_map<const Value*, LiveRange>;
 
 TORCH_API std::unordered_set<const Value*> GetAlwaysAliveValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     AliasDb& db);
 
-TORCH_API std::pair<LivenessMap, LiveRanges> GetLiveness(
+TORCH_API std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const std::unordered_set<const Value*>& always_alive,
     AliasDb& db);
