@@ -13,8 +13,8 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Type, Union
 
 import torch
 import torch.distributed as dist
-from torch.distributed.algorithms.join import _Join, _Joinable, _JoinHook
-from torch.distributed.optim import DistributedOptimizer
+from torch.distributed.algorithms.join import Join, Joinable, JoinHook
+from torch.distributed.optim import functional_optim_map
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
@@ -105,7 +105,7 @@ def _get_global_rank(group: Any, rank: int) -> int:
             else dist.distributed_c10d._get_global_rank(group, rank))
 
 
-class _ZeROJoinHook(_JoinHook):
+class _ZeROJoinHook(JoinHook):
     def __init__(self, zero):
         assert isinstance(zero, ZeroRedundancyOptimizer), \
             "ZeRO join hook requires passing in a ZeroRedundancyOptimizer " \
@@ -180,7 +180,7 @@ class _OverlapInfo():
         bucket_indices_seen (List[int]): :class:`list` of the bucket indices
             seen on this iteration.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
 
         # Modified per bucket reconstruction
@@ -191,14 +191,38 @@ class _OverlapInfo():
 
         # Modified per iteration
         self.broadcast_handles: List[Any] = []
+        self.bucket_indices_seen: List[int] = []
         # Used by `hook_with_zero_step()`
         self.bucket_index_to_future: Dict[int, torch.futures.Future] = {}
         self.bucket_index_to_bucket: Dict[int, dist.GradBucket] = {}
-        # Used by `hook_with_zero_step_interleaved()`
-        self.bucket_indices_seen: List[int] = []
+
+    def wait_for_broadcasts(self, num_buckets, rank) -> None:
+        r"""
+        Waits for all parameter broadcasts. This should be called once all
+        broadcasts have been scheduled, meaning ``self.broadcast_handles`` is
+        filled. This clears ``self.broadcast_handles`` in preparation for the
+        next iteration.
+
+        Arguments:
+            num_buckets (int): total number of buckets.
+            rank (int): the calling process's rank.
+        """
+        assert len(self.broadcast_handles) == num_buckets, \
+            f"Missing at least one broadcast handle on rank {rank}"
+        _ = list(map(lambda x: x.wait(), self.broadcast_handles))
+        self.broadcast_handles.clear()
+
+    def clear_per_iter_info(self) -> None:
+        r"""
+        Clears the data structures that are modified per-iteration. This should
+        be called at the end of an iteration.
+        """
+        self.bucket_indices_seen.clear()
+        self.bucket_index_to_future.clear()
+        self.bucket_index_to_bucket.clear()
 
 
-class ZeroRedundancyOptimizer(Optimizer, _Joinable):
+class ZeroRedundancyOptimizer(Optimizer, Joinable):
     r"""
     This class wraps an arbitrary :class:`optim.Optimizer
     <torch.optim.Optimizer>` and shards its states across ranks in the group as
@@ -285,8 +309,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
     """
 
-    functional_optim_map = DistributedOptimizer.functional_optim_map
-
     def __init__(
         self,
         params,
@@ -307,7 +329,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         self.initialized = False
 
         Optimizer.__init__(self, self._all_params, defaults)
-        _Joinable.__init__(self)
+        Joinable.__init__(self)
         # Now, all parameters are held in both `self._all_params` and
         # `self.param_groups`
 
@@ -809,7 +831,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
             ``None``) if ``overlap_with_ddp=True``, in which case
             :class:`ZeroRedundancyOptimizer` wraps a functional optimizer.
         """
-        _Join.notify_join_context(self)
+        Join.notify_join_context(self)
         # Check if the model trainability has changed
         is_trainable_mask = self._get_is_trainable_mask()
         if is_trainable_mask != self._is_trainable_mask:
@@ -886,7 +908,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
 
         return loss
 
-    def _join_hook(self, **kwargs):
+    def join_hook(self, **kwargs):
         r"""
         Returns the ZeRO join hook, which enables training on uneven inputs by
         shadowing the collective communications in the optimizer step.
@@ -896,7 +918,7 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         Arguments:
             kwargs (dict): a :class:`dict` containing any keyword arguments
                 to modify the behavior of the join hook at run time; all
-                :class:`_Joinable` instances sharing the same join context
+                :class:`Joinable` instances sharing the same join context
                 manager are forwarded the same value for ``kwargs``.
 
         This hook does not support any keyword arguments; i.e. ``kwargs`` is
@@ -905,11 +927,11 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
         return _ZeROJoinHook(self)
 
     @property
-    def _join_device(self) -> torch.device:
+    def join_device(self) -> torch.device:
         return self._default_device
 
     @property
-    def _join_process_group(self) -> Any:
+    def join_process_group(self) -> Any:
         return self.process_group
 
     def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
@@ -1313,7 +1335,6 @@ class ZeroRedundancyOptimizer(Optimizer, _Joinable):
                 - if ``overlap_with_ddp=False`` and ``optimizer_class`` is a
                     functional optimizer.
         """
-        functional_optim_map = ZeroRedundancyOptimizer.functional_optim_map
         functional_optims = functional_optim_map.values()
         if not self._overlap_with_ddp:
             if optimizer_class in functional_optims:
