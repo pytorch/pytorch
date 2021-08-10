@@ -4,6 +4,7 @@ namespace dnnlowp {
 
 using namespace std;
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 Sigmoid<T>::Sigmoid(double max_abs_err) : tanh_(max_abs_err) {
   float x_sq = tanh_.GetSaturationRegionBegin();

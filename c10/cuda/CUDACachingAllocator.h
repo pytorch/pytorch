@@ -1,9 +1,9 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
-
-#include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Registry.h>
 
 #include <array>
@@ -19,7 +19,7 @@ class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
  public:
-  virtual ~FreeMemoryCallback() {};
+  virtual ~FreeMemoryCallback() = default;
   virtual bool Execute() = 0;
 };
 
@@ -55,7 +55,7 @@ enum struct StatType : uint64_t {
   AGGREGATE = 0,
   SMALL_POOL = 1,
   LARGE_POOL = 2,
-  NUM_TYPES = 3  // remember to update this whenever a new stat type is added
+  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
 };
 
 typedef std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)> StatArray;
@@ -68,7 +68,8 @@ struct DeviceStats {
   StatArray segment;
   // COUNT: number of active memory blocks (allocated or used by stream)
   StatArray active;
-  // COUNT: number of inactive, split memory blocks (unallocated but can't be released via cudaFree)
+  // COUNT: number of inactive, split memory blocks (unallocated but can't be
+  // released via cudaFree)
   StatArray inactive_split;
 
   // SUM: bytes requested by client code
@@ -80,14 +81,25 @@ struct DeviceStats {
   // SUM: bytes within inactive, split memory blocks
   StatArray inactive_split_bytes;
 
-  // COUNT: total number of failed calls to CUDA malloc necessitating cache flushes.
+  // COUNT: total number of failed calls to CUDA malloc necessitating cache
+  // flushes.
   int64_t num_alloc_retries = 0;
 
   // COUNT: total number of OOMs (i.e. failed calls to CUDA after cache flush)
   int64_t num_ooms = 0;
+
+  // COUNT: total number of oversize blocks allocated from pool
+  Stat oversize_allocations;
+
+  // COUNT: total number of oversize blocks requiring malloc
+  Stat oversize_segments;
+
+  // SIZE: maximum block size that is allowed to be split.
+  int64_t max_split_size = 0;
 };
 
-// Struct containing info of an allocation block (i.e. a fractional part of a cudaMalloc)..
+// Struct containing info of an allocation block (i.e. a fractional part of a
+// cudaMalloc)..
 struct BlockInfo {
   int64_t size = 0;
   bool allocated = false;
@@ -113,19 +125,31 @@ C10_CUDA_API Allocator* get();
 C10_CUDA_API void init(int device_count);
 C10_CUDA_API void setMemoryFraction(double fraction, int device);
 C10_CUDA_API void emptyCache();
-C10_CUDA_API void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock);
-C10_CUDA_API void* getBaseAllocation(void *ptr, size_t *size);
+C10_CUDA_API void cacheInfo(
+    int dev_id,
+    size_t* cachedAndFree,
+    size_t* largestBlock);
+C10_CUDA_API void* getBaseAllocation(void* ptr, size_t* size);
 C10_CUDA_API void recordStream(const DataPtr&, CUDAStream stream);
 C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
 C10_CUDA_API std::vector<SegmentInfo> snapshot();
 
+// CUDAGraph interactions
+C10_CUDA_API void notifyCaptureBegin(
+    int device,
+    CaptureId_t graph_id,
+    MempoolId_t mempool_id);
+C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id);
+C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
+
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 } // namespace CUDACachingAllocator
 
-}} // namespace c10::cuda
+} // namespace cuda
+} // namespace c10
 
 #endif

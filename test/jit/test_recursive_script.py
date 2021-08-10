@@ -1,5 +1,6 @@
 import os
 import sys
+import types
 import typing
 import typing_extensions
 from typing import List, Dict, Optional, Tuple
@@ -82,7 +83,7 @@ class TestRecursiveScript(JitTestCase):
                 return self.fn(x)
 
         m = M(fn)
-        with self.assertRaisesRegex(RuntimeError, "failed to compile"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "failed to compile", "i_dont_exist"):
             torch.jit.script(m)
 
     def test_init_error(self):
@@ -210,7 +211,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegex(torch.jit.frontend.FrontendError, "Cannot instantiate class"):
+        with self.assertRaisesRegexWithHighlight(torch.jit.frontend.FrontendError, "Cannot instantiate class", "MyScriptClass"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
@@ -384,7 +385,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_class(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -400,7 +401,7 @@ class TestRecursiveScript(JitTestCase):
     def test_error_stack_annotation(self):
         class X(object):
             def bad_fn(self):
-                import pdb  # noqa
+                import pdb  # noqa: F401
 
         def fn(x) -> X:
             return X(10)
@@ -729,3 +730,23 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
+
+    def test_override_instance_method_ignore(self):
+        class M(torch.nn.Module):
+            @torch.jit.ignore
+            def i_am_ignored(self):
+                return "old"
+
+        m = M()
+
+        # Override the ignored method by binding a new method to this instance.
+        @torch.jit.ignore
+        def i_am_ignored(self):
+            return "new"
+
+        m.i_am_ignored = types.MethodType(i_am_ignored, m)
+        self.assertEqual(m.i_am_ignored(), "new")
+
+        # ScriptModule should correctly reflect the override.
+        s = torch.jit.script(m)
+        self.assertEqual(s.i_am_ignored(), "new")

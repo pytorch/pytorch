@@ -55,7 +55,7 @@ else
   echo "Can't tell what to checkout"
   exit 1
 fi
-retry git submodule update --init --recursive
+retry git submodule update --init --recursive --jobs 0
 echo "Using Pytorch from "
 git --no-pager log --max-count 1
 popd

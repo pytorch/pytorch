@@ -109,7 +109,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
-        base_dist = ExpRelaxedCategorical(temperature, probs, logits)
+        base_dist = ExpRelaxedCategorical(temperature, probs, logits, validate_args=validate_args)
         super(RelaxedOneHotCategorical, self).__init__(base_dist,
                                                        ExpTransform(),
                                                        validate_args=validate_args)

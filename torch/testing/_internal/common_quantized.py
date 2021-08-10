@@ -35,7 +35,7 @@ def _quantize(x, scale, zero_point, qmin=None, qmax=None, dtype=np.uint8):
 
 def _dequantize(qx, scale, zero_point):
     """Dequantizes a numpy array."""
-    x = (qx.astype(np.float) - zero_point) * scale
+    x = (qx.astype(float) - zero_point) * scale
     return x
 
 
@@ -140,6 +140,16 @@ def override_quantized_engine(qengine):
     finally:
         torch.backends.quantized.engine = previous
 
+@contextmanager
+def override_cpu_allocator_for_qnnpack(qengine_is_qnnpack):
+    try:
+        if qengine_is_qnnpack:
+            torch._C._set_default_mobile_cpu_allocator()
+        yield
+    finally:
+        if qengine_is_qnnpack:
+            torch._C._unset_default_mobile_cpu_allocator()
+
 # TODO: Update all quantization tests to use this decorator.
 # Currently for some of the tests it seems to have inconsistent params
 # for fbgemm vs qnnpack.
@@ -155,3 +165,42 @@ def qengine_is_fbgemm():
     return torch.backends.quantized.engine == 'fbgemm'
 def qengine_is_qnnpack():
     return torch.backends.quantized.engine == 'qnnpack'
+
+# Helper function used to simulate per-channel fake-quant against any axis
+def _permute_to_axis_zero(X, axis):
+    new_axis_list = list(range(X.dim()))
+    new_axis_list[axis] = 0
+    new_axis_list[0] = axis
+    y = X.permute(tuple(new_axis_list))
+    return y, new_axis_list
+
+# Reference method for fake quantize
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
+def _fake_quantize_per_channel_affine_reference(X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
+    dtype = X.dtype
+    X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
+    res = torch.zeros_like(X)
+
+    for i in range(X.size()[0]):
+        res[i] = (torch.clamp(torch.round(X[i] * (1.0 / per_channel_scale[i]) +
+                  per_channel_zero_point[i]), quant_min, quant_max) - per_channel_zero_point[i]) * per_channel_scale[i]
+
+    out = res.permute(tuple(permute_axis_list))
+    return out.to(dtype)
+
+# Reference method for the gradient of the fake quantize operator
+# Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
+def _fake_quantize_per_channel_affine_grad_reference(dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max):
+    dtype = X.dtype
+    X, permute_axis_list = _permute_to_axis_zero(X.to(torch.float32), axis)
+    Xq = torch.zeros_like(X)
+    for i in range(X.size()[0]):
+        Xq[i] = torch.round(X[i] * (1.0 / per_channel_scale[i]) + per_channel_zero_point[i])
+    Xq = Xq.permute(tuple(permute_axis_list))
+    mask = (Xq >= quant_min) * (Xq <= quant_max)
+    res = torch.zeros_like(dY)
+    res[mask] = dY[mask]
+    return res.to(dtype)
+
+def to_tensor(X, device):
+    return torch.tensor(X).to(device=torch.device(device), dtype=torch.float32)

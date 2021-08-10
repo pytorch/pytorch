@@ -412,7 +412,7 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     // output. If so add a mapping from it's latest renamed version to its
     // original name.
     std::unordered_map<std::string, std::string> renamed_external_outputs;
-    for (const auto it : blob_versions) {
+    for (const auto& it : blob_versions) {
       if (external_outputs.count(it.first)) {
         renamed_external_outputs.emplace(
             SsaName(it.first, it.second), it.first);
@@ -431,6 +431,7 @@ std::unordered_map<std::string, std::string> SsaRewrite(
     }
   }
   // run schema check again
+  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   run_schema_check(*pred_net);
 
   return input_mapping;
@@ -998,6 +999,7 @@ ConvertedResult OnnxExporter::CreateConcatNodes(
     int canonical_axis = canonical_axis_index_(axis, adj_size);
     CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
     for (int i = 0; i < mdef.input_size(); ++i) {
+      // NOLINTNEXTLINE(performance-inefficient-vector-operation)
       split_info.push_back(
           add_axis ? 1 : shapes.at(mdef.input(i)).dims(canonical_axis));
     }
@@ -1299,6 +1301,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
   CAFFE_ENFORCE_EQ(def.input_size(), 3);
   CAFFE_ENFORCE_GE(def.output_size(), 1);
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto x = def.input(0);
   auto w = def.input(1);
   const auto& b = def.input(2);

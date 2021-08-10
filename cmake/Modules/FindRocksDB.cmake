@@ -21,4 +21,3 @@ if(ROCKSDB_FOUND)
   message(STATUS "Found RocksDB  (include: ${RocksDB_INCLUDE_DIR}, library: ${RocksDB_LIBRARIES})")
   mark_as_advanced(RocksDB_INCLUDE_DIR RocksDB_LIBRARIES)
 endif()
-

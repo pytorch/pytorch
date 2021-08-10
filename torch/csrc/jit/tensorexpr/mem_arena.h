@@ -9,16 +9,17 @@ namespace tensorexpr {
 class KernelScopedObject;
 
 // An arena that manages all the underlying kernel-scoped objects.
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class KernelArena {
  public:
   static KernelArena* GetCurrentKernelArena();
   static void SetCurrentKernelArena(KernelArena* new_arena);
-  TORCH_API KernelArena() {}
+  TORCH_API KernelArena() = default;
   TORCH_API ~KernelArena();
-
- private:
   KernelArena(const KernelArena&) = delete;
   KernelArena& operator=(const KernelArena&) = delete;
+
+ private:
   friend class KernelScopedObject;
   std::vector<KernelScopedObject*> kernel_objects_; // owned
 };
@@ -32,14 +33,14 @@ class KernelScope {
   TORCH_API KernelScope();
   TORCH_API explicit KernelScope(KernelArena* arena_);
   TORCH_API ~KernelScope();
-
- private:
   KernelScope(const KernelScope&) = delete;
   KernelScope& operator=(const KernelScope&) = delete;
-  KernelArena* old_kernel_arena_ =
-      nullptr; // previous arena, will be restored in destructor
-  bool owning_ = false; // determines whether the arena will be freed along with
-                        // the scope object
+
+ private:
+  KernelArena* kernel_arena_; // maybe owned
+  KernelArena* old_kernel_arena_; // previous arena, restored in destructor
+  bool owning_; // determines whether the arena will be freed along with
+                // the scope object
 };
 
 // The base object managed by the Kernel.
@@ -50,7 +51,6 @@ class TORCH_API KernelScopedObject {
   KernelScopedObject();
   virtual ~KernelScopedObject() = default;
 
- private:
   KernelScopedObject(const KernelScopedObject&) = delete;
   KernelScopedObject& operator=(const KernelScopedObject&) = delete;
 };

@@ -33,6 +33,7 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
     }
 
     for (int i = 0; i < batch_size; i++) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       float r;
       int offset = i * weights_dim;
 
@@ -56,6 +57,7 @@ bool WeightedSampleOp<float, CPUContext>::RunOnDevice() {
       }
     }
   } else {
+    // NOLINTNEXTLINE(clang-diagnostic-unused-variable,clang-analyzer-deadcode.DeadStores)
     auto* out_idx = Output(0, {0}, at::dtype<int>());
     if (OutputSize() == 2) {
       auto* out_value = Output(1, {0}, at::dtype<float>());

@@ -98,6 +98,7 @@ class TestConversion(TestCase):
         self.assertEqual(onnx_model.graph.node[0].op_type, 'Relu')
         self.assertEqual(len(onnx_model.graph.initializer), 0)
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_onnx_to_caffe2(self):
         onnx_model = tempfile.NamedTemporaryFile()
         output = tempfile.NamedTemporaryFile()
@@ -240,6 +241,7 @@ class TestConversion(TestCase):
         ]
         return retval_nodes
 
+    @unittest.skip("Disabled due to onnx optimizer deprecation")
     def test_onnx_to_caffe2_loop(self):
         body_nodes = [helper.make_node(
             "MatMul", ["_X", "W"], ["_Y"])]

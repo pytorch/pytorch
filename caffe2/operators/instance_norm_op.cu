@@ -207,10 +207,14 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
   ComputeFusedParamsCUDAKernel<float>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, mean, rstd, gamma, beta, scale_data, bias_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   InstanceNormForwardCUDAKernel<float, StorageOrder::NCHW>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, X, scale_data, bias_data, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -241,10 +245,14 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
   ComputeFusedParamsCUDAKernel<float>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, mean, rstd, gamma, beta, scale_data, bias_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   InstanceNormForwardCUDAKernel<float, StorageOrder::NHWC>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, X, scale_data, bias_data, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -294,6 +302,8 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
   ComputeInternalGradientsNCHWCUDAKernel<float>
       <<<N * C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           HxW, dY, X, ds_data, db_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   ReinitializeTensor(&c1_, {N, C}, at::dtype<float>().device(CUDA));
   ReinitializeTensor(&c2_, {N, C}, at::dtype<float>().device(CUDA));
   ReinitializeTensor(&c3_, {N, C}, at::dtype<float>().device(CUDA));
@@ -314,13 +324,19 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW(
           c1_data,
           c2_data,
           c3_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   InstanceNormBackwardCUDAKernel<float, StorageOrder::NCHW>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, dY, X, c1_data, c2_data, c3_data, dX);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   GammaBetaBackwardCUDAKernel<float>
       <<<C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, ds_data, db_data, mean, rstd, dgamma, dbeta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -398,13 +414,19 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC(
           c1_data,
           c2_data,
           c3_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   B = math::DivUp<int64_t>(N * C * HxW, CAFFE_CUDA_NUM_THREADS);
   InstanceNormBackwardCUDAKernel<float, StorageOrder::NHWC>
       <<<B, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, HxW, dY, X, c1_data, c2_data, c3_data, dX);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   GammaBetaBackwardCUDAKernel<float>
       <<<C, CAFFE_CUDA_NUM_THREADS, 0, context_.cuda_stream()>>>(
           N, C, ds_data, db_data, mean, rstd, dgamma, dbeta);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

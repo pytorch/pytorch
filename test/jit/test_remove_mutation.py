@@ -3,11 +3,12 @@ import sys
 
 import torch
 from torch.testing import FileCheck
+from typing import List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -154,6 +155,19 @@ class TestRemoveMutation(JitTestCase):
         self.run_pass('remove_mutation', graph)
         FileCheck().check('aten::fill_').run(graph)
 
+        def normal():
+            return torch.rand(2, 1, 3, 4).normal_()
+
+        fn = torch.jit.script(normal)
+        graph = fn.graph
+        self.run_pass('remove_mutation', graph)
+        FileCheck().check_not("normal_").run(graph)
+        with freeze_rng_state():
+            out_eager = normal()
+        with freeze_rng_state():
+            out_script = fn()
+        self.assertEqual(out_eager, out_script)
+
     def test_lists_append(self):
         def successful_remove():
             return [i for i in range(5)]  # noqa: C416
@@ -179,6 +193,54 @@ class TestRemoveMutation(JitTestCase):
         # it is possible to remove the append here but don't currently have the logic for it
         FileCheck().check_not("append").run(graph)
         self.assertEqual(intermediary_use(), fn())
+
+    def test_lists_insert(self):
+        def successful_remove():
+            a : List[int] = []
+            a.insert(0, 1)
+            a.insert(0, 2)
+            a.insert(-10, 3)
+            a.insert(-9, 4)
+            a.insert(10, 5)
+            return a
+
+        fn = torch.jit.script(successful_remove)
+        graph = fn.graph
+        torch._C._jit_pass_remove_mutation(graph)
+        torch._C._jit_pass_constant_propagation(graph)
+        FileCheck().check("graph").check_next("Constant").check_next("return").run(graph)
+        self.assertEqual(successful_remove(), fn())
+
+    def test_list_indexing_removal(self):
+        @torch.jit.script
+        def out_of_bounds():
+            x = [1, 2]
+            x[4] = 3
+            return x
+
+        torch._C._jit_pass_remove_mutation(out_of_bounds.graph)
+        FileCheck().check("set_item").run(out_of_bounds.graph)
+
+        @torch.jit.script
+        def unknown(y: int):
+            x = [1, 2]
+            x[y] = 3
+            return x
+
+        torch._C._jit_pass_remove_mutation(out_of_bounds.graph)
+        FileCheck().check("set_item").run(out_of_bounds.graph)
+
+        def successful():
+            x = [1, 2, 3]
+            x[0] = 4
+            x[-1] = 0
+            return x
+
+        scripted_fn = torch.jit.script(successful)
+        torch._C._jit_pass_remove_mutation(scripted_fn.graph)
+        FileCheck().check_not("set_item").run(scripted_fn.graph)
+        self.checkScript(successful, ())
+
 
     def test_common_pytorch_list_ops(self):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:

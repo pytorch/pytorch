@@ -10,7 +10,7 @@
 #include <c10/util/complex.h>
 #include <c10/util/string_view.h>
 
-#ifdef XPLAT_MOBILE_BUILD
+#ifdef TEMPLATE_SELECTIVE_BUILD
 #include <ATen/selected_mobile_ops.h>
 #else
 namespace at {
@@ -45,16 +45,28 @@ inline constexpr bool should_include_kernel_dtype(
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)
 #endif
 
+#if defined __cpp_if_constexpr
+#define AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, HINT, ...)        \
+  case enum_type: {                                                              \
+    if constexpr (!at::should_include_kernel_dtype(NAME, enum_type)) {           \
+      AT_ERROR("dtype '", toString(enum_type), "' not selected for kernel tag ", #NAME); \
+    }                                                                            \
+    using HINT = type;                                                           \
+    return __VA_ARGS__();                                                        \
+  }
+#else
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, HINT, ...)        \
   case enum_type: {                                                              \
     at::guts::if_constexpr<(!at::should_include_kernel_dtype(NAME, enum_type))>( \
-      [&] {                                                                      \
-        AT_ERROR("dtype '", toString(enum_type), "' not selected for kernel tag ", #NAME); \
+      [] {                                                                       \
+        AT_ERROR("dtype '" #enum_type "' not selected for kernel tag " #NAME);   \
       }                                                                          \
     );                                                                           \
     using HINT = type;                                                           \
     return __VA_ARGS__();                                                        \
   }
+#endif                                                                           \
+
 
 #define AT_PRIVATE_CASE_TYPE(NAME, enum_type, type, ...)                     \
   AT_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, scalar_t, __VA_ARGS__)
@@ -94,6 +106,9 @@ inline constexpr bool should_include_kernel_dtype(
     int bit_width = bitwidth;                                                     \
     int64_t quant_min = qmin;                                                     \
     int64_t quant_max = qmax;                                                     \
+    (void)bit_width; /* Suppress unused variable warning */                       \
+    (void)quant_min; /* Suppress unused variable warning */                       \
+    (void)quant_max; /* Suppress unused variable warning */                       \
     return __VA_ARGS__();                                                         \
   }
 

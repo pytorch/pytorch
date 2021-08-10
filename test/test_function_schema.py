@@ -86,5 +86,14 @@ class TestFunctionSchema(TestCase):
         new_schema = parse_schema('any(Tensor self, *, Tensor b, int[] c) -> Tensor')
         self.assertFalse(new_schema.is_backward_compatible_with(old_schema))
 
+    def test_string_optional_parameter_default_value(self):
+        schema_a = parse_schema("example::op(str? order=\"NCHW\") -> (Tensor)")
+        schema_b = parse_schema(str(schema_a))
+        self.assertEquals(schema_a, schema_b)
+
+    def test_schema_error(self):
+        with self.assertRaisesRegex(RuntimeError, r"schemas with vararg \(...\) can't have default value args"):
+            schema = parse_schema("any.foo(int arg1, int arg2=0, ...)")
+
 if __name__ == '__main__':
     run_tests()

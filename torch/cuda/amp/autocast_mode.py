@@ -4,9 +4,11 @@ import warnings
 import collections
 try:
     import numpy as np
+    HAS_NUMPY = True
 except ModuleNotFoundError:
-    np = None
+    HAS_NUMPY = False
 from torch._six import string_classes
+from .common import amp_definitely_not_available
 
 
 class autocast(object):
@@ -114,7 +116,7 @@ class autocast(object):
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
-        if enabled and not torch.cuda.is_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
@@ -148,7 +150,7 @@ def _cast(value, dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
-    elif np is not None and isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(value, np.ndarray):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}

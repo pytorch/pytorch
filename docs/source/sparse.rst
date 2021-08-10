@@ -53,8 +53,8 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
 Sparse COO tensors
 ++++++++++++++++++
 
-Currently, PyTorch implements the so-called Coordinate format, or COO
-format, as the default sparse storage format for storing sparse
+PyTorch implements the so-called Coordinate format, or COO
+format, as one of the storage formats for implementing sparse
 tensors.  In COO format, the specified elements are stored as tuples
 of element indices and the corresponding values. In particular,
 
@@ -363,6 +363,82 @@ assumption that the fill value is negative infinity.
 
 .. See https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc-fill-value/RFC-0004-sparse-fill-value for a new API
 
+.. _sparse-csr-docs:
+
+Sparse CSR Tensor
++++++++++++++++++
+
+The CSR (Compressed Sparse Row) sparse tensor format implements the CSR format
+for storage of 2 dimensional tensors. Although there is no support for N-dimensional
+tensors, the primary advantage over the COO format is better use of storage and
+much faster computation operations such as sparse matrix-vector multiplication
+using MKL and MAGMA backends. CUDA support does not exist as of now.
+
+A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indices``
+and ``values``:
+
+  - The ``crow_indices`` tensor consists of compressed row indices. This is a 1-D tensor
+    of size ``size[0] + 1``. The last element is the number of non-zeros. This tensor
+    encodes the index in ``values`` and ``col_indices`` depending on where the given row
+    starts. Each successive number in the tensor subtracted by the number before it denotes
+    the number of elements in a given row.
+  - The ``col_indices`` tensor contains the column indices of each value. This is a 1-D
+    tensor of size ``nnz``.
+  - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
+    of size ``nnz``.
+
+.. note::
+
+   The index tensors ``crow_indices`` and ``col_indices`` should have element type either
+   ``torch.int64`` (default) or ``torch.int32``. If you want to use MKL-enabled matrix
+   operations, use ``torch.int32``. This is as a result of the default linking of pytorch
+   being with MKL LP64, which uses 32 bit integer indexing.
+
+Construction of CSR tensors
+---------------------------
+
+Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
+method. The user must supply the row and column indices and values tensors separately.
+The ``size`` argument is optional and will be deduced from the the ``crow_indices``
+and ``col_indices`` if it is not present.
+
+    >>> crow_indices = torch.tensor([0, 2, 4])
+    >>> col_indices = torch.tensor([0, 1, 0, 1])
+    >>> values = torch.tensor([1, 2, 3, 4])
+    >>> csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=torch.double)
+    >>> csr
+    tensor(crow_indices=tensor([0, 2, 4]),
+          col_indices=tensor([0, 1, 0, 1]),
+          values=tensor([1., 2., 3., 4.]), size=(2, 2), nnz=4,
+          dtype=torch.float64)
+    >>> csr.to_dense()
+    tensor([[1., 2.],
+            [3., 4.]], dtype=torch.float64)
+
+CSR Tensor Operations
+---------------------
+
+The simplest way of constructing a sparse CSR tensor from a strided or sparse COO
+tensor is to use :meth:`tensor.to_sparse_csr`. Any zeros in the (strided) tensor will
+be interpreted as missing values in the sparse tensor:
+
+    >>> a = torch.tensor([[0, 0, 1, 0], [1, 2, 0, 0], [0, 0, 0, 0]], dtype = torch.float64)
+    >>> sp = a.to_sparse_csr()
+    >>> sp
+    tensor(crow_indices=tensor([0, 1, 3, 3]),
+          col_indices=tensor([2, 0, 1]),
+          values=tensor([1., 1., 2.]), size=(3, 4), nnz=3, dtype=torch.float64)
+
+The sparse matrix-vector multiplication can be performed with the
+:meth:`tensor.matmul` method. This is currently the only math operation
+supported on CSR tensors.
+
+    >>> vec = torch.randn(4, 1, dtype=torch.float64)
+    >>> sp.matmul(vec)
+    tensor([[0.9078],
+            [1.3180],
+            [0.0000]], dtype=torch.float64)
+
 Supported Linear Algebra operations
 +++++++++++++++++++++++++++++++++++
 
@@ -380,7 +456,9 @@ multiplication, and ``@`` is matrix multiplication.
    :delim: ;
 
    :func:`torch.mv`;no; ``M[sparse_coo] @ V[strided] -> V[strided]``
+   :func:`torch.mv`;no; ``M[sparse_csr] @ V[strided] -> V[strided]``
    :func:`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
+   :func:`torch.matmul`; no; ``M[sparse_csr] @ M[strided] -> M[strided]``
    :func:`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
@@ -405,27 +483,44 @@ matrix arguments.
    applications can still compute this using the matrix relation ``D @
    S == (S.t() @ D.t()).t()``.
 
-.. class:: Tensor()
-   :noindex:
+Tensor methods and sparse
++++++++++++++++++++++++++
 
-   The following methods are specific to :ref:`sparse tensors <sparse-docs>`:
+The following Tensor methods are related to sparse tensors:
 
-    .. autoattribute:: is_sparse
-    .. automethod:: dense_dim
-    .. automethod:: sparse_dim
-    .. automethod:: sparse_mask
-    .. automethod:: sparse_resize_
-    .. automethod:: sparse_resize_and_clear_
-    .. automethod:: to_dense
-    .. automethod:: to_sparse
-    .. The following methods are specific to :ref:`sparse COO tensors <sparse-coo-docs>`:
-    .. automethod:: coalesce
-    .. automethod:: is_coalesced
-    .. automethod:: indices
-    .. automethod:: values
+.. autosummary::
+    :nosignatures:
 
-The following :class:`torch.Tensor` methods support :ref:`sparse COO
-tensors <sparse-coo-docs>`:
+    Tensor.is_sparse
+    Tensor.dense_dim
+    Tensor.sparse_dim
+    Tensor.sparse_mask
+    Tensor.to_sparse
+    Tensor.to_sparse_csr
+    Tensor.indices
+    Tensor.values
+
+The following Tensor methods are specific to sparse COO tensors:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Tensor.coalesce
+    Tensor.sparse_resize_
+    Tensor.sparse_resize_and_clear_
+    Tensor.is_coalesced
+    Tensor.to_dense
+
+The following methods are specific to :ref:`sparse CSR tensors <sparse-csr-docs>`:
+
+.. autosummary::
+    :nosignatures:
+
+    Tensor.crow_indices
+    Tensor.col_indices
+
+The following Tensor methods support sparse COO tensors:
 
 :meth:`~torch.Tensor.add`
 :meth:`~torch.Tensor.add_`
@@ -479,25 +574,27 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.transpose_`
 :meth:`~torch.Tensor.zero_`
 
+Torch functions specific to sparse Tensors
+++++++++++++++++++++++++++++++++++++++++++
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
 
-Sparse tensor functions
-+++++++++++++++++++++++
-
-.. autofunction:: torch.sparse_coo_tensor
-   :noindex:
-.. autofunction:: torch.sparse.sum
-.. autofunction:: torch.sparse.addmm
-.. autofunction:: torch.sparse.mm
-.. autofunction:: torch.sspaddmm
-.. autofunction:: torch.hspmm
-.. autofunction:: torch.smm
-.. autofunction:: torch.sparse.softmax
-.. autofunction:: torch.sparse.log_softmax
+    sparse_coo_tensor
+    sparse_csr_tensor
+    sparse.sum
+    sparse.addmm
+    sparse.mm
+    sspaddmm
+    hspmm
+    smm
+    sparse.softmax
+    sparse.log_softmax
 
 Other functions
 +++++++++++++++
 
-The following :mod:`torch` functions support :ref:`sparse COO tensors <sparse-coo-docs>`:
+The following :mod:`torch` functions support sparse tensors:
 
 :func:`~torch.cat`
 :func:`~torch.dstack`

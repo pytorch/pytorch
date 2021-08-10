@@ -20,7 +20,7 @@ bool use_channel_shuffle(
   return xnnpack::internal::available() &&
       // Input
       (4 == input.dim()) &&
-      (c10::DeviceType::CPU == input.device().type()) &&
+      (input.device().is_cpu()) &&
       (kFloat == input.scalar_type()) &&
       (input.size(Layout::Activation4D::batch) >= 0) &&
       (input.size(Layout::Activation4D::channels) > 0) &&

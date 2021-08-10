@@ -156,6 +156,7 @@ caffe2::Tensor* createTensorAndConstantFill(
 // Concise util class to mutate a net in a chaining fashion.
 class TORCH_API NetMutator {
  public:
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.UninitializedObject)
   explicit NetMutator(caffe2::NetDef* net) : net_(net) {}
 
   NetMutator& newOp(

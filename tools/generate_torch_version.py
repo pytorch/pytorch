@@ -2,7 +2,7 @@ import argparse
 import os
 import subprocess
 from pathlib import Path
-from distutils.util import strtobool
+from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
@@ -13,7 +13,7 @@ def get_sha(pytorch_root: Union[str, Path]) -> str:
 
 def get_torch_version(sha: Optional[str] = None) -> str:
     pytorch_root = Path(__file__).parent.parent
-    version = open('version.txt', 'r').read().strip()
+    version = open(pytorch_root / 'version.txt', 'r').read().strip()
 
     if os.getenv('PYTORCH_BUILD_VERSION'):
         assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
@@ -24,12 +24,12 @@ def get_torch_version(sha: Optional[str] = None) -> str:
     elif sha != 'Unknown':
         if sha is None:
             sha = get_sha(pytorch_root)
-        version += '+' + sha[:7]
+        version += '+git' + sha[:7]
     return version
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate torch/version.py from build and environment metadata.")
-    parser.add_argument("--is_debug", type=strtobool, help="Whether this build is debug mode or not.")
+    parser.add_argument("--is_debug", type=distutils.util.strtobool, help="Whether this build is debug mode or not.")
     parser.add_argument("--cuda_version", type=str)
     parser.add_argument("--hip_version", type=str)
 

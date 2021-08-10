@@ -71,6 +71,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::NotImplementedError& e) {                      \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
@@ -157,7 +163,7 @@ struct python_error : public std::exception {
     }
   }
 
-  virtual const char* what() const noexcept override {
+   const char* what() const noexcept override {
     return message.c_str();
   }
 
@@ -239,6 +245,7 @@ THP_API bool get_cpp_stacktraces_enabled();
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
+  // NOLINTNEXTLINE(modernize-pass-by-value)
   PyTorchError(const std::string& msg_ = std::string()): msg(msg_) {}
   virtual PyObject* python_type() = 0;
   const char* what() const noexcept override {
@@ -285,7 +292,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  NotImplementedError() {}
+  NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
   }
@@ -301,6 +308,7 @@ struct AttributeError : public PyTorchError {
 
 struct WarningMeta {
   WarningMeta(const c10::SourceLocation& _source_location,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       const std::string& _msg,
       const bool _verbatim) :
       source_location_{_source_location},
@@ -318,6 +326,7 @@ struct PyWarningHandler: at::WarningHandler {
 public:
 /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
   TORCH_API PyWarningHandler() noexcept(true);
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   TORCH_API ~PyWarningHandler() noexcept(false) override;
 
   void process(const at::SourceLocation &source_location,

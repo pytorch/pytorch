@@ -1,8 +1,16 @@
 #include <ATen/ATen.h>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/core/Dict.h>
+
+// Snippets for checking assembly.
+c10::IValue inspectTupleConstruction() {
+  std::tuple<std::string, std::string> s = std::make_tuple(
+      "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+  return c10::IValue(s);
+}
 
 namespace c10 {
 
@@ -16,6 +24,7 @@ TEST(IValueTest, Basic) {
   auto foo2 = std::move(bar);
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(foo2.isIntList());
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar.isNone());
   foo2 = IValue(4.0);
   ASSERT_TRUE(foo2.isDouble());
@@ -25,6 +34,7 @@ TEST(IValueTest, Basic) {
 
   auto move_it = std::move(baz).toIntList();
   ASSERT_EQ(foo.use_count(), 2);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   ASSERT_TRUE(baz.isNone());
   IValue i(4);
   ASSERT_TRUE(i.isInt());
@@ -33,6 +43,7 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(dlist.isDoubleList());
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.5}));
   std::move(dlist).toDoubleList();
+  // NOLINTNEXTLINE(bugprone-use-after-move)
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::List<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.4}));
@@ -65,6 +76,7 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(foo12.isComplexDoubleList());
   ASSERT_EQ(foo12.toComplexDoubleList(), foo1);
 
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar1.isNone());
   auto foo3 = IValue(c10::complex<double>(3, 4));
   ASSERT_TRUE(foo3.isComplexDouble());
@@ -140,6 +152,7 @@ TEST(IValueTest, MoveConstruct) {
     IValue source(v);
     IValue target(std::move(source));
     EXPECT_IVALUE_EQ(target, v);
+    // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
     EXPECT_TRUE(source.isNone());
   }
 }
@@ -170,6 +183,7 @@ TEST(IValueTest, MoveAssign) {
       IValue moveFrom(input);
       moveTo = std::move(moveFrom);
       EXPECT_IVALUE_EQ(moveTo, input);
+      // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
       EXPECT_TRUE(moveFrom.isNone());
     }
   }
@@ -269,18 +283,18 @@ TEST(IValueTest, FutureCallbacks) {
   auto f2 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimesA = 0;
   int calledTimesB = 0;
-  f2->addCallback([f2, &calledTimesA]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesA](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesA;
   });
   f2->markCompleted(IValue(43));
   ASSERT_EQ(calledTimesA, 1);
   ASSERT_EQ(calledTimesB, 0);
   // Post-markCompleted()
-  f2->addCallback([f2, &calledTimesB]() {
-    ASSERT_TRUE(f2->completed());
-    ASSERT_EQ(f2->value().toInt(), 43);
+  f2->addCallback([&calledTimesB](ivalue::Future& f2) {
+    ASSERT_TRUE(f2.completed());
+    ASSERT_EQ(f2.value().toInt(), 43);
     ++calledTimesB;
   });
   ASSERT_EQ(calledTimesA, 1);
@@ -291,10 +305,10 @@ TEST(IValueTest, FutureCallbacks) {
 TEST(IValueTest, FutureExceptions) {
   auto f3 = c10::make_intrusive<ivalue::Future>(IntType::get());
   int calledTimes = 0;
-  f3->addCallback([f3, &calledTimes]() {
-    ASSERT_TRUE(f3->completed());
+  f3->addCallback([&calledTimes](ivalue::Future& f3) {
+    ASSERT_TRUE(f3.completed());
     try {
-      (void)f3->value();
+      (void)f3.value();
     } catch (const std::exception& e) {
       if (std::string(e.what()) == "My Error") {
         ++calledTimes;
@@ -307,6 +321,20 @@ TEST(IValueTest, FutureExceptions) {
   ASSERT_TRUE(f3->hasError());
   ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
+
+TEST(IValueTest, FutureSetError) {
+  auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
+  f1->setError(std::make_exception_ptr(std::runtime_error("foo")));
+  try {
+    f1->setError(std::make_exception_ptr(std::runtime_error("bar")));
+    FAIL() << "Expected to throw";
+  } catch (std::exception& e) {
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("Error already set"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("foo"));
+    EXPECT_THAT(e.what(), ::testing::HasSubstr("bar"));
+  }
+}
+
 
 TEST(IValueTest, ValueEquality) {
   EXPECT_EQ(IValue("asdf"), IValue("asdf"));
@@ -335,6 +363,7 @@ TEST(IValueTest, TensorEquality) {
   auto testEquality = []() {
     return IValue(torch::ones({2, 3})) == IValue(torch::rand({2, 3}));
   };
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_ANY_THROW(testEquality());
 
   // equals() should return a tensor of all `true`.
@@ -346,6 +375,7 @@ TEST(IValueTest, TensorEquality) {
   // Test identity checking
   EXPECT_TRUE(t.is(t));
   EXPECT_FALSE(t.is(tCopy));
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   IValue tReference = t;
   EXPECT_TRUE(t.is(tReference));
 }
@@ -586,9 +616,9 @@ TEST(IValueTest, getSubValues) {
   IValue list(std::vector<at::Tensor>{t1, t2});
   IValue tuple(ivalue::Tuple::create({tv1, tv2}));
 
-  std::unordered_map<int64_t, at::Tensor> m;
-  m[1] = t1;
-  m[2] = t2;
+  c10::Dict<int64_t, at::Tensor> m;
+  m.insert(1, t1);
+  m.insert(2, t2);
 
   IValue dict(std::move(m));
 
@@ -616,6 +646,14 @@ TEST(IValueTest, getSubValues) {
 
     subvalues.clear();
   }
+}
+
+TEST(IValueTest, ScalarBool) {
+  Scalar expected(true);
+  IValue v(expected);
+  Scalar actual = v.toScalar();
+  EXPECT_TRUE(actual.isBoolean());
+  EXPECT_TRUE(actual.toBool());
 }
 
 // TODO(gmagogsfm): Add type conversion test?

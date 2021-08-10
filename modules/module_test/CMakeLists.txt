@@ -6,7 +6,7 @@ if(NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   option(BUILD_SHARED_LIBS "Build shared libs." ON)
 endif()
 
-if(BUILD_TEST)
+if(BUILD_TEST AND NOT BUILD_LITE_INTERPRETER)
   add_library(
       caffe2_module_test_dynamic
       ${CMAKE_CURRENT_SOURCE_DIR}/module_test_dynamic.cc)

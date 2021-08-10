@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/tree.h>
 
+#include <c10/util/complex.h>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -123,6 +124,7 @@ struct TreeView {
   const TreeRef& subtree(size_t i) const {
     return tree_->trees().at(i);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   TreeRef tree_;
 };
 
@@ -291,6 +293,7 @@ struct Expr : public TreeView {
       case TK_TRUE:
       case TK_FALSE:
       case TK_NONE:
+      case TK_NONE_TYPE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -450,6 +453,8 @@ struct Property : public TreeView {
   }
 };
 
+struct Assign;
+
 struct ClassDef : public TreeView {
   explicit ClassDef(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_CLASS_DEF);
@@ -470,19 +475,43 @@ struct ClassDef : public TreeView {
   Maybe<List<Property>> properties() const {
     return Maybe<List<Property>>(subtree(3));
   }
+  Maybe<List<Assign>> assigns() const {
+    return Maybe<List<Assign>>(subtree(4));
+  }
+  static ClassDef create(
+      const SourceRange& range,
+      const Ident& name,
+      const Maybe<Expr>& superclass,
+      const List<Stmt>& body) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range),
+         Maybe<List<Assign>>::create(range)}));
+  }
   static ClassDef create(
       const SourceRange& range,
       const Ident& name,
       const Maybe<Expr>& superclass,
       const List<Stmt>& body,
-      c10::optional<const List<Property>> properties = {}) {
-    auto props = properties.has_value()
-        ? Maybe<List<Property>>::create(range, properties.value())
-        : Maybe<List<Property>>::create(range);
-    return ClassDef(
-        Compound::create(TK_CLASS_DEF, range, {name, superclass, body, props}));
+      const List<Property>& properties,
+      const List<Assign>& assigns) {
+    return ClassDef(Compound::create(
+        TK_CLASS_DEF,
+        range,
+        {name,
+         superclass,
+         body,
+         Maybe<List<Property>>::create(range, properties),
+         Maybe<List<Assign>>::create(range, assigns)}));
   }
 };
+
+TORCH_API std::vector<std::string> getUnresolvedClassAttributes(
+    const ClassDef& def);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Statements
@@ -867,15 +896,22 @@ struct Const : public Expr {
     tree_->matchNumSubtrees(TK_CONST, 1);
   }
   bool isFloatingPoint() const {
+    if (isComplex())
+      return false;
+
     bool is_inf = subtree(0)->stringValue() == "inf";
     return is_inf ||
         subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
   }
   bool isIntegral() const {
-    return !isFloatingPoint();
+    return !isFloatingPoint() && !isComplex();
+  }
+  bool isComplex() const {
+    return subtree(0)->stringValue().find_first_of('j') != std::string::npos;
   }
   int64_t asIntegral() const {
     try {
+      // NOLINTNEXTLINE(modernize-use-nullptr)
       return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
     } catch (const std::out_of_range& e) {
       throw ErrorReport(range()) << "Integral constant out of range "
@@ -885,8 +921,21 @@ struct Const : public Expr {
   double asFloatingPoint() const {
     // We can't pass in nullptr as the dummy pointer gets dereferenced for
     // Android version of strtod_c().
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     char* dummy;
     return torch::jit::strtod_c(subtree(0)->stringValue().c_str(), &dummy);
+  }
+  c10::complex<double> asComplex() const {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    char* dummy;
+    auto str = subtree(0)->stringValue();
+    // Complex numbers (a+bj, where a is non-zero) are parsed as an addition
+    // between float/int a and a complex number "bj". When a is 0, a complex
+    // number bj is created as above. So, while parsing the string, we don't
+    // have to worry about the real component of the complex number.
+    auto imag =
+        torch::jit::strtod_c(str.substr(0, str.size() - 1).c_str(), &dummy);
+    return c10::complex<double>(0, imag);
   }
   const std::string& text() const {
     return subtree(0)->stringValue();

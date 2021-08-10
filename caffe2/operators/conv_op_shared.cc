@@ -14,6 +14,7 @@ template <>
 void createSharedBuffer<CPUContext>(Workspace* ws) {
   auto* mutexPtr = ws->CreateBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU_MUTEX__")
                        ->GetMutable<std::unique_ptr<std::mutex>>();
+  // NOLINTNEXTLINE(modernize-make-unique)
   mutexPtr->reset(new std::mutex());
   ws->CreateBlob("__CAFFE2_SHARED_CONV_BUFFER_CPU__");
 }

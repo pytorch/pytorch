@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 template <typename T>
 GroupNormDNNLowPOp<T>::GroupNormDNNLowPOp(
     const OperatorDef& operator_def,

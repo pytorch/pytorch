@@ -246,6 +246,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::GetQuantizationParameters_() {
   }
 
   if (packW && !Wq_acc16_packed_) {
+    // NOLINTNEXTLINE(modernize-make-shared)
     Wq_acc16_packed_.reset(new fbgemm::PackBMatrix<int8_t, int16_t>(
         fbgemm::matrix_op_t::Transpose,
         group_ * kernel_dim,
@@ -405,6 +406,7 @@ bool ConvDNNLowPAcc16Op<ReluFused>::RunOnDeviceWithOrderNCHW() {
             int32_t int32_sum = 0;
             int16_t int16_sum = 0;
             for (int k = 0; k < kernel_dim; ++k) {
+              // NOLINTNEXTLINE(bugprone-signed-char-misuse)
               int32_t w = W_quantized_group[i * kernel_dim + k];
               int32_t x = col_buffer_private[k * output_image_size + j];
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
@@ -471,6 +473,7 @@ static void conv_nhwc_acc16_ref_(
 #endif
         for (int k = 0; k < kernel_dim; ++k) {
           int32_t x = col_buffer[(i * num_groups + group_id) * kernel_dim + k];
+          // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           int32_t w = W[(group_id * (M / num_groups) + j) * kernel_dim + k];
 #ifdef DNNLOWP_ACC16_IN_SLOW_PATH
           if (!overflowed && !underflowed) {
@@ -606,6 +609,7 @@ void ConvDNNLowPAcc16Op<ReluFused>::ConvOutlier_(
 #pragma omp parallel
 #endif
     {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int group_begin, group_end, i_begin, i_end;
       this->PartitionGroupedNHWCConv_(
           &group_begin,

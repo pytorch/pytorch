@@ -63,6 +63,7 @@ std::vector<int>& AsyncNetBase::getStreamCounters() {
   return stream_counters_;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 AsyncNetBase::AsyncNetBase(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
@@ -232,6 +233,7 @@ bool AsyncNetBase::canSchedule(
   auto first_child_op_id = chains_[task_id].front();
   for (auto parent_id : parents(task_id)) {
     auto last_parent_op_id = chains_[parent_id].back();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     EventStatus parent_status;
     if (status) {
       parent_status = status->at(parent_id);

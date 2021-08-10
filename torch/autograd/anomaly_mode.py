@@ -38,7 +38,7 @@ class detect_anomaly(object):
         >>> out.backward()
             Traceback (most recent call last):
               File "<stdin>", line 1, in <module>
-              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/_tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
               File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag
@@ -57,7 +57,7 @@ class detect_anomaly(object):
                 out = MyFunc.apply(a)
             Traceback (most recent call last):
               File "<stdin>", line 4, in <module>
-              File "/your/pytorch/install/torch/tensor.py", line 93, in backward
+              File "/your/pytorch/install/torch/_tensor.py", line 93, in backward
                 torch.autograd.backward(self, gradient, retain_graph, create_graph)
               File "/your/pytorch/install/torch/autograd/__init__.py", line 90, in backward
                 allow_unreachable=True)  # allow_unreachable flag

@@ -26,6 +26,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRandom) {
       228.703079, 152.251892, 145.431564, 387.215454, 274.594238, 5.062420,
       11.040955, 66.328903, 269.686218;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),
@@ -59,6 +60,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotated) {
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645,
       180.5;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),
@@ -92,6 +94,7 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
       147.631, 205.397, 55.0, 187.363, 214.185, 19.865, 31.0368, -80.0, 270.234,
       210.513, 235.963, 130.163, -50.0, 36.1956, 140.863, 62.2665, 259.645, 0.5;
 
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const float BBOX_XFORM_CLIP = log(1000.0 / 16.0);
   auto result = utils::bbox_transform(
       bbox.array(),

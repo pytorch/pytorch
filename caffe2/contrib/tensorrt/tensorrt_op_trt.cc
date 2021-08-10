@@ -136,7 +136,7 @@ void TensorRTOp::MaybeAdjustOutputShape(
   if (it != output_size_hints_.end()) {
     const auto& dims_hint = it->second;
     const auto total_trt = c10::multiply_integers(*dims);
-    const auto total_c2 = c10::multiply_integers(*dims_hint);
+    const auto total_c2 = c10::multiply_integers(dims_hint);
     CAFFE_ENFORCE_EQ(
         total_trt,
         total_c2,

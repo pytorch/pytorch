@@ -50,6 +50,8 @@ bool MarginRankingCriterionOp<CUDAContext>::RunOnDevice() {
   MRCKernel<<<CAFFE_GET_BLOCKS(X1.numel()), CAFFE_CUDA_NUM_THREADS,
               0, context_.cuda_stream()>>>(
       X1.numel(), Ydata, X1data, X2data, margin_, output_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 
@@ -74,6 +76,8 @@ bool MarginRankingCriterionGradientOp<CUDAContext>::RunOnDevice() {
                       0, context_.cuda_stream()>>>(
       X1.numel(), Ydata, X1data, X2data,
       dOutput_data, margin_, dX1_data, dX2_data);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

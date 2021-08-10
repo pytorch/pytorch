@@ -31,6 +31,8 @@ bool CastOp<CUDAContext>::DoRunWithType() {
          CAFFE_CUDA_NUM_THREADS,
          0,
          context_.cuda_stream()>>>(N, data, out);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   return true;
 }
 

@@ -223,9 +223,9 @@ This is how a ``Linear`` module can be implemented::
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
             # nn.Parameters require gradients by default.
-            self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
+            self.weight = nn.Parameter(torch.empty(output_features, input_features))
             if bias:
-                self.bias = nn.Parameter(torch.Tensor(output_features))
+                self.bias = nn.Parameter(torch.empty(output_features))
             else:
                 # You should always register all possible parameters, but the
                 # optional ones can be None if you want.
@@ -344,7 +344,7 @@ The ``__torch_function__`` method takes four arguments: ``func``, a reference
 to the torch API function that is being overridden, ``types``, the list of
 types of Tensor-likes that implement ``__torch_function__``, ``args``, the
 tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
-arguments passed to the function. It uses a global dispatch stable named
+arguments passed to the function. It uses a global dispatch table named
 ``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
 dictionary are functions in the ``torch`` namespace and the values are
 implementations for ``ScalarTensor``.
@@ -494,7 +494,7 @@ will return subclass instances instead of ``torch.Tensor`` instances::
   ...     pass
   >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
   'SubTensor'
-  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor([0]), torch.tensor([1]))).__name__
   'SubTensor'
 
 If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
@@ -503,7 +503,7 @@ default. If there is no unique way to determine such a case, then a
 
   >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
   'SubTensor2'
-  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  >>> type(torch.add(SubTensor2([0]), torch.tensor([1]))).__name__
   'SubTensor2'
   >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
   Traceback (most recent call last):
@@ -517,7 +517,9 @@ calls::
   class LoggingTensor(torch.Tensor):
       @classmethod
       def __torch_function__(cls, func, types, args=(), kwargs=None):
-          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          # NOTE: Logging calls Tensor.__repr__, so we can't log __repr__ without infinite recursion
+          if func is not torch.Tensor.__repr__:
+              logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
           if kwargs is None:
               kwargs = {}
           return super().__torch_function__(func, types, args, kwargs)
@@ -564,7 +566,7 @@ This simple implementation won't necessarily work with every function in the
 
   >>> metadata = {'owner': 'Ministry of Silly Walks'}
   >>> m = MetadataTensor([[1, 2], [3, 4]], metadata=metadata)
-  >>> t = torch.tensor([[1, 2], [1, 2]]])
+  >>> t = torch.tensor([[1, 2], [1, 2]])
   >>> torch.add(t, m)
   Metadata:
   {'owner': 'Ministry of Silly Walks'}

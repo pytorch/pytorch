@@ -7,7 +7,7 @@ namespace jit {
 namespace onnx {
 using namespace ::c10::onnx;
 
-}
+} // namespace onnx
 
 ValueToParamPairMap buildValueToParamsMap(
     Block* b,
@@ -80,7 +80,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16:
       return at::kBFloat16;
     default:
-      TORCH_CHECK("unexpected tensor scalar type");
+      TORCH_CHECK(false, "unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
 }
@@ -88,6 +88,7 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
   auto new_node = block->appendNode(block->owningGraph()->create(kind));
   for (auto input : inputs) {
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     auto new_input = new_node->addInput(input);
   }
   return new_node;
@@ -95,6 +96,44 @@ Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
 
 Value* addInputToBlock(Block* block) {
   return block->addInput();
+}
+
+namespace {
+::ONNX_NAMESPACE::TensorProto_DataType ATenTypeToOnnxType_aux(
+    at::ScalarType at_type) {
+  switch (at_type) {
+    case at::kDouble:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_DOUBLE;
+    case at::kFloat:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT;
+    case at::kHalf:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT16;
+    case at::kByte:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
+    case at::kChar:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
+    case at::kShort:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT16;
+    case at::kInt:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+    case at::kLong:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT64;
+    case at::kBool:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_BOOL;
+    case at::kQInt8:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT8;
+    case at::kQUInt8:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_UINT8;
+    case at::kQInt32:
+      return ::ONNX_NAMESPACE::TensorProto_DataType_INT32;
+    default:
+      AT_ERROR("unexpected tensor scalar type");
+  }
+}
+} // namespace
+
+int ATenTypeToOnnxType(at::ScalarType at_type) {
+  return static_cast<int>(ATenTypeToOnnxType_aux(at_type));
 }
 
 Node* createONNXUnsqueeze(
@@ -118,6 +157,41 @@ Node* createONNXUnsqueeze(
     unsqueeze_node->is_(attr::axes, {0});
   }
   return unsqueeze_node;
+}
+
+bool isValidToTransformToONNXConcatNode(Node* lc_node) {
+  return !lc_node->inputs().empty();
+}
+
+Node* transformToONNXConcatNode(
+    Graph* g,
+    Node* lc_node,
+    bool need_new_input,
+    int opset_version) {
+  // ListConstruct Int[] output case, we need to transform to ONNX
+  // Concat to ensure the output is a single tensor(dynamic) type in
+  // order to be consumed as inputs
+  std::vector<Value*> unsqueezed;
+  auto new_node = need_new_input ? g->return_node() : lc_node;
+
+  for (auto* input : lc_node->inputs()) {
+    auto new_input =
+        need_new_input ? g->addInput()->copyMetadata(input) : input;
+
+    Node* unsqueezed_node =
+        createONNXUnsqueeze(g, new_node, new_input, 0, opset_version);
+    unsqueezed.emplace_back(unsqueezed_node->output());
+  }
+
+  Node* concat_node = need_new_input
+      ? g->insertNode(g->create(onnx::Concat, 1))
+      : g->create(onnx::Concat, 1)->insertBefore(lc_node);
+  concat_node->i_(attr::axis, 0);
+  for (auto v : unsqueezed) {
+    concat_node->addInput(v);
+  }
+
+  return concat_node;
 }
 
 } // namespace jit

@@ -59,7 +59,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_log(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32) + 1.0
@@ -326,7 +326,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_swish_gradient_inplace(self, n, m, gc, dc, seed):
         np.random.seed(seed)
 
@@ -352,9 +352,231 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_mul_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
+        np.random.seed(seed)
+
+        def mul_gradient(dC, A, B):
+            dA = B * dC
+            dB = A * dC
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32)
+        else:
+            B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+        op_dB_inplace = core.CreateOperator(
+            "MulGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC" if inplace else "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=mul_gradient,
+        )
+
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_div_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
+        np.random.seed(seed)
+
+        def div_gradient(dC, _A, B, C):
+            dA = dC / B
+            dB = -dC * C / B
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32) + 1.0
+        else:
+            B = np.random.rand(n, m).astype(np.float32) + 1.0
+        C = A / B
+        dC = np.random.rand(n, m).astype(np.float32)
+        op = core.CreateOperator(
+            "DivGradient",
+            ["dC", "A", "B", "C"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[dC, A, B, C],
+            reference=div_gradient,
+        )
+
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_add_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
+        np.random.seed(seed)
+
+        def add_gradient(dC, _A, _B):
+            dA, dB = dC, dC
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32)
+        else:
+            B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "AddGradient",
+            ["dC", "A", "B"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+        op_dB_inplace = core.CreateOperator(
+            "AddGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC" if inplace else "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=add_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=add_gradient,
+        )
+
+    @given(n=st.integers(1, 6),
+           m=st.integers(4, 6),
+           inplace=st.booleans(),
+           allow_broadcast_fastpath=st.booleans(),
+           seed=st.integers(0, 1000), **hu.gcs)
+    @settings(deadline=10000)
+    def test_sub_gradient_inplace_or_broadcast(
+        self,
+        n: int,
+        m: int,
+        inplace: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc,
+        seed: int,
+    ):
+        broadcast = not inplace
+        np.random.seed(seed)
+
+        def sub_gradient(dC, _A, _B):
+            dA, dB = dC, -dC
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        A = np.random.rand(n, m).astype(np.float32)
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32)
+        else:
+            B = np.random.rand(n, m).astype(np.float32)
+        dC = np.random.rand(n, m).astype(np.float32)
+        op_dA_inplace = core.CreateOperator(
+            "SubGradient",
+            ["dC", "A", "B"],
+            ["dC" if inplace else "dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+        op_dB_inplace = core.CreateOperator(
+            "SubGradient",
+            ["dC", "A", "B"],
+            ["dA", "dC" if inplace else "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dA_inplace,
+            inputs=[dC, A, B],
+            reference=sub_gradient,
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op_dB_inplace,
+            inputs=[dC, A, B],
+            reference=sub_gradient,
+        )
+
     @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_sigmoid(self, X, inplace, engine, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
@@ -371,6 +593,30 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=sigmoid_ref,
+            ensure_outputs_are_inferred=True,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0], ensure_outputs_are_inferred=True)
+
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    @settings(deadline=10000)
+    def test_tanh(self, X, inplace, engine, gc, dc):
+        op = core.CreateOperator(
+            "Tanh",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+            engine=engine,
+        )
+
+        def tanh_ref(X):
+            return [np.tanh(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=tanh_ref,
             ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
@@ -624,13 +870,22 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             "Div", np.divide, n, m, 1.0, True, False, gc, dc)
 
     @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
-           **hu.gcs)
+           allow_broadcast_fastpath=st.booleans(), **hu.gcs)
     @settings(deadline=10000)
-    def test_div_legacy_grad(self, n, m, broadcast, gc, dc):
+    def test_div_legacy_grad(
+        self,
+        n: int,
+        m: int,
+        broadcast: bool,
+        allow_broadcast_fastpath: bool,
+        gc,
+        dc
+    ):
         op = core.CreateOperator(
             "DivGradient",
             ["B", "C", "dC"],
             ["dA", "dB"],
+            allow_broadcast_fastpath=allow_broadcast_fastpath,
         )
 
         def div_grad_ref(B, C, dC):
@@ -756,6 +1011,34 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             op=op,
             inputs=[X],
             reference=not_op,
+            ensure_outputs_are_inferred=True,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    @settings(deadline=10000)
+    def test_log1p(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Log1p",
+            ["X"],
+            ["Y"]
+        )
+
+        def ref_log1p(input):
+            result = np.log1p(input)
+            return (result,)
+
+        def ref_log1p_grad(g_out, outputs, fwd_inputs):
+            result = g_out / (fwd_inputs[0] + 1)
+            return (result,)
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=ref_log1p,
+            output_to_grad="Y",
+            grad_reference=ref_log1p_grad,
             ensure_outputs_are_inferred=True,
         )
         self.assertDeviceChecks(dc, op, [X], [0])

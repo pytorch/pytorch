@@ -21,15 +21,15 @@
 #  |----------------|
 #  |packed_a        | 0
 #  |----------------|
-#  
+#
 
 #  After loading w pointer in ip reg.
 #  And after pushing r4-r9 and d8-d15 on stack
 #  |----------------|
-#  |r4 - r11        | 0 
+#  |r4 - r11        | 0
 #  |packed_a        | 32
 #  |----------------|
-#  
+#
 
 # Packed A format.
 # 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
@@ -42,7 +42,7 @@
 # |                     |        Thus Packed A has (K + 4 - 1)/4 * (M + 8 -1)/8 blocks
 # |                     |
 # |---------------------|
-# 
+#
 # Each 8 x 4 blocks is transposed and stored.
 # Each of the (K + 4 - 1)/4 blocks for a given group of 8 m blocks
 # are stored adjacent in memory

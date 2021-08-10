@@ -25,6 +25,7 @@ import androidx.camera.core.PreviewConfig;
 import androidx.core.app.ActivityCompat;
 import java.nio.FloatBuffer;
 import org.pytorch.IValue;
+import org.pytorch.MemoryFormat;
 import org.pytorch.Module;
 import org.pytorch.PyTorchAndroid;
 import org.pytorch.Tensor;
@@ -184,7 +185,8 @@ public class CameraActivity extends AppCompatActivity {
         TensorImageUtils.TORCHVISION_NORM_MEAN_RGB,
         TensorImageUtils.TORCHVISION_NORM_STD_RGB,
         mInputTensorBuffer,
-        0);
+        0,
+        MemoryFormat.CHANNELS_LAST);
     final long moduleForwardStartTime = SystemClock.elapsedRealtime();
     final Tensor outputTensor = mModule.forward(IValue.from(mInputTensor)).toTensor();
     final long moduleForwardDuration = SystemClock.elapsedRealtime() - moduleForwardStartTime;

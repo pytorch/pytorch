@@ -44,19 +44,19 @@ args = vars(args)
 
 def run_worker(rank, world_size, master_addr, master_port, batch, state_size, nlayers, out_features, queue):
     r"""
-    inits an rpc worker 
+    inits an rpc worker
     Args:
         rank (int): Rpc rank of worker machine
         world_size (int): Number of workers in rpc network (number of observers +
                           1 agent + 1 coordinator)
         master_addr (str): Master address of cooridator
         master_port (str): Master port of coordinator
-        batch (bool): Whether agent will use batching or process one observer 
+        batch (bool): Whether agent will use batching or process one observer
                       request a at a time
         state_size (str): Numerical str representing state dimensions (ie: 5-15-10)
         nlayers (int): Number of layers in model
         out_features (int): Number of out features in model
-        queue (SimpleQueue): SimpleQueue from torch.multiprocessing.get_context() for 
+        queue (SimpleQueue): SimpleQueue from torch.multiprocessing.get_context() for
                              saving benchmark run results to
     """
     state_size = list(map(int, state_size.split('-')))
@@ -82,9 +82,9 @@ def find_graph_variable(args):
     r"""
     Determines if user specified multiple entries for a single argument, in which case
     benchmark is run for each of these entries.  Comma separated values in a given argument indicate multiple entries.
-    Output is presented so that user can use plot repo to plot the results with each of the 
-    variable argument's entries on the x-axis. Args is modified in accordance with this.  
-    More than 1 argument with multiple entries is not permitted.  
+    Output is presented so that user can use plot repo to plot the results with each of the
+    variable argument's entries on the x-axis. Args is modified in accordance with this.
+    More than 1 argument with multiple entries is not permitted.
     Args:
         args (dict): Dictionary containing arguments passed by the user (and default arguments)
     """
@@ -138,12 +138,12 @@ def print_benchmark_results(report):
     if x_axis_name:
         x_axis_output_label = f'{x_axis_name} |'
         heading += append_spaces(x_axis_output_label, col_width)
-    metric_headers = ['agent latency (seconds)', 'agent throughput', 
+    metric_headers = ['agent latency (seconds)', 'agent throughput',
                       'observer latency (seconds)', 'observer throughput']
     percentile_subheaders = ['p50', 'p75', 'p90', 'p95']
     subheading = ""
     if x_axis_name:
-        subheading += append_spaces(' ' * (len(x_axis_output_label) - 1), col_width) 
+        subheading += append_spaces(' ' * (len(x_axis_output_label) - 1), col_width)
     for header in metric_headers:
         heading += append_spaces(header, col_width * len(percentile_subheaders))
         for percentile in percentile_subheaders:
@@ -163,7 +163,7 @@ def print_benchmark_results(report):
 
 def main():
     r"""
-    Runs rpc benchmark once if no argument has multiple entries, and otherwise once for each of the multiple entries. 
+    Runs rpc benchmark once if no argument has multiple entries, and otherwise once for each of the multiple entries.
     Multiple entries is indicated by comma separated values, and may only be done for a single argument.
     Results are printed as well as saved to output file.  In case of multiple entries for a single argument,
     the plot repo can be used to benchmark results on the y axis with each entry on the x axis.
@@ -171,7 +171,7 @@ def main():
     find_graph_variable(args)
 
     # run once if no x axis variables
-    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None]  
+    x_axis_variables = args[args['x_axis_name']] if args.get('x_axis_name') else [None]
     ctx = mp.get_context('spawn')
     queue = ctx.SimpleQueue()
     benchmark_runs = []
@@ -197,7 +197,7 @@ def main():
         print(f"Time taken benchmark run {i} -, {time.time() - start_time}")
         if args.get('x_axis_name'):
             # save x axis value was for this iteration in the results
-            benchmark_run_results[args['x_axis_name']] = x_axis_variable  
+            benchmark_run_results[args['x_axis_name']] = x_axis_variable
         benchmark_runs.append(benchmark_run_results)
 
     report = args

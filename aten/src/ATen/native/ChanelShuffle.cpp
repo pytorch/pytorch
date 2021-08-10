@@ -54,7 +54,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
       .reshape(self.sizes());
   return namedinference::propagate_names_if_nonempty(
       output_tensor,
-      self.names());
+      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 }} // namespace at::native

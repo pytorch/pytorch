@@ -41,6 +41,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
        "SparseLengthsWeightedSumFused8BitRowwiseFakeFP16NNPI"},
       {"SparseLengthsMeanFused8BitRowwise",
        "SparseLengthsMeanFused8BitRowwiseFakeFP16AccFP16"},
+      {"MatMul", "BatchMatMulFP16Acc32Fake"},
       {"BatchMatMul", "BatchMatMulFP16Acc32Fake"},
       {"Sigmoid", "SigmoidFakeFp16"},
       {"SpatialBN", "SpatialBNFakeFp16NNPI"},
@@ -58,6 +59,7 @@ std::unordered_map<std::string, std::string> getFakeFp16OpMapping(
     fake_fp16_op_conversion_map["FC"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["FbFCPacked"] = "Fp16FCAcc16NNPI";
     fake_fp16_op_conversion_map["BatchMatMul"] = "BatchMatMulFP16Acc16Fake";
+    fake_fp16_op_conversion_map["MatMul"] = "BatchMatMulFP16Acc16Fake";
   }
   if (use_nnpi) {
     fake_fp16_op_conversion_map["Sigmoid"] = "SigmoidFakeFp16NNPI";

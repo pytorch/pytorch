@@ -18,15 +18,43 @@ struct OperatorKernel;
 TORCH_API void fallthrough_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
 
 // Note [Ambiguity in AutogradOther kernel]
-// This kernel implements reporting an error message when there're kernels registered
-// to both Math and a backend of AutogradOther, we don't know which kernel to pick:
-// - if we pick Math kernel for AutogradOther, the kernel registered to backend will be
-//   silently ignored and never called.
-// - if we skip using Math kernel for AutogradOther (it might pick Autograd kernel if available),
-//   it'll break all backends mapped to AutogradOther without a direct registration to backend.
-//   See c10/core/DispatchKeySet.cpp for a list of backends mapped to AutogradOther.
-// Thus if backend extender indeed want to override Math kernel behavior, they should request
-// a dedicated Autograd key for their backend to resolve the ambiguity.
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// This error-reporting kernel is registered to the AutogradOther entry in the
+// dispatch table when there is both a CompositeImplicitAutograd kernel and a
+// backend kernel for ANY backend that maps to AutogradOther.  To see why
+// this is necessary in the AutogradOther case, it's helpful to first see
+// why everything works out fine for a backend that has a reserved Autograd
+// entry (see rule 2.2 in [Note] DispatchTable computation):
+//
+//    CPU   AutogradCPU
+//    reg?  registers with...
+//    -------------------------------------------------
+//    y     Autograd registration takes precedence
+//          over CompositeImplicitAutograd.
+//          This is good, because the CPU specific backend
+//          implementation is more specialized and typically better;
+//          if we used the composite, we would bypass it.
+//          (NB: the Autograd key is guaranteed to exist because
+//          the autograd codegen requires it!)
+//
+//    n     CompositeImplicitAutograd takes precedence.
+//          This is also good, because the Autograd
+//          registration (if it exists) would try to redispatch
+//          to the (non-existent) CPU implementation; by
+//          using the composite, we ensure the operator
+//          actually works.
+//
+// As you can see, when we have a specific Autograd key (AutogradCPU), we can
+// decide whether or not to use the CompositeImplicitAutograd kernel or the
+// Autograd kernel based on whether or not the backend kernel exists.
+//
+// However, for AutogradOther (which is the catchall autograd kernel for
+// everything that doesn't have a specific Autograd key), we can't do this
+// trick because there isn't any unique backend to peek at to disambiguate;
+// if there are some backends that have implementations they prefer Autograd,
+// but unimplemented backends would prefer CompositeImplicitAutograd.  Rather
+// than arbitrarily pick one or the other, we just register a kernel that raises
+// an error and let the user decide how to proceed.
 TORCH_API void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
 
 // Note [named_not_supported_kernel]
@@ -149,14 +177,28 @@ public:
    *
    * Example:
    *
-   * > class MyFunctor final {
+   * > class MyFunctor final : public c10::OperatorKernel {
    * >   public:
    * >     Tensor operator()(Tensor a, Tensor b) {...}
    * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor(std::make_unique<MyFunctor>());
+   * > KernelFunction func = KernelFunction::makeFromUnboxedFunctor<MyFunctor>(std::make_unique<MyFunctor>());
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
+
+  /**
+   * Create a KernelFunction from a boxed functor.
+   *
+   * Example:
+   *
+   * > class MyFunctor final : public c10::OperatorKernel {
+   * >   public:
+   * >     void operator()(const OperatorHandle&, DispatchKeySet, Stack*) {...}
+   * > };
+   * > KernelFunction func = KernelFunction::makeFromBoxedFunctor(std::make_unique<MyFunctor>());
+   */
+  template<class KernelFunctor>
+  static KernelFunction makeFromBoxedFunctor(std::unique_ptr<KernelFunctor> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -191,6 +233,12 @@ public:
   static KernelFunction makeAmbiguousAutogradOther();
   static KernelFunction makeNamedNotSupported();
 
+  template<BoxedKernelFunction* func>
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+
+  template<BoxedKernelFunction_withDispatchKeys* func>
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+
   /**
    * Create a KernelFunction from an unboxed lambda.
    *
@@ -211,12 +259,6 @@ public:
 private:
 
   explicit KernelFunction(std::unique_ptr<OperatorKernel> functor, InternalBoxedKernelFunction* boxed_kernel_func, void* unboxed_kernel_func);
-
-  template<BoxedKernelFunction* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
-
-  template<BoxedKernelFunction_withDispatchKeys* func>
-  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   OperatorKernel* getFunctor_() const;
 

@@ -76,9 +76,11 @@ class ScriptModuleOp final : public Operator<Context> {
 
   ScriptModuleOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        method_name_(this->template GetSingleArgument<std::string>(
-            "method",
-            "forward")) {
+        method_name_(
+            this->template GetSingleArgument<std::string>("method", "forward")),
+        pass_inputs_as_tensor_list_(this->template GetSingleArgument<bool>(
+            "pass_inputs_as_tensor_list",
+            false)) {
     // TODO: we could also parse extra arguments here and allow to pass in
     // scalars to the method invocation. But there's probably less blocking need
     // for that.
@@ -96,13 +98,26 @@ class ScriptModuleOp final : public Operator<Context> {
     const auto& module = OperatorBase::Input<std::unique_ptr<Module>>(0);
     CAFFE_ENFORCE(module);
     Method method = module->get_method(method_name_);
+
     // Assume all inputs are tensor for now
     std::vector<IValue> inputs;
-    const int num_inputs = InputSize();
-    inputs.reserve(num_inputs);
-    for (int i = 1; i < num_inputs; ++i) {
-      inputs.emplace_back(at::Tensor(Input(i)));
+    if (pass_inputs_as_tensor_list_) {
+      std::vector<at::Tensor> tensor_vector;
+      const int num_inputs = InputSize();
+      tensor_vector.reserve(num_inputs);
+      for (int i = 1; i < num_inputs; ++i) {
+        tensor_vector.emplace_back(at::Tensor(Input(i)));
+      }
+
+      inputs.emplace_back(at::TensorList(tensor_vector));
+    } else {
+      const int num_inputs = InputSize();
+      inputs.reserve(num_inputs);
+      for (int i = 1; i < num_inputs; ++i) {
+        inputs.emplace_back(at::Tensor(Input(i)));
+      }
     }
+
     // We just convert specified inputs. If some of the inputs were omitted and
     // don't have default values, method::operator() is going to complain.
     IValue output = method(inputs);
@@ -123,6 +138,7 @@ class ScriptModuleOp final : public Operator<Context> {
 
  private:
   std::string method_name_;
+  bool pass_inputs_as_tensor_list_;
 };
 } // namespace
 
@@ -133,9 +149,7 @@ REGISTER_BLOB_SERIALIZER(
     ScriptModuleSerializer);
 // NB: the first argument to REGISTER_BLOB_DESERIALIZER macro doesn't really
 // need to be a real type, it just get converted to string
-REGISTER_BLOB_DESERIALIZER(
-    torch::jit::Module,
-    ScriptModuleDeserializer);
+REGISTER_BLOB_DESERIALIZER(torch::jit::Module, ScriptModuleDeserializer);
 
 OPERATOR_SCHEMA(ScriptModule)
     .NumInputs(1, INT_MAX)

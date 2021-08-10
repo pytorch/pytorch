@@ -10,8 +10,10 @@ class Flatten(Module):
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
 
     Shape:
-        - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, \prod *dims)` (for the default case).
+        - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,'
+          where :math:`S_{i}` is the size at dimension :math:`i` and :math:`*` means any
+          number of dimensions including none.
+        - Output: :math:`(*, \prod_{i=\text{start}}^{\text{end}} S_{i}, *)`.
 
     Args:
         start_dim: first dim to flatten (default = 1).
@@ -53,12 +55,14 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape` 
+      a `tuple` of ints or a `list` of ints or `torch.Size` for `Tensor` input;  a `NamedShape`
       (tuple of `(name, size)` tuples) for `NamedTensor` input.
 
     Shape:
-        - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
+        - Input: :math:`(*, S_{\text{dim}}, *)`, where :math:`S_{\text{dim}}` is the size at
+          dimension :attr:`dim` and :math:`*` means any number of dimensions including none.
+        - Output: :math:`(*, U_1, ..., U_n, *)`, where :math:`U` = :attr:`unflattened_size` and
+          :math:`\prod_{i=1}^n U_i = S_{\text{dim}}`.
 
     Args:
         dim (Union[int, str]): Dimension to be unflattened
@@ -112,7 +116,7 @@ class Unflatten(Module):
         if (isinstance(input, tuple)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
-                    raise TypeError("unflattened_size must be tuple of tuples, " + 
+                    raise TypeError("unflattened_size must be tuple of tuples, " +
                                     "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
         raise TypeError("unflattened_size must be a tuple of tuples, " +
@@ -122,7 +126,7 @@ class Unflatten(Module):
         if (isinstance(input, (tuple, list))):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
-                    raise TypeError("unflattened_size must be tuple of ints, " + 
+                    raise TypeError("unflattened_size must be tuple of ints, " +
                                     "but found element of type {} at pos {}".format(type(elem).__name__, idx))
             return
         raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))

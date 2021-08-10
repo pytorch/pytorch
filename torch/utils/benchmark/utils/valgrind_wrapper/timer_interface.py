@@ -9,7 +9,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import textwrap
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
@@ -46,6 +45,7 @@ class FunctionCounts(object):
     """
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
+    truncate_rows: bool = True
 
     # For normal use, torch._tensor_str.PRINT_OPTS.linewidth determines
     # the print settings. This is simply to allow hermetic unit tests.
@@ -61,7 +61,7 @@ class FunctionCounts(object):
     def __getitem__(self, item: Any) -> "Union[FunctionCount, FunctionCounts]":
         data: Union[FunctionCount, Tuple[FunctionCount, ...]] = self._data[item]
         return (
-            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive)
+            FunctionCounts(cast(Tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
 
@@ -80,7 +80,7 @@ class FunctionCounts(object):
                 fn = fn[:left_len] + " ... " + fn[-(fn_str_len - left_len - 5):]
             lines.append(f"  {c:>{count_len}}  {fn}")
 
-        if len(lines) > 18:
+        if self.truncate_rows and len(lines) > 18:
             lines = lines[:9] + ["...".rjust(count_len + 2)] + lines[-9:]
 
         if not self.inclusive:
@@ -99,6 +99,11 @@ class FunctionCounts(object):
         other,  # type: FunctionCounts
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
+
+    def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
+        return self._from_dict({
+            fn: int(c * other) for c, fn in self._data
+        }, self.inclusive)
 
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
         """Apply `map_fn` to all of the function names.
@@ -167,6 +172,7 @@ class CallgrindStats(object):
     baseline_exclusive_stats: FunctionCounts
     stmt_inclusive_stats: FunctionCounts
     stmt_exclusive_stats: FunctionCounts
+    stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
         newline = "\n"  # `\` cannot appear in fstring code section.
@@ -198,9 +204,7 @@ class CallgrindStats(object):
         reducing noise when diffing counts from two different runs. (See
         CallgrindStats.delta(...) for more details)
         """
-        if inclusive:
-            return self.stmt_inclusive_stats - self.baseline_inclusive_stats
-        return self.stmt_exclusive_stats - self.baseline_exclusive_stats
+        return self.stmt_inclusive_stats if inclusive else self.stmt_exclusive_stats
 
     def counts(self, *, denoise: bool = False) -> int:
         """Returns the total number of instructions executed.
@@ -215,7 +219,6 @@ class CallgrindStats(object):
         self,
         other,  # type: CallgrindStats
         inclusive: bool = False,
-        subtract_baselines: bool = True
     ) -> FunctionCounts:
         """Diff two sets of counts.
 
@@ -225,15 +228,9 @@ class CallgrindStats(object):
         next logical question is "why". This generally involves looking at what part
         if the code increased in instruction count. This function automates that
         process so that one can easily diff counts on both an inclusive and
-        exclusive basis. The `subtract_baselines` argument allows one to disable
-        baseline correction, though in most cases it shouldn't matter as the
-        baselines are expected to more or less cancel out.
+        exclusive basis.
         """
-        if subtract_baselines:
-            return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
-        elif inclusive:
-            return self.stmt_inclusive_stats - other.stmt_inclusive_stats
-        return self.stmt_exclusive_stats - other.stmt_exclusive_stats
+        return self.stats(inclusive=inclusive) - other.stats(inclusive=inclusive)
 
     def as_standardized(self) -> "CallgrindStats":
         """Strip library names and some prefixes from function strings.
@@ -284,6 +281,10 @@ class CallgrindStats(object):
             baseline_exclusive_stats=strip(self.baseline_exclusive_stats),
             stmt_inclusive_stats=strip(self.stmt_inclusive_stats),
             stmt_exclusive_stats=strip(self.stmt_exclusive_stats),
+
+            # `as_standardized` will change symbol names, so the contents will
+            # no longer map directly to `callgrind.out`
+            stmt_callgrind_out=None,
         )
 
 
@@ -473,12 +474,18 @@ class GlobalsBridge:
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
         self._bindings_module: Optional[CallgrindModuleType] = None
-        if hasattr(torch._C, "_valgrind_supported_platform"):
+        valgrind_symbols = (
+            "_valgrind_supported_platform",
+            "_valgrind_toggle",
+            "_valgrind_toggle_and_dump_stats",
+        )
+        if all(hasattr(torch._C, symbol) for symbol in valgrind_symbols):
             self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
             self._bindings_module = cpp_jit.get_compat_bindings()
+            assert all(hasattr(self._bindings_module, symbol) for symbol in valgrind_symbols)
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
@@ -496,8 +503,6 @@ class _ValgrindWrapper(object):
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 
-        self._baseline_cache: Dict[Tuple[int, int], Tuple[FunctionCounts, FunctionCounts]] = {}
-
     def _validate(self) -> None:
         if not self._supported_platform:
             raise OSError("Valgrind is not supported on this platform.")
@@ -510,51 +515,53 @@ class _ValgrindWrapper(object):
         self,
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
+        *,
         number: int,
+        repeats: int,
         collect_baseline: bool,
         is_python: bool,
-    ) -> CallgrindStats:
+        retain_out_file: bool,
+    ) -> Tuple[CallgrindStats, ...]:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
         assert is_python or not collect_baseline
 
-        baseline_inclusive_stats = FunctionCounts((), inclusive=True)
-        baseline_exclusive_stats = FunctionCounts((), inclusive=False)
-        if collect_baseline:
-            cache_key = (number, task_spec.num_threads)
-            if cache_key not in self._baseline_cache:
-                self._baseline_cache[cache_key] = self._invoke(
-                    common.TaskSpec(
-                        stmt="pass",
-                        setup="pass",
-                        num_threads=task_spec.num_threads,
-                    ),
-                    globals={},
-                    number=number,
-                    is_python=True,
-                )
-            baseline_inclusive_stats, baseline_exclusive_stats = \
-                self._baseline_cache[cache_key]
-
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
-            task_spec, globals, number, is_python)
-        return CallgrindStats(
+        *task_stats, baseline_stats = self._invoke(
             task_spec=task_spec,
-            number_per_run=number,
-            built_with_debug_symbols=self._build_type == "RelWithDebInfo",
-            baseline_inclusive_stats=baseline_inclusive_stats,
-            baseline_exclusive_stats=baseline_exclusive_stats,
-            stmt_inclusive_stats=stmt_inclusive_stats,
-            stmt_exclusive_stats=stmt_exclusive_stats,
+            globals=globals,
+            number=number,
+            repeats=repeats,
+            collect_baseline=collect_baseline,
+            is_python=is_python,
+            retain_out_file=retain_out_file,
+        )
+        assert len(task_stats) == repeats
+
+        return tuple(
+            CallgrindStats(
+                task_spec=task_spec,
+                number_per_run=number,
+                built_with_debug_symbols=self._build_type == "RelWithDebInfo",
+                baseline_inclusive_stats=baseline_stats[0],
+                baseline_exclusive_stats=baseline_stats[1],
+                stmt_inclusive_stats=stmt_inclusive_stats,
+                stmt_exclusive_stats=stmt_exclusive_stats,
+                stmt_callgrind_out=out_contents,
+            )
+            for stmt_inclusive_stats, stmt_exclusive_stats, out_contents in task_stats
         )
 
     def _invoke(
         self,
+        *,
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
+        repeats: int,
+        collect_baseline: bool,
         is_python: bool,
-    ) -> Tuple[FunctionCounts, FunctionCounts]:
+        retain_out_file: bool,
+    ) -> Tuple[Tuple[FunctionCounts, FunctionCounts, Optional[str]], ...]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -575,7 +582,7 @@ class _ValgrindWrapper(object):
         3) Parse the run results.
         4) Cleanup the scratch directory.
         """
-        working_dir = tempfile.mkdtemp()
+        working_dir = common._make_temp_dir(prefix="callgrind")
         data_dir = os.path.join(working_dir, "data")
         script_file = os.path.join(working_dir, "timer_callgrind.py")
         callgrind_out = os.path.join(working_dir, "callgrind.out")
@@ -612,19 +619,25 @@ class _ValgrindWrapper(object):
                         task_spec,
                         globals=GlobalsBridge(globals, data_dir),
                         number=number,
+                        repeats=repeats,
+                        collect_baseline=collect_baseline,
                         error_log=error_log,
                         stat_log=stat_log,
                         bindings=self._bindings_module))
+
                 run_loop_cmd = ["python", script_file]
             else:
+                assert not collect_baseline
                 run_loop_exec = cpp_jit.compile_callgrind_template(
-                    task_spec.stmt,
-                    task_spec.setup,
+                    stmt=task_spec.stmt,
+                    setup=task_spec.setup,
+                    global_setup=task_spec.global_setup,
                 )
                 run_loop_cmd = [
                     run_loop_exec,
                     "--number", str(number),
                     "--number_warmup", str(min(number, 10)),
+                    "--repeats", str(repeats),
                     "--number_threads", str(task_spec.num_threads),
                 ]
 
@@ -648,34 +661,81 @@ class _ValgrindWrapper(object):
 
                 raise OSError(f"Failed to collect callgrind profile:\n{error_report}")
 
-            def parse_output(inclusive: bool) -> FunctionCounts:
+            def parse_output(fpath: str, inclusive: bool) -> FunctionCounts:
                 annotate_invocation, annotate_invocation_output = run([
                     "callgrind_annotate",
                     f"--inclusive={'yes' if inclusive else 'no'}",
-                    callgrind_out
+                    "--threshold=100",
+                    "--show-percs=no",
+                    fpath
                 ], check=True)
 
-                begin_collecting = False
+                total_pattern = re.compile(r"^([0-9,]+)\s+PROGRAM TOTALS")
+                begin_pattern = re.compile(r"Ir\s+file:function")
+                function_pattern = re.compile(r"^\s*([0-9,]+)\s+(.+:.+)$")
+
+                class ScanState(enum.Enum):
+                    SCANNING_FOR_TOTAL = 0
+                    SCANNING_FOR_START = 1
+                    PARSING = 2
+
+                scan_state = ScanState.SCANNING_FOR_TOTAL
                 fn_counts = []
                 for l in annotate_invocation_output.splitlines(keepends=False):
-                    if not begin_collecting and re.match(r"Ir\s+file:function", l):
-                        begin_collecting = True
-                        continue
+                    if scan_state == ScanState.SCANNING_FOR_TOTAL:
+                        total_match = total_pattern.match(l)
+                        if total_match:
+                            program_totals = int(total_match.groups()[0].replace(",", ""))
+                            scan_state = ScanState.SCANNING_FOR_START
 
-                    count_match = re.match(r"^\s*([0-9,]+)\s+(.+:.+)$", l)
-                    if count_match:
-                        ir_str, file_function = count_match.groups()
-                        ir = int(ir_str.replace(",", ""))
-                        fn_counts.append(FunctionCount(ir, file_function))
-                        continue
+                    elif scan_state == ScanState.SCANNING_FOR_START:
+                        if begin_pattern.match(l):
+                            scan_state = ScanState.PARSING
 
-                    if begin_collecting and re.match(r"-+", l):
-                        continue
+                    else:
+                        assert scan_state == ScanState.PARSING
+                        fn_match = function_pattern.match(l)
+                        if fn_match:
+                            ir_str, file_function = fn_match.groups()
+                            ir = int(ir_str.replace(",", ""))
+                            if ir == program_totals:
+                                # Callgrind includes some top level red herring symbols when
+                                # a program dumps multiple profiles.
+                                continue
+                            fn_counts.append(FunctionCount(ir, file_function))
 
-                    begin_collecting = False
+                        elif re.match(r"-+", l):
+                            # Ignore heading separator lines.
+                            continue
 
+                        else:
+                            break
+
+                assert scan_state == ScanState.PARSING, f"Failed to parse {fpath}"
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
-            return parse_output(inclusive=True), parse_output(inclusive=False)
+
+            def read_results(i: int) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
+                if i == repeats and not collect_baseline:
+                    # Null baseline.
+                    return (
+                        FunctionCounts((), inclusive=True),
+                        FunctionCounts((), inclusive=False),
+                        None,
+                    )
+
+                fpath = f"{callgrind_out}.{i + 1}"  # Callgrind one-indexes files.
+                callgrind_out_contents: Optional[str] = None
+                if retain_out_file:
+                    with open(fpath, "rt") as f:
+                        callgrind_out_contents = f.read()
+
+                return (
+                    parse_output(fpath, inclusive=True),
+                    parse_output(fpath, inclusive=False),
+                    callgrind_out_contents
+                )
+
+            return tuple(read_results(i) for i in range(repeats + 1))
         finally:
             shutil.rmtree(working_dir)
 
@@ -683,27 +743,50 @@ class _ValgrindWrapper(object):
     def _construct_script(
         task_spec: common.TaskSpec,
         globals: GlobalsBridge,
+        *,
         number: int,
+        repeats: int,
+        collect_baseline: bool,
         error_log: str,
         stat_log: str,
         bindings: Optional[CallgrindModuleType],
     ) -> str:
-        # The naive template looks something like:
-        #   "for _ in range({number}): {stmt}"
-        # However a loop in Python is surprisingly expensive, and significantly
-        # increases the number of background Python instructions. So instead we
-        # partially unroll the loops, with a block size of 100 chosen to keep
-        # the instruction overhead from `range` low while also not ballooning
-        # the size of the generated file.
-        block_size = 100
-        loop_count = number // block_size
-        remainder = number - block_size * loop_count
-        blocked_stmt = ""
-        if loop_count:
-            unrolled_stmts = textwrap.indent("\n".join([task_spec.stmt] * block_size), " " * 4)
-            blocked_stmt += f"for _ in range({loop_count}):\n{unrolled_stmts}\n"
-        if remainder:
-            blocked_stmt += "\n".join([task_spec.stmt] * remainder)
+        def block_stmt(stmt: str, indent: int = 0) -> str:
+            """Partially unroll benchmark loop.
+
+            The naive template looks something like:
+                "for _ in range({number}): {stmt}"
+
+            However a loop in Python is surprisingly expensive, and significantly
+            increases the number of background Python instructions. So instead we
+            partially unroll the loops, with a block size of 100 chosen to keep
+            the instruction overhead from `range` low while also not ballooning
+            the size of the generated file.
+            """
+            block_size = 100
+            loop_count = number // block_size
+            if loop_count == 1:
+                # There is no point in having `for _ in range(1): ...` rather
+                # than just `...`, and this lets us save shave a few background
+                # instructions.
+                loop_count = 0
+            remainder = number - block_size * loop_count
+            blocked_stmt = ""
+
+            if loop_count:
+                unrolled_stmts = textwrap.indent("\n".join([stmt] * block_size), " " * 4)
+                blocked_stmt += f"for _ in range({loop_count}):\n{unrolled_stmts}\n"
+
+            if remainder:
+                blocked_stmt += "\n".join([stmt] * remainder)
+
+            return textwrap.indent(blocked_stmt, " " * indent)
+
+        pass_baseline = (
+            "callgrind_bindings._valgrind_toggle()\n"
+            f"{block_stmt('pass')}\n"
+            "callgrind_bindings._valgrind_toggle_and_dump_stats()"
+        )
 
         return textwrap.dedent(r"""
             import gc
@@ -786,17 +869,19 @@ class _ValgrindWrapper(object):
             # =============================================================================
             # == User code block ==========================================================
             # =============================================================================
-            callgrind_bindings._valgrind_toggle()
+            for _ in range({repeats}):
+                callgrind_bindings._valgrind_toggle()
             {blocked_stmt}
+                callgrind_bindings._valgrind_toggle_and_dump_stats()
+                gc.collect()
 
-            # Sleep is to allow the interpreter to catch up before we stop collecting in
-            # order to reduce jitter.
-            time.sleep(0.01)
-            callgrind_bindings._valgrind_toggle()
+            {baseline}
         """).strip().format(
             indented_stmt=textwrap.indent(task_spec.stmt, " " * 4),
-            blocked_stmt=blocked_stmt,
+            blocked_stmt=block_stmt(task_spec.stmt, indent=4),
+            baseline=(pass_baseline if collect_baseline else ""),
             number=number,
+            repeats=repeats,
             load_globals=globals.construct(),
             setup=task_spec.setup,
             warmup_number=min(number, 10),

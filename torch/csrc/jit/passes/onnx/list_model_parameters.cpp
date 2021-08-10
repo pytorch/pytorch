@@ -160,7 +160,7 @@ std::vector<IValue> getParamAttributes(
 }
 
 void insertMainModuleAsConstant(const std::shared_ptr<Graph>& graph) {
-  auto* constNode = graph->create(prim::Constant);
+  auto* constNode = graph->create(prim::CreateObject);
   constNode->output()->setType(graph->inputs().at(0)->type());
   auto it = graph->nodes().begin();
   constNode->insertBefore(*it);

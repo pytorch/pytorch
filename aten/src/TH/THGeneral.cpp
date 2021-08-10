@@ -28,11 +28,13 @@ static void defaultErrorHandlerFunction(const char *msg, void *data)
 
 static THErrorHandlerFunction defaultErrorHandler = defaultErrorHandlerFunction;
 static void *defaultErrorHandlerData;
+// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THErrorHandlerFunction threadErrorHandler = NULL;
 static __thread void *threadErrorHandlerData;
 
 void _THError(const char *file, const int line, const char *fmt, ...)
 {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   char msg[2048];
   va_list args;
 
@@ -54,27 +56,13 @@ void _THError(const char *file, const int line, const char *fmt, ...)
 }
 
 void _THAssertionFailed(const char *file, const int line, const char *exp, const char *fmt, ...) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
   char msg[1024];
   va_list args;
   va_start(args, fmt);
   vsnprintf(msg, 1024, fmt, args);
   va_end(args);
   _THError(file, line, "Assertion `%s' failed. %s", exp, msg);
-}
-
-void THSetErrorHandler(THErrorHandlerFunction new_handler, void *data)
-{
-  threadErrorHandler = new_handler;
-  threadErrorHandlerData = data;
-}
-
-void THSetDefaultErrorHandler(THErrorHandlerFunction new_handler, void *data)
-{
-  if (new_handler)
-    defaultErrorHandler = new_handler;
-  else
-    defaultErrorHandler = defaultErrorHandlerFunction;
-  defaultErrorHandlerData = data;
 }
 
 /* Torch Arg Checking Handling */
@@ -87,12 +75,14 @@ static void defaultArgErrorHandlerFunction(int argNumber, const char *msg, void 
 
 static THArgErrorHandlerFunction defaultArgErrorHandler = defaultArgErrorHandlerFunction;
 static void *defaultArgErrorHandlerData;
+// NOLINTNEXTLINE(modernize-use-nullptr,cppcoreguidelines-avoid-non-const-global-variables)
 static __thread THArgErrorHandlerFunction threadArgErrorHandler = NULL;
 static __thread void *threadArgErrorHandlerData;
 
 void _THArgCheck(const char *file, int line, int condition, int argNumber, const char *fmt, ...)
 {
   if(!condition) {
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-magic-numbers)
     char msg[2048];
     va_list args;
 
@@ -114,40 +104,6 @@ void _THArgCheck(const char *file, int line, int condition, int argNumber, const
   }
 }
 
-void THSetArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data)
-{
-  threadArgErrorHandler = new_handler;
-  threadArgErrorHandlerData = data;
-}
-
-void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *data)
-{
-  if (new_handler)
-    defaultArgErrorHandler = new_handler;
-  else
-    defaultArgErrorHandler = defaultArgErrorHandlerFunction;
-  defaultArgErrorHandlerData = data;
-}
-
-static __thread void (*torchGCFunction)(void *data) = NULL;
-static __thread void *torchGCData;
-
-/* Optional hook for integrating with a garbage-collected frontend.
- *
- * If torch is running with a garbage-collected frontend (e.g. Lua),
- * the GC isn't aware of TH-allocated memory so may not know when it
- * needs to run. These hooks trigger the GC to run in two cases:
- *
- * (1) When a memory allocation (malloc, realloc, ...) fails
- * (2) When the total TH-allocated memory hits a dynamically-adjusted
- *     soft maximum.
- */
-void THSetGCHandler( void (*torchGCFunction_)(void *data), void *data )
-{
-  torchGCFunction = torchGCFunction_;
-  torchGCData = data;
-}
-
 void* THAlloc(ptrdiff_t size)
 {
   if(size < 0)
@@ -156,58 +112,7 @@ void* THAlloc(ptrdiff_t size)
   return c10::alloc_cpu(size);
 }
 
-void* THRealloc(void *ptr, ptrdiff_t size)
-{
-  if(!ptr)
-    return(THAlloc(size));
-
-  if(size == 0)
-  {
-    THFree(ptr);
-    return NULL;
-  }
-
-  if(size < 0)
-    THError("$ Torch: invalid memory size -- maybe an overflow?");
-
-  void *newptr = realloc(ptr, size);
-
-  if(!newptr && torchGCFunction) {
-    torchGCFunction(torchGCData);
-    newptr = realloc(ptr, size);
-  }
-
-  if(!newptr)
-    THError("$ Torch: not enough memory: you tried to reallocate %dGB. Buy new RAM!", size/1073741824);
-
-  return newptr;
-}
-
 void THFree(void *ptr)
 {
   c10::free_cpu(ptr);
-}
-
-THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
-  const int L = TH_DESC_BUFF_LEN;
-  THDescBuff buf;
-  char *str = buf.str;
-  int i, n = 0;
-  n += snprintf(str, L-n, "[");
-
-  for (i = 0; i < ndim; i++) {
-    if (n >= L) break;
-    n += snprintf(str+n, L-n, "%" PRId64, size[i]);
-    if (i < ndim-1) {
-      n += snprintf(str+n, L-n, " x ");
-    }
-  }
-
-  if (n < L - 2) {
-    snprintf(str+n, L-n, "]");
-  } else {
-    snprintf(str+L-5, 5, "...]");
-  }
-
-  return buf;
 }

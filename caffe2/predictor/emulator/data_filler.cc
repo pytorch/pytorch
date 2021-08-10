@@ -1,6 +1,8 @@
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/emulator/utils.h"
 
+#include <c10/util/irange.h>
+
 namespace caffe2 {
 namespace emulator {
 
@@ -61,22 +63,22 @@ DataRandomFiller::DataRandomFiller(
 
   // load op inputs and outputs
   std::unordered_set<std::string> output_names;
-  for (size_t i = 0; i < run_net.op_size(); ++i) {
+  for (auto i: c10::irange(run_net.op_size())) {
     const auto& op = run_net.op(i);
     const auto& op_dims = input_dims[i];
     const auto& op_types = input_types[i];
     CAFFE_ENFORCE(
-        op_dims.size() == op.input_size(),
+        op_dims.size() == static_cast<size_t>(op.input_size()),
         op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input dimension size is " +
             c10::to_string(op_dims.size()));
     CAFFE_ENFORCE(
-        op_types.size() == op.input_size(),
+        op_types.size() == static_cast<size_t>(op.input_size()),
         op.name() + " has " + c10::to_string(op.input_size()) +
             " inputs; while the input type size is " +
             c10::to_string(op_types.size()));
 
-    for (size_t j = 0; j < op.input_size(); ++j) {
+    for (auto j: c10::irange(op.input_size())) {
       inputs_[op.input(j)] =
           std::make_pair(get_tensor_filler(op, j, op_dims), op_types[j]);
     }
@@ -87,6 +89,7 @@ DataRandomFiller::DataRandomFiller(
     // So when we generate the value of length, we need to bound it to the size
     // of weight input of Gather too
     if (op.type().find("SparseLengthsWeighted") == 0 && i > 0) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const auto& prev_op = run_net.op(i - 1);
       if (prev_op.type() == "Gather") {
         const auto& prev_dims = input_dims[i - 1];
@@ -96,19 +99,19 @@ DataRandomFiller::DataRandomFiller(
       }
     }
 
-    for (size_t j = 0; j < op.output_size(); ++j) {
+    for (auto j: c10::irange(op.output_size())) {
       output_names.emplace(op.output(j));
     }
   }
 
   // load parameters
   std::unordered_set<std::string> parameters;
-  for (size_t i = 0; i < run_net.arg_size(); ++i) {
+  for (auto i: c10::irange(run_net.arg_size())) {
     const auto& arg = run_net.arg(i);
     // TODO: replace "PredictorParameters" with the constant in OSS bbp
     if (arg.has_name() && arg.name() == "PredictorParameters") {
       parameters.reserve(arg.strings_size());
-      for (size_t j = 0; j < arg.strings_size(); ++j) {
+      for (auto j: c10::irange(arg.strings_size())) {
         parameters.emplace(arg.strings(j));
       }
       break;
@@ -206,19 +209,19 @@ TestDataRandomFiller::TestDataRandomFiller(
     }
 
     CAFFE_ENFORCE(
-        op_dims.size() == countRequiredInputs,
+        op_dims.size() == static_cast<unsigned>(countRequiredInputs),
         op.name() + " has " + c10::to_string(op.input_size()) +
             " (required) inputs; while the input dimension size is " +
             c10::to_string(op_dims.size()));
     CAFFE_ENFORCE(
-        op_types.size() == countRequiredInputs,
+        op_types.size() == static_cast<unsigned>(countRequiredInputs),
         op.name() + " has " + c10::to_string(op.input_size()) +
             " (required) inputs; while the input type size is " +
             c10::to_string(op_types.size()));
 
     int dimCounter = 0;
     for (auto inputIdx = 0; inputIdx < op.input_size(); ++inputIdx) {
-      auto inputName = op.input(inputIdx);
+      const auto& inputName = op.input(inputIdx);
       if (outputNames.count(inputName)) {
         // Skip intermediate inputs.
         continue;

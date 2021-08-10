@@ -8,9 +8,9 @@ MemOverlap has_internal_overlap(const Tensor& tensor) {
 }
 
 MemOverlap has_internal_overlap(TensorImpl* t) {
-  AT_ASSERT(t->layout() == kStrided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t->layout() == kStrided);
 
-  if (t->is_contiguous()) {
+  if (t->is_non_overlapping_and_dense()) {
     return MemOverlap::NO;
   }
 
@@ -45,20 +45,24 @@ MemOverlapStatus get_overlap_status(TensorImpl* a, TensorImpl* b) {
   if (a->numel() == 0 || b->numel() == 0) {
     return MemOverlapStatus::NO;
   }
-  if (!a->is_contiguous() || !b->is_contiguous()) {
+  if (!a->is_non_overlapping_and_dense() || !b->is_non_overlapping_and_dense()) {
     return MemOverlapStatus::TOO_HARD;
   }
-  if (!a->has_storage() || !b->has_storage()) {
-    return MemOverlapStatus::NO;
-  }
-  if (a->storage().data() == b->storage().data()) {
+  // Test for storage equality, rather than pointer equality.
+  // This reduces precision, but if people are aliasing the
+  // same pointer across multiple storages there are many
+  // similar situations (e.g., storage().data() == storage().data()+1)
+  // which we will miss.
+  auto a_storage = a->unsafe_storage();
+  if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
     const auto a_begin = static_cast<char*>(a->data());
     const auto a_end = a_begin + a->numel() * a->itemsize();
     const auto b_begin = static_cast<char*>(b->data());
     const auto b_end = b_begin + b->numel() * b->itemsize();
 
     if (a_begin == b_begin && a_end == b_end) {
-      return MemOverlapStatus::FULL;
+      return (a->strides() == b->strides()) ?
+          MemOverlapStatus::FULL : MemOverlapStatus::PARTIAL;
     }
     if (a_begin < b_end && b_begin < a_end) {
       return MemOverlapStatus::PARTIAL;

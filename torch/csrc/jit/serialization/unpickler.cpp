@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
 
@@ -177,6 +178,7 @@ IValue Unpickler::parse_ivalue() {
 double Unpickler::readFloat() {
   AT_ASSERT(sizeof(double) == 8);
   double big_endian = read<double>();
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   double little_endian;
 
   // Pickle floats are big endian, so reverse the bytes
@@ -319,19 +321,16 @@ PickleOpCode Unpickler::readInstruction() {
         tuple->elements().emplace_back(*it);
       }
       stack_.erase(start_it, stack_.end());
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(std::move(tuple));
     } break;
     case PickleOpCode::TUPLE1: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 1));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 1)));
     } break;
     case PickleOpCode::TUPLE2: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 2));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 2)));
     } break;
     case PickleOpCode::TUPLE3: {
-      auto tuple = c10::ivalue::Tuple::create(pop(stack_, 3));
-      stack_.emplace_back(tuple);
+      stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_, 3)));
     } break;
     case PickleOpCode::EMPTY_DICT:
       stack_.emplace_back(
@@ -404,22 +403,33 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef());
       at::ScalarType type = args.at(1).toScalarType();
       const std::string& key = args.at(2).toStringRef();
+
       at::Device device(args.at(3).toStringRef());
       if (device_) {
         device = *device_;
       }
-      at::DataPtr storage_ptr = read_record_(key);
-      int64_t numel = args.at(4).toInt();
-      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
-      at::Storage storage(
-          c10::Storage::use_byte_size_t(),
-          numel * dtype.itemsize(),
-          std::move(storage_ptr),
-          /*allocator=*/nullptr,
-          /*resizable=*/false); // NB: we didn't set any allocator for the
-                                // tensor
-      auto options = at::CPU(type).options();
 
+      at::Storage storage;
+      if (storage_context_ != nullptr && storage_context_->hasStorage(key)) {
+        // for torch.package logic where storage may be loaded already
+        storage = storage_context_->getStorage(key);
+      } else {
+        at::DataPtr storage_ptr = read_record_(key);
+        int64_t numel = args.at(4).toInt();
+        caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+        storage = at::Storage(
+            c10::Storage::use_byte_size_t(),
+            numel * dtype.itemsize(),
+            std::move(storage_ptr),
+            /*allocator=*/nullptr,
+            /*resizable=*/false); // NB: we didn't set any allocator for the
+                                  // tensor
+        if (storage_context_ != nullptr) {
+          storage_context_->addStorage(key, storage);
+        }
+      }
+
+      auto options = at::CPU(type).options();
       if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();
@@ -433,8 +443,7 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == DeviceType::CUDA ||
-          device.type() == DeviceType::XPU) {
+      if (device.is_cuda() || device.is_xpu()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
@@ -465,9 +474,9 @@ void Unpickler::readGlobal(
         auto setitem_data = stack_.back();
         stack_.pop_back();
         TORCH_INTERNAL_ASSERT(
-            tensor_table_,
+            !tensor_table_.empty(),
             "Pickler tried to write a tensor but had no tensor table to write to");
-        stack_.emplace_back(tensor_table_->at(setitem_data.toInt()));
+        stack_.emplace_back(tensor_table_.at(setitem_data.toInt()));
       });
     } else if (class_name == "IntList") {
       globals_.emplace_back([this] {
@@ -483,10 +492,10 @@ void Unpickler::readGlobal(
         auto data = stack_.back().toTuple()->elements().at(0);
         stack_.pop_back();
         TORCH_CHECK(
-            tensor_table_,
+            !tensor_table_.empty(),
             "Found a tensor table reference but Unpickler"
             " has no tensor table\n");
-        stack_.emplace_back(tensor_table_->at(data.toInt()));
+        stack_.emplace_back(tensor_table_.at(data.toInt()));
       });
     } else if (class_name == "restore_type_tag") {
       globals_.emplace_back([this] {
@@ -791,7 +800,7 @@ void Unpickler::readList(IValue list_ivalue) {
   size_t start = marks_.back();
   marks_.pop_back();
   auto num_elements = stack_.size() - start;
-  auto elements = at::ArrayRef<IValue>(stack_).slice(start);
+  auto elements = c10::ArrayRef<IValue>(stack_).slice(start);
   if (list_ivalue.isIntList()) {
     auto list = std::move(list_ivalue).toIntList();
     list.reserve(num_elements);
@@ -838,19 +847,32 @@ inline bool is_valid_python_id_char(char c) {
 std::string Unpickler::readString() {
   std::string ss;
   while (true) {
-    char c = read<char>();
-    if (c == '\n') {
+    auto* const bufferStart = buffer_.data() + buffer_pos_;
+    const auto bufferLeft = buffer_.size() - buffer_pos_;
+    char* const newlinePtr =
+        static_cast<char*>(memchr(bufferStart, '\n', bufferLeft));
+    if (newlinePtr) {
+      // read up to newline and we are done.
+      auto const charsRead = newlinePtr - bufferStart;
+      ss.append(bufferStart, charsRead);
+      buffer_remaining_ -= charsRead + 1;
+      buffer_pos_ += charsRead + 1;
       break;
+    } else {
+      // read whole buffer, refill
+      for (const char* p = bufferStart; p < bufferStart + bufferLeft; ++p) {
+        // Simple check just in case there is no terminating '\n'
+        TORCH_CHECK(
+            is_valid_python_id_char(*p),
+            "Found character '",
+            int(uint8_t(*p)),
+            "' in string, ",
+            "strings must be qualified Python identifiers");
+      }
+      ss.append(bufferStart, bufferLeft);
+      buffer_remaining_ = reader_(buffer_.data(), buffer_.size());
+      buffer_pos_ = 0;
     }
-    ss.push_back(c);
-
-    // Simple check just in case there is no terminating '\n'
-    TORCH_CHECK(
-        is_valid_python_id_char(c),
-        "Found character '",
-        int(uint8_t(c)),
-        "' in string, ",
-        "strings must be qualified Python identifiers");
   }
   return ss;
 }

@@ -12,6 +12,7 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
+DEFINE_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
 
@@ -38,6 +39,17 @@ Tensor fake_quantize_per_tensor_affine(
   return std::get<0>(res);
 }
 
+Tensor fake_quantize_per_tensor_affine(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  const auto res = at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+      self, scale, zero_point, at::ones(1, self.options().dtype(at::kLong)), quant_min, quant_max);
+  return std::get<0>(res);
+}
+
 /* Fake-quantizes the 'inputs' tensor, saving a mask for the backward pass.
 
 This is numerically equivalent to `fake_quantize_per_tensor_affine`,
@@ -60,7 +72,6 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
   TORCH_CHECK(
       quant_min <= quant_max,
       "`quant_min` should be less than or \
@@ -78,6 +89,26 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
   return std::make_tuple(Y, mask);
 }
 
+std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    const Tensor& fake_quant_enabled,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(
+      quant_min <= quant_max,
+      "`quant_min` should be less than or \
+        equal to `quant_max`.");
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
+  fake_quant_tensor_cachemask_tensor_qparams_stub(
+      self.device().type(), Y, mask, self, scale, zero_point, fake_quant_enabled, quant_min, quant_max);
+  // TODO(future, optional): look into packing the mask further (BoolTensor uses
+  //   1 byte per element, we only need 1 bit per element).
+  return std::make_tuple(Y, mask);
+}
+
 /* Backward path to fake-quantize the 'inputs' tensor, with mask.
 
 Args:
@@ -90,7 +121,6 @@ Returns:
 Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
   TORCH_CHECK(mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",
@@ -110,7 +140,8 @@ int64_t _get_zero_point_from_tensor(
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
   zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
-  float zero_point_clamped = std::min(std::max(zero_point_fp, quant_min), quant_max);
+  float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
+                                       static_cast<float>(quant_max));
   return static_cast<int64_t>(zero_point_clamped);
 }
 

@@ -33,7 +33,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_selu_2(self, X, gc, dc, engine):
         alpha = 1.6732
         scale = 1.0507
@@ -50,7 +50,7 @@ class TestSelu(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            engine=st.sampled_from(["", "CUDNN"]),
             **hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def test_selu_3(self, X, gc, dc, engine):
         alpha = 1.3
         scale = 1.1

@@ -21,31 +21,33 @@ from caffe2.python.net_builder import ops, NetBuilder
 from caffe2.proto import caffe2_pb2
 
 import unittest
+from typing import Optional
 
 
 if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
-    gpu_device_option = caffe2_pb2.DeviceOption()
-    gpu_device_option.device_type = workspace.GpuDeviceType
+    _gpu_dev_option = caffe2_pb2.DeviceOption()
+    _gpu_dev_option.device_type = workspace.GpuDeviceType
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_checker = device_checker.DeviceChecker(
-        0.01, [gpu_device_option]
+        0.01, [_gpu_dev_option]
     )
     device_checker = device_checker.DeviceChecker(
-        0.01, [gpu_device_option, cpu_device_option]
+        0.01, [_gpu_dev_option, cpu_device_option]
     )
     gpu_gradient_checkers = [
         gradient_checker.GradientChecker(
-            0.005, 0.05, gpu_device_option, "gpu_checker_ws"
+            0.005, 0.05, _gpu_dev_option, "gpu_checker_ws"
         ),
     ]
     gradient_checkers = [
         gradient_checker.GradientChecker(
-            0.005, 0.05, gpu_device_option, "gpu_checker_ws"
+            0.005, 0.05, _gpu_dev_option, "gpu_checker_ws"
         ),
         gradient_checker.GradientChecker(
             0.01, 0.05, cpu_device_option, "cpu_checker_ws"
         ),
     ]
+    gpu_device_option: Optional[caffe2_pb2.DeviceOption] = _gpu_dev_option
 else:
     cpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_option = None

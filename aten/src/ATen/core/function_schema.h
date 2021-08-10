@@ -406,7 +406,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 
   if (arg.default_value()) {
     out << "=";
-    if (type->kind() == c10::TypeKind::StringType) {
+    if (type->kind() == c10::TypeKind::StringType || (unopt_type->kind() == c10::TypeKind::StringType && !arg.default_value().value().isNone())) {
       printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();

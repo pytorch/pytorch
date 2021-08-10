@@ -1,12 +1,13 @@
-
 import torch
 
 
 class MkldnnLinear(torch.jit.ScriptModule):
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnLinear, self).__init__()
-        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
         if dense_module.bias is not None:
+            # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
+            # we use fp32 dtype.
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
             # TODO: Remove this once ScriptModule supports registering None buffer
@@ -47,6 +48,8 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
+            # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
+            # we use fp32 dtype.
             # TODO: Remove this once ScriptModule supports registering None buffer
             self.register_buffer(
                 'bias',
@@ -69,10 +72,10 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
 
 class MkldnnConv1d(_MkldnnConvNd):
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnConv1d, self).__init__(dense_module)
 
-        self.register_buffer('weight', dense_module.weight.to_mkldnn())
+        self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
 
     @torch.jit.script_method
     def __setstate__(self, state):
@@ -82,11 +85,11 @@ class MkldnnConv1d(_MkldnnConvNd):
 
 
 class MkldnnConv2d(_MkldnnConvNd):
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnConv2d, self).__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
-            dense_module.weight.to_mkldnn(),
+            dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
             self.dilation,
@@ -104,11 +107,11 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.training = state[2]
 
 class MkldnnConv3d(_MkldnnConvNd):
-    def __init__(self, dense_module):
+    def __init__(self, dense_module, dtype):
         super(MkldnnConv3d, self).__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
-            dense_module.weight.to_mkldnn(),
+            dense_module.weight.to_mkldnn(dtype),
             self.padding,
             self.stride,
             self.dilation,
@@ -178,25 +181,30 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
         )
 
 
-def to_mkldnn(module):
-    def m_fn(m):
+def to_mkldnn(module, dtype=torch.float):
+    assert dtype in [torch.float, torch.bfloat16], \
+        "MKLDNN only support float or bfloat16 path now"
+
+    def m_fn(m, d):
         if isinstance(m, torch.nn.Linear):
-            return MkldnnLinear(m)
+            return MkldnnLinear(m, d)
         elif isinstance(m, torch.nn.Conv1d):
-            return MkldnnConv1d(m)
+            return MkldnnConv1d(m, d)
         elif isinstance(m, torch.nn.Conv2d):
-            return MkldnnConv2d(m)
+            return MkldnnConv2d(m, d)
         elif isinstance(m, torch.nn.Conv3d):
-            return MkldnnConv3d(m)
+            return MkldnnConv3d(m, d)
         elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+            # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
+            # so it doesn't need dtype argument.
             return MkldnnBatchNorm(m)
         else:
             return m
 
-    def m_fn_rec(m):
-        new_m = m_fn(m)
+    def m_fn_rec(m, d):
+        new_m = m_fn(m, d)
         for name, sub_m in m.named_children():
-            setattr(new_m, name, m_fn_rec(sub_m))
+            setattr(new_m, name, m_fn_rec(sub_m, d))
         return new_m
 
-    return m_fn_rec(module)
+    return m_fn_rec(module, dtype)
