@@ -41,7 +41,7 @@ class ProfilerConfig:
         profile_memory: bool,
         with_stack: bool,
         with_flops: bool,
-        with_module_hierarchy: bool
+        with_modules: bool
     ) -> None: ...
     ...
 
