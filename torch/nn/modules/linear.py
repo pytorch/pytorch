@@ -32,10 +32,23 @@ class Identity(Module):
         return input
 
 class Bias(Module):
-    r"""
-    Description TBD
+    r""" Adds a tensor of normally distributed bias values to the last dimension
+    of the incoming data :math:`y = x + b`
+
+    Args:
+        num_features: number of elements of the bias tensor (must match the
+        last dimension of the incoming data)
+
+    Shape:
+        - Input: :math:`(*, H_{n})` where :math:`*` means any number of
+          dimensions excluding none and :math:`H_{n} = \text{n\_features}`.
+        - Output: Same as input
+
+    Attributes:
+        bias_values: the learnable bias of the module of shape :math:`(\text{num\_features})`.
     """
-    def __init__(self, num_features: int) -> None:
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
         super(Bias, self).__init__()
         self.num_features = num_features
         self.bias_values = Parameter(torch.randn(self.num_features))

@@ -1073,15 +1073,7 @@ TEST_F(ModulesTest, Bias) {
     ASSERT_EQ(y.size(0), 10);
     ASSERT_EQ(y.size(1), 5);
 
-    std::cout << "bias_values:" << std::endl;
-    std::cout << model->bias_values << std::endl;
-
-    std::cout << "bias_values size:" << std::endl;
-    std::cout << model->bias_values.sizes() << std::endl;
-
-    std::cout << "bias_values.grad():" << std::endl;
-    std::cout << model->bias_values.grad() << std::endl;
-    ASSERT_EQ(model->bias_values.grad().numel(), 5);  // Figure this out
+    ASSERT_EQ(model->bias_values.grad().numel(), 5);
 
     auto y_exp = torch::add(x, model->bias_values);
     ASSERT_TRUE(torch::allclose(y, y_exp));

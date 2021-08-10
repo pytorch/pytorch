@@ -36,7 +36,14 @@ class TORCH_API IdentityImpl : public Cloneable<IdentityImpl> {
 TORCH_MODULE(Identity);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Bias ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// Description TBD
+/// Adds a tensor of normally distributed bias values to the last dimension
+/// of the incoming data.
+///
+/// Example:
+/// ```
+/// Bias model(LinearOptions(5));
+/// ```
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BiasImpl : public Cloneable<BiasImpl> {
   public:
   BiasImpl(int64_t num_features)
