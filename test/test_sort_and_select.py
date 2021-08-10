@@ -203,7 +203,7 @@ class TestSortAndSelect(TestCase):
     def test_sort_1d_output_discontiguous(self, device, dtype):
         tensor = torch.randn(12, device=device, dtype=dtype)[:6]
         values = torch.empty_like(tensor)[::2]
-        indices = torch.empty(18, device="cuda", dtype=torch.long)[::3]
+        indices = torch.empty(18, device=device, dtype=torch.long)[::3]
         torch.sort(tensor, out=(values, indices))
         values_cont, indices_cont = tensor.sort()
         self.assertEqual(indices, indices_cont)
