@@ -74,7 +74,7 @@ void IRVisitor::visit(CompareSelect* v) {
 
 // NOLINTNEXTLINE
 #define IMM_VISIT(Type, Name) \
-  void IRVisitor::visit(const Name##Imm* v) {}
+  void IRVisitor::visit(Name##Imm* v) {}
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT
 
@@ -156,7 +156,7 @@ void IRVisitor::visit(IfThenElse* v) {
 }
 
 void IRVisitor::visit(Intrinsics* v) {
-  for (auto i : c10::irange(v->nparams())) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
   }
 }
