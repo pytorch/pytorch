@@ -329,9 +329,13 @@ bool is_available(TensorList tensors) {
 
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
-  return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
+  constexpr std::uint64_t ver = (((uint64_t) NCCL_MAJOR) << 32) |
+                                (((uint64_t) NCCL_MINOR) << 16) |
+                                ((uint64_t) NCCL_PATCH);
+  return ver;
 #elif defined(USE_NCCL)
-  return 1000;
+  // return major version "1"
+  return ((uint64_t) 1) << 32;
 #else
   return 0;
 #endif
