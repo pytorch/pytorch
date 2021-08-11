@@ -15,7 +15,8 @@ if __name__ == '__main__':
     # Placeholder for future interface. For now just gives a nice -h.
     parser = argparse.ArgumentParser(description='Build libtorch')
     parser.add_argument('--cmake', action="store_true", help='rerun cmake')
-    parser.add_argument('--cmake_only', action="store_true", help='Stop once cmake terminates. Leave users a chance to adjust build options')
+    parser.add_argument('--cmake_only', action="store_true",
+                        help='Stop once cmake terminates. Leave users a chance to adjust build options')
     options = parser.parse_args()
 
     build_caffe2(version=None, cmake_python_library=None, build_python=False,
