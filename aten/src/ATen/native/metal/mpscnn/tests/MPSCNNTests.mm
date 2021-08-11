@@ -792,7 +792,6 @@ bool test_reflection_pad2d() {
 }
 
 bool test_hardtanh_() {
-#if TARGET_OS_IPHONE
   __block std::vector<int64_t> size{1, 32, 112, 112};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -801,11 +800,17 @@ bool test_hardtanh_() {
     auto Y2 = at::hardtanh_(X2, 0, 6.0).cpu();
     return almostEqual(Y1, Y2);
   });
-#else
-  // Skip this test on MacOS as the shader function doesn't work well
-  // Will get back and fix it - T82700462
-  return true;
-#endif
+}
+
+bool test_hardtanh() {
+  __block std::vector<int64_t> size{1, 3, 4, 4};
+  return TEST(size, __PRETTY_FUNCTION__, ^bool {
+    auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+    auto Y1 = at::hardtanh(X1, 0, 6.0);
+    auto X2 = X1.metal();
+    auto Y2 = at::hardtanh(X2, 0, 6.0).cpu();
+    return almostEqual(Y1, Y2);
+  });
 }
 
 bool test_mean_dim() {
@@ -840,7 +845,6 @@ bool test_mean_dim3() {
       return almostEqual(Y1, Y2);
     });
 }
-
 
 bool test_chunk() {
 __block std::vector<int64_t> size{1, 4, 2, 2};
