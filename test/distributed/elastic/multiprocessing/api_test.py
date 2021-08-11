@@ -49,7 +49,8 @@ class RunProcResultsTest(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
 
     def tearDown(self):
-        shutil.rmtree(self.test_dir)
+        if os.path.isdir(self.test_dir):
+			shutil.rmtree(self.test_dir)
 
     def test_is_failed(self):
         pr_success = RunProcsResult(return_values={0: "a", 1: "b"})
@@ -233,7 +234,8 @@ if not (TEST_WITH_ASAN or TEST_WITH_TSAN or IS_WINDOWS or IS_MACOS):
                 self._start_methods = ["fork", "spawn"]
 
         def tearDown(self):
-            shutil.rmtree(self.test_dir)
+			if os.path.isdir(self.test_dir):
+				shutil.rmtree(self.test_dir)
 
         def log_dir(self):
             return tempfile.mkdtemp(dir=self.test_dir)
