@@ -42,6 +42,7 @@ bool test_sigmoid();
 bool test_hardsigmoid();
 bool test_hardswish();
 bool test_upsampling_nearest2d_vec();
+bool test_upsampling_nearest2d_vec2();
 bool test_adaptive_avg_pool2d();
 bool test_hardtanh_();
 bool test_reshape();
