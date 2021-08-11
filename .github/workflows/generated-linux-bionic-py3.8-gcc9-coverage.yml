@@ -33,8 +33,9 @@ jobs:
     runs-on: ubuntu-18.04
     if: ${{ (github.event_name != 'pull_request') || (github.event.action !='unassigned') || (github.event.action == 'unassigned' && contains(github.event.pull_request.labels.*.name, 'ciflow/default')) }}
     steps:
+      - uses: hmarr/debug-action@v2
       - name: noop
-        run: echo running ciflow_should_run
+        run: echo running ciflow_should_run for test
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.2xlarge

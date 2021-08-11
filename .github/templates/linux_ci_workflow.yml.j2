@@ -56,8 +56,9 @@ jobs:
     runs-on: ubuntu-18.04
     if: ${{ !{{ ciflow_config.root_job_condition }} }}
     steps:
+      - uses: hmarr/debug-action@v2
       - name: noop
-        run: echo running !{{ ciflow_config.root_job_name }}
+        run: echo running !{{ ciflow_config.root_job_name }} for test
 {%- endif %}
   calculate-docker-image:
     if: ${{ github.repository_owner == 'pytorch' }}
