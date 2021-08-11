@@ -67,6 +67,13 @@ TORCH_META_FUNC(_softmax_backward_data)
 
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
+    // The code below is only valid for the CUDA implementation. It's "okay"
+    // to put it here because half-to-float conversion is not supported by
+    // the CPU implementation of _softmax. There is a TORCH_CHECK in the CUDA
+    // implementation that should ideally go here as well, but there is at least
+    // one test in which the grad and input dtypes do not match for the CPU
+    // implementation of this kernel and it is not true that the grad type is
+    // float and the input dtype is half (see #63057).
     if (grad.scalar_type() == ScalarType::Float &&
          input.scalar_type() == ScalarType::Half) {
       grad_input_options = grad_input_options.dtype(ScalarType::Half);
@@ -92,6 +99,13 @@ TORCH_META_FUNC(_log_softmax_backward_data)
 
   bool half_to_float = grad.scalar_type() != input.scalar_type();
   if (half_to_float) {
+    // The code below is only valid for the CUDA implementation. It's "okay"
+    // to put it here because half-to-float conversion is not supported by
+    // the CPU implementation of _softmax. There is a TORCH_CHECK in the CUDA
+    // implementation that should ideally go here as well, but there is at least
+    // one test in which the grad and input dtypes do not match for the CPU
+    // implementation of this kernel and it is not true that the grad type is
+    // float and the input dtype is half (see #63057).
     if (grad.scalar_type() == ScalarType::Float &&
         input.scalar_type() == ScalarType::Half) {
       grad_input_options = grad_input_options.dtype(ScalarType::Half);
