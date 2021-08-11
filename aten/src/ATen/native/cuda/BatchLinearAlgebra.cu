@@ -2900,8 +2900,11 @@ cublasOperation_t _get_cublas_trans(char trans) {
 static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Tensor& pivots, char trans) {
   auto batch_size = batchCount(lu);
   auto m = lu.size(-2);
+  auto b2 = b.size(-1);
+  bool over_magma_dim_limit = b2 > 1024;  // magma implementation of LU solve cannot handle a b tensor with last dim > 1024 (https://bitbucket.org/icl/magma/issues/19/dgesv_batched-dgetrs_batched-fails-for)
+  // heuristics determined from tests dicussed in https://github.com/pytorch/pytorch/pull/59148
 #ifdef USE_CUSOLVER
-  if (batch_size == 1 && m > 512) {
+  if ((batch_size == 1 && m > 512) || (batch_size <= 8 && over_magma_dim_limit)) {
     lu_solve_looped_cusolver(b, lu, pivots, _get_cublas_trans(trans));
   }
 #else
@@ -2910,7 +2913,7 @@ static void lu_solve_trans_dispatch(const Tensor& b, const Tensor& lu, const Ten
   }
 #endif // ifdef USE_CUSOLVER
 #ifdef CUDART_VERSION
-  else if (batch_size > 2 && m <= 128) {
+  else if ((batch_size > 2 && m <= 128) || (batch_size > 8 && over_magma_dim_limit)) {
     lu_solve_batched_cublas(b, lu, pivots, _get_cublas_trans(trans));
   }
 #endif // ifdef CUDART_VERSION
