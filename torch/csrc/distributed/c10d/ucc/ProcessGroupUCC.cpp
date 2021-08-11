@@ -150,7 +150,7 @@ public:
 
 private:
   c10::intrusive_ptr<Store> store;
-  void lazyInitUCP();
+  void initUCP();
   std::vector<std::shared_ptr<UCPEndpoint>> ucp_endpoints = {};
 };
 
@@ -158,13 +158,10 @@ ProcessGroupUCC::ProcessGroupUCC(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size) : ProcessGroup(rank, size), store(store) {
+  initUCP();
 }
 
-void ProcessGroupUCC::lazyInitUCP() {
-  if (ucp_endpoints.size() > 0) {
-    return;  // already initialized
-  }
-
+void ProcessGroupUCC::initUCP() {
   UCPContext *ucp_context = UCPContext::get();
   ucs_status_t st;
   ucp_address_t* local_addr;
@@ -259,7 +256,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
     int tag) {
   check_tensor(tensors);
   auto& tensor = tensors[0];
-  lazyInitUCP();
 
   ucp_request_param_t params;
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
@@ -286,7 +282,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
     int tag) {
   check_tensor(tensors);
   auto& tensor = tensors[0];
-  lazyInitUCP();
 
   ucp_request_param_t params;
   params.op_attr_mask = UCP_OP_ATTR_FIELD_CALLBACK |
