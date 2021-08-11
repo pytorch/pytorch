@@ -1072,7 +1072,7 @@ def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwa
     cases: Tuple[tuple, dict] = (  # type: ignore[assignment]
         ((S, S), {'dim': 1}),
         ((S, 2), {'dim': -1}),
-        ((S,), {'dim': 0, 'eps': 1e-5}),
+        ((S,), {'dim': 0, 'eps': 0.5}),
         ((), {'dim': 0}),
         ((S, S, M), {'dim': 2}),
         ((S, S), {})
