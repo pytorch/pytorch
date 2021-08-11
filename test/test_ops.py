@@ -58,6 +58,7 @@ class TestCommon(TestCase):
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
+        self.assertTrue(0, "deliberately fail to test fail at end feature")
         # dtypes to try to backward in
         allowed_backward_dtypes = floating_and_complex_types_and(torch.bfloat16, torch.float16)
 
