@@ -264,6 +264,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
     def set_disable_serialized_check(self, val: bool):
         orig = getattr(_output_context, 'disable_serialized_check', False)
         try:
+            # pyre-fixme[16]: `local` has no attribute `disable_serialized_check`.
             _output_context.disable_serialized_check = val
             yield
         finally:

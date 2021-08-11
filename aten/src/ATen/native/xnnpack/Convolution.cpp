@@ -325,6 +325,17 @@ Tensor run(
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status setup_status;
 
+  /*
+   * Input Pointer Caching:
+   * Previously, we cached the input/output pointers and dimension parameters
+   * so that if the same pointers and parameters are used, this setup could be
+   * skipped.
+   * However, XNNPack has integrated offsets with its indirection buffer, so the
+   * buffer does not need to be recalculated even if activation tensor pointer
+   * changes as long as tensor dimensions are the same. Thus, the aforementioned
+   * manual caching is not needed here.
+   */
+
   if (context.transposed_) {
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
