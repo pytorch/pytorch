@@ -369,6 +369,14 @@ class TORCH_CUDA_CU_API Expr : public Node {
     predicate_ = predicate;
   }
 
+  Predicate* writePredicate() const {
+    return write_predicate_;
+  }
+
+  void setWritePredicate(Predicate* write_predicate) {
+    write_predicate_ = write_predicate;
+  }
+
  protected:
   // TODO(kir): try to avoid this protected interface
   void addInput(Val* input) {
@@ -389,6 +397,8 @@ class TORCH_CUDA_CU_API Expr : public Node {
   Scope* scope_ = nullptr;
 
   Predicate* predicate_ = nullptr;
+  // Only used for reduction-related expressions
+  Predicate* write_predicate_ = nullptr;
 };
 
 class TORCH_CUDA_CU_API NamedScalar final : public Val {
@@ -489,7 +499,8 @@ class TORCH_CUDA_CU_API Predicate final : public Val {
     TORCH_INTERNAL_ASSERT(
         ptype_ == PredicateType::Inline ||
         ptype_ == PredicateType::Misaligned || ptype_ == PredicateType::Shift ||
-        ptype_ == PredicateType::Padding);
+        ptype_ == PredicateType::Padding ||
+        ptype_ == PredicateType::ReductionWrite);
     return thread_pred_;
   }
 

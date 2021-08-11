@@ -80,18 +80,70 @@ kir::Bool* PredicateCompute::getInlinePredicate(
     return thread_pred;
   }
 
-  auto all_preds = Index::getReferenceRootPredicates(out_tv, loops).first;
-
-  if (thread_pred != nullptr) {
-    all_preds.push_back(thread_pred);
-  }
+  auto all_preds = Index::getReferenceRootPredicates(out_tv, loops);
 
   std::vector<kir::Bool*> preds;
 
-  for (auto pred : all_preds) {
-    if (!pred->isConst() || !(pred->isConst() && pred->value().value())) {
+  auto is_true = [](const kir::Bool* p) {
+    return p->isConst() && p->value().value();
+  };
+
+  // When pred_type is ReductionWrite, filter out predicates for
+  // reduction axes. For blockReduce, this is necessary when reduction
+  // axes start at non-zero offsets and parallelized with TID since
+  // blockReduce returns a valid output only at offset-zero
+  // threads. Similarly, for gridReduce, the last block to store the
+  // output may be predicated out with the read predicate, so the
+  // write predicate needs to ignore the reduction axes.
+  bool non_zero_start_found = false;
+  for (size_t i = 0; i < all_preds.first.size(); ++i) {
+    auto pred = all_preds.first[i];
+    if (pred_type == PredicateType::ReductionWrite) {
+      const auto& concrete_root_ids = all_preds.second[i];
+      bool pred_for_reduction_axis = false;
+      for (auto pred_root_id : concrete_root_ids) {
+        auto kir_pred_root_id =
+            gpu_lower->lowerValue(pred_root_id)->as<kir::IterDomain>();
+        auto it = std::find_if(
+            out_tv->domain()->rootDomain().begin(),
+            out_tv->domain()->rootDomain().end(),
+            [&](const auto& out_root_id) {
+              return gpu_lower->caIndexMap().areMapped(
+                  kir_pred_root_id, out_root_id);
+            });
+        TORCH_INTERNAL_ASSERT(
+            it != out_tv->domain()->rootDomain().end(),
+            "No corresponding root ID found for ",
+            pred_root_id);
+        auto out_root_id = *it;
+        if (out_root_id->isReduction()) {
+          if (!out_root_id->start()->isZeroInt()) {
+            non_zero_start_found = true;
+          }
+          pred_for_reduction_axis = true;
+          break;
+        }
+      }
+      // Don't add the predicate if it corresponds to a reduction axis
+      if (pred_for_reduction_axis) {
+        continue;
+      }
+    }
+    if (!is_true(pred)) {
       preds.push_back(pred);
     }
+  }
+
+  // When generating a predicate for blockReduce writes and not for
+  // gridReduce, if all reduction axes start with zero, we can just
+  // use the same predicate for reads. nullptr is returned then.
+  if (pred_type == PredicateType::ReductionWrite && !non_zero_start_found &&
+      !out_tv->fuserTv()->domain()->hasGridReduction()) {
+    return nullptr;
+  }
+
+  if (thread_pred != nullptr && !is_true(thread_pred)) {
+    preds.push_back(thread_pred);
   }
 
   if (preds.empty()) {

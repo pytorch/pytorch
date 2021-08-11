@@ -200,7 +200,7 @@ __device__ void gridReduceLastBlock(
     const nvfuser_index_t in_size,
     Func reduction_op,
     T* shared_buf,
-    bool read_write_pred,
+    bool write_pred,
     T init_val) {
   const int tid = ioffset(threadIdx, blockDim);
   const int block_size = isize(blockDim);
@@ -245,7 +245,7 @@ __device__ void gridReduceLastBlock(
     }
   }
 
-  if (should_write && read_write_pred) {
+  if (should_write && write_pred) {
     reduction_op(out, inp);
   }
 }
@@ -314,7 +314,8 @@ __device__ bool gridReduce(
     volatile T* work_buf,
     Tensor<int64_t, 1> sync_flags,
     T* shared_buf,
-    bool read_write_pred,
+    bool read_pred,
+    bool write_pred,
     T init_val) {
   // Number of values to reduce in the grid dimensions
   const auto seg_size =
@@ -341,7 +342,7 @@ __device__ bool gridReduce(
         offset_in_reduction_block<X_THREAD, Y_THREAD, Z_THREAD>(
             threadIdx, blockDim);
     auto work_buf_offset = rblock_size * rblock_offset + thread_offset;
-    if (read_write_pred) {
+    if (read_pred) {
       work_buf[work_buf_offset] = inp_val;
     } else {
       work_buf[work_buf_offset] = init_val;
@@ -368,7 +369,7 @@ __device__ bool gridReduce(
         seg_size * rblock_size,
         reduction_op,
         shared_buf,
-        read_write_pred,
+        write_pred,
         init_val);
     return true;
   } else {

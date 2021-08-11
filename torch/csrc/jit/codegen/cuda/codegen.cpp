@@ -685,7 +685,17 @@ class CudaKernelGenerator : private kir::IrVisitor {
       indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
       TORCH_INTERNAL_ASSERT(
           node->predicate() != nullptr && node->predicate()->hasValue());
-      indent() << kTab << genInline(node->predicate()) << ",\n";
+      auto read_pred = genInline(node->predicate());
+      indent() << kTab << read_pred << ",\n";
+      // Pass the write predicate if available and different from the
+      // default predicate. The blockReduce runtime function uses the
+      // default predicate for both read and write when only the
+      // default one is given.
+      if (node->writePredicate() != nullptr) {
+        TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
+        auto write_pred = genInline(node->writePredicate());
+        indent() << kTab << write_pred << ",\n";
+      }
       indent() << kTab << data_type << "(" << genInline(node->init())
                << "));\n";
     }
@@ -777,7 +787,13 @@ class CudaKernelGenerator : private kir::IrVisitor {
       TORCH_INTERNAL_ASSERT(node->predicate() != nullptr);
       TORCH_INTERNAL_ASSERT(
           node->predicate() != nullptr && node->predicate()->hasValue());
-      indent() << kTab << genInline(node->predicate()) << ",\n";
+      auto read_pred = genInline(node->predicate());
+      indent() << kTab << read_pred << ",\n";
+      if (node->writePredicate() != nullptr) {
+        TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
+        auto write_pred = genInline(node->writePredicate());
+        indent() << kTab << write_pred << ",\n";
+      }
       indent() << kTab << data_type << "(0));\n";
     }
   }
@@ -860,7 +876,15 @@ class CudaKernelGenerator : private kir::IrVisitor {
     indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
     TORCH_INTERNAL_ASSERT(
         node->predicate() != nullptr && node->predicate()->hasValue());
-    indent() << kTab << genInline(node->predicate()) << ",\n";
+    auto read_pred = genInline(node->predicate());
+    indent() << kTab << read_pred << ",\n";
+    if (node->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
+      auto write_pred = genInline(node->writePredicate());
+      indent() << kTab << write_pred << ",\n";
+    } else {
+      indent() << kTab << read_pred << ",\n";
+    }
     indent() << kTab << data_type << "("
              << genInline(node->reduction_op()->init()) << "));\n";
   }
@@ -921,7 +945,15 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << "*>(shared_mem_n),\n";
     TORCH_INTERNAL_ASSERT(
         node->predicate() != nullptr && node->predicate()->hasValue());
-    indent() << kTab << genInline(node->predicate()) << ",\n";
+    auto read_pred = genInline(node->predicate());
+    indent() << kTab << read_pred << ",\n";
+    if (node->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
+      auto write_pred = genInline(node->writePredicate());
+      indent() << kTab << write_pred << ",\n";
+    } else {
+      indent() << kTab << read_pred << ",\n";
+    }
     // TODO : init value support or remove.
     indent() << kTab << data_type << "(0));\n";
   }

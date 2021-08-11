@@ -87,11 +87,16 @@ void UnrollPass::handle(kir::Expr* expr) {
       return;
     }
 
+    // Reduction may need a separate predicate for writes.
+    if (!isReductionInitExpr(expr) && out_tv->domain()->hasReduction()) {
+      const auto write_pred = ir_builder.create<kir::Predicate>(
+          PredicateType::ReductionWrite, expr, thread_pred);
+      expr->setWritePredicate(write_pred);
+    }
+
     // For expr calling a device func with block sync, don't create
     // if-then-else but pass the predicate to the device func
     if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
-      auto thread_pred =
-          GpuLower::current()->threadPredMap().getPredicate(out_tv->fuserTv());
       const auto pred = ir_builder.create<kir::Predicate>(
           PredicateType::Inline, expr, thread_pred);
       expr->setPredicate(pred);

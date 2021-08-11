@@ -46,8 +46,23 @@ class ConditionalFromPredicateModifier {
     } else if (expr != nullptr && expr->predicate() != nullptr) {
       // Replace expr predicate with bool conditional
       auto conditional = generateConditional(expr->predicate());
+      TORCH_INTERNAL_ASSERT(conditional != nullptr);
       expr->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(expr->predicate()->value() != nullptr);
+      setWritePredicate(expr, conditional);
+    }
+  }
+
+  void setWritePredicate(kir::Expr* expr, kir::Bool* read_cond) {
+    if (expr->writePredicate() != nullptr) {
+      auto write_cond = generateConditional(expr->writePredicate());
+      if (write_cond) {
+        expr->writePredicate()->setValue(write_cond);
+      } else {
+        // If generateConditional returns null, it means no specific
+        // predicate needs to be used.
+        expr->setWritePredicate(nullptr);
+      }
     }
   }
 
@@ -93,6 +108,7 @@ class ConditionalFromPredicateModifier {
   kir::Bool* generateConditional(kir::Predicate* pred) {
     switch (pred->predicate_type()) {
       case PredicateType::Inline:
+      case PredicateType::ReductionWrite:
       case PredicateType::Misaligned: {
         return PredicateCompute::getInlinePredicate(
             pred->expr(),

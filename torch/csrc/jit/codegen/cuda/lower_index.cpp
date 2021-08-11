@@ -173,6 +173,9 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
     if (rop->predicate()) {
       block_reduction_op->setPredicate(rop->predicate());
     }
+    if (rop->writePredicate()) {
+      block_reduction_op->setWritePredicate(rop->writePredicate());
+    }
     pushBack(block_reduction_op);
   }
 
@@ -252,7 +255,20 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
     grid_reduction->setThreadPredicate(thread_pred);
 
     if (rop->predicate()) {
-      grid_reduction->setPredicate(rop->predicate());
+      // If preceded by a blockReduce, all thread blocks should have
+      // valid inputs to gridReduce. In fact, using the original
+      // predicate does not work when the write predicate of the
+      // blockReduce is different from the read predicate.
+      if (is_block_reduce) {
+        grid_reduction->setPredicate(
+            ir_builder_.create<kir::Predicate>(ir_builder_.trueVal()));
+      } else {
+        grid_reduction->setPredicate(rop->predicate());
+      }
+    }
+
+    if (rop->writePredicate()) {
+      grid_reduction->setWritePredicate(rop->writePredicate());
     }
 
     pushBack(reduce_buffer);
@@ -355,6 +371,9 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
     block_welford_op = welford_op;
     if (wop->predicate()) {
       block_welford_op->setPredicate(wop->predicate());
+    }
+    if (wop->writePredicate()) {
+      block_welford_op->setWritePredicate(wop->writePredicate());
     }
     pushBack(block_welford_op);
   }

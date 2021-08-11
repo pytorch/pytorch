@@ -39,6 +39,7 @@ enum class ValType {
 // Misaligned - PredicateCompute::getInlinePredicate + Misaligned flag
 // Shift - ShiftPredicateInserter::getShiftPredicate
 // Padding - ShiftPredicateInserter::getPaddingPredicate
+// ReductionWrite - Same as Inline but without reduction axes
 enum class PredicateType {
   Manual,
   Inline,
@@ -46,7 +47,8 @@ enum class PredicateType {
   Vectorize,
   Misaligned,
   Shift,
-  Padding
+  Padding,
+  ReductionWrite
 };
 
 enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };

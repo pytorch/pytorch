@@ -28,7 +28,8 @@ __device__ void blockReduce(
     const _dim3ti& thread_idx,
     const _dim3bd& block_dim,
     T* shared_mem,
-    bool read_write_pred,
+    bool read_pred,
+    bool write_pred,
     T init_val) {
   unsigned int reduction_size = (X_REDUCE ? block_dim.x : 1) *
       (Y_REDUCE ? block_dim.y : 1) * (Z_REDUCE ? block_dim.z : 1);
@@ -72,7 +73,7 @@ __device__ void blockReduce(
 
   assert(reduction_stride != 0);
 
-  if (read_write_pred) {
+  if (read_pred) {
     shared_mem[linear_tid] = inp_val;
   } else {
     shared_mem[linear_tid] = init_val;
@@ -99,7 +100,7 @@ __device__ void blockReduce(
     block_sync::sync();
   }
 
-  if (should_write && read_write_pred) {
+  if (should_write && write_pred) {
     T result = out;
     reduction_op(result, shared_mem[linear_tid]);
     if (reduction_size > 1) {
@@ -108,4 +109,34 @@ __device__ void blockReduce(
     out = result;
   }
   block_sync::sync();
+}
+
+// Use the same pred for both reads and writes
+template <
+    bool X_REDUCE,
+    bool Y_REDUCE,
+    bool Z_REDUCE,
+    typename T,
+    typename Func,
+    typename _dim3ti,
+    typename _dim3bd>
+__device__ void blockReduce(
+    T& out,
+    const T& inp_val,
+    Func reduction_op,
+    const _dim3ti& thread_idx,
+    const _dim3bd& block_dim,
+    T* shared_mem,
+    bool read_write_pred,
+    T init_val) {
+  blockReduce<X_REDUCE, Y_REDUCE, Z_REDUCE, T, Func, _dim3ti, _dim3bd>(
+      out,
+      inp_val,
+      reduction_op,
+      thread_idx,
+      block_dim,
+      shared_mem,
+      read_write_pred,
+      read_write_pred,
+      init_val);
 }
