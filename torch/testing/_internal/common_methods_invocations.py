@@ -2224,23 +2224,27 @@ def sample_inputs_max_min_binary(op_info, device, dtype, requires_grad, **kwargs
 def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as shapes for: input, weight, bias, stride, padding, output_padding, groups
-    cases = (((1, 3, 4, 4), (3, 3, 3, 3), (3), (2, 2), 2, (1, 1), 1),
-             ((2, 2, 4, 4), (2, 2, 4, 5), (4), (3, 3), 1, (2, 2), 2),
-             ((1, 1, 4, 5), (1, 1, 4, 3), (1), 2, 1, 1, 1),
-             ((1, 1, 4, 3), (1, 2, 3, 4), None, (2), 1, 1, 1),)
+    # Ordered as shapes for input, weight, bias
+    # and a dict of values of (stride, padding, output_padding, groups, dilation)
+    cases: Tuple[tuple, tuple, int, dict] = (  # type: ignore[assignment]
+        ((1, 3, 4, 4), (3, 3, 3, 3), 3,
+         {'stride': (2, 2), 'padding': 2, 'output_padding': (1, 1), 'groups': 1}),
+        ((2, 2, 4, 4), (2, 2, 4, 5), 4,
+         {'stride': (3, 2), 'padding': (1, 2), 'output_padding': (2, 3), 'groups': 2, 'dilation': (4, 4)}),
+        ((1, 1, 4, 5), (1, 1, 4, 3), 1,
+         {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
+        ((1, 1, 4, 3), (1, 2, 3, 4), None,
+         {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((1, 4, 5, 5), (4, 8, 3, 3), None,
+         {})
+    )
 
     def generator():
-        for input_shape, weight, bias, stride, padding, output_padding, groups in cases:
+        for input_shape, weight, bias, kwargs in cases:
             yield SampleInput(make_arg(input_shape), args=(
                 make_arg(weight),
-                make_arg(bias) if bias is not None else bias,
-                stride,
-                padding,
-                output_padding,
-                groups
-            ))
-        yield SampleInput(make_arg((1, 4, 5, 5)), args=(make_arg((4, 8, 3, 3)), None))
+                make_arg(bias) if bias is not None else bias
+            ), kwargs=kwargs)
 
     return list(generator())
 
