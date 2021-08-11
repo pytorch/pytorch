@@ -1808,7 +1808,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     int srcRank,
     int tag) {
   if (pg_ucc.get() != nullptr && tensors[0].device().type() != c10::kCUDA) {
-    return pg_ucc->send(tensors, srcRank, tag);
+    return pg_ucc->recv(tensors, srcRank, tag);
   }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
