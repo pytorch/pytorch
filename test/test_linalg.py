@@ -4126,6 +4126,31 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
+    @dtypes(torch.float64)
+    def test_matrix_rank_atol_rtol(self, device, dtype):
+        from torch.testing._internal.common_utils import make_fullrank_matrices_with_distinct_singular_values
+
+        # creates a matrix with singular values arange(1/(n+1), 1, 1/(n+1)) and rank=n
+        n = 9
+        a = make_fullrank_matrices_with_distinct_singular_values(n, n, dtype=dtype, device=device)
+
+        # test float and tensor variants
+        for tol_value in [0.5, torch.tensor(0.5, device=device)]:
+            # using rtol (relative tolerance) takes into account the largest singular value (0.9 in this case)
+            result = torch.linalg.matrix_rank(a, rtol=tol_value)
+            self.assertEqual(result, 5)  # there are 5 singular values above 0.9*0.5=0.45
+
+            # atol is used directly to compare with singular values
+            result = torch.linalg.matrix_rank(a, atol=tol_value)
+            self.assertEqual(result, 4)  # there are 4 singular values above 0.5
+
+            # when both are specified the maximum tolerance is used
+            result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=tol_value)
+            self.assertEqual(result, 4)  # there are 4 singular values above max(0.5, 0.9*0.5)
+
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_matrix_rank_empty(self, device, dtype):
         matrix_rank = torch.linalg.matrix_rank
