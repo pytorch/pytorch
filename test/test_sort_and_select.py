@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -703,6 +703,7 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
+    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
@@ -762,6 +763,7 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
+    @dtypesIfCPU(*set(torch.testing.get_all_dtypes()) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
