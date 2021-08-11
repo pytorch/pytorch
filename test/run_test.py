@@ -171,6 +171,7 @@ TESTS = [
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
     'distributed/_sharding_spec/test_sharding_spec',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 # Tests need to be run with pytest.
