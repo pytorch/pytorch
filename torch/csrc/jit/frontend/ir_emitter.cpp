@@ -1296,7 +1296,7 @@ struct to_ir {
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
-  Value* emitListComprehension(const ListComp& lc, const TypePtr& type_hint) {
+  Value* emitListComprehension(const ListComp& lc, TypePtr type_hint) {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
@@ -1306,15 +1306,37 @@ struct to_ir {
                             ->output()
                             ->setType(ListType::ofTensors());
     bool type_set = false;
+
+    // See notes on logic in `emitListLiteral`
     if (type_hint) {
-      if (!type_hint->cast<ListType>()) {
-        throw ErrorReport(loc)
-            << "Expected list type annotation for list comprehension"
-               ", found "
-            << type_hint->repr_str();
+      // If necessary/possible, make `type_hint` a ListType
+      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+        std::vector<TypePtr> list_types;
+        std::copy_if(
+            union_type_hint->containedTypes().begin(),
+            union_type_hint->containedTypes().end(),
+            std::back_inserter(list_types),
+            [&](TypePtr type_ptr) {
+              return type_ptr->isSubtypeOf(AnyListType::get());
+            });
+        if (list_types.empty()) {
+          throw ErrorReport(lc)
+              << "Expected an Union type annotation "
+              << "with an inner List type, but got " << type_hint->repr_str();
+        } else if (list_types.size() == 1) {
+          type_hint = list_types[0];
+        }
+        // In the case that we have multiple possible list annotations
+        // in the Union type, we don't set the type at all
       }
-      list_value->setType(type_hint);
-      type_set = true;
+
+      if (auto list_type_hint = type_hint->cast<ListType>()) {
+        list_value->setType(type_hint);
+        type_set = true;
+      } else if (type_hint->kind() != UnionType::Kind) {
+        throw ErrorReport(lc) << "Expected an annotation of type "
+                              << "List, but got " << type_hint->repr_str();
+      }
     }
 
     // comprehension introduces its own scope. no variable assigned
@@ -1377,25 +1399,50 @@ struct to_ir {
     return list_value;
   }
 
-  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
+  Value* emitDictComprehension(const DictComp& dc, TypePtr type_hint) {
     const auto loc = dc.range();
     const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
     const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
 
     Value* dict_value =
         graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
+
     // Set the default type to be Dict[Str, Tensor]
     dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
+
     bool type_set = false;
+
+    // See notes on logic in `emitListLiteral`
     if (type_hint) {
-      if (!type_hint->cast<DictType>()) {
-        throw ErrorReport(loc)
-            << "Expected Dict type annotation for dict comprehension"
-               ", found "
-            << type_hint->repr_str();
+      // If necessary/possible, make `type_hint` a DictType
+      if (auto union_type_hint = type_hint->cast<UnionType>()) {
+        std::vector<TypePtr> dict_types;
+        std::copy_if(
+            union_type_hint->containedTypes().begin(),
+            union_type_hint->containedTypes().end(),
+            std::back_inserter(dict_types),
+            [&](TypePtr type_ptr) {
+              return type_ptr->kind() == DictType::Kind;
+            });
+        if (dict_types.empty()) {
+          throw ErrorReport(dc)
+              << "Expected an Union type annotation "
+              << "with an inner Dict type, but got " << type_hint->repr_str();
+        } else if (dict_types.size() == 1) {
+          type_hint = dict_types[0];
+        }
+        // In the case that we have multiple possible dict annotations
+        // in the Union type, we don't set the type at all
       }
-      dict_value->setType(type_hint);
-      type_set = true;
+
+      if (auto dict_type_hint = type_hint->cast<DictType>()) {
+        dict_value->setType(type_hint);
+        type_set = true;
+      } else if (type_hint->kind() != UnionType::Kind) {
+        throw ErrorReport(dc) << "Expected an annotation of type "
+                              << "Dict, but got " << type_hint->repr_str();
+      }
+
     }
 
     // A dict comprehension introduces its own scope. No variable assigned
@@ -3793,8 +3840,8 @@ struct to_ir {
     // If `type_hint` is a Union, we're going to change it to be
     // the type of the rhs List, so we need to store the original
     // UnionType for later. `nullptr` means that we don't need to emit
-    // a `widenToUnion` node (either because we don't have a type hint
-    // or because the type hint wasn't a Union)
+    // an `unchecked_cast` node (either because we don't have a type
+    // hint or because the type hint wasn't a Union)
     TypePtr annotated_union_type =
         type_hint && type_hint->kind() == UnionType::Kind ? type_hint : nullptr;
 
@@ -3986,7 +4033,7 @@ struct to_ir {
         TypePtr key_type = nullptr;
         TypePtr value_type = nullptr;
 
-        // See notes in `emitListLiteral` regarding the following logic
+        // See notes on logic in `emitListLiteral`
 
         TypePtr annotated_union_type =
             type_hint && type_hint->kind() == UnionType::Kind ? type_hint
