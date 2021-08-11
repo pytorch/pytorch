@@ -1,13 +1,5 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
-// All rights reserved.
-//
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree.
-
 #pragma once
 
-// TODO: clean up headers
-#include <c10/core/TensorImpl.h>
 #include <ATen/Tensor.h>
 
 namespace at {
@@ -25,8 +17,6 @@ struct TORCH_API FunctionalTensorImplBase : public c10::TensorImpl {
   std::shared_ptr<at::Alias> alias() { return alias_; }
   bool is_up_to_date() const;
   void sync_();
-
-  void replace_(const TensorImpl* other_impl) override;
 
  private:
   const char* tensorimpl_type_name() const override;

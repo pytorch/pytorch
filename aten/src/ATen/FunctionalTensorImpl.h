@@ -1,16 +1,6 @@
-// Copyright (c) Facebook, Inc. and its affiliates.
-// All rights reserved.
-//
-// This source code is licensed under the BSD-style license found in the
-// LICENSE file in the root directory of this source tree.
-
 #pragma once
 
-#include <bitset>
-
-// TODO: clean up headers
 #include <ATen/ArrayRef.h>
-#include <ATen/SmallVector.h>
 #include <ATen/core/List.h>
 #include <ATen/FunctionalTensorImplBase.h>
 
@@ -59,6 +49,12 @@ TORCH_API inline FunctionalTensorImpl* unsafeGetFunctionalImpl(const Tensor& ten
 }
 
 namespace functionalization {
+namespace impl {
+
+// Utility functions for the functionalization pass.
+
+void maybe_add_update(Tensor& self);
+void set_view_meta(Tensor& self, const Tensor& other, ViewMeta meta);
 
 TORCH_API Tensor makeFunctional(const Tensor& tensor, int64_t level = -1);
 TORCH_API c10::optional<Tensor> makeFunctional(const c10::optional<Tensor>& tensor, int64_t level = -1);
@@ -78,5 +74,6 @@ const c10::List<Tensor> maybeUnwrapFunctional(const c10::List<Tensor>& t_list);
 const std::vector<Tensor> maybeUnwrapFunctional(const at::TensorList t_list);
 const c10::List<c10::optional<Tensor>> maybeUnwrapFunctional(const c10::List<c10::optional<Tensor>>& t_list);
 
+} // namespace impl
 } // namespace functionalization
 } // namespace at

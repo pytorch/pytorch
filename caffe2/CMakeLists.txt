@@ -376,9 +376,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_4.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/ADInplaceOrViewType_1.cpp"
-      # TODO: this shouldn't be tied to autograd
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/RegisterFunctionalization_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/RegisterFunctionalization_1.cpp"
     )
   endif()
 

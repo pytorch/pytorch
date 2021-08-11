@@ -28,8 +28,7 @@ from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     match_differentiability_info, NativeFunctionWithDifferentiabilityInfo,
 )
-from tools.codegen.gen import parse_native_yaml, get_grouped_native_functions
-from tools.codegen.gen_functionalization_type import gen_functionalization_type
+from tools.codegen.gen import parse_native_yaml
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List
 from . import gen_python_functions
@@ -55,7 +54,6 @@ def gen_autograd(
     template_path = os.path.join(autograd_dir, 'templates')
 
     native_funcs = parse_native_yaml(native_functions_path).native_functions
-    grouped_native_functions = get_grouped_native_functions(native_funcs)
     fns = list(sorted(filter(
         operator_selector.is_native_function_selected_for_training,
         native_funcs), key=lambda f: cpp.name(f.func)))
@@ -66,10 +64,9 @@ def gen_autograd(
         gen_variable_type(out, native_functions_path, fns_with_diff_infos, template_path)
 
         gen_inplace_or_view_type(out, native_functions_path, fns_with_diff_infos, template_path)
-        gen_functionalization_type(out, native_functions_path, grouped_native_functions, template_path)
 
         # operator filter not applied as tracing sources are excluded in selective build
-        gen_trace_type(out, native_functions_path, template_path)
+        gen_trace_type(out, native_funcs, template_path)
     # Generate Functions.h/cpp
     gen_autograd_functions_lib(
         out, differentiability_infos, template_path)

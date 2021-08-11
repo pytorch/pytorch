@@ -1,8 +1,8 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/FunctionalTensorImpl.h>
 #include <torch/library.h>
 
-#include <ATen/FunctionalTensorImpl.h>
 
 /*
  * This file implements a variable fallback kernel for custom operators.
@@ -69,11 +69,12 @@ namespace {
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
 
-	// NOTE: we need to read from TLS in order to distinguish between the functorch case and the XLA case.
+	// Note [Wrapping return values in the functionalization pass]
+	// We need to read from TLS in order to distinguish between the functorch case and the XLA case.
 	// In functorch's functionalization pass, we (need to) add the key to the TLS include set.
 	// We need to do this in order to ensure that free variables created from factory functions
 	// inside of the program are properly wrapped.
-	// We DO NOT want to wrap outputs unconditionally though.
+	// However, we DO NOT want to wrap outputs unconditionally.
 	// For example, when calling xla_tensor.to('cpu'), the output should not be wrapped.
 	// TLS is the only way to distinguish between these two cases.
 	bool is_modal_pass = c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize);
@@ -83,15 +84,15 @@ namespace {
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
 
-		at::functionalization::maybe_sync(t);
-		auto maybe_unwrapped = at::functionalization::maybeUnwrapFunctional(t);
+		at::functionalization::impl::maybe_sync(t);
+		auto maybe_unwrapped = at::functionalization::impl::maybeUnwrapFunctional(t);
 		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
 		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
 
       } else if (ivalue.isTensorList()) {
         auto tensors = ivalue.toTensorList();
-		at::functionalization::maybe_sync(tensors);
-		auto maybe_unwrapped = at::functionalization::maybeUnwrapFunctional(tensors);
+		at::functionalization::impl::maybe_sync(tensors);
+		auto maybe_unwrapped = at::functionalization::impl::maybeUnwrapFunctional(tensors);
 		auto materialized_ivalue = c10::IValue(maybe_unwrapped);
 		(*stack)[arguments_begin + idx] = std::move(materialized_ivalue);
       }
@@ -112,7 +113,7 @@ namespace {
       if (ivalue.isTensor()) {
         at::Tensor t = ivalue.toTensor();
         if (is_modal_pass) {
-          auto wrapped_t = at::functionalization::makeFunctional(t);
+          auto wrapped_t = at::functionalization::impl::makeFunctional(t);
           auto wrapped_ivalue = c10::IValue(wrapped_t);
           (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
         }
@@ -120,7 +121,7 @@ namespace {
         auto tensors = ivalue.toTensorList();
         if (is_modal_pass) {
           auto tensors = ivalue.toTensorList();
-          auto wrapped_t = at::functionalization::makeFunctional(tensors);
+          auto wrapped_t = at::functionalization::impl::makeFunctional(tensors);
           auto wrapped_ivalue = c10::IValue(wrapped_t);
           (*stack)[returns_begin + idx] = std::move(wrapped_ivalue);
         }
@@ -136,6 +137,11 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 // see Note [ADInplaceOrView key]
 TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
       m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
+  // We need this for the functionalization pass: replace_ shouldn't enter the boxed fallback
+  m.impl("replace_", torch::CppFunction::makeFallthrough());
 }
 
 }

@@ -5567,13 +5567,6 @@
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
-- func: view_copy(Tensor self, int[] size) -> Tensor
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  dispatch:
-    CPU: view_copy
-
 # Warning: If you want to change the name or overload name of this
 # operator, you might also want to change the `isBlockListedSchema`
 # function in `torch/csrc/jit/frontend/schema_catching.cpp`.

@@ -98,82 +98,122 @@ const Tensor& Tensor::requires_grad_(bool _requires_grad) const {
 
 const char* ViewMetaTypeToString(ViewMeta::Type t) {
   switch (t) {
-      case ViewMeta::Type::noOp:
-        return "noOp";
-      case ViewMeta::Type::invalid:
-        return "invalid";
-      case ViewMeta::Type::_conj:
-        return "_conj";
-      case ViewMeta::Type::_indices:
-        return "_indices";
-      case ViewMeta::Type::_neg_view:
-        return "_neg_view";
-      case ViewMeta::Type::_reshape_alias:
-        return "_reshape_alias";
-      case ViewMeta::Type::_values:
-        return "_values";
-      case ViewMeta::Type::alias:
-        return "alias";
-      case ViewMeta::Type::as_strided:
-        return "as_strided";
-      case ViewMeta::Type::as_strided_:
-        return "as_strided_";
-      case ViewMeta::Type::detach:
-        return "detach";
-      case ViewMeta::Type::detach_:
-        return "detach_";
-      case ViewMeta::Type::diagonal:
-        return "diagonal";
-      case ViewMeta::Type::expand:
-        return "expand";
-      case ViewMeta::Type::indices:
-        return "indices";
-      case ViewMeta::Type::permute:
-        return "permute";
-      case ViewMeta::Type::select_int:
-        return "select_int";
-      case ViewMeta::Type::slice_Tensor:
-        return "slice_Tensor";
-      case ViewMeta::Type::split_Tensor:
-        return "split_Tensor";
-      case ViewMeta::Type::split_with_sizes:
-        return "split_with_sizes";
-      case ViewMeta::Type::squeeze:
-        return "squeeze";
-      case ViewMeta::Type::squeeze_dim:
-        return "squeeze_dim";
-      case ViewMeta::Type::squeeze_:
-        return "squeeze_";
-      case ViewMeta::Type::squeeze__dim:
-        return "squeeze__dim";
-      case ViewMeta::Type::t:
-        return "t";
-      case ViewMeta::Type::t_:
-        return "t_";
-      case ViewMeta::Type::transpose_int:
-        return "transpose_int";
-      case ViewMeta::Type::transpose_:
-        return "transpose_";
-      case ViewMeta::Type::unbind_int:
-        return "unbind_int";
-      case ViewMeta::Type::unfold:
-        return "unfold";
-      case ViewMeta::Type::unsqueeze:
-        return "unsqueeze";
-      case ViewMeta::Type::unsqueeze_:
-        return "unsqueeze_";
-      case ViewMeta::Type::values:
-        return "values";
-      case ViewMeta::Type::view:
-        return "view";
-      case ViewMeta::Type::view_dtype:
-        return "view_dtype";
-      case ViewMeta::Type::view_as_complex:
-        return "view_as_complex";
-      case ViewMeta::Type::view_as_real:
-        return "view_as_real";
-    default:
-      return "UNKNOWN_VIEW_TYPE";
+    case ViewMeta::Type::noOp:
+      return "noOp";
+    case ViewMeta::Type::invalid:
+      return "invalid";
+    case ViewMeta::Type::real:
+      return "real";
+    case ViewMeta::Type::imag:
+      return "imag";
+    case ViewMeta::Type::as_strided:
+      return "as_strided";
+    case ViewMeta::Type::tensor_split_sections:
+      return "tensor_split_sections";
+    case ViewMeta::Type::tensor_split_indices:
+      return "tensor_split_indices";
+    case ViewMeta::Type::tensor_split_tensor_indices_or_sections:
+      return "tensor_split_tensor_indices_or_sections";
+    case ViewMeta::Type::contiguous:
+      return "contiguous";
+    case ViewMeta::Type::expand:
+      return "expand";
+    case ViewMeta::Type::flatten_using_ints:
+      return "flatten_using_ints";
+    case ViewMeta::Type::flatten_named_out_dim:
+      return "flatten_named_out_dim";
+    case ViewMeta::Type::flatten_using_names:
+      return "flatten_using_names";
+    case ViewMeta::Type::flatten_DimnameList:
+      return "flatten_DimnameList";
+    case ViewMeta::Type::permute:
+      return "permute";
+    case ViewMeta::Type::numpy_T:
+      return "numpy_T";
+    case ViewMeta::Type::reshape:
+      return "reshape";
+    case ViewMeta::Type::_reshape_alias:
+      return "_reshape_alias";
+    case ViewMeta::Type::select_Dimname:
+      return "select_Dimname";
+    case ViewMeta::Type::select_int:
+      return "select_int";
+    case ViewMeta::Type::slice_Tensor:
+      return "slice_Tensor";
+    case ViewMeta::Type::split_Tensor:
+      return "split_Tensor";
+    case ViewMeta::Type::split_with_sizes:
+      return "split_with_sizes";
+    case ViewMeta::Type::squeeze:
+      return "squeeze";
+    case ViewMeta::Type::squeeze_dim:
+      return "squeeze_dim";
+    case ViewMeta::Type::squeeze_dimname:
+      return "squeeze_dimname";
+    case ViewMeta::Type::t:
+      return "t";
+    case ViewMeta::Type::view_as:
+      return "view_as";
+    case ViewMeta::Type::_indices:
+      return "_indices";
+    case ViewMeta::Type::values:
+      return "values";
+    case ViewMeta::Type::unbind_int:
+      return "unbind_int";
+    case ViewMeta::Type::unbind_Dimname:
+      return "unbind_Dimname";
+    case ViewMeta::Type::swapaxes:
+      return "swapaxes";
+    case ViewMeta::Type::swapdims:
+      return "swapdims";
+    case ViewMeta::Type::unfold:
+      return "unfold";
+    case ViewMeta::Type::alias:
+      return "alias";
+    case ViewMeta::Type::view_as_real:
+      return "view_as_real";
+    case ViewMeta::Type::view_as_complex:
+      return "view_as_complex";
+    case ViewMeta::Type::_conj:
+      return "_conj";
+    case ViewMeta::Type::_neg_view:
+      return "_neg_view";
+    case ViewMeta::Type::chunk:
+      return "chunk";
+    case ViewMeta::Type::diagonal:
+      return "diagonal";
+    case ViewMeta::Type::diagonal_Dimname:
+      return "diagonal_Dimname";
+    case ViewMeta::Type::expand_as:
+      return "expand_as";
+    case ViewMeta::Type::narrow:
+      return "narrow";
+    case ViewMeta::Type::narrow_Tensor:
+      return "narrow_Tensor";
+    case ViewMeta::Type::movedim_intlist:
+      return "movedim_intlist";
+    case ViewMeta::Type::movedim_int:
+      return "movedim_int";
+    case ViewMeta::Type::reshape_as:
+      return "reshape_as";
+    case ViewMeta::Type::detach:
+      return "detach";
+    case ViewMeta::Type::transpose_int:
+      return "transpose_int";
+    case ViewMeta::Type::transpose_Dimname:
+      return "transpose_Dimname";
+    case ViewMeta::Type::unsqueeze:
+      return "unsqueeze";
+    case ViewMeta::Type::_values:
+      return "_values";
+    case ViewMeta::Type::indices:
+      return "indices";
+    case ViewMeta::Type::view:
+      return "view";
+    case ViewMeta::Type::view_dtype:
+      return "view_dtype";
+      default:
+        return "UNKNOWN_VIEW_TYPE";
   }
 }
 
@@ -193,12 +233,12 @@ void Alias::add_update(const at::Tensor& updated_val, std::vector<ViewMeta> meta
 }
 
 void Alias::apply_update(const Update& update) {
-  // TODO: Should handle more kinds of view ops. Only do reshape now.
+  // TODO: Handle the other important view ops. This requires computing their inverses.
   at::Tensor t = update.new_val;
   for(int i = update.view_metas.size()-1; i >= 0; --i) {
     switch (update.view_metas[i].view_type) {
       case ViewMeta::Type::view:
-          t = t.view_copy(update.view_metas[i].source_size);
+          t = t.view(update.view_metas[i].source_size);
           break;
       case ViewMeta::Type::noOp:
           break;
@@ -206,6 +246,7 @@ void Alias::apply_update(const Update& update) {
           TORCH_CHECK(false, "Other types are not supported yet.");
     }
   }
+  t = t.clone();
   base_.replace_(t);
 }
 
@@ -225,33 +266,9 @@ const Tensor& Tensor::_base() const {
 }
 
 bool Tensor::has_view_meta() const {
-    // We want this function to be fast, since it's used to detect if two tensors alias.
-    // The first check is a fastpath for normal TensorImpl backends that haven't opted into
-    // the functionalization pass.
-    auto functional_impl = dynamic_cast<const at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
-    return functional_impl != nullptr && functional_impl->is_view();
-}
-void Tensor::sync_() const {
-  auto functional_impl = dynamic_cast<at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
-  // Skip if this is not a functional tensor.
-  // This happens when we call repr(tensor), since we need to make sure the tensor is up to date before printing.
-  if (functional_impl != nullptr) {
-    functional_impl->sync_();
-  }
-}
-bool Tensor::is_up_to_date() const {
-  auto functional_impl = dynamic_cast<at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
-    return functional_impl != nullptr && functional_impl->is_up_to_date();
-}
-void Tensor::maybe_add_update() const {
-    auto functional_impl = dynamic_cast<at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
-    functional_impl->maybe_add_update(*this);
-}
-void Tensor::set_view_meta(const at::Tensor& other, ViewMeta meta) const {
-    auto functional_impl = dynamic_cast<at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
-    functional_impl->set_view_meta(other, meta);
+  // Only tensors that are opted into the functionalization pass can have a view meta.
+  auto functional_impl = dynamic_cast<const at::FunctionalTensorImplBase*>(unsafeGetTensorImpl());
+  return functional_impl != nullptr && functional_impl->is_view();
 }
 
 const std::string& Tensor::name() const {

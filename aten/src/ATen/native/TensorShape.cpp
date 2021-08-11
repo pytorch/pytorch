@@ -1,6 +1,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/FunctionalTensorImpl.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
@@ -23,8 +24,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
 #include <torch/library.h>
-
-#include <ATen/FunctionalTensorImpl.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -2454,26 +2453,26 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
 }
 
 Tensor& replace_(Tensor& self, const Tensor& other) {
+  // Note [Functionalization Pass replace_()]
+  // replace_ is only called by users of the functionalization pass.
+  // The precondition is that every tensor's TensorImpl is wrapped
+  // by a FunctionalTensorImplBase, which can safely do the replace.
+  // Every subsequent TensorImpl type knows how to replace its own internals
+  // with another TensorImpl of the same type.
+  auto self_impl = dynamic_cast<FunctionalTensorImplBase*>(self.unsafeGetTensorImpl());
+  auto other_impl = dynamic_cast<FunctionalTensorImplBase*>(other.unsafeGetTensorImpl());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl != nullptr);
   // INVARIANT: inputs to replace_() are always temporaries.
   // They should never have an alias, or be exposed to python.
   // This is important because we want to retain all of the
   // aliasing + python metadata from the original tensor
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!other.has_view_meta());
-  // INVARIANT: replace_ is only called by users of the functionalization pass.
-  // The precondition is that every tensor's TensorImpl is wrapped
-  // by a FunctionalTensorImplBase, which can safely do the replace.
-  auto functional_impl = dynamic_cast<FunctionalTensorImplBase*>(self.unsafeGetTensorImpl());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr && self.key_set().has(c10::DispatchKey::Functionalize));
-  functional_impl->replace_(other);
+  //
+  // In the functorch case, this corresponds to other not being wrapped.
+  // In the XLA case, this corresponds to the XLATensorImpl not having an alias.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl == nullptr || !other_impl->is_view());
+  self_impl->replace_(other);
   return self;
 }
 
 } // namespace native
 } // namespace at
-
-namespace {
-  TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
-    // We need this for the functionalization pass: replace_ shouldn't enter the boxed fallback
-    m.impl("replace_", torch::CppFunction::makeFallthrough());
-  }
-}

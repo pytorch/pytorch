@@ -1,14 +1,15 @@
 from tools.codegen.api import cpp
 from tools.codegen.api.types import DispatcherSignature, CppSignatureGroup
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.context import with_native_function
+from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (
     SelfArgument, Argument, NativeFunction, NativeFunctionsGroup, BaseType, BaseTy,
     ListType, FunctionSchema
 )
-from typing import List, Optional, Sequence, Union
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import concatMap, mapMaybe
+from typing import List, Optional, Union
+from dataclasses import dataclass
+from typing_extensions import Literal
+from tools.codegen.utils import mapMaybe, Target, assert_never
 
 from tools.autograd.gen_inplace_or_view_type import (
     gen_formals, get_view_info, modifies_arguments
@@ -18,14 +19,16 @@ from tools.autograd.gen_trace_type import (
 )
 
 
-INPLACE_OR_OUT_WARN_TEMPLATE = CodeTemplate("""\
+
+WARN_TEMPLATE = CodeTemplate("""\
       if (c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {
           TORCH_WARN("Note: the functionalization pass encountered an operator (${op_name}) that it could not functionalize, \
-because it couldn't find an out-of-place equivalent of the operator to call. Instead, it's calling the inplace operator directly. \
+because it couldn't find an out-of-place equivalent of the operator to call (or because it's a view operator \
+that hasn't been implemented yet). Instead, it's calling the inplace/view operator directly. \
 If this causes problems in your program, consider upstreaming the out-of-place op to PyTorch.");
       }
-      ${maybe_sync_tensor_args}
       at::AutoDispatchBelowFunctionalize guard;
+      ${maybe_sync_tensor_args}
       // Redispatch as normally otherwise, since XLA has its own lowerings for special inplace ops.
       return at::redispatch::${cpp_api_name}(${unpacked_args});
 """)
@@ -48,6 +51,7 @@ VIEW_TEMPLATE = CodeTemplate("""\
       {
         at::AutoDispatchBelowFunctionalize guard;
         auto tmp_out = at::redispatch::${cpp_api_name}(${redispatch_original_args_unwrap_self});
+        // See Note [Wrapping return values in the functionalization pass]
         bool is_modal_pass = c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize);
         if (is_modal_pass) {
           auto self_impl = at::unsafeGetFunctionalImpl(self);
@@ -70,7 +74,7 @@ def post_process_mutable_input(a: Argument) -> Optional[str]:
     if a.annotation and a.annotation.is_write and a.type.is_tensor_like():
         replace_str = f'{a.name}.replace_(tmp_output);'
         debug_str = f'TORCH_INTERNAL_ASSERT_DEBUG_ONLY({a.name}.key_set().has(c10::DispatchKey::Functionalize));'
-        add_update_str = f'{a.name}.maybe_add_update();'
+        add_update_str = f'at::functionalization::impl::maybe_add_update({a.name});'
         return f'{replace_str}\n{debug_str}\n{add_update_str}'
     return None
 
@@ -83,7 +87,7 @@ def maybeUnwrapTensorInput(a: Argument) -> Optional[str]:
     t = a.type
     if not t.is_tensor_like():
         return None
-    return f'auto {maybeUnwrapVarName(a)} = at::functionalization::maybeUnwrapFunctional({a.name});'
+    return f'auto {maybeUnwrapVarName(a)} = at::functionalization::impl::maybeUnwrapFunctional({a.name});'
 
 def return_names_str(f: NativeFunction) -> str:
     if len(f.func.arguments.out) > 0:
@@ -95,7 +99,7 @@ def return_names_str(f: NativeFunction) -> str:
 def gen_clone_output_str(func: FunctionSchema, functionalize: bool) -> str:
     if len(func.returns) == 1 and func.returns[0].type == BaseType(BaseTy.Tensor):
         if functionalize:
-            return 'out = at::functionalization::makeFunctional(tmp_out.clone());'
+            return 'out = at::functionalization::impl::makeFunctional(tmp_out.clone());'
         else:
             return 'out = tmp_out.clone();'
     elif len(func.returns) == 1 \
@@ -104,7 +108,7 @@ def gen_clone_output_str(func: FunctionSchema, functionalize: bool) -> str:
         if functionalize:
             return """\
 for (const auto& t : tmp_out) {{
-    out.push_back(at::functionalization::makeFunctional(t.clone()));
+    out.push_back(at::functionalization::impl::makeFunctional(t.clone()));
 }}"""
         else:
             return """\
@@ -116,13 +120,13 @@ for (const auto& t : tmp_out) {{
 
 def set_view_meta_output(func: FunctionSchema) -> str:
     if len(func.returns) == 1 and func.returns[0].type == BaseType(BaseTy.Tensor):
-        return 'out.set_view_meta(self, view_meta);'
+        return 'at::functionalization::impl::set_view_meta(out, self, view_meta);'
     elif len(func.returns) == 1 \
             and isinstance(func.returns[0].type, ListType) \
             and func.returns[0].type.elem == BaseType(BaseTy.Tensor):
         return """\
 for (auto& t : out) {{
-    t.set_view_meta(self, view_meta);
+    at::functionalization::impl::set_view_meta(t, self, view_meta);'
 }}"""
     else:
         raise AssertionError(f"unsupported return type for op={str(func.name)}. type={str(func.returns)}")
@@ -131,14 +135,12 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
     dispatcher_exprs = dispatcher_sig.exprs()
 
-    # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
-    # See Note [Plumbing Keys Through The Dispatcher] for details.
     dispatch_key_set = 'ks & c10::after_func_keyset'
     redispatch_original_args = ', '.join([dispatch_key_set] + [a.name for a in dispatcher_sig.arguments()])
 
     # This is only used in view/inplace kernels that aren't implemented
     maybe_sync_tensor_args = '\n'.join(mapMaybe(
-        lambda arg: f'at::functionalization::maybe_sync({arg.name});' if arg.type.is_tensor_like() else None,
+        lambda arg: f'at::functionalization::impl::maybe_sync({arg.name});' if arg.type.is_tensor_like() else None,
         f.func.arguments.flat_all))
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
@@ -164,9 +166,11 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
             a.name if not isinstance(a.argument, SelfArgument) else 'self_impl->value()' for a in dispatcher_sig.arguments()])
 
         if str(f.func.name) not in [
+                # TODO: add view operators to this list as we add functionalization support for them.
+                # More complex views might require changes to the codegen output (e.g. split())
                 'view',
         ]:
-            return INPLACE_OR_OUT_WARN_TEMPLATE.substitute(
+            return WARN_TEMPLATE.substitute(
                 op_name=str(f.func.name),
                 cpp_api_name=api_name,
                 maybe_sync_tensor_args=maybe_sync_tensor_args,
@@ -189,7 +193,7 @@ def emit_functionalization_body(f: NativeFunction, g: Optional[NativeFunctionsGr
     if g is None:
         # We can't functionalize this inplace op, since we don't know what the corresponding functional op is.
         cpp_sig = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
-        return INPLACE_OR_OUT_WARN_TEMPLATE.substitute(
+        return WARN_TEMPLATE.substitute(
             op_name=str(f.func.name),
             cpp_api_name=cpp_sig.most_faithful_signature().name(),
             maybe_sync_tensor_args=maybe_sync_tensor_args,
@@ -223,83 +227,55 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-@with_native_function
-def functionalization_definition(g: Union[NativeFunction, NativeFunctionsGroup]) -> List[str]:
-    fs = [g] if isinstance(g, NativeFunction) else g.functions()
-    group: Optional[NativeFunctionsGroup] = None if isinstance(g, NativeFunction) else g
-    outputs = []
-    for f in fs:
-        if get_view_info(f) is None and not modifies_arguments(f):
-            continue
-        if len(f.func.returns) == 0:
-            # TODO: it looks like all the _foreach_ ops fall into this category
-            # Do they.. need to be functionalized?
-            # print("OPERATOR: " + str(f.func.name))
-            continue
-        if get_view_info(f) is not None and modifies_arguments(f):  # view op
-            # TODO: ops that are both views and mutations will require special handling. Pushing off for now.
-            # e.g. transpose_, as_strided_
-            continue
-        outputs.append(METHOD_DEFINITION.substitute(
-            return_type=cpp.returns_type(f.func.returns).cpp_type(),
-            type_wrapper_name=type_wrapper_name(f),
-            formals=gen_formals(f),
-            type_definition_body=emit_functionalization_body(f, group),
-        ))
-    return outputs
-
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
 """)
 
-@with_native_function
-def functionalization_registration(g: Union[NativeFunction, NativeFunctionsGroup]) -> List[str]:
-    fs = [g] if isinstance(g, NativeFunction) else g.functions()
-    group: Optional[NativeFunctionsGroup] = None if isinstance(g, NativeFunction) else g
-    outputs = []
-    for f in fs:
-        if get_view_info(f) is None and not modifies_arguments(f):
-            continue
-        if len(f.func.returns) == 0:
-            continue
-        if get_view_info(f) is not None and modifies_arguments(f):  # view op
-            continue
-        outputs.append(WRAPPER_REGISTRATION.substitute(
-            unqual_operator_name_with_overload=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='functionalization',
-        ))
-    return outputs
+# Generates RegisterFunctionalization.cpp
+# These provide the kernels that run the functionalization pass, which can be opted into
+# per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
+@dataclass(frozen=True)
+class Functionalize:
+    target: Union[
+        Literal[Target.REGISTRATION],
+        Literal[Target.DEFINITION]
+    ]
 
-def gen_functionalization_shard(
-    fm: FileManager, funcs: Sequence[Union[NativeFunction, NativeFunctionsGroup]], suffix: str
-) -> None:
-
-    fm.write_with_template('RegisterFunctionalization%s.cpp' % suffix, 'RegisterFunctionalization.cpp', lambda: {
-        'generated_comment': f'@generated from {fm.template_dir}/RegisterFunctionalization.cpp',
-        'func_definitions': list(concatMap(functionalization_definition, funcs)),
-        'func_registrations': list(concatMap(functionalization_registration, funcs)),
-    })
-
-def gen_functionalization_type(
-    out: str,
-    native_yaml_path: str,
-    funcs: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-    template_path: str
-) -> None:
-    # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
-    # template regarding sharding of the generated files.
-    num_shards = 2
-    shards: List[List[Union[NativeFunction, NativeFunctionsGroup]]] = [[] for _ in range(num_shards)]
-
-    # functions are assigned arbitrarily but stably to a file based on hash
-    for f in funcs:
-        x = sum(ord(c) for c in cpp.name(f.func if isinstance(f, NativeFunction) else f.functional.func)) % num_shards
-        shards[x].append(f)
-
-    fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    for i, shard in enumerate(shards):
-        gen_functionalization_shard(fm, shard, f'_{i}')
-    gen_functionalization_shard(fm, funcs, 'Everything')
+    @method_with_native_function
+    def __call__(self, g: Union[NativeFunction, NativeFunctionsGroup]) -> List[str]:
+        fs = [g] if isinstance(g, NativeFunction) else g.functions()
+        group: Optional[NativeFunctionsGroup] = None if isinstance(g, NativeFunction) else g
+        outputs = []
+        for f in fs:
+            if get_view_info(f) is None and not modifies_arguments(f):
+                continue
+            if len(f.func.returns) == 0:
+                # TODO: it looks like all the _foreach_ ops fall into this category
+                # Do they.. need to be functionalized?
+                # print("OPERATOR: " + str(f.func.name))
+                continue
+            if get_view_info(f) is not None and modifies_arguments(f):  # view op
+                # TODO: ops that are both views and mutations will require special handling. Pushing off for now.
+                # e.g. transpose_, as_strided_
+                continue
+            if self.target is Target.REGISTRATION:
+                output = WRAPPER_REGISTRATION.substitute(
+                    unqual_operator_name_with_overload=f.func.name,
+                    type_wrapper_name=type_wrapper_name(f),
+                    class_type='functionalization',
+                )
+            elif self.target is Target.DEFINITION:
+                output = METHOD_DEFINITION.substitute(
+                    return_type=cpp.returns_type(f.func.returns).cpp_type(),
+                    type_wrapper_name=type_wrapper_name(f),
+                    formals=gen_formals(f),
+                    type_definition_body=emit_functionalization_body(f, group),
+                )
+            elif self.target is Target.DECLARATION:
+                raise NotImplementedError("The functionalization pass doesn't currently expose declarations")
+            else:
+                assert_never(self.target)
+            outputs.append(output)
+        return outputs
