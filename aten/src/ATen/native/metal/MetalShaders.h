@@ -374,7 +374,6 @@ kernel void clamp(texture2d_array<half, access::read> in_arr[[texture(0), functi
                   texture2d_array<half, access::write> out_arr[[texture(1), function_constant(clamp_is_arr)]],
                   texture2d<half, access::write> out_tex[[texture(1), function_constant(clamp_is_tex)]],
                  ushort3 gid[[thread_position_in_grid]]) {
-    
     const ushort w = clamp_is_arr? out_arr.get_width() : out_tex.get_width();
     const ushort h = clamp_is_arr? out_arr.get_height() : out_tex.get_height();
     if (gid.x >= w || gid.y >= h) {
