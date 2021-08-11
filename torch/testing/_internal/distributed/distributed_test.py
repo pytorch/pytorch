@@ -3,6 +3,7 @@ import itertools
 import math
 import os
 import random
+from re import S
 import sys
 import tempfile
 import time
@@ -1163,15 +1164,16 @@ class DistributedTest:
             self._barrier()
             rank = dist.get_rank()
             if rank == 0:
-                rank_to_GPU = self._init_multigpu_helper()
-                device_id = rank_to_GPU[rank][0]
                 with self.assertRaisesRegex(
-                    RuntimeError, "Tensors must be CUDA and dense"
+                    RuntimeError, "dense"
                 ):
                     send_tensor = _build_tensor(rank + 1)
+                    send_tensor = torch.stack([send_tensor, send_tensor, send_tensor], dim=-1)[..., 1]
+                    print(send_tensor.stride())
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
-                    req = dist.batch_isend_irecv([send_op])
-                    req.wait()
+                    reqs = dist.batch_isend_irecv([send_op])
+                    for req in reqs:
+                        req.wait()
 
         # NCCL Batch SEND RECV Op Error
         @sandcastle_skip_if(BACKEND != "nccl", "NCCL Batch Send Recv Only")
@@ -1276,15 +1278,11 @@ class DistributedTest:
             self._test_send_recv_nccl()
 
         @skip_if_no_gpu
-        @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         def test_send_recv_nccl_autograd_profiler(self):
             profiler_ctx = torch.autograd.profiler.profile(record_shapes=True)
             self._test_send_recv_nccl(profiler_ctx)
 
         @skip_if_no_gpu
-        @sandcastle_skip_if(BACKEND != "nccl", "NCCL Send Recv Only")
-        @requires_nccl_version(2700, "Need NCCL 2.7+ for send/recv")
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1340,22 +1338,13 @@ class DistributedTest:
                             self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl"
-        )
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
