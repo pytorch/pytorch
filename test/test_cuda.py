@@ -1636,6 +1636,10 @@ except RuntimeError as e:
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
+
+    # test is flaky in ROCM
+    # https://github.com/pytorch/pytorch/issues/62533
+    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
