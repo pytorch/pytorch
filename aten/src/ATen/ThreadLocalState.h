@@ -35,13 +35,10 @@ class TORCH_API ThreadLocalState {
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;
 
+  uint8_t autograd_tls_;
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
-  bool grad_mode_enabled_;
 #endif
-
-  // TLS for InferenceMode
-  bool inference_mode_enabled_;
 
   // Whether pre-sampling RecordFunction optimization was enabled
   bool bumped_record_all_functions_ = false;
