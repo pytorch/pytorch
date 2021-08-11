@@ -17605,10 +17605,9 @@ class TestLazyModules(TestCase):
         module = nn.Bias(5)
         input = torch.ones(10, 5)
         module(input)
-        self.assertIsInstance(module, nn.Bias)
-        self.assertTrue(module.bias_values.shape == (5,))
+        self.assertEqual(module.bias_values.shape, (5,))
         y = module(input)
-        self.assertTrue(torch.equal(torch.nn.functional.bias(input, module.bias_values), y))
+        self.assertEqual(input + module.bias_values, y)
 
     @suppress_warnings
     def test_linear(self):
