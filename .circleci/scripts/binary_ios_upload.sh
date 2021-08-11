@@ -29,7 +29,7 @@ cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
 export IOS_NIGHTLY_BUILD_VERSION="1.10.0.dev${DATE}"
-export IOS_NIGHTLY_POD_NAME="nightly-test"#"LibTorch-Lite-Nightly"
+export IOS_NIGHTLY_POD_NAME="nightly-test"
 # libtorch_lite_ios_nightly_1.10.0.dev20210810.zip
 ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"
 cd ${ZIP_DIR}
