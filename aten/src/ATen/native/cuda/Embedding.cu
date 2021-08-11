@@ -7,7 +7,6 @@
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCThrustAllocator.cuh>
 #include <THC/THCReduceApplyUtils.cuh>
 
 #include <ATen/cuda/cub.cuh>
@@ -290,9 +289,6 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
       sorted_indices, count, num_weights, padding_idx);
 }
 
-template<typename index_t>
-int embedding_renorm_cuda_unique_copy(Tensor &indices_contig, Tensor &unique_indices);
-
 Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
                                 double max_norm, double norm_type) {
   auto self_arg = TensorArg(self, "self", 1);
@@ -307,11 +303,17 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
     auto num_indices = indices.numel();
     auto indices_contig = std::get<0>(indices.sort()).contiguous();
     auto unique_indices = at::empty(indices.numel(), indices.options());
+    auto num_unique_indices = at::empty({}, indices.options().dtype(kLong));
 
-    auto num_unique_indices = embedding_renorm_cuda_unique_copy<index_t>(indices_contig, unique_indices);
+    cuda::cub::unique(
+      indices_contig.data_ptr<index_t>(),
+      unique_indices.data_ptr<index_t>(),
+      num_unique_indices.data_ptr<int64_t>(),
+      num_indices
+    );
 
-    dim3 grid(num_unique_indices);
-    dim3 block(128);
+    dim3 grid = num_unique_indices.item<int64_t>();
+    dim3 block = 128;
     int dim = self.stride(0);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "embedding_backward", [&] {
