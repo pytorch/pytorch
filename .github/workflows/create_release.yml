@@ -46,3 +46,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: ${{env.PT_RELEASE_FILE}}
+
+concurrency:
+  group: create-release-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
