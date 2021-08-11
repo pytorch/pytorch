@@ -65,4 +65,4 @@ sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ
 cat ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
 
 # push the new LibTorch-Lite-Nightly.podspec to CocoaPods
-pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation private-test-specs ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
