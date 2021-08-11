@@ -53,10 +53,13 @@ set +x
 aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
 
 # create a new LibTorch-Lite-Nightly.podspec from the template
+echo "cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec"
 cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # update pod version
 sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
+cat ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # update the new LibTorch-Lite-Nightly.podspec to CocoaPods
-pod repo push --verbose --allow-warnings --use-libraries --skip-import-validation hanton-private-specs ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
+pod repo add private-test-specs https://github.com/hanton/Specs.git
+pod repo push --verbose --allow-warnings --use-libraries --skip-import-validation private-test-specs ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
