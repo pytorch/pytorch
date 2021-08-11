@@ -61,5 +61,7 @@ sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ
 cat ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # update the new LibTorch-Lite-Nightly.podspec to CocoaPods
-pod repo add private-test-specs https://github.com/hanton/Specs.git
+pod repo add private-test-specs https://gitlab.com/hanton/test.git
+# pod repo add private-test-specs https://github.com/hanton/Specs.git
+# pod trunk register cocoapods@fb.com 'Facebook, Inc.' --description='nightly build'
 pod repo push --verbose --allow-warnings --use-libraries --skip-import-validation private-test-specs ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
