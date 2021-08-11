@@ -31,7 +31,11 @@ from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
-from torch.testing._internal.common_utils import IS_WINDOWS, sandcastle_skip_if
+from torch.testing._internal.common_utils import IS_WINDOWS
+
+if IS_WINDOWS:
+    print("Test fails on windows, see https://github.com/pytorch/pytorch/issues/63086")
+    sys.exit(0)
 
 try:
     import torchvision
@@ -55,10 +59,6 @@ def check_same_model_params(model_a: torch.nn.Module, model_b: torch.nn.Module, 
         assert torch.allclose(b_a, b_b), f"Model buffers differ {b_a} - {b_b}\n" + message
 
 
-@sandcastle_skip_if(
-    IS_WINDOWS,
-    "Test fails on windows, see https://github.com/pytorch/pytorch/issues/63086",
-)
 class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
