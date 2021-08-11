@@ -7507,6 +7507,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         run_test((4, 4), (2, 1, 3, 4, 2))  # broadcasting A
         run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5))  # broadcasting A & b
 
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    # this tests https://github.com/pytorch/pytorch/issues/36921
+    def test_lu_solve_large_matrices(self, device, dtype):
+        def run_test(A_dims, b_dims):
+            b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
+            x = torch.lu_solve(b, LU_data, LU_pivots)
+            Ax = torch.matmul(A, x)
+            self.assertEqual(Ax, b.expand_as(Ax))
+
+        run_test((1, 1), (1, 1, 1025))
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
