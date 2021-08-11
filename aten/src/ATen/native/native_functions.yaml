@@ -10394,35 +10394,35 @@
   python_module: linalg
   variants: function
 
-- func: linalg_pinv(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False) -> Tensor
+- func: linalg_pinv.atol_rtol(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.out(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.atol_rtol_out(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.tol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
+- func: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.out_tol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.atol_rtol_tensor_out(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.numpy(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+- func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.numpy_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
+- func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.numpy_out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.numpy_out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
@@ -10477,35 +10477,35 @@
 - func: linalg_matrix_power.out(Tensor self, int n, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
-- func: linalg_matrix_rank(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank.atol_rtol(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.out(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.atol_rtol_out(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.tol_tensor(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank.atol_rtol_tensor(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.out_tol_tensor(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.atol_rtol_tensor_out(Tensor input, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.numpy(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank(Tensor self, float? tol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.numpy_out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.out(Tensor self, float? tol=None, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.numpy_tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
+- func: linalg_matrix_rank.tol_tensor(Tensor input, Tensor tol, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_matrix_rank.numpy_out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_matrix_rank.out_tol_tensor(Tensor input, Tensor tol, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
