@@ -5,7 +5,7 @@ import warnings
 
 import torch
 from .quant_type import QuantType, quant_type_to_str
-from typing import Tuple
+from typing import Tuple, Any
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
@@ -20,6 +20,16 @@ def is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
                        torch.per_channel_symmetric]
+
+def getattr_from_fqn(gm: Any, fqn: str) -> Any:
+    """
+    Given a gm and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
+    """
+    fqn_parts = fqn.split(".")
+    cur_val = gm
+    for part in fqn_parts:
+        cur_val = getattr(cur_val, part)
+    return cur_val
 
 def get_qparam_dict(observer_or_fake_quant):
     qscheme = observer_or_fake_quant.qscheme if hasattr(observer_or_fake_quant, "qscheme") else None
