@@ -391,7 +391,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_CXX_PYTHON
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_0.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_1.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_2.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_3.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions_4.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
