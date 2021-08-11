@@ -5,6 +5,6 @@
 
 namespace c10d {
 
-typedef c10::intrusive_ptr<ProcessGroup> CreateProcessGroupUCCType(const c10::intrusive_ptr<Store>& store, int rank, int size);
+typedef c10::intrusive_ptr<ProcessGroup> (*CreateProcessGroupUCCType)(const c10::intrusive_ptr<Store>& store, int rank, int size);
 
 } // namespace c10d

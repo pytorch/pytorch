@@ -2,6 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Functions.h>
+#include <ATen/DynamicLibrary.h>
 #include <c10/util/Exception.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/FileStore.hpp>
@@ -26,7 +27,7 @@
 #endif
 
 #ifdef USE_C10D_UCC
-#include <c10d/ProcessGroupUCC.hpp>
+#include <c10d/ucc/ProcessGroupUCC.hpp>
 #endif
 
 namespace c10d {
@@ -224,7 +225,10 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 #endif // USE_C10D_NCCL
     } else if (backend == "_internal_ucc") {
 #ifdef USE_C10D_UCC
-      pg = c10::make_intrusive<ProcessGroupUCC>(
+      static at::DynamicLibrary lib("libtorch_ucc.so");
+      CreateProcessGroupUCCType createProcessGroupUCC = 
+        reinterpret_cast<CreateProcessGroupUCCType>(lib.sym("createProcessGroupUCC"));
+      pg = createProcessGroupUCC(
           prefix_store, rank, world_size);
 #else
       AT_ERROR(

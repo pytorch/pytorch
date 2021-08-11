@@ -24,9 +24,10 @@
 #endif
 
 #ifdef USE_C10D_UCC
-#include <c10d/ProcessGroupUCC.hpp>
+#include <c10d/ucc/ProcessGroupUCC.hpp>
 #endif
 
+#include <ATen/DynamicLibrary.h>
 #include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
@@ -1450,15 +1451,17 @@ Example::
 #endif
 
 #if USE_C10D_UCC
+  static at::DynamicLibrary lib("libtorch_ucc.so");
+  ::c10d::CreateProcessGroupUCCType createProcessGroupUCC = 
+    reinterpret_cast<::c10d::CreateProcessGroupUCCType>(lib.sym("createProcessGroupUCC"));
   auto processGroupUCC =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupUCC>(
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroup>(
           module, "ProcessGroupUCC", processGroup)
           .def(
-              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+              py::init([createProcessGroupUCC](const c10::intrusive_ptr<::c10d::Store>& store,
                           int rank,
                           int size) {
-                return c10::make_intrusive<::c10d::ProcessGroupUCC>(
-                    store, rank, size);
+                return createProcessGroupUCC(store, rank, size);
               }),
               py::arg("store"),
               py::arg("rank"),

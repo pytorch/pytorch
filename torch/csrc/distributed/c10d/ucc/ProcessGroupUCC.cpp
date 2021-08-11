@@ -1,5 +1,6 @@
 #include <c10d/ucc/ProcessGroupUCC.hpp>
 #include <c10d/ucc/UCXUtils.hpp>
+#include <c10/macros/Export.h>
 
 namespace {
 
@@ -327,15 +328,15 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
   TORCH_CHECK(false, "ProcessGroupUCC does not support _allgather_base");
 }
 
-c10::intrusive_ptr<ProcessGroup> createProcessGroupUCC(
-  const c10::intrusive_ptr<Store>& store,
+} // namespace c10d
+
+C10_EXPORT c10::intrusive_ptr<c10d::ProcessGroup> createProcessGroupUCC(
+  const c10::intrusive_ptr<c10d::Store>& store,
   int rank,
   int size) {
-  return c10::make_intrusive<ProcessGroupUCC>(store, rank, size);
+  return c10::make_intrusive<c10d::ProcessGroupUCC>(store, rank, size);
 }
 
-static_assert(std::is_same<CreateProcessGroupUCCType, decltype(createProcessGroupUCC)>::value,
+static_assert(std::is_same<c10d::CreateProcessGroupUCCType, decltype(&createProcessGroupUCC)>::value,
   "CreateProcessGroupUCCType mismatch with createProcessGroupUCC, "
   "if you changed one of them, you should change the other as well");
-
-} // namespace c10d
