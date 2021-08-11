@@ -188,6 +188,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.is_autocast_cpu_enabled,
         torch.set_autocast_cpu_dtype,
         torch.get_autocast_cpu_dtype,
+        torch.get_autocast_gpu_dtype,
+        torch.set_autocast_gpu_dtype,
         torch.autocast_increment_nesting,
         torch.autocast_decrement_nesting,
         torch.nn.functional.hardswish,
