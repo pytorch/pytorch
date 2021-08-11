@@ -8,9 +8,9 @@ from typing import Optional, List
 from tools.codegen.api.types import CppSignatureGroup
 from tools.codegen.api import cpp
 import tools.codegen.api.python as python
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.gen import parse_native_yaml
 from tools.codegen.context import with_native_function
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import NativeFunction, TensorOptionsArguments, Variant
 
 OPTIONAL_TYPE_PATTERN = re.compile(r"c10::optional<(.+)>")
