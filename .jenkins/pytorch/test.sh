@@ -339,15 +339,15 @@ test_custom_backend() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
     echo "Testing custom backends"
     CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    pushd test/custom_backend
+    # pushd test/custom_backend
     cp -a "$CUSTOM_BACKEND_BUILD" build
     # Run tests Python-side and export a lowered module.
-    python test_custom_backend.py -v
-    python backend.py --export-module-to=model.pt
+    python test/custom_backend/test_custom_backend.py -v
+    python test/custom_backend/backend.py --export-module-to=./test/custom_backend/model.pt
     # Run tests C++-side and load the exported lowered module.
-    build/test_custom_backend ./model.pt
-    rm -f ./model.pt
-    popd
+    "$CUSTOM_BACKEND_BUILD"/test_custom_backend ./test/custom_backend/model.pt
+    rm -f ./test/custom_backend/model.pt
+    # popd
     assert_git_not_dirty
   fi
 }

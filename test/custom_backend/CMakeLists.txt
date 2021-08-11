@@ -11,3 +11,8 @@ target_link_libraries(custom_backend "${TORCH_LIBRARIES}")
 add_executable(test_custom_backend test_custom_backend.cpp)
 set_property(TARGET test_custom_backend PROPERTY CXX_STANDARD 14)
 target_link_libraries(test_custom_backend custom_backend)
+
+if(INSTALL_TEST)
+    install(TARGETS test_custom_backend DESTINATION bin)
+    install(TARGETS custom_backend DESTINATION lib)
+endif()
