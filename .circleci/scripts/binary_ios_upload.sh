@@ -55,7 +55,8 @@ aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
 
 # create a new LibTorch-Lite-Nightly.podspec from the template
 echo "cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec"
-cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+# cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
 
 # update pod info
 sed -i '' -e "s/IOS_NIGHTLY_POD_NAME/${IOS_NIGHTLY_POD_NAME}/g" ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
