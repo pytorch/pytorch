@@ -6,6 +6,8 @@ on:
     branches: [master]
   release:
     types: [published]
+  pull_request:
+    paths: [.github/workflows/create_release.yml]
 
 jobs:
   release:
@@ -15,9 +17,15 @@ jobs:
       - uses: actions/checkout@v2
         with:
           submodules: 'recursive'
+      - name: Fake name for PRs
+        if: ${{ github.event_name == 'pull_request' }}
+        run: echo "PT_GITHUB_REF=refs/tags/pr-tag" >> "$GITHUB_ENV"
+      - name: Real name for non-PRs
+        if: ${{ github.event_name != 'pull_request' }}
+        run: echo "PT_GITHUB_REF=$GITHUB_REF" >> "$GITHUB_ENV"
       - name: Set filenames
         run: |
-          tag_or_branch="${GITHUB_REF#refs/tags/}"
+          tag_or_branch="${PT_GITHUB_REF#refs/tags/}"
           tag_or_branch="${tag_or_branch#refs/heads/}"
           echo "PT_RELEASE_NAME=pytorch-$tag_or_branch" >> "$GITHUB_ENV"
           echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz" >> "$GITHUB_ENV"
