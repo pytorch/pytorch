@@ -16,11 +16,11 @@ prof = profile(
 
 def enter(signum, frame):
     print("start profiling")
-    prof.__enter__()
+    prof.start()
 
 def exit(signum, frame):
     print("exit profiling")
-    prof.__exit__(None, None, None)
+    prof.stop()
 
 signal.signal(signal.SIGUSR1, enter)
 signal.signal(signal.SIGUSR2, exit)
