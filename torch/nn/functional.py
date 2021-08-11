@@ -2771,6 +2771,7 @@ def cross_entropy(
     ignore_index: int = -100,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
+    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""This criterion computes the cross entropy loss between input and target.
 
@@ -2836,7 +2837,7 @@ def cross_entropy(
         )
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index)
+    return torch._C._nn.cross_entropy_loss(input, target, weight, _Reduction.get_enum(reduction), ignore_index, label_smoothing)
 
 
 def binary_cross_entropy(

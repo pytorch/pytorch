@@ -16897,6 +16897,49 @@ class TestNNDeviceType(NNTestCase):
                 output_one_hot = m(input, target_one_hot)
                 self.assertEqual(output, output_one_hot)
 
+    def test_cross_entropy_consistent_label_smoothing_errors(self, device):
+        N, C = 10, 4
+        input = torch.randn(N, C, requires_grad=True, device=device)
+        target = torch.empty(N, dtype=torch.long, device=device).random_(0, C)
+
+        bad_target = torch.empty_like(input, device=device)
+        loss = nn.CrossEntropyLoss(label_smoothing=0.3)
+        with self.assertRaisesRegex(RuntimeError,
+                                    r'target must be specified as class indices to use label_smoothing'):
+            loss(input, bad_target)
+
+        loss = nn.CrossEntropyLoss(label_smoothing=0.3, ignore_index=1)
+        with self.assertRaisesRegex(RuntimeError, r'ignore_index is not supported to use label_smoothing'):
+            loss(input, target)
+
+
+    def test_cross_entropy_label_smoothing_consistent_index_target_and_probs(self, device):
+        N, C = 10, 4
+        ks = range(5)
+        reductions = ['none', 'mean', 'sum']
+        weights = [None, torch.randn(C, device=device).abs()]
+        label_smoothings = [0.05, 0.15]
+
+        for k, reduction, w, label_smoothing in product(ks, reductions, weights, label_smoothings):
+            other_dims = [torch.randint(2, 5, size=(1,)).item() for _ in range(k)]
+            input = torch.randn(N, C, *other_dims, device=device, requires_grad=True)
+            target = torch.empty(N, *other_dims, dtype=torch.long, device=device).random_(0, C)
+
+            # construct target probablity that should have the same result as label_smoothing
+            target_prob = torch.full_like(input, fill_value=label_smoothing/(C - 1), device=device)
+            src = torch.full(target.shape, 1 - label_smoothing, device=device)
+            target_prob.scatter_(1, target.unsqueeze(1), src.unsqueeze(1))
+
+            loss = nn.CrossEntropyLoss(reduction=reduction, weight=w)
+            output_with_prob = loss(input, target_prob)
+
+            loss = nn.CrossEntropyLoss(
+                reduction=reduction, label_smoothing=label_smoothing, weight=w)
+            output_with_index = loss(input, target)
+
+            self.assertEqual(output_with_prob, output_with_index, rtol=1e-5, atol=1e-6)
+
+
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)

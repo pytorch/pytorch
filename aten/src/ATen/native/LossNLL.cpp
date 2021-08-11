@@ -497,23 +497,78 @@ Tensor cross_entropy_loss_prob_target(
   }
 }
 
+Tensor cross_entropy_loss_label_smoothing(
+    const Tensor& self,
+    const Tensor& target,
+    const Tensor& weight,
+    int64_t reduction,
+    double label_smoothing) {
+
+    auto input = at::log_softmax(self, 1, self.scalar_type());
+    auto nllloss = at::nll_loss_nd(input, target, weight, Reduction::None);
+
+    auto n_classes = input.size(1);
+
+    auto eps_i = label_smoothing / (n_classes - 1);
+    Tensor smooth_loss;
+
+    if (weight.defined()) {
+      // Expand weight to the correct number of dims for broadcasting with input / target
+      auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+      std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+      weight_broadcast_shape[1] = weight.size(0);
+      Tensor weight_ = weight.view(weight_broadcast_shape);
+
+      smooth_loss = -at::sum(input * weight_, 1);
+    } else {
+      smooth_loss = -at::sum(input, 1);
+    }
+
+    auto unreduced_loss = (1 - label_smoothing - eps_i) * nllloss + eps_i * smooth_loss;
+    Tensor ret;
+    switch (reduction) {
+      case Reduction::Mean:
+         ret = at::mean(unreduced_loss);
+        break;
+      case Reduction::Sum:
+        ret = at::sum(unreduced_loss);
+        break;
+      case Reduction::None:
+        ret = unreduced_loss;
+        break;
+      default:
+        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+    }
+
+    return ret;
+}
+
 Tensor cross_entropy_loss(
     const Tensor& self,
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction,
-    int64_t ignore_index) {
+    int64_t ignore_index,
+    double label_smoothing) {
   Tensor ret;
   if (self.sizes() == target.sizes()) {
     // Assume soft targets when input and target shapes are the same
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
     TORCH_CHECK(ignore_index < 0, "ignore_index is not supported for floating point target");
+    TORCH_CHECK(label_smoothing == 0.0, "target must be specified as class indices to use label_smoothing")
 
     // See [Note: hacky wrapper removal for optional tensor]
     c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
     const Tensor& weight_ = *weight_maybe_owned;
     ret = cross_entropy_loss_prob_target(self, target, weight_, reduction);
+  } else if (0.0 < label_smoothing && label_smoothing < 1.0) {
+    TORCH_CHECK(ignore_index < 0, "ignore_index is not supported to use label_smoothing");
+
+    // See [Note: hacky wrapper removal for optional tensor]
+    c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight);
+    const Tensor& weight_ = *weight_maybe_owned;
+    ret = cross_entropy_loss_label_smoothing(self, target, weight_, reduction, label_smoothing);
   } else {
     ret = at::nll_loss_nd(
         at::log_softmax(self, 1, self.scalar_type()),
