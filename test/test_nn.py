@@ -16464,6 +16464,11 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out1, out2, atol=prec, rtol=0, exact_dtype=False)
         self.assertEqual(input1.grad.data, input2.grad.data, atol=prec, rtol=0, exact_dtype=False)
 
+    @onlyCPU
+    def test_activations_bfloat16_cpu(self, device):
+        self._test_bfloat16_ops(torch.nn.Hardshrink(), device, inp_dims=(5), prec=1e-2)
+        self._test_bfloat16_ops(torch.nn.Softshrink(), device, inp_dims=(5), prec=1e-2)
+
     @onlyCUDA
     def test_activations_bfloat16(self, device):
         self._test_bfloat16_ops(torch.nn.ReLU(), device, inp_dims=(5), prec=1e-2)

@@ -52,13 +52,13 @@ inline void _vec_log_sigmoid(Tensor& output, Tensor& buffer, const Tensor& input
 }
 
 static void log_sigmoid_cpu_kernel(Tensor& output, Tensor& buffer, const Tensor& input) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, input.scalar_type(), "log_sigmoid_cpu", [&] {
     _vec_log_sigmoid<scalar_t>(output, buffer, input);
   });
 }
 
 static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
     auto zero_val = scalar_t(0);
     auto zero_vec = Vec(zero_val);
@@ -240,7 +240,7 @@ void GeluBackwardKernelImpl(TensorIteratorBase& it) {
 }
 
 void hardsigmoid_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardsigmoid_cpu", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t six(6.0f);
@@ -263,7 +263,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
 }
 
 void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardsigmoid_backward", [&] {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t neg_three(-3.0f);
@@ -286,7 +286,7 @@ void hardsigmoid_backward_kernel(TensorIteratorBase& iter) {
 }
 
 void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardshrink_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardshrink_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
         iter,
@@ -301,7 +301,7 @@ void hardshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "softshrink_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "softshrink_cpu", [&]() {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
       return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : scalar_t(0));
@@ -310,7 +310,7 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
 }
 
 void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "shrink_backward_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "shrink_backward_cpu", [&] {
     auto lambd_val = lambd.to<scalar_t>();
     cpu_kernel_vec(
         iter,
@@ -340,7 +340,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
 }
 
 void hardswish_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardswish_cpu", [&]() {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t six(6.0f);
@@ -364,7 +364,7 @@ void hardswish_kernel(TensorIterator& iter) {
 }
 
 void hardswish_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hardswish_backward_cpu", [&]() {
     const scalar_t zero(0.0f);
     const scalar_t three(3.0f);
     const scalar_t neg_three(-3.0f);
