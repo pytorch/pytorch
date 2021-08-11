@@ -2,7 +2,6 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Functions.h>
-#include <ATen/DynamicLibrary.h>
 #include <c10/util/Exception.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/FileStore.hpp>
@@ -222,17 +221,6 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 #else
       AT_ERROR(
           "Attempting to create NCCL-based process group while NCCL is either not enabled or built");
-#endif // USE_C10D_NCCL
-    } else if (backend == "_internal_ucc") {
-#ifdef USE_C10D_UCC
-      static at::DynamicLibrary lib("libtorch_ucc.so");
-      CreateProcessGroupUCCType createProcessGroupUCC = 
-        reinterpret_cast<CreateProcessGroupUCCType>(lib.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
-      pg = createProcessGroupUCC(
-          prefix_store, rank, world_size);
-#else
-      AT_ERROR(
-          "Attempting to create UCC-based process group while UCC is either not enabled or built");
 #endif // USE_C10D_NCCL
     } else {
       // TODO: discuss to figure out how to extend this to third party backends?

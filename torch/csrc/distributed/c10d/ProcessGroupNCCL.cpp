@@ -449,7 +449,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       options_(options),
       ncclCommCounter_(0),
-      terminateProcessGroup_(false) {
+      terminateProcessGroup_(false),
+      libucc("libtorch_ucc.so", nullptr, true),
+      createProcessGroupUCC(nullptr) {
+  if (libucc.available()) {
+    createProcessGroupUCC = 
+      reinterpret_cast<CreateProcessGroupUCCType>(libucc.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
+    pg_ucc = createProcessGroupUCC(store, rank, size);
+  }
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");

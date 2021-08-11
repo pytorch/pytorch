@@ -23,11 +23,6 @@
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
 
-#ifdef USE_C10D_UCC
-#include <c10d/ucc/ProcessGroupUCC.hpp>
-#endif
-
-#include <ATen/DynamicLibrary.h>
 #include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
@@ -1448,25 +1443,6 @@ Example::
         return ::c10d::ProcessGroupMPI::createProcessGroupMPI(ranks);
       },
       py::call_guard<py::gil_scoped_release>());
-#endif
-
-#if USE_C10D_UCC
-  static at::DynamicLibrary lib("libtorch_ucc.so");
-  ::c10d::CreateProcessGroupUCCType createProcessGroupUCC = 
-    reinterpret_cast<::c10d::CreateProcessGroupUCCType>(lib.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
-  auto processGroupUCC =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroup>(
-          module, "ProcessGroupUCC", processGroup)
-          .def(
-              py::init([createProcessGroupUCC](const c10::intrusive_ptr<::c10d::Store>& store,
-                          int rank,
-                          int size) {
-                return createProcessGroupUCC(store, rank, size);
-              }),
-              py::arg("store"),
-              py::arg("rank"),
-              py::arg("size"),
-              py::call_guard<py::gil_scoped_release>());
 #endif
 
   intrusive_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")

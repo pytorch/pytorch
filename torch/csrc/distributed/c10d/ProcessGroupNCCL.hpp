@@ -15,6 +15,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/DynamicLibrary.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -22,6 +23,8 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
+
+#include <c10d/ucc/ProcessGroupUCC.hpp>
 
 namespace c10d {
 
@@ -559,6 +562,10 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
+
+  at::DynamicLibrary libucc;
+  CreateProcessGroupUCCType createProcessGroupUCC;
+  c10::intrusive_ptr<ProcessGroup> pg_ucc;
 };
 
 } // namespace c10d
