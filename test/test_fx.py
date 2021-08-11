@@ -1903,6 +1903,25 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'cannot contain a Node'):
             traced_graph = MyTracer().trace(CallsModWithDict())
 
+    def test_module_deepcopy_edit_nodes(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+        traced1 = symbolic_trace(Foo())
+        copied = copy.deepcopy(traced1)
+
+        for node in copied.graph.nodes:
+            if node.target == torch.relu:
+                node.target = torch.neg
+
+        copied.recompile()
+        traced1.recompile()
+
+        x = torch.randn(15, 15)
+        torch.testing.assert_allclose(traced1(x), torch.relu(x))
+        torch.testing.assert_allclose(copied(x), torch.neg(x))
+
     def test_direct_param_use(self):
         class TransposeTest(torch.nn.Module):
             def __init__(self):
