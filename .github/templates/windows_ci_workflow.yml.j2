@@ -263,9 +263,9 @@ jobs:
   render_test_results:
     needs: [generate-test-matrix, test, !{{ ciflow_config.root_job_name }}]
 {%- if only_build_on_pull_request %}
-    if:  ${{ github.event_name == 'push' && (needs.test.result == 'success' || needs.test.result == 'failure') }}
+    if: ${{ github.event_name == 'push' && (needs.test.result != 'skipped' || failure()) }}
 {%- else %}
-    if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
+    if: ${{ needs.test.result != 'skipped' || failure() }}
 {%- endif %}
     runs-on: linux.2xlarge
     strategy:
