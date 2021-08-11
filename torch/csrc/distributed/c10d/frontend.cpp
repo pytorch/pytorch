@@ -227,7 +227,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 #ifdef USE_C10D_UCC
       static at::DynamicLibrary lib("libtorch_ucc.so");
       CreateProcessGroupUCCType createProcessGroupUCC = 
-        reinterpret_cast<CreateProcessGroupUCCType>(lib.sym("createProcessGroupUCC"));
+        reinterpret_cast<CreateProcessGroupUCCType>(lib.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
       pg = createProcessGroupUCC(
           prefix_store, rank, world_size);
 #else
