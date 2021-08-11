@@ -190,13 +190,13 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TORCH_BIN_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TORCH_BIN_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TORCH_BIN_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TORCH_TEST_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TORCH_TEST_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TORCH_TEST_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
 
-    aten/tools/run_tests.sh "$TORCH_BIN_DIR"
+    aten/tools/run_tests.sh "$TORCH_TEST_DIR"
     assert_git_not_dirty
   fi
 }
