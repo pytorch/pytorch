@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/AutogradTLS.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {
@@ -25,6 +26,18 @@ struct TORCH_API AutoGradMode {
 // gradients.
 struct TORCH_API NoGradGuard : public AutoGradMode {
   NoGradGuard() : AutoGradMode(/*enabled=*/false) {}
+};
+
+// A RAII, thread local (!) guard that enables or disables forward grad mode
+// upon construction, and sets it back to the original value upon destruction.
+struct TORCH_API AutoFwGradMode {
+  AutoFwGradMode(bool enabled) : prev_mode(AutogradTLS::get_fw_grad_mode()) {
+    AutogradTLS::set_fw_grad_mode(enabled);
+  }
+  ~AutoFwGradMode() {
+    AutogradTLS::set_fw_grad_mode(prev_mode);
+  }
+  bool prev_mode;
 };
 
 } // namespace c10
