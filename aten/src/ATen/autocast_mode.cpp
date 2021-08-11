@@ -57,6 +57,9 @@ thread_local int nesting = 0;
 
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;
+
+// autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
+at::ScalarType autocast_gpu_dtype = at::kHalf;
 }
 
 void clear_cache() {
@@ -71,6 +74,10 @@ int decrement_nesting() {
   return --nesting;
 }
 
+at::ScalarType get_autocast_gpu_dtype() {
+  return autocast_gpu_dtype;
+}
+
 at::ScalarType get_autocast_cpu_dtype() {
   return autocast_cpu_dtype;
 }
@@ -80,6 +87,10 @@ void set_autocast_cpu_dtype(at::ScalarType dtype) {
       dtype == at::kBFloat16,
       "Currently, AutocastCPU only support Bfloat16 as the autocast_cpu_dtype");
   autocast_cpu_dtype = dtype;
+}
+
+void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  autocast_gpu_dtype = dtype;
 }
 
 // Overload to catch Tensor args
