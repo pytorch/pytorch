@@ -12,7 +12,6 @@ struct TORCH_API AutogradTLS {
   static uint8_t get_mode();
   static void set_mode(uint8_t flag);
   static void set_grad_mode(bool enabled);
-  static void set_fw_grad_mode(bool enabled);
   static void set_inference_mode(bool enabled);
   static bool get_grad_mode();
   static bool get_fw_grad_mode();
