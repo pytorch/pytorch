@@ -119,6 +119,32 @@ class TestProfiler(TestCase):
         if use_cuda:
             z = z.cpu()
 
+    def test_module_backward_profiling(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(1, 1, bias=False)
+                self.lin2 = nn.Linear(1, 1, bias=False)
+
+            def forward(self, x):
+                return self.lin2(self.lin(x))
+
+        m = MyModule()
+        m2 = MyModule()
+        inp = torch.ones(1)
+        torch.autograd.profiler.enable_backward_profiling_for_module(m, recursive=True)
+        loss = m(m2(inp)).sum()
+        with torch.autograd.profiler.profile() as prof:
+            loss.backward()
+
+        module_bwd_event = [e for e in prof.function_events if e.name.startswith(m.__class__.__name__)][0]
+        self.assertEqual(module_bwd_event.count, 1)
+        expected_lin_count = 2
+        for evt in module_bwd_event.cpu_children:
+            if evt.name.startswith('Linear'):
+                expected_lin_count -= evt.count
+        self.assertTrue(expected_lin_count == 0)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()

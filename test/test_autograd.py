@@ -124,6 +124,26 @@ class TestAutograd(TestCase):
         loss.backward()
         self.assertTrue(m._hook_called)
 
+    def test_backward_hook_example(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(1, 1, bias=False)
+            def forward(self, x):
+                return self.lin(x)
+
+        inp = torch.ones(1)
+        m2 = MyModule()
+        m = MyModule()
+        def my_hook(module, gin, gout):
+            print(f"running bwd hook for {module.__class__.__name__}")
+
+        m.register_full_backward_hook(my_hook)
+        m.lin.register_full_backward_hook(my_hook)
+        out = m(m2(inp)).sum()
+        # out = m(inp).sum()
+        out.backward()
+
     def test_function(self):
         class MyFunction(Function):
 

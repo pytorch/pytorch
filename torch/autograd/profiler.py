@@ -37,6 +37,23 @@ except ImportError:
 
             return wrapped
 
+# TODO: Find a better place to put this.
+def enable_backward_profiling_for_module(module, recursive=False):
+    def rf_enter(mod, grad_output):
+        module_name = mod.__class__.__name__
+        rf = torch.ops.profiler._record_function_enter(f"{module_name}.backward")
+        mod._record_function = rf
+
+    def rf_exit(mod, grad_input, grad_output):
+        assert mod._record_function is not None
+        torch.ops.profiler._record_function_exit(mod._record_function)
+
+    module._register_pre_backward_hook(rf_enter)
+    module.register_full_backward_hook(rf_exit)
+    if recursive:
+        for submodule in module.modules():
+            if submodule is not module:
+                enable_backward_profiling_for_module(submodule, recursive)
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
