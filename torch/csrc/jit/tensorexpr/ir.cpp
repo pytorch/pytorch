@@ -224,6 +224,16 @@ std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<Var*>& v) {
   return result;
 }
 
+bool immediateIsNegative(Expr* e) {
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value() < 0;                          \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
