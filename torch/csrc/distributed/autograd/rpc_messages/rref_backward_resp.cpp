@@ -4,8 +4,8 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-c10::intrusive_ptr<rpc::Message> RRefBackwardResp::toMessageImpl() && {
-  return c10::make_intrusive<rpc::Message>(
+c10::intrusive_ptr<rpc::OutgoingMessage> RRefBackwardResp::toMessageImpl() && {
+  return c10::make_intrusive<rpc::OutgoingMessage>(
       std::vector<char>{},
       std::vector<torch::Tensor>{},
       rpc::MessageType::RREF_BACKWARD_RESP);

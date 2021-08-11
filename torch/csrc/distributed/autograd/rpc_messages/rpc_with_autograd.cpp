@@ -11,6 +11,7 @@ namespace autograd {
 
 using rpc::Message;
 using rpc::MessageType;
+using rpc::OutgoingMessage;
 using rpc::RpcCommandBase;
 using rpc::worker_id_t;
 
@@ -18,7 +19,7 @@ RpcWithAutograd::RpcWithAutograd(
     worker_id_t fromWorkerId,
     MessageType messageType,
     const AutogradMetadata& autogradMetadata,
-    c10::intrusive_ptr<rpc::Message> wrappedMessage,
+    c10::intrusive_ptr<rpc::OutgoingMessage> wrappedMessage,
     std::unordered_map<c10::Device, c10::Device> deviceMap)
     : fromWorkerId_(fromWorkerId),
       messageType_(messageType),
@@ -53,7 +54,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> RpcWithAutograd::toMessageImpl() && {
   auto messageId = wrappedMessage_->id();
   auto wrappedMessageType = wrappedMessage_->type();
 
@@ -84,7 +85,7 @@ c10::intrusive_ptr<Message> RpcWithAutograd::toMessageImpl() && {
   // encoding.
   rpc::writeWrappedPayload(payload, additionalPayload);
 
-  return c10::make_intrusive<Message>(
+  return c10::make_intrusive<OutgoingMessage>(
       std::move(payload), std::move(tensors_), messageType_, messageId);
 }
 

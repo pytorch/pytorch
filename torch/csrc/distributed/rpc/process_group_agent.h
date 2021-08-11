@@ -35,11 +35,11 @@ struct TORCH_API ProcessGroupRpcBackendOptions : public RpcBackendOptions {
 // SendWork and RecvWork will be put into a task queue, and later picked up by
 // worker threads from the same ThreadPool.
 struct TORCH_API SendWork {
-  SendWork(const WorkerInfo& to, c10::intrusive_ptr<Message> message)
+  SendWork(const WorkerInfo& to, c10::intrusive_ptr<OutgoingMessage> message)
       : to_(to), message_(std::move(message)) {}
 
   const WorkerInfo& to_;
-  c10::intrusive_ptr<Message> message_;
+  c10::intrusive_ptr<OutgoingMessage> message_;
 };
 
 // SendWork wraps a Message and RecvWork wraps a Tensor. The difference here is
@@ -92,7 +92,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // consume SendWork from the queue and send it out.
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      c10::intrusive_ptr<Message> message,
+      c10::intrusive_ptr<OutgoingMessage> message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;
@@ -100,7 +100,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // put SendWork into a queue and notify the worker thread
   virtual void enqueueSend(SendWork work);
   // Bypass handleSend() logic and send a message to self rank
-  virtual void sendToSelf(c10::intrusive_ptr<Message> message);
+  virtual void sendToSelf(c10::intrusive_ptr<OutgoingMessage> message);
 
  private:
   class MessageCounter {
@@ -182,7 +182,7 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // future is marked with the passed in message, and then removed from the
   // futures_ map. It is also removed from the futureTimeouts_ map since these
   // maps are kept in sync.
-  void markFutureWithError(Message& message);
+  void markFutureWithError(OutgoingMessage& message);
   void markFutureWithError(int64_t id, std::string errorMsg);
 
   // Note [Termination Detection]

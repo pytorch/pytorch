@@ -34,7 +34,7 @@ class TORCH_API PythonRemoteCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<PythonRemoteCall> fromMessage(const Message& message);
 
  private:

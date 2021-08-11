@@ -66,7 +66,7 @@ void RpcWithProfilingResp::setWrappedRpc(
   wrappedRpc_ = std::move(wrappedRpc);
 }
 
-c10::intrusive_ptr<rpc::Message> RpcWithProfilingResp::toMessageImpl() && {
+c10::intrusive_ptr<rpc::OutgoingMessage> RpcWithProfilingResp::toMessageImpl() && {
   auto wrappedMsgId = wrappedMessage_->id();
   auto wrappedMsgType = wrappedMessage_->type();
   auto wrappedPayload = std::move(*wrappedMessage_).movePayload();
@@ -86,7 +86,7 @@ c10::intrusive_ptr<rpc::Message> RpcWithProfilingResp::toMessageImpl() && {
       jit::pickle(c10::ivalue::Tuple::create(std::move(ivalues)), &tensorTable);
   rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
 
-  auto returnMsg = c10::make_intrusive<rpc::Message>(
+  auto returnMsg = c10::make_intrusive<rpc::OutgoingMessage>(
       std::move(wrappedPayload),
       std::move(tensors_),
       messageType_,

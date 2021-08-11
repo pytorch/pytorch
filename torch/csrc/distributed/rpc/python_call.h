@@ -12,7 +12,7 @@ class TORCH_API PythonCall final : public RpcCommandBase {
  public:
   PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution);
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
 
   static std::unique_ptr<PythonCall> fromMessage(const Message& message);
 

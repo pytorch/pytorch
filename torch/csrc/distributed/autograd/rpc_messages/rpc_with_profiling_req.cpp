@@ -15,7 +15,7 @@ using rpc::RpcCommandBase;
 // client.
 RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::MessageType messageType,
-    c10::intrusive_ptr<rpc::Message> wrappedMessage,
+    c10::intrusive_ptr<rpc::OutgoingMessage> wrappedMessage,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig,
     rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
@@ -59,7 +59,7 @@ void RpcWithProfilingReq::setWrappedRpc(
   wrappedRpc_ = std::move(wrappedRpc);
 }
 
-c10::intrusive_ptr<rpc::Message> RpcWithProfilingReq::toMessageImpl() && {
+c10::intrusive_ptr<rpc::OutgoingMessage> RpcWithProfilingReq::toMessageImpl() && {
   // save the original message ID and type before moving it.
   auto wrappedMsgId = wrappedMessage_->id();
   auto wrappedMsgType = wrappedMessage_->type();
@@ -80,7 +80,7 @@ c10::intrusive_ptr<rpc::Message> RpcWithProfilingReq::toMessageImpl() && {
   // add the profiling payload to the wrapped payload
   rpc::writeWrappedPayload(wrappedPayload, profilingPayload);
   // Put the wrapped payload into a message to return.
-  auto returnMsg = c10::make_intrusive<rpc::Message>(
+  auto returnMsg = c10::make_intrusive<rpc::OutgoingMessage>(
       std::move(wrappedPayload),
       std::move(tensors_),
       messageType_,

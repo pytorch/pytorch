@@ -50,7 +50,7 @@ void RpcAgent::shutdown() {
 
 c10::intrusive_ptr<JitFuture> RpcAgent::sendWithRetries(
     const WorkerInfo& to,
-    c10::intrusive_ptr<Message> message,
+    c10::intrusive_ptr<OutgoingMessage> message,
     RpcRetryOptions retryOptions) {
   TORCH_CHECK(retryOptions.maxRetries >= 0, "maxRetries cannot be negative.");
   TORCH_CHECK(

@@ -47,7 +47,7 @@ class TORCH_API FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Faulty send function for this class.
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      c10::intrusive_ptr<Message> message,
+      c10::intrusive_ptr<OutgoingMessage> message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;
@@ -61,7 +61,7 @@ class TORCH_API FaultyProcessGroupAgent : public ProcessGroupAgent {
   // Overrides ProcessGroupAgent's enqueueSend to inject delays.
   void enqueueSend(SendWork work) override;
   // Override ProcessGroupAgent's sendToSelf to inject delays.
-  void sendToSelf(c10::intrusive_ptr<Message> message) override;
+  void sendToSelf(c10::intrusive_ptr<OutgoingMessage> message) override;
   // This function parses the list of strings passed in by the python tests and
   // resolves the Message Types that must use the faulty send.
   std::vector<MessageType> parseMessagesToFailInput(

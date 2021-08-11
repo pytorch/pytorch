@@ -77,8 +77,8 @@ ContextPtr addRecvRpcBackward(
   return autogradContext;
 }
 
-c10::intrusive_ptr<Message> getMessageWithProfiling(
-    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMessage,
+c10::intrusive_ptr<rpc::OutgoingMessage> getMessageWithProfiling(
+    c10::intrusive_ptr<torch::distributed::rpc::OutgoingMessage> wrappedRpcMessage,
     MessageType msgType,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
   auto& remoteProfilerManager =
@@ -100,9 +100,9 @@ c10::intrusive_ptr<Message> getMessageWithProfiling(
   return std::move(wrappedProfilingMsg).toMessage();
 }
 
-c10::intrusive_ptr<Message> getMessageWithAutograd(
+c10::intrusive_ptr<rpc::OutgoingMessage> getMessageWithAutograd(
     const rpc::worker_id_t dstId,
-    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::OutgoingMessage> wrappedRpcMsg,
     MessageType msgType,
     bool forceGradRecording,
     const std::unordered_map<c10::Device, c10::Device>& deviceMap) {
@@ -145,7 +145,7 @@ c10::intrusive_ptr<Message> getMessageWithAutograd(
 c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
-    c10::intrusive_ptr<torch::distributed::rpc::Message> wrappedRpcMsg,
+    c10::intrusive_ptr<torch::distributed::rpc::OutgoingMessage> wrappedRpcMsg,
     bool forceGradRecording,
     const float rpcTimeoutSeconds,
     bool forceDisableProfiling) {

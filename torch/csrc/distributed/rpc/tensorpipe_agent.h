@@ -178,7 +178,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      c10::intrusive_ptr<Message> message,
+      c10::intrusive_ptr<OutgoingMessage> message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout,
       const DeviceMap& deviceMap = {}) override;
 
@@ -224,7 +224,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // is a protected method since it is overwritten by FaultyTensorPipeAgent
   virtual void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      c10::intrusive_ptr<Message> message,
+      c10::intrusive_ptr<OutgoingMessage> message,
       std::vector<c10::Device>&& devices,
       std::vector<c10::Stream> streams,
       std::function<void(const tensorpipe::Error&)>) noexcept;
@@ -275,7 +275,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   inline std::vector<c10::Device> getDevicesForRemote(
       const std::string& remoteName,
-      const Message& message) const;
+      const OutgoingMessage& message) const;
 
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an

@@ -19,7 +19,7 @@ TEST(TensorpipeSerialize, Base) {
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
   int64_t mId = 100;
-  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::OutgoingMessage>(
       std::move(payload), std::move(tensors), mtype);
   sendingRpcMessage->setId(mId);
   tensorpipe::Message sendingTpMessage;
@@ -112,7 +112,7 @@ TEST(TensorpipeSerialize, RecopySparseTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::OutgoingMessage>(
       std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;
@@ -144,7 +144,7 @@ TEST(TensorpipeSerialize, NoDeleterTensors) {
   std::vector<char> payload = {'1', '2', '3'};
   torch::distributed::rpc::MessageType mtype =
       torch::distributed::rpc::MessageType::UNKNOWN;
-  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::Message>(
+  auto sendingRpcMessage = c10::make_intrusive<torch::distributed::rpc::OutgoingMessage>(
       std::move(payload), std::move(tensors), mtype);
 
   tensorpipe::Message sendingTpMessage;

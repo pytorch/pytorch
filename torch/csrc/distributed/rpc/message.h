@@ -162,11 +162,62 @@ class TORCH_API Message final : public torch::CustomClassHolder {
   int64_t id_ = -1;
 };
 
+class TORCH_API OutgoingMessage final : public torch::CustomClassHolder {
+ private:
+  // Keep these private in order to force users to go through make_intrusive and
+  // thus prevent creating a Message that's not held by an intrusive_ptr.
+  OutgoingMessage();
+
+  OutgoingMessage(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type);
+
+  OutgoingMessage(
+      std::vector<char>&& payload,
+      std::vector<torch::Tensor>&& tensors,
+      MessageType type,
+      int64_t id);
+
+  friend c10::intrusive_ptr<OutgoingMessage>;
+
+ public:
+  OutgoingMessage(const OutgoingMessage& other) = delete;
+  OutgoingMessage(OutgoingMessage&& other) = delete;
+  OutgoingMessage& operator=(OutgoingMessage const& rhs) = delete;
+  OutgoingMessage& operator=(OutgoingMessage&& rhs) = delete;
+
+  // Destructively retrieves the payload.
+  std::vector<char>&& movePayload() &&;
+  std::vector<torch::Tensor>&& moveTensors() &&;
+
+  std::vector<char>& payload();
+  const std::vector<char>& payload() const;
+  std::vector<torch::Tensor>& tensors();
+  const std::vector<torch::Tensor>& tensors() const;
+  MessageType type() const;
+
+  bool isRequest() const;
+  bool isResponse() const;
+  bool isShutdown() const;
+
+  // id is an optional field to match request/response. If an RpcAgent
+  // implementation is able to do the matching without using this id, it can be
+  // dropped during message serialization.
+  int64_t id() const;
+  void setId(int64_t id);
+
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
+
+ private:
+  c10::intrusive_ptr<Message> message_;
+};
+
 // Create a response Message of type Exception.
 // The exception string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
+TORCH_API c10::intrusive_ptr<OutgoingMessage> createExceptionResponse(
     const std::exception& e,
     int64_t id);
 
@@ -174,14 +225,14 @@ TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
 // The passed in string representation will be used as the message's payload.
 // A message ID corresponding to the request that resulted in this response can
 // be provided for matching requests/responses.
-TORCH_API c10::intrusive_ptr<Message> createExceptionResponse(
+TORCH_API c10::intrusive_ptr<OutgoingMessage> createExceptionResponse(
     const std::string& exceptionStr,
     int64_t id);
 
 inline std::tuple<
-    c10::intrusive_ptr<Message>,
+    c10::intrusive_ptr<OutgoingMessage>,
     std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>>>
-withStorages(c10::intrusive_ptr<Message> message) {
+withStorages(c10::intrusive_ptr<OutgoingMessage> message) {
   auto storages = message->getStorages();
   return std::make_tuple(std::move(message), std::move(storages));
 }

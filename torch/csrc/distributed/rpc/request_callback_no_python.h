@@ -87,7 +87,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
       const MessageType& messageType,
       std::vector<c10::Stream> streams) const;
 
-  c10::intrusive_ptr<Message> handleError(
+  c10::intrusive_ptr<OutgoingMessage> handleError(
       const std::exception& e,
       const MessageType messageType,
       int64_t messageId) const;
@@ -109,7 +109,7 @@ class TORCH_API RequestCallbackNoPython : public RequestCallback {
   c10::intrusive_ptr<JitFuture> asFuture(IValue value, TypePtr type) const;
 
   c10::intrusive_ptr<JitFuture> asFuture(
-      c10::intrusive_ptr<Message> message) const;
+      c10::intrusive_ptr<OutgoingMessage> message) const;
 
   c10::intrusive_ptr<JitFuture> asFuture(std::exception_ptr err) const;
 };

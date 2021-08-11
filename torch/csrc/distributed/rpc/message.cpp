@@ -76,17 +76,90 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> Message::getStorages()
   return storages;
 }
 
-c10::intrusive_ptr<Message> createExceptionResponse(
+OutgoingMessage::OutgoingMessage() = default;
+
+OutgoingMessage::OutgoingMessage(
+    std::vector<char>&& payload,
+    std::vector<torch::Tensor>&& tensors,
+    MessageType type)
+    : message_(c10::make_intrusive<Message>(
+        std::move(payload),
+        std::move(tensors),
+        type
+      )) {}
+
+OutgoingMessage::OutgoingMessage(
+    std::vector<char>&& payload,
+    std::vector<torch::Tensor>&& tensors,
+    MessageType type,
+    int64_t id)
+    : message_(c10::make_intrusive<Message>(
+        std::move(payload),
+        std::move(tensors),
+        type,
+        id
+      )) {}
+
+std::vector<char>&& OutgoingMessage::movePayload() && {
+  return std::move(*message_).movePayload();
+}
+
+std::vector<char>& OutgoingMessage::payload() {
+  return message_->payload();
+}
+
+const std::vector<char>& OutgoingMessage::payload() const {
+  return message_->payload();
+}
+
+std::vector<torch::Tensor>&& OutgoingMessage::moveTensors() && {
+  return std::move(*message_).moveTensors();
+}
+
+std::vector<torch::Tensor>& OutgoingMessage::tensors() {
+  return message_->tensors();
+}
+
+const std::vector<torch::Tensor>& OutgoingMessage::tensors() const {
+  return message_->tensors();
+}
+
+MessageType OutgoingMessage::type() const {
+  return message_->type();
+}
+
+bool OutgoingMessage::isRequest() const {
+  return message_->isRequest();
+}
+
+bool OutgoingMessage::isResponse() const {
+  return message_->isResponse();
+}
+
+int64_t OutgoingMessage::id() const {
+  return message_->id();
+}
+
+void OutgoingMessage::setId(int64_t id) {
+  message_->setId(id);
+}
+
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> OutgoingMessage::getStorages()
+    const {
+  return message_->getStorages();
+}
+
+c10::intrusive_ptr<OutgoingMessage> createExceptionResponse(
     const std::exception& e,
     int64_t id) {
   return createExceptionResponse(e.what(), id);
 }
 
-c10::intrusive_ptr<Message> createExceptionResponse(
+c10::intrusive_ptr<OutgoingMessage> createExceptionResponse(
     const std::string& exceptionStr,
     int64_t id) {
   std::vector<char> payload(exceptionStr.begin(), exceptionStr.end());
-  return c10::make_intrusive<Message>(
+  return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::vector<torch::Tensor>(),
       MessageType::EXCEPTION,

@@ -4,10 +4,10 @@ namespace torch {
 namespace distributed {
 namespace autograd {
 
-c10::intrusive_ptr<rpc::Message> CleanupAutogradContextResp::toMessageImpl() && {
+c10::intrusive_ptr<rpc::OutgoingMessage> CleanupAutogradContextResp::toMessageImpl() && {
   std::vector<torch::Tensor> tensors;
   std::vector<char> payload;
-  return c10::make_intrusive<rpc::Message>(
+  return c10::make_intrusive<rpc::OutgoingMessage>(
       std::move(payload),
       std::move(tensors),
       rpc::MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP);

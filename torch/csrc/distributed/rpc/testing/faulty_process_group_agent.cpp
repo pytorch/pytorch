@@ -60,7 +60,7 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
 
 c10::intrusive_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
-    c10::intrusive_ptr<Message> message,
+    c10::intrusive_ptr<OutgoingMessage> message,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
@@ -102,7 +102,7 @@ void FaultyProcessGroupAgent::enqueueSend(SendWork work) {
   ProcessGroupAgent::enqueueSend(std::move(work));
 }
 
-void FaultyProcessGroupAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
+void FaultyProcessGroupAgent::sendToSelf(c10::intrusive_ptr<OutgoingMessage> message) {
   float msgDelay = getDelayForMessage(message->type());
   if (msgDelay != 0) {
     // Sleep for the specified delay for the message.

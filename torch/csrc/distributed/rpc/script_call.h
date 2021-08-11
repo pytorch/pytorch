@@ -39,7 +39,7 @@ class TORCH_API ScriptCall : public RpcCommandBase {
     return isAsyncExecution_;
   }
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<ScriptCall> fromMessage(const Message& message);
 
   ~ScriptCall() override = default;

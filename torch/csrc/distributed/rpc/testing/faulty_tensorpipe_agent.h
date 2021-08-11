@@ -51,7 +51,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
   // Faulty send function for this class.
   c10::intrusive_ptr<JitFuture> send(
       const WorkerInfo& to,
-      c10::intrusive_ptr<Message> message,
+      c10::intrusive_ptr<OutgoingMessage> message,
       const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
       const std::unordered_map<c10::Device, c10::Device>& deviceMap = {})
       override;
@@ -59,7 +59,7 @@ class TORCH_API FaultyTensorPipeAgent : public TensorPipeAgent {
   // Add delay to writes
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>& pipe,
-      c10::intrusive_ptr<Message> rpcMessage,
+      c10::intrusive_ptr<OutgoingMessage> rpcMessage,
       std::vector<c10::Device>&& devices,
       std::vector<c10::Stream> streams,
       std::function<void(const tensorpipe::Error&)> fn) noexcept override;

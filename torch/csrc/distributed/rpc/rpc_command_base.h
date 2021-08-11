@@ -12,11 +12,11 @@ class RpcCommandBase {
  public:
   // Need to override this to serialize the RPC. This should destructively
   // create a message for the RPC (Hence the &&).
-  c10::intrusive_ptr<Message> toMessage() && {
+  c10::intrusive_ptr<OutgoingMessage> toMessage() && {
     JitRRefPickleGuard jitPickleGuard;
     return std::move(*this).toMessageImpl();
   }
-  virtual c10::intrusive_ptr<Message> toMessageImpl() && = 0;
+  virtual c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && = 0;
   virtual ~RpcCommandBase() = 0;
 };
 

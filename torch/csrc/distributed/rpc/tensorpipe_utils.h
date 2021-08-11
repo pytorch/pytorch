@@ -96,7 +96,7 @@ struct TensorpipeReadBuffers {
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
-    c10::intrusive_ptr<Message> rpcMessage,
+    c10::intrusive_ptr<OutgoingMessage> rpcMessage,
     std::vector<c10::Device> devices,
     const std::vector<c10::Stream>& streams);
 

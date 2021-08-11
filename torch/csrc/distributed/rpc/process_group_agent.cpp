@@ -270,7 +270,7 @@ void ProcessGroupAgent::shutdownImpl() {
 
 c10::intrusive_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
-    c10::intrusive_ptr<Message> message,
+    c10::intrusive_ptr<OutgoingMessage> message,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // Throw if we previously encountered an exception in ::listenLoop.
@@ -431,10 +431,10 @@ void ProcessGroupAgent::handleSend(const SendWork& work) {
   }
 }
 
-void ProcessGroupAgent::sendToSelf(c10::intrusive_ptr<Message> message) {
+void ProcessGroupAgent::sendToSelf(c10::intrusive_ptr<OutgoingMessage> message) {
   // NOLINTNEXTLINE(modernize-avoid-bind)
   threadPool_.run(std::bind(
-      [this](c10::intrusive_ptr<Message> message) {
+      [this](c10::intrusive_ptr<OutgoingMessage> message) {
         // Unlike the other cases, need to add a tensor deleter, since the
         // data outlives the scope of this function. It's shared_ptr<> due
         // to c++11 lambda capture limitations with unique_ptr<>.
@@ -509,7 +509,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     if (futureResponse->completed()) {
       --serverActiveCalls_;
       if (!futureResponse->hasError()) {
-        send(work.from_, futureResponse->value().toCustomClass<Message>());
+        send(work.from_, futureResponse->value().toCustomClass<OutgoingMessage>());
       } else {
         send(
             work.from_,
@@ -529,7 +529,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
             if (!futureResponse.hasError()) {
               send(
                   getWorkerInfo(fromId),
-                  futureResponse.value().toCustomClass<Message>());
+                  futureResponse.value().toCustomClass<OutgoingMessage>());
             } else {
               send(
                   getWorkerInfo(fromId),
@@ -616,7 +616,7 @@ void ProcessGroupAgent::enqueueRecv(RecvWork work) {
       std::move(work)));
 }
 
-void ProcessGroupAgent::markFutureWithError(Message& message) {
+void ProcessGroupAgent::markFutureWithError(OutgoingMessage& message) {
   TORCH_INTERNAL_ASSERT(
       message.type() == MessageType::EXCEPTION,
       "markFutureWithError should be only called with Message that has type Exception.");

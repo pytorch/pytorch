@@ -27,7 +27,7 @@ class TORCH_API RpcWithProfilingResp : public rpc::RpcCommandBase {
       std::vector<torch::Tensor> tensors,
       std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
       rpc::ProfilingId profilingId);
-  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<RpcWithProfilingResp> fromMessage(
       const rpc::Message& message);
   // Retrieve remote Events

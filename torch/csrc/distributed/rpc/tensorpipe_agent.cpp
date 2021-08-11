@@ -571,7 +571,7 @@ void TensorPipeAgent::pipeRead(
 
 void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    c10::intrusive_ptr<Message> rpcMessage,
+    c10::intrusive_ptr<OutgoingMessage> rpcMessage,
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
@@ -608,8 +608,8 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << pipe->getRemoteName();
 
   if (!futureResponseMessage.hasError()) {
-    c10::intrusive_ptr<Message> responseMessage =
-        futureResponseMessage.value().toCustomClass<Message>();
+    c10::intrusive_ptr<OutgoingMessage> responseMessage =
+        futureResponseMessage.value().toCustomClass<OutgoingMessage>();
     responseMessage->setId(messageId);
 
     std::vector<c10::Device> devices;
@@ -763,7 +763,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 
 c10::intrusive_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
-    c10::intrusive_ptr<Message> requestMessage,
+    c10::intrusive_ptr<OutgoingMessage> requestMessage,
     const float rpcTimeoutSeconds,
     const DeviceMap& deviceMap) {
   TORCH_CHECK(
@@ -1275,7 +1275,7 @@ void TensorPipeAgent::markFutureWithError(
 
 std::vector<c10::Device> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
-    const Message& message) const {
+    const OutgoingMessage& message) const {
   const auto& deviceMaps =
       message.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
 

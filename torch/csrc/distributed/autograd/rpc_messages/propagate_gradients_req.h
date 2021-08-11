@@ -24,7 +24,7 @@ class TORCH_API PropagateGradientsReq : public rpc::RpcCommandBase {
   const std::vector<torch::autograd::Variable>& getGrads();
 
   // Serialization and deserialization methods.
-  c10::intrusive_ptr<rpc::Message> toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<PropagateGradientsReq> fromMessage(
       const rpc::Message& message);
 

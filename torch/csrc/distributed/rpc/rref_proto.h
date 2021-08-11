@@ -22,7 +22,7 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
 
   const RRefId& rrefId();
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static at::IValue fromMessage(const Message& message, MessageType type);
 
  protected:
@@ -39,7 +39,7 @@ class TORCH_API ForkMessageBase : public RRefMessageBase {
 
   const ForkId& forkId();
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::pair<RRefId, ForkId> fromMessage(
       const Message& message,
       MessageType type);
@@ -60,7 +60,7 @@ class TORCH_API ScriptRRefFetchCall final : public RRefMessageBase {
     return fromWorkerId_;
   }
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<ScriptRRefFetchCall> fromMessage(
       const Message& message);
 
@@ -74,7 +74,7 @@ class TORCH_API PythonRRefFetchCall final : public RRefMessageBase {
       : RRefMessageBase(rrefId, MessageType::PYTHON_RREF_FETCH_CALL),
         fromWorkerId_(fromWorkerId) {}
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<PythonRRefFetchCall> fromMessage(
       const Message& message);
 
@@ -89,7 +89,7 @@ class TORCH_API RRefFetchRet : public RpcCommandBase {
       : values_(std::move(values)), type_(type) {}
 
   const std::vector<at::IValue>& values();
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
 
  private:
   std::vector<at::IValue> values_;
@@ -140,7 +140,7 @@ class TORCH_API RRefChildAccept final : public RpcCommandBase {
 
   const ForkId& forkId() const;
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<RRefChildAccept> fromMessage(const Message& message);
 
  private:
@@ -160,7 +160,7 @@ class TORCH_API RRefAck final : public RpcCommandBase {
  public:
   RRefAck() = default;
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
   static std::unique_ptr<RRefAck> fromMessage(const Message& message);
 };
 

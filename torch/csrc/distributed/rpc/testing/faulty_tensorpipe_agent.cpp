@@ -65,7 +65,7 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyTensorPipeAgent::
 
 c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
     const WorkerInfo& to,
-    c10::intrusive_ptr<Message> message,
+    c10::intrusive_ptr<OutgoingMessage> message,
     const float rpcTimeoutSeconds,
     const std::unordered_map<c10::Device, c10::Device>& /* unused */) {
   // We only fail control messages that have been specified by the test case.
@@ -100,7 +100,7 @@ c10::intrusive_ptr<JitFuture> FaultyTensorPipeAgent::send(
 
 void FaultyTensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    c10::intrusive_ptr<Message> rpcMessage,
+    c10::intrusive_ptr<OutgoingMessage> rpcMessage,
     std::vector<c10::Device>&& devices,
     std::vector<c10::Stream> streams,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {

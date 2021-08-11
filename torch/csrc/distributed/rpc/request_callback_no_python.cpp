@@ -108,12 +108,12 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processMessage(
 
     auto retFutureWithMessageId = retFuture->then(
         [id = request.id()](JitFuture& future) {
-          c10::intrusive_ptr<Message> message =
-              future.value().toCustomClass<Message>();
+          c10::intrusive_ptr<OutgoingMessage> message =
+              future.value().toCustomClass<OutgoingMessage>();
           message->setId(id);
           return withStorages(message);
         },
-        c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+        c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 
     return retFutureWithMessageId;
   } catch (std::exception& e) {
@@ -343,7 +343,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         } else {
           auto msg = getMessageWithAutograd(
               fromWorkerId,
-              wrappedRpcResponseFuture.value().toCustomClass<Message>(),
+              wrappedRpcResponseFuture.value().toCustomClass<OutgoingMessage>(),
               MessageType::FORWARD_AUTOGRAD_RESP);
           return withStorages(std::move(msg));
         }
@@ -552,7 +552,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRpc(
   }
 }
 
-c10::intrusive_ptr<Message> RequestCallbackNoPython::handleError(
+c10::intrusive_ptr<OutgoingMessage> RequestCallbackNoPython::handleError(
     const std::exception& e,
     const MessageType messageType,
     int64_t messageId) const {
@@ -605,9 +605,9 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::asFuture(
-    c10::intrusive_ptr<Message> message) const {
+    c10::intrusive_ptr<OutgoingMessage> message) const {
   auto future = c10::make_intrusive<JitFuture>(
-      at::getCustomClassType<c10::intrusive_ptr<Message>>(),
+      at::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>(),
       RpcAgent::getCurrentRpcAgent()->getDevices());
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> storages =
       message->getStorages();
