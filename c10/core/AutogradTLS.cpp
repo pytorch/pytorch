@@ -3,7 +3,8 @@
 namespace c10 {
 
 // By default, both grad modes are enabled and inference mode is disabled
-thread_local uint8_t autograd_mode_bitfield = AutogradTLS::GRAD_MODE_MASK | AutogradTLS::FW_GRAD_MODE_MASK;
+thread_local uint8_t autograd_mode_bitfield =
+    AutogradTLS::GRAD_MODE_MASK | AutogradTLS::FW_GRAD_MODE_MASK;
 
 uint8_t AutogradTLS::get_mode() {
   return autograd_mode_bitfield;

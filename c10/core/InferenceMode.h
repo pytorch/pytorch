@@ -1,9 +1,9 @@
 #pragma once
 
+#include <c10/core/AutogradTLS.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/macros/Macros.h>
-#include <c10/core/AutogradTLS.h>
 
 namespace c10 {
 
@@ -58,7 +58,8 @@ struct TORCH_API InferenceMode {
     if (enabled) {
       AutogradTLS::set_mode(AutogradTLS::INFERENCE_MODE_MASK);
     } else {
-      AutogradTLS::set_mode(AutogradTLS::GRAD_MODE_MASK | AutogradTLS::FW_GRAD_MODE_MASK);
+      AutogradTLS::set_mode(
+          AutogradTLS::GRAD_MODE_MASK | AutogradTLS::FW_GRAD_MODE_MASK);
     }
     DispatchKeySet included = enabled
         ? prev_keyset.included_.remove(c10::DispatchKey::ADInplaceOrView)
