@@ -43,7 +43,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
-std::string stacksToStr(const std::vector<std::string>& stacks, const char* delem);
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim);
 std::string dtypesToStr(const std::vector<std::string>& types);
 std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
@@ -428,12 +428,12 @@ std::string dtypesToStr(const std::vector<std::string>& types) {
   }
 }
 
-std::string stacksToStr(const std::vector<std::string>& stacks, const char* delem) {
+std::string stacksToStr(const std::vector<std::string>& stacks, const char* delim) {
   std::ostringstream oss;
   std::transform(
       stacks.begin(),
       stacks.end(),
-      std::ostream_iterator<std::string>(oss, delem),
+      std::ostream_iterator<std::string>(oss, delim),
       [](std::string s) -> std::string {
 #ifdef _WIN32
         // replace the windows backslash with forward slash
