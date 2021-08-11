@@ -259,6 +259,7 @@ class Module:
         self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
         self._non_persistent_buffers_set: Set[str] = set()
         self._backward_hooks: Dict[int, Callable] = OrderedDict()
+        self._pre_backward_hooks: Dict[int, Callable] = OrderedDict()
         self._is_full_backward_hook = None
         self._forward_hooks: Dict[int, Callable] = OrderedDict()
         self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
@@ -888,6 +889,11 @@ class Module:
         self._backward_hooks[handle.id] = hook
         return handle
 
+    def _register_pre_backward_hook(self, hook) -> RemovableHandle:
+        handle = hooks.RemovableHandle(self._pre_backward_hooks)
+        self._pre_backward_hooks[handle.id] = hook
+        return handle
+
     def register_full_backward_hook(
         self, hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
     ) -> RemovableHandle:
@@ -1060,7 +1066,7 @@ class Module:
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks or _global_backward_hooks
-                or _global_forward_hooks or _global_forward_pre_hooks):
+                or _global_forward_hooks or _global_forward_pre_hooks or self._pre_backward_hooks):
             return forward_call(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
@@ -1088,6 +1094,17 @@ class Module:
 
         if bw_hook:
             result = bw_hook.setup_output_hook(result)
+
+        if self._pre_backward_hooks:
+            var = result
+            while not isinstance(var, torch.Tensor):
+                if isinstance(var, dict):
+                    var = next((v for v in var.values() if isinstance(v, torch.Tensor)))
+                else:
+                    var = var[0]
+            grad_fn = var.grad_fn
+            for hook in self._pre_backward_hooks.values():
+                var.register_hook(functools.partial(hook, self))
 
         # Handle the non-full backward hooks
         if non_full_backward_hooks:

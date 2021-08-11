@@ -101,6 +101,29 @@ class TestAutograd(TestCase):
 
         return x, y
 
+    def test_bwd_pre_hook(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(1, 1, bias=False)
+                self._hook_called = False
+
+            def forward(self, x):
+                return self.lin(x)
+
+        m = MyModule()
+
+        def hook(module, grad_output):
+            module._hook_called = True
+
+        m._register_pre_backward_hook(hook)
+        inp = torch.ones(1)
+        out = m(inp)
+        loss = out.sum()
+        self.assertFalse(m._hook_called)
+        loss.backward()
+        self.assertTrue(m._hook_called)
+
     def test_function(self):
         class MyFunction(Function):
 
