@@ -175,7 +175,7 @@ namespace {
 // only tests that won't run rpc/init.cpp; 2) Message is not meant to be
 // visible from Python.
 static const auto message = torch::class_<Message>("rpc", "_Message");
-static const auto message = torch::class_<Message>("rpc", "_OutgoingMessage");
+static const auto outgoingMessage = torch::class_<Message>("rpc", "_OutgoingMessage");
 
 } // namespace
 
