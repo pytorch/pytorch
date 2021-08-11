@@ -444,10 +444,10 @@ test_vec256() {
     TEST_REPORTS_DIR="test/test-reports/vec256"
     mkdir -p "$TEST_REPORTS_DIR"
     ls -l "$TORCH_BIN_DIR"
-    vec256_tests=$(find $TORCH_BIN_DIR -maxdepth 1 -executable -name 'vec256_test*')
+    vec256_tests=$(find "$TORCH_BIN_DIR" -maxdepth 1 -executable -name 'vec256_test*')
     for vec256_exec in $vec256_tests
     do
-      "$TORCH_BIN_DIR"/$vec256_exec --gtest_output=xml:$TEST_REPORTS_DIR/$vec256_exec.xml
+      "$TORCH_BIN_DIR"/"$vec256_exec" --gtest_output=xml:$TEST_REPORTS_DIR/"$vec256_exec".xml
     done
     assert_git_not_dirty
   fi
