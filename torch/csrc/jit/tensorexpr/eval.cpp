@@ -394,9 +394,9 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
   }
 
-#define IMM_VISIT(Type, Name)                         \
-  TORCH_API void visit(const Name##Imm* v) override { \
-    value_ = Value(v->value());                       \
+#define IMM_VISIT(Type, Name)                   \
+  TORCH_API void visit(Name##Imm* v) override { \
+    value_ = Value(v->value());                 \
   }
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_VISIT);
 #undef IMM_VISIT

@@ -911,8 +911,9 @@ def check_if_enable(test: unittest.TestCase):
             if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
                 raise unittest.SkipTest(
                     f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}." +
-                    " To enable, set the environment variable PYTORCH_RUN_DISABLED_TESTS=1")
+                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
+                    "If you're seeing this on your local machine and would like to enable this test, " +
+                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")

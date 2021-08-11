@@ -1686,6 +1686,13 @@ graph(%Ra, %Rb):
         self.assertEqual(a + b, torch.ops.aten.add(a, b))
         self.assertEqual(a + 1, torch.ops.aten.add(a, 1))
 
+    def test_torch_ops_kwonly(self):
+        a, b = torch.rand(3, 4), torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, "positional argument"):
+            torch.ops.aten.add(a, b, 2)
+        # h/t Chillee for this ambiguous case
+        self.assertEqual(a.prod(1), torch.ops.aten.prod(a, 1))
+
     def test_torch_complex(self):
         def fn(real, img):
             return torch.complex(real, img)
@@ -14484,6 +14491,47 @@ dedent """
 
         with self.assertRaisesRegex(Exception, "Parameters not specified"):
             torch.jit.script(test)
+
+    def test_function_overload_misuse(self):
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
+            @torch.jit._overload
+            def wrong_decl_body(x: str) -> str:
+                return x + "0"
+
+        with self.assertRaisesRegex(RuntimeError, "Only `pass` statement or `...` can be the body"):
+            class MyClass:
+                @torch.jit._overload_method
+                def method(self):
+                    return 0
+
+        @torch.jit._overload
+        def null_overload(x: int) -> int: ...  # noqa: E704
+
+        @torch.jit._overload
+        def null_overload(x: str) -> str:  # noqa: F811
+            pass
+
+        def null_overload_driver():
+            return null_overload(0)
+
+        with self.assertRaisesRegex(RuntimeError, 'Implementation for the function ".+" is missing.'):
+            torch.jit.script(null_overload_driver)
+
+        class OverloadMisuse(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit._overload_method
+            def forward(self, x: int):
+                pass
+
+            @torch.jit._overload_method
+            def forward(self, x: Tensor):  # noqa: F811
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'Implementation for the method ".+" is missing.'):
+            m = torch.jit.script(OverloadMisuse())
+
 
     def test_script_method_torch_function_overload(self):
         class MyCustomTensor(torch.Tensor):

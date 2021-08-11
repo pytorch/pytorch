@@ -52,6 +52,11 @@ from torch.utils.checkpoint import checkpoint
 
 if not IS_WINDOWS:
     from torch.distributed.optim.functional_sgd import _FunctionalSGD
+    from torch.distributed.optim.functional_adam import _FunctionalAdam
+    _SUPPORTED_OPTIM_MAPPING = {
+        _FunctionalSGD: torch.optim.SGD,
+        _FunctionalAdam: torch.optim.Adam
+    }
 
 if TEST_WITH_TSAN:
     print(
@@ -1600,15 +1605,20 @@ class DistributedDataParallelTest(
             # check whether the grads are equal to what DDP without hook would return.
             self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
-    def _test_hook_then_optimizer(self, gradient_as_bucket_view=False):
+    def _test_hook_then_optimizer(
+        self,
+        functional_optim_cls,
+        *functional_optim_args,
+        gradient_as_bucket_view=False,
+        **functional_optim_kwargs
+    ):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         hook, hook_state = default.allreduce_hook, process_group
-        sgd_lr = 1e-2
-        sgd_momentum = 0.9
-        sgd_weight_decay = 0.01
         opt_hook_state = default._OptimizerHookState(
-            _FunctionalSGD, sgd_lr, momentum=sgd_momentum, weight_decay=sgd_weight_decay
+            functional_optim_cls,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         gpu_model = self._gpu_model_with_ddp_comm_hook(
             process_group,
@@ -1627,11 +1637,10 @@ class DistributedDataParallelTest(
         gpu_model_allreduce = self._gpu_model_with_ddp_comm_hook(
             process_group, default.allreduce_hook, gradient_as_bucket_view, hook_state
         )
-        sgd = torch.optim.SGD(
+        sgd = _SUPPORTED_OPTIM_MAPPING.get(functional_optim_cls)(
             gpu_model_allreduce.parameters(),
-            sgd_lr,
-            momentum=sgd_momentum,
-            weight_decay=sgd_weight_decay,
+            *functional_optim_args,
+            **functional_optim_kwargs,
         )
         for _ in range(8):
             gpu_model_allreduce.zero_grad()
@@ -1703,13 +1712,58 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl(self):
-        self._test_hook_then_optimizer()
+    def test_hook_then_sgd_nccl(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_hook_then_optimizer_nccl_grad_as_bucket_view(self):
-        self._test_hook_then_optimizer(gradient_as_bucket_view=True)
+    def test_hook_then_sgd_nccl_grad_as_bucket_view(self):
+        sgd_lr = 1e-2
+        sgd_momentum = 0.9
+        sgd_weight_decay = 0.01
+        self._test_hook_then_optimizer(
+            _FunctionalSGD,
+            sgd_lr,
+            momentum=sgd_momentum,
+            weight_decay=sgd_weight_decay,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_hook_then_adam_nccl_grad_as_bucket_view(self):
+        adam_lr = 1e-2
+        adam_betas = (0.9, 0.99)
+        adam_eps = 1e-6
+        self._test_hook_then_optimizer(
+            _FunctionalAdam,
+            adam_lr,
+            betas=adam_betas,
+            eps=adam_eps,
+            gradient_as_bucket_view=True
+        )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
