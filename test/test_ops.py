@@ -752,6 +752,9 @@ class TestJit(JitCommonTestCase):
                     # Check traced forward, grad, and grad grad
                     # TODO: fix tracing here
                     supports_tracing = not has_fake_function
+                    if op.assert_jit_shape_analysis:
+                        self.assertTrue(supports_tracing)
+
                     if supports_tracing:
                         traced_fn = create_traced_fn(self, variant)
                         check_against_reference(self,

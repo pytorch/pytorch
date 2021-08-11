@@ -108,20 +108,29 @@ const std::string shape_compute_functions =
           # TODO: return self
           return [self[0]]
 
-        # TODO: optional dim, then expose as a registered shape function
         def unsqueeze(li: List[int], dim: int):
           out: List[int] = []
+          ndim = len(li)
+          dim = maybe_wrap_dim(dim, len(li))
           for i in range(len(li)):
             if i == dim:
               out.append(1)
             out.append(li[i])
+          if dim == ndim:
+            out.append(1)
           return out
 
-        # TODO: optional dim, then expose as a registered shape function
+        def squeeze_nodim(li: List[int]):
+          out: List[int] = []
+          for i in range(len(li)):
+            if li[i] != 1:
+              out.append(li[i])
+          return out
+
         def squeeze(li: List[int], dim: int):
           out: List[int] = []
           for i in range(len(li)):
-            if i == dim:
+            if i == maybe_wrap_dim(dim, len(li)):
               if li[i] != 1:
                 out.append(li[i])
             else:
@@ -180,6 +189,22 @@ const std::string shape_compute_functions =
             return [self[0]]
           else:
             return [self[1], self[0]]
+
+        def transpose(self: List[int], dim0: int, dim1: int):
+          ndims = len(self)
+          dim0 = maybe_wrap_dim(dim0, ndims)
+          dim1 = maybe_wrap_dim(dim1, ndims)
+          if (dim0 == dim1):
+            return _copy(self)
+          out: List[int] = []
+          for i in range(ndims):
+            if i == dim0:
+              out.append(self[dim1])
+            elif i == dim1:
+              out.append(self[dim0])
+            else:
+              out.append(self[i])
+          return out
 
         def linear(input: List[int], weight: List[int], bias: Optional[List[int]]):
           out = matmul(input, t(weight))
@@ -321,6 +346,9 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"aten::zeros(int[] size, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None) -> (Tensor)", "unary_four_unused_inputs"},
       {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))", "unary_four_unused_inputs"},
+      {"aten::squeeze(Tensor(a) self) -> Tensor(a)", "squeeze_nodim"},
+      {"aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)", "squeeze"},
+      {"aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)", "unsqueeze"},
       {"aten::layer_norm(Tensor input, int[] normalized_shape, Tensor? weight=None, Tensor? bias=None, "
        "float eps=1e-05, bool cudnn_enable=True) -> Tensor", "unary_five_unused_inputs"},
       {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor", "unary_two_unused_inputs"},
@@ -330,6 +358,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::matmul(Tensor self, Tensor other) -> Tensor", "matmul"},
       {"aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor", "linear"},
       {"aten::t(Tensor(a) self) -> Tensor(a)", "t"},
+      {"aten::transpose.int(Tensor(a) self, int dim0, int dim1) -> Tensor(a)", "transpose"},
       {"aten::conv1d(Tensor input, Tensor weight, Tensor? bias=None, int[1] stride=1, int[1] padding=0, int[1] dilation=1, int groups=1) -> Tensor", "conv1d"},
       {"aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", "conv2d"},
       {"aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", "conv3d"},
