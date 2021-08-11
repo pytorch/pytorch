@@ -441,7 +441,7 @@ test_vec256() {
   # This is to test vec256 instructions DEFAULT/AVX/AVX2 (platform dependent, some platforms might not support AVX/AVX2)
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing vec256 instructions"
-    $TEST_REPORTS_DIR="test/test-reports/vec256"
+    TEST_REPORTS_DIR="test/test-reports/vec256"
     mkdir -p "$TEST_REPORTS_DIR"
     ls -l "$TORCH_BIN_DIR"
     vec256_tests=$(find $TORCH_BIN_DIR -maxdepth 1 -executable -name 'vec256_test*')
