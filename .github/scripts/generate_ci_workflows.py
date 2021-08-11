@@ -449,6 +449,13 @@ if __name__ == "__main__":
     for template, workflows in template_and_workflows:
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
+
             if workflow.ciflow_config.enabled:
                 ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+            elif workflow.on_pull_request:
+                # If ciflow is disabled but still on_pull_request, we can denote
+                # it as a special label 'ciflow/default' in the ruleset, which will be later
+                # turned into an actual 'ciflow/default' label in the workflow.
+                # During the rollout phase, it has the same effect as 'ciflow/default'
+                ciflow_ruleset.add_label_rule({'ciflow/default'}, workflow.build_environment)
     ciflow_ruleset.generate_json()
