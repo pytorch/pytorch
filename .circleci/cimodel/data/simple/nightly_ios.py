@@ -37,7 +37,7 @@ class IOSNightlyJob:
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
             "requires": extra_requires,
             "context": "org-member",
-            "filters": {"branches": {"only": "nightly"}},
+            # "filters": {"branches": {"only": "nightly"}},
         }
 
         if not self.is_upload:
