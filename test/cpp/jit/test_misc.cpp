@@ -2075,13 +2075,13 @@ TEST(InlinedCallStackTest, BlockAnnotation) {
       for (Block* block : n->blocks()) {
         for (Node* if_node : block->nodes()) {
           if (if_node->kind() == aten::add) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               add_ss << std::get<1>(e);
             }
             add_ss << if_node->sourceRange();
           }
           if (if_node->kind() == aten::mul) {
-            for (const auto e : if_node->callstack().value()->vec()) {
+            for (const auto& e : if_node->callstack().value()->vec()) {
               mul_ss << std::get<1>(e);
             }
             mul_ss << if_node->sourceRange();
