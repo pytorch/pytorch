@@ -156,6 +156,22 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   const auto dtype = mixed_type ? kFloat : input.scalar_type();
 
   bool all_contiguous = is_contiguous(input);
+
+  // Reduce all dimensions except dim=1
+  DimVector reduce_dims(ndim - 1);
+  reduce_dims[0] = 0;
+  for (int64_t i = 2; i < ndim; ++i) {
+    reduce_dims[i - 1] = i;
+  }
+
+  // For contiguous case, leave 'mean' computation to kernel
+  Tensor save_mean = all_contiguous
+      ? at::empty({n_input}, input.options().dtype(dtype))
+      : at::mean(input, /*dims=*/reduce_dims, /*keepdim=*/false, dtype);
+  Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
+  auto save_mean_a = save_mean.accessor<scalar_t, 1>();
+  auto save_var_transform_a = save_var_transform.accessor<scalar_t, 1>();
+
   if (all_contiguous) {
     auto _mean = at::empty({n_input}, input.options().dtype(dtype));
     auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
@@ -166,7 +182,8 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
 
     parallel_for(0, n_input, 1, [&](int64_t b_begin, int64_t b_end) {
       for (int64_t f = b_begin; f < b_end; ++f) {
-        _var_sum_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
+        save_mean_a[f] = _mean_a[f];
+        save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
         if (running_mean.defined()) {
           running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
@@ -177,22 +194,11 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         }
       }
     });
-    return std::make_tuple(_mean, _var_sum);
+
+    return std::make_tuple(save_mean, save_var_transform);
   }
 
   // non-contiguous path
-  // Reduce all dimensions except dim=1
-  DimVector reduce_dims(ndim - 1);
-  reduce_dims[0] = 0;
-  for (int64_t i = 2; i < ndim; ++i) {
-    reduce_dims[i - 1] = i;
-  }
-
-  Tensor save_mean = at::mean(input, /*dims=*/reduce_dims, /*keepdim=*/false, dtype);
-  Tensor save_var_transform = at::empty({n_input}, input.options().dtype(dtype));
-  auto save_mean_a = save_mean.accessor<param_t, 1>();
-  auto save_var_transform_a = save_var_transform.accessor<param_t, 1>();
-
   auto channel_stride = input.strides()[1];
   auto in_data = input.data_ptr<scalar_t>();
   auto reduce_iter = TensorIteratorConfig()
