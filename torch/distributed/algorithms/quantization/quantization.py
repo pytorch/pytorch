@@ -10,7 +10,8 @@ TORCH_HALF_MIN = torch.finfo(torch.float16).min
 TORCH_HALF_MAX = torch.finfo(torch.float16).max
 
 class DQuantType(Enum):
-    FP16 = "fp16"
+    FP16 = "fp16",
+    BFP16 = "bfp16"
 
     def __str__(self) -> str:
         return self.value
@@ -26,6 +27,8 @@ def _quantize_tensor(tensor, qtype):
         )
     if (qtype == DQuantType.FP16):
         return _fp32_to_fp16_with_clamp(tensor)
+    elif (qtype == DQuantType.BFP16):
+        return torch.ops.q.FloatToBfloat16Quantized(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -38,7 +41,7 @@ def _quantize_tensor_list(tensor_list, qtype):
         raise RuntimeError(
             f"_quantize_tensor_list expecting list of torch.Tensor as input but found {type(tensor_list)}"
         )
-    if (qtype == DQuantType.FP16):
+    if ((qtype == DQuantType.FP16) or (qtype == DQuantType.BFP16)):
         quantized_tensor_list = [_quantize_tensor(t, qtype) for t in tensor_list]
         return quantized_tensor_list
     else:
@@ -60,6 +63,13 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
             return tensor.float()
         else:
             return tensor.float() / quant_loss
+    elif (qtype == DQuantType.BFP16):
+        if tensor.dtype != torch.float16:
+            raise RuntimeError(
+                f"tensor dtype is {tensor.dtype} while expected to be FP16."
+            )
+        else:
+            return torch.ops.q.Bfloat16QuantizedToFloat(tensor)
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -76,6 +86,9 @@ def _dequantize_tensor_list(tensor_list, qtype, quant_loss=None):
     elif (qtype == DQuantType.FP16):
         dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
         return dequantized_tensor_list
+    elif (qtype == DQuantType.BFP16):
+        dequantized_tensor_list = [_dequantize_tensor(t, qtype) for t in tensor_list]
+        return dequantized_tensor_list
     else:
         raise RuntimeError(
             f'Quantization type {qtype} is not supported'
@@ -86,13 +99,16 @@ def auto_quantize(func, qtype, quant_loss=None):
     """
     This is a prototype API that automatically quantize the input tensors, choose the precision types, and
     pass other necessary arguments and then dequantizes the output.
+
     Currently it only supports:
         . FP16 quantization method
         . all_gather, all_to_all collective ops
+
     Args:
         func (callable): A function representing collective operations.
         qtype (QuantType): Quantization method
         quant_loss (float, optional): This can be used to improve accuracy in the dequantization.
+
     Returns:
         (callable): the same collective as func but enables automatic quantization/dequantization.
     """

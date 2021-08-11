@@ -20,6 +20,15 @@ def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
         return torch.empty(size, size, size, dtype=dtype).fill_(value)
     else:
         return torch.empty(size, size, size, dtype=dtype).fill_(value).cuda(device_id)
+
+def _build_2Dtensor(size, value=None, dtype=torch.float, device_id=None):
+    if value is None:
+        value = size
+    if device_id is None:
+        return torch.empty(size, size, dtype=dtype).fill_(value)
+    else:
+        return torch.empty(size, size, dtype=dtype).fill_(value).cuda(device_id)
+
 class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def setUp(self):
         super().setUp()
@@ -30,6 +39,11 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
     def test_all_gather_fp16(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_gather(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.FP16)
+
+    @requires_gloo()
+    def test_all_gather_bfp16(self):
+        group, group_id, rank = self._init_global_test()
+        self._test_all_gather(group, group_id, rank, dtype=torch.float32, qtype=DQuantType.BFP16)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
@@ -45,12 +59,32 @@ class DistQuantizationTests(TestDistBackend, DistributedTest._DistTestBase):
             dtype=torch.float32,
             qtype=DQuantType.FP16)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+    def test_all_to_all_bfp16(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all(
+            group,
+            group_id,
+            rank,
+            cuda=True,
+            rank_to_GPU=rank_to_GPU,
+            dtype=torch.float32,
+            qtype=DQuantType.BFP16)
+
     def _test_all_gather(
             self, group, group_id, rank, cuda=False, rank_to_GPU=None, dtype=torch.float, qtype=None):
         for dest in group:
             tensor = _build_tensor(dest + 1, rank, dtype=dtype)
             tensors = [_build_tensor(dest + 1, -1, dtype=dtype) for i in group]
             expected_tensors = [_build_tensor(dest + 1, i, dtype=dtype) for i in group]
+            if (qtype == DQuantType.BFP16):
+                tensor = _build_2Dtensor(dest + 1, rank, dtype=dtype)
+                tensors = [_build_2Dtensor(dest + 1, -1, dtype=dtype) for i in group]
+                expected_tensors = [
+                    _build_2Dtensor(dest + 1, i, dtype=dtype) for i in group
+                ]
             if (qtype is not None):
                 allgather = quant.auto_quantize(dist.all_gather, qtype, quant_loss=None)
             else:
