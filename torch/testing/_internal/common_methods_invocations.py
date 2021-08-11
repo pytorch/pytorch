@@ -2226,7 +2226,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, output_padding, groups, dilation)
-    cases: Tuple[tuple, tuple, int, dict] = (  # type: ignore[assignment]
+    cases = (  # type: ignore
         ((1, 3, 4, 4), (3, 3, 3, 3), 3,
          {'stride': (2, 2), 'padding': 2, 'output_padding': (1, 1), 'groups': 1}),
         ((2, 2, 4, 4), (2, 2, 4, 5), 4,
