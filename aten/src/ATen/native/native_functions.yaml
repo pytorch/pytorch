@@ -4017,16 +4017,16 @@
     CPU, CUDA: sum
 
 - func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  structured_delegate: sum.IntList_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  dispatch:
-    CPU, CUDA: sum
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
 - func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: sum_out
@@ -8174,6 +8174,15 @@
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
 
+- func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
+  structured_delegate: _convert_indices_from_coo_to_csr.out
+
+- func: _convert_indices_from_coo_to_csr.out(Tensor self, int size, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: _convert_indices_from_coo_to_csr_structured_cpu
+    CUDA: _convert_indices_from_coo_to_csr_structured_cuda
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
@@ -10170,23 +10179,23 @@
 # See linalg_det as an example.
 
 # "_ex" stands for experimental
-- func: linalg_cholesky_ex(Tensor self, *, bool check_errors=False) -> (Tensor L, Tensor info)
+- func: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_cholesky_ex
 
-- func: linalg_cholesky_ex.L(Tensor self, *, bool check_errors=False, Tensor(a!) L, Tensor(b!) info) -> (Tensor(a!) L, Tensor(b!) info)
+- func: linalg_cholesky_ex.L(Tensor self, *, bool upper=False, bool check_errors=False, Tensor(a!) L, Tensor(b!) info) -> (Tensor(a!) L, Tensor(b!) info)
   python_module: linalg
   variants: function
   dispatch:
     CPU, CUDA: linalg_cholesky_ex_out
 
-- func: linalg_cholesky(Tensor self) -> Tensor
+- func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_cholesky.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
