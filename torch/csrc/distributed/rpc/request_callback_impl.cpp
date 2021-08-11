@@ -176,7 +176,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptCall(
       [](JitFuture& jitFuture) {
         return withStorages(ScriptResp(jitFuture.value()).toMessage());
       },
-      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+      c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
@@ -191,7 +191,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonCall(
         return withStorages(
             PythonResp(serializePyObject(future.value())).toMessage());
       },
-      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+      c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processScriptRemoteCall(
@@ -241,7 +241,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processPythonRRefFetchCall(
         return withStorages(
             PythonRRefFetchRet(std::move(result).toIValues()).toMessage());
       },
-      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+      c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
 
 void RequestCallbackImpl::handleRRefDelete(
@@ -299,7 +299,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::processRRefBackward(
 
         return withStorages(RRefBackwardResp().toMessage());
       },
-      c10::getCustomClassType<c10::intrusive_ptr<Message>>());
+      c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runJitFunction(
