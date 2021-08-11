@@ -3347,6 +3347,8 @@ class TestLinalg(TestCase):
                 rconds.append(torch.rand(A.shape[-3], device=device))
             for rcond in rconds:
                 actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
+                torch_rtol = torch.linalg.pinv(A, rtol=rcond, hermitian=hermitian)
+                self.assertEqual(actual, torch_rtol)
                 numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
                 expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
                 self.assertEqual(actual, expected, atol=self.precision, rtol=1e-5)
@@ -3402,13 +3404,23 @@ class TestLinalg(TestCase):
             # device of rcond and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             rcond = torch.full((), 1e-2, device=wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.pinv(a, rcond=rcond)
 
         # rcond can't be complex
         rcond = torch.full((), 1j, device=device)
         with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
             torch.linalg.pinv(a, rcond=rcond)
+
+        # atol can't be complex
+        atol = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "atol tensor of complex type is not supported"):
+            torch.linalg.pinv(a, atol=atol)
+
+        # rtol can't be complex
+        rtol = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "rtol tensor of complex type is not supported"):
+            torch.linalg.pinv(a, rtol=rtol)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack

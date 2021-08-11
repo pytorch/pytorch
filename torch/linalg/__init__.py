@@ -1644,6 +1644,7 @@ Examples::
 """)
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
+linalg.pinv(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
 linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
@@ -1660,7 +1661,21 @@ symmetric if real, but this is not checked internally. Instead, just the lower
 triangular part of the matrix is used in the computations.
 
 The singular values (or the norm of the eigenvalues when :attr:`hermitian`\ `= True`)
-that are below the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
+that are below `max(atol, σ₁*rtol)` threshold are treated as zero and discarded in the computation,
+where :math:`\sigma_1` is the largest singular value (or eigenvalue).
+
+If :attr:`rtol` is not specified and :attr:`A` is a matrix of dimensions `(m, n)`,
+the relative tolerance is set to be
+
+.. math::
+
+    \text{rtol} = \max(m, n) \varepsilon
+
+and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
+If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
+the batch.
+
+If both :attr:`atol` and :attr:`rtol` are specified then the value for :attr:`rtol` is ignored.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -1674,6 +1689,10 @@ that are below the specified :attr:`rcond` threshold are treated as zero and dis
 
     It is always prefered to use :func:`~lstsq` when possible, as it is faster and more
     numerically stable than computing the pseudoinverse explicitly.
+
+.. note::
+    Use of the positional argument :attr:`rcond` is deprecated in favor of :attr:`rtol`.
+    The default values for :attr:`rcond` and :attr:`rtol` are different.
 
 .. warning::
     This function uses internally :func:`torch.linalg.svd` (or :func:`torch.linalg.eigh`
@@ -1695,10 +1714,13 @@ Args:
                                        broadcastable to that of the singular values of
                                        :attr:`A` as returned by :func:`torch.svd`.
                                        Default: `1e-15`.
-    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
-                               or symmetric if real. Default: `False`.
 
 Keyword args:
+    atol (float, Tensor, optional): the absolute tolerance value. Default: `0.0`.
+    rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
+                                    Default: `None`.
+    hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
+                               or symmetric if real. Default: `False`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Examples::

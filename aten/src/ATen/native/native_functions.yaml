@@ -10394,19 +10394,35 @@
   python_module: linalg
   variants: function
 
-- func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+- func: linalg_pinv(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
+- func: linalg_pinv.out(Tensor self, *, float atol=0.0, float? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.tol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_pinv.out_tol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv.numpy(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv.numpy_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv.numpy_out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
+- func: linalg_pinv.numpy_out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
 
