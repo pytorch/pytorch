@@ -63,7 +63,7 @@ struct BatchNormImpl {
     if (size - d > 0) {
       Vec data_vec = Vec::loadu(in + d, size - d);
       Vec out_vec = data_vec * alpha_vec + beta_vec;
-      out_vec.store(out, size - d);
+      out_vec.store(out + d, size - d);
     }
   }
 
