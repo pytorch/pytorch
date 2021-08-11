@@ -11114,6 +11114,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            sample_inputs_func=sample_inputs_hardswish,
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            supports_gradgrad=False,
            supports_forward_ad=True,
@@ -11608,11 +11609,24 @@ op_db: List[OpInfo] = [
         aten_name="log_sigmoid",
         ref=reference_logsigmoid,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         supports_autograd=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
+        decorators=[
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_normal'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_hard'),
+            DecorateInfo(
+                precisionOverride({torch.float16: 1e-2, torch.bfloat16: 5e-3}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+        ],
     ),
     UnaryUfuncInfo(
         'nn.functional.mish',
@@ -11828,6 +11842,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            supports_autograd=True,
            assert_autodiffed=True,
@@ -14798,6 +14813,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_softplus,
         supports_forward_ad=True,
         dtypes=floating_types(),
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
     ),
