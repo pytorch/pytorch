@@ -1,7 +1,5 @@
 #pragma once
 
-#ifdef USE_C10D_UCC
-
 #include <memory>
 #include <stdexcept>
 #include <ucp/api/ucp.h>
@@ -50,5 +48,3 @@ inline ucs_memory_type getUCSMemoryType(c10::DeviceType type) {
 }
 
 } // namespace c10d
-
-#endif
