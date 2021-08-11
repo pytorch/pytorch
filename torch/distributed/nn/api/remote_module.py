@@ -421,7 +421,7 @@ class _RemoteModule(nn.Module):
         assert rpc._is_current_rpc_agent_set(), "RemoteModule only works in RPC."
 
         remote_device = _remote_device(remote_device_str)
-        self.on = remote_device.worker_name()
+        self.on = remote_device.worker_name() if remote_device.worker_name() is not None else remote_device.rank()
         self.device = str(remote_device.device())
         agent = rpc._get_current_rpc_agent()
         # If the device map of the remote worker is set,
