@@ -396,8 +396,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
     WithInsertPoint ins(embedding_bag_float_op);
     g->insertNode(qembedding_bag);
     // Verify that the outputs (apart from index 0) have no uses in the graph.
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 1; i < embedding_bag_float_op->outputs().size(); ++i) {
+    for (const auto i :
+         c10::irange(1, embedding_bag_float_op->outputs().size())) {
       TORCH_CHECK(
           !embedding_bag_float_op->output(i)->hasUses(),
           "Expected aten::embedding_bag to only have use for its first output.");
@@ -1521,8 +1521,7 @@ void ReplicateQuant(std::shared_ptr<Graph>& graph) {
     Node* if_node = n->input(0)->node();
     // move the nodes that produces the quantization parameters before
     // prim::If
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (auto i = 1; i < n->inputs().size(); ++i) {
+    for (const auto i : c10::irange(1, n->inputs().size())) {
       n->input(i)->node()->moveBefore(if_node);
     }
     // replace all uses of the quantized node with the output of if node
