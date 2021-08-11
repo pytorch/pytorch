@@ -429,7 +429,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cuda_out(const Tensor& self, co
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, bool train, double momentum, double epsilon) {
-  auto output = at::empty({0}, self.options());
+  auto output = at::empty_like(self);
   int64_t n_input = self.size(1);
   auto options = self.options().dtype(
       at::toAccumulateType(self.scalar_type(), /*is_cuda=*/true));
@@ -558,7 +558,7 @@ Tensor batch_norm_elemt_cuda(
     const Tensor& self, const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt, const Tensor& mean,
     const Tensor& invstd, double epsilon) {
-  auto output = at::empty({0}, self.options());
+  auto output = at::empty_like(self);
   // FIXME: Epsilon parameter isn't required, we don't take the reciprocal
   batch_norm_elementwise(output, self, weight_opt, bias_opt, mean, invstd);
   return output;
