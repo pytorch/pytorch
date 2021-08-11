@@ -74,6 +74,7 @@ std::pair<tensor_list, tensor_list> runGradient(
 
 std::shared_ptr<Graph> build_lstm();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph();
+std::shared_ptr<Graph> build_mobile_export_with_out();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_with_vararg();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_nested();
 std::shared_ptr<Graph> build_mobile_export_analysis_graph_non_const();

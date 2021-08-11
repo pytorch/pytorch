@@ -13,9 +13,19 @@ inline size_t CalculateNecessaryArgs(
   if (schema_args.size() < actual_inputs.size()) {
     return actual_inputs.size();
   }
+
+  int schema_idx = schema_args.size() - 1;
+  // skip over out arguments in the end.
+  while (schema_idx > -1) {
+    auto current_arg = schema_args.at(schema_idx);
+    if (!current_arg.is_out()) {
+      break;
+    }
+    schema_idx--;
+  }
+
   // keeps track of trailing unnecessary args
-  int schema_size = schema_args.size();
-  for (int schema_idx = schema_size - 1; schema_idx > -1; schema_idx--) {
+  while (schema_idx > -1) {
     // this means it is not default argument, so it is necessary
     if (!schema_args.at(schema_idx).default_value().has_value()) {
       return schema_idx + 1;
@@ -35,6 +45,7 @@ inline size_t CalculateNecessaryArgs(
         return schema_idx + 1;
       }
     }
+    schema_idx--;
   }
   return 0;
 }
