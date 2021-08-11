@@ -2226,12 +2226,12 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
 
     # Ordered as shapes for input, weight, bias
     # and a dict of values of (stride, padding, output_padding, groups, dilation)
-    cases = (  # type: ignore
-        ((1, 3, 4, 4), (3, 3, 3, 3), 3,
+    cases: Tuple[Tuple[int], Tuple[int], Tuple[int], dict] = (  # type: ignore[assignment]
+        ((1, 3, 4, 4), (3, 3, 3, 3), (3,),
          {'stride': (2, 2), 'padding': 2, 'output_padding': (1, 1), 'groups': 1}),
-        ((2, 2, 4, 4), (2, 2, 4, 5), 4,
+        ((2, 2, 4, 4), (2, 2, 4, 5), (4,),
          {'stride': (3, 2), 'padding': (1, 2), 'output_padding': (2, 3), 'groups': 2, 'dilation': (4, 4)}),
-        ((1, 1, 4, 5), (1, 1, 4, 3), 1,
+        ((1, 1, 4, 5), (1, 1, 4, 3), (1,),
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
@@ -6674,7 +6674,7 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose2d',
            aten_name='conv_transpose2d',
            aliases=('conv_transpose2d',),
-           dtypesIfCPU=floating_types(),
+           dtypesIfCPU=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=sample_inputs_conv_transpose2d,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
