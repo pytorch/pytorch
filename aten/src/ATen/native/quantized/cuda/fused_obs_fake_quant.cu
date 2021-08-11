@@ -241,17 +241,17 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
   // weight quantization currently.
   int64_t size = 1;
   if (per_row_fq) {
-    at::Tensor y = self;
-    if (self.dim() != 2) {
-      auto res = DimVector(self.sizes());
+    at::Tensor y = x;
+    if (x.dim() != 2) {
+      auto res = DimVector(x.sizes());
       std::iota(res.begin(), res.end(), 0);
       res[ch_axis] = 0;
       res[0] = ch_axis;
 
-      y = self.permute(res);
+      y = x.permute(res);
       y = y.flatten(1);
     }
-    size = self.size(ch_axis);
+    size = x.size(ch_axis);
     if (running_min.numel() == 0) {
       float inf = std::numeric_limits<float>::infinity();
       running_min.resize_(size).fill_(inf);
