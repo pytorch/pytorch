@@ -99,7 +99,7 @@ Expr* flatten_index(
   }
 
   Expr* total_index = new IntImm(0);
-  for (auto i : c10::irange(ndim)) {
+  for (const auto i : c10::irange(ndim)) {
     total_index = new Add(total_index, new Mul(indices[i], strides[i]));
   }
   return total_index;
@@ -193,7 +193,7 @@ ExternalCall* ExternalCall::make(
 std::vector<Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<Expr*> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -202,7 +202,7 @@ std::vector<Expr*> ExprHandleVectorToExprVector(
 std::vector<ExprHandle> ExprVectorToExprHandleVector(
     const std::vector<Expr*>& v) {
   std::vector<ExprHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = ExprHandle(v[i]);
   }
   return result;
@@ -210,7 +210,7 @@ std::vector<ExprHandle> ExprVectorToExprHandleVector(
 
 std::vector<Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
   std::vector<Var*> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = v[i].node();
   }
   return result;
@@ -218,10 +218,20 @@ std::vector<Var*> VarHandleVectorToVarVector(const std::vector<VarHandle>& v) {
 
 std::vector<VarHandle> VarVectorToVarHandleVector(const std::vector<Var*>& v) {
   std::vector<VarHandle> result(v.size());
-  for (auto i : c10::irange(v.size())) {
+  for (const auto i : c10::irange(v.size())) {
     result[i] = VarHandle(v[i]);
   }
   return result;
+}
+
+bool immediateIsNegative(Expr* e) {
+#define TYPE_CASE(Type, Name)                         \
+  if (Name##Imm* imm = dynamic_cast<Name##Imm*>(e)) { \
+    return imm->value() < 0;                          \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
 }
 
 } // namespace tensorexpr

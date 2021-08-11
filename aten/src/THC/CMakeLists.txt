@@ -21,7 +21,6 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorScatterGather.cu
   PARENT_SCOPE)
 
 install(FILES
@@ -93,6 +92,4 @@ install(FILES
           generic/THCTensorMathMagma.cpp
           generic/THCTensorMathPairwise.h
           generic/THCTensorMathPairwise.cu
-          generic/THCTensorScatterGather.h
-          generic/THCTensorScatterGather.cu
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC/generic")
