@@ -55,6 +55,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -110,9 +112,11 @@ jobs:
       TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
       NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
+      PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
+      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
     container:
       image: python:3.9
     steps:
@@ -133,6 +137,7 @@ jobs:
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       RUN_SMOKE_TESTS_ONLY_ON_PR: False
+      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
@@ -147,6 +152,8 @@ jobs:
         with:
           submodules: recursive
           path: pytorch-${{ github.run_id }}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
       - name: Install Visual Studio 2019 toolchain
         shell: powershell
         run: |
@@ -216,8 +223,8 @@ jobs:
   # logs (like test); we can always move it back to the other one, but it
   # doesn't create the best experience
   render_test_results:
-    if: always()
     needs: [generate-test-matrix, test, ciflow_should_run]
+    if: ${{ needs.test.result == 'success' || needs.test.result == 'failure' }}
     runs-on: linux.2xlarge
     strategy:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.render-matrix) }}
