@@ -82,9 +82,7 @@ void check_allany_for_meta(
   bool keepdim) {
    dim = maybe_wrap_dim(dim, self.dim());
    check_allany_for_meta(*this, "all", self, dim, keepdim);
-   return {
-     .dim_=dim
-   };
+   return TORCH_PRECOMPUTE_STRUCT2(all, dim) {.dim = dim};
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(any, dim)
@@ -93,9 +91,7 @@ TORCH_PRECOMPUTE_META_FUNC2(any, dim)
  bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
   check_allany_for_meta(*this, "any", self, dim, keepdim);
-  return {
-    .dim_=dim
-  };
+  return TORCH_PRECOMPUTE_STRUCT2(any, dim) {.dim = dim};
 }
 
 void check_argmax_argmin(
@@ -1263,10 +1259,10 @@ Tensor all(const Tensor& self) {
 }
 
 TORCH_IMPL_FUNC(all_out)
-(const Tensor& self, int64_t dim_, bool keepdim, const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim_, keepdim);
+(const Tensor& self, int64_t dim, bool keepdim, const Tensor& result) {
+  auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 1, dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 1, dim, keepdim)) {
     _all(mut_result, iter);
   }
 }
@@ -1296,12 +1292,12 @@ Tensor any(const Tensor& self) {
 
 TORCH_IMPL_FUNC(any_out)
 (const Tensor& self,
- int64_t dim_,
+ int64_t dim,
  bool keepdim,
  const Tensor& result) {
-  auto iter = get_allany_iter(self, result, dim_, keepdim);
+  auto iter = get_allany_iter(self, result, dim, keepdim);
   auto mut_result = const_cast<Tensor&>(result);
-  if (!_dimreduce_return_trivial(mut_result, self, 0, dim_, keepdim)) {
+  if (!_dimreduce_return_trivial(mut_result, self, 0, dim, keepdim)) {
     _any(mut_result, iter);
   }
 }

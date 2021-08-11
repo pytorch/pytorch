@@ -556,7 +556,11 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     method=False
                 )
             )
+
             if self.g.out.precomputed:
+                # If this function group has precomputed elements, the meta function
+                # returns a struct containing them which must be saved so that it
+                # can be unpacked when generating code to call the impl.
                 sig_body.append(f"auto precompute = op.meta({meta_exprs});")
             else:
                 sig_body.append(f"op.meta({meta_exprs});")
@@ -603,29 +607,31 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # I didn't do it for this version
                 sig_body.append(f"at::{api_name}({out_exprs});")
             elif self.backend_index.dispatch_key != DispatchKey.Meta:
-                impl_exprs_gen =  (e.expr for e in translate(context, structured.impl_arguments(self.g), method=False))
+                impl_exprs_gen = (e.expr for e in translate(context, structured.impl_arguments(self.g), method=False))
+
                 if self.g.out.precomputed:
+                    # A list of arguments for the impl function with
+                    # certain arguments replaced with precomputed counterparts
+                    # as specified in native_functions.yaml.
                     impl_exprs_replaced = []
-                    used_precomputed_elements = set()
 
                     for expr in impl_exprs_gen:
                         if expr in self.g.out.precomputed.replace:
+                        # If expr is in precompute.replace, append the argument
+                        # that should replace it on to impl_exprs_replaced. This argument
+                        # will be a specific member of the precomputed_out struct returned
+                        # by the meta function.
                             for replacement in self.g.out.precomputed.replace[expr]:
                                 impl_exprs_replaced.append(f"precompute.{replacement.name}")
-                                used_precomputed_elements.add(replacement)
                         else:
+                            # If not, push expr as is.
                             impl_exprs_replaced.append(expr)
-
-                    for element in self.g.out.precomputed.elements:
-                        if element not in used_precomputed_elements:
-                            impl_exprs_replaced.append(f"precompute.{element.name}")
 
                     impl_exprs = ', '.join(impl_exprs_replaced)
                 else:
                     impl_exprs = ', '.join(impl_exprs_gen)
 
                 sig_body.append(f"op.impl({impl_exprs});")
-
 
             # Destructively return the final tensors
             # TODO: Do this in translate instead

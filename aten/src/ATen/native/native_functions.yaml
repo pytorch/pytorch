@@ -488,9 +488,9 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    elements: int64_t dim_
+    elements: int64_t dim
     replace:
-      - dim -> dim_
+      - dim -> dim
   dispatch:
     CPU, CUDA: all_out
 
@@ -513,9 +513,9 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    elements: int64_t dim_
+    elements: int64_t dim
     replace:
-      - dim -> dim_
+      - dim -> dim
   dispatch:
     CPU, CUDA: any_out
 

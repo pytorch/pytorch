@@ -28,21 +28,22 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List
     if metadata is None:
         return []
     prefix = '' if backend_index.external else 'TORCH_API '
+
     if precompute:
+        # A list of parameters for the impl function with
+        # certain parameters replaced with precomputed counterparts
+        # as specified in native_functions.yaml.
         impl_args_replaced = []
-        used_precomputed_elements = set()
 
         for a in out_args:
             if a.name in precompute.replace:
+                # If a is in precompute.replace, append the parameters
+                # that should replace it onto impl_args_replaced.
                 for replacement in precompute.replace[a.name]:
                     impl_args_replaced.append(replacement.decl())
-                    used_precomputed_elements.add(replacement)
             else:
+                # If not, push a as is.
                 impl_args_replaced.append(a.decl())
-
-        for element in precompute.elements:
-            if element not in used_precomputed_elements:
-                impl_args_replaced.append(element.decl())
 
         impl_args = ', '.join(impl_args_replaced)
     else:

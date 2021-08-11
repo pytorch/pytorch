@@ -451,11 +451,9 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
         precomputed = g.out.precomputed if g.structured else None
 
         if precomputed:
-            elements_with_cpp_types = []
-            for elem in precomputed.elements:
-                elements_with_cpp_types.append(elem.decl())
-
-            precomputed_elements = ";\n".join(elements_with_cpp_types)
+            # Generate a string containing declarations of all precomputed elements.
+            precomputed_elements = ";\n".join(elem.decl() for replace_list in precomputed.replace.values() for elem in replace_list)
+            # Meta should return an instance of the struct containing the precomputed elements.
             meta_return = "precompute_out"
             precomputed_decl = f"""
                 struct TORCH_API precompute_out {{
