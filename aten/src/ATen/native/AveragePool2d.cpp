@@ -82,7 +82,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
         input.options().memory_format(memory_format));
   }
 
-  return TORCH_PRECOMPUTE_STRUCT(avg_pool2d){
+  return {
         .kH=kH,
         .kW=kW,
         .dH=dH,

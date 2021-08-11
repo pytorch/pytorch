@@ -82,7 +82,7 @@ void check_allany_for_meta(
   bool keepdim) {
    dim = maybe_wrap_dim(dim, self.dim());
    check_allany_for_meta(*this, "all", self, dim, keepdim);
-   return TORCH_PRECOMPUTE_STRUCT2(all, dim) {.dim = dim};
+   return {.dim = dim};
 }
 
 TORCH_PRECOMPUTE_META_FUNC2(any, dim)
@@ -91,7 +91,7 @@ TORCH_PRECOMPUTE_META_FUNC2(any, dim)
  bool keepdim) {
   dim = maybe_wrap_dim(dim, self.dim());
   check_allany_for_meta(*this, "any", self, dim, keepdim);
-  return TORCH_PRECOMPUTE_STRUCT2(any, dim) {.dim = dim};
+  return {.dim = dim};
 }
 
 void check_argmax_argmin(
