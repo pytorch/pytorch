@@ -9,6 +9,7 @@
 
 #include <unordered_set>
 
+#ifdef EDGE_PROFILER_USE_KINETO
 namespace torch {
 namespace jit {
 namespace mobile {
@@ -58,15 +59,16 @@ TEST(MobileProfiler, ModuleHierarchy) {
   std::string line;
   ASSERT_TRUE(trace_file.is_open());
   trace_file.seekg(0, std::ios_base::beg);
-  ASSERT_TRUE(checkModuleHierarchyForOp("aten::sub", "top(C)::<forward>.A0(A)::forward.aten::sub", trace_file));
+  ASSERT_TRUE(checkModuleHierarchyForOp("aten::sub", "top(C)::<unknown>.A0(A)::forward.aten::sub", trace_file));
   trace_file.seekg(0, std::ios_base::beg);
-  ASSERT_TRUE(checkModuleHierarchyForOp("aten::mul", "top(C)::<forward>.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method.aten::mul", trace_file));
+  ASSERT_TRUE(checkModuleHierarchyForOp("aten::mul", "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.SELF(A)::my_new_method.aten::mul", trace_file));
   trace_file.seekg(0, std::ios_base::beg);
-  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<forward>.A0(A)::forward.SELF(A)::forward_impl_.aten::add", trace_file));
-  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<forward>.SELF(C)::call_b.B0(B)::forward.aten::add", trace_file));
-  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<forward>.aten::add", trace_file));
+  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<unknown>.A0(A)::forward.SELF(A)::forward_impl_.aten::add", trace_file));
+  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<unknown>.SELF(C)::call_b.B0(B)::forward.aten::add", trace_file));
+  ASSERT_TRUE(checkModuleHierarchyForOp("aten::add", "top(C)::<unknown>.aten::add", trace_file));
 }
 
 } // namespace mobile
 } // namespace jit
 } // namespace torch
+#endif

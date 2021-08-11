@@ -14,7 +14,11 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/ADInplaceOrViewType_0.cpp",
     "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions.cpp",
+    "autograd/generated/python_functions_0.cpp",
+    "autograd/generated/python_functions_1.cpp",
+    "autograd/generated/python_functions_2.cpp",
+    "autograd/generated/python_functions_3.cpp",
+    "autograd/generated/python_functions_4.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
@@ -113,6 +117,9 @@ libtorch_sources_common = core_sources_common
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+]
+
+libtorch_edge_profiler_sources = libtorch_profiler_sources + [
     "torch/csrc/jit/mobile/profiler_edge.cpp",
 ]
 
@@ -372,7 +379,6 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/python_call.cpp",
     "torch/csrc/distributed/rpc/python_remote_call.cpp",
     "torch/csrc/distributed/rpc/python_resp.cpp",
-    "torch/csrc/distributed/rpc/process_group_agent.cpp",
     "torch/csrc/distributed/rpc/request_callback.cpp",
     "torch/csrc/distributed/rpc/request_callback_no_python.cpp",
     "torch/csrc/distributed/rpc/rpc_agent.cpp",
@@ -384,7 +390,6 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/script_resp.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_agent.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_utils.cpp",
-    "torch/csrc/distributed/rpc/testing/faulty_process_group_agent.cpp",
     "torch/csrc/distributed/rpc/testing/faulty_tensorpipe_agent.cpp",
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
@@ -458,7 +463,6 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/model_compatibility.cpp",
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
-    "torch/csrc/jit/mobile/profiler_edge.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
@@ -742,7 +746,11 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions.cpp",
+        "autograd/generated/python_functions_0.cpp",
+        "autograd/generated/python_functions_1.cpp",
+        "autograd/generated/python_functions_2.cpp",
+        "autograd/generated/python_functions_3.cpp",
+        "autograd/generated/python_functions_4.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",

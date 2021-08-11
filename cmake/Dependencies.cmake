@@ -1880,7 +1880,7 @@ set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" F
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
 # profiling. Thus we dont need USE_CUDA/USE_ROCM
-if(USE_KINETO AND INTERN_BUILD_MOBILE AND NOT USE_LITE_INTERPRETER_PROFILER)
+if(USE_KINETO AND INTERN_BUILD_MOBILE AND NOT (BUILD_LITE_INTERPRETER AND USE_LITE_INTERPRETER_PROFILER))
   message(STATUS "Not using libkineto in a mobile build.")
   set(USE_KINETO OFF)
 endif()

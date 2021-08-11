@@ -532,9 +532,7 @@ class Tracer(TracerBase):
         else:
             self.root = torch.nn.Module()
             fn = root
-
-        tracer_cls: Optional['Tracer'] = getattr(self, '__class__', None)
-        self.graph = Graph(tracer_cls=tracer_cls)
+        self.graph = Graph()
 
         # When we encounter a Tensor value that's not a parameter, we look if it
         # is some other attribute on the model. Construct a dict mapping Tensor
