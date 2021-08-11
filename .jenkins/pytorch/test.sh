@@ -183,18 +183,6 @@ test_aten() {
   # scalar_tensor_test, basic, native_test
   if [[ "$BUILD_ENVIRONMENT" != *asan* ]] && [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Running ATen tests with pytorch lib"
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      echo "Running test with the install folder"
-      # Rename the build folder when running test to ensure it
-      # is not depended on the folder
-      mv "$BUILD_DIR" "$BUILD_RENAMED_DIR"
-      TEST_BASE_DIR="$TORCH_TEST_DIR"
-    else
-      echo "Running test with the build folder"
-      TEST_BASE_DIR="$BUILD_BIN_DIR"
-    fi
-
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
@@ -202,20 +190,13 @@ test_aten() {
       SUDO=sudo
     fi
 
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TEST_BASE_DIR"
-    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TEST_BASE_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TORCH_BIN_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TORCH_BIN_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libnccl* "$TORCH_BIN_DIR"
+    ${SUDO} ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
 
-    ls "$TEST_BASE_DIR"
-    aten/tools/run_tests.sh "$TEST_BASE_DIR"
-
-    if [[ -n "$IN_WHEEL_TEST" ]]; then
-      # Restore the build folder to avoid any impact on other tests
-      mv "$BUILD_RENAMED_DIR" "$BUILD_DIR"
-    fi
-
+    aten/tools/run_tests.sh "$TORCH_BIN_DIR"
     assert_git_not_dirty
   fi
 }
