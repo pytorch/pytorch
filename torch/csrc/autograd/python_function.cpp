@@ -496,9 +496,12 @@ static void _trace_post_record(
   int num_outputs = PyTuple_GET_SIZE(output_objects);
   auto graph = node->owningGraph();
   node->addOutput();
+  auto old_node = node;
   if (!unpack_output) {
     std::vector<TypePtr> tuple_values(num_outputs, TensorType::get());
     TypePtr tuple_type = TupleType::create(std::move(tuple_values));
+    // Original type is tuple of tensors "without" element type and shape.
+    // The missed parts will be added below.
     node->output()->setType(tuple_type);
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
@@ -513,6 +516,18 @@ static void _trace_post_record(
         jit::tracer::setValueTrace(tensor, value);
       }
     }
+  }
+  // If TupleUnpack operator is created, we copy its output type back
+  // to the original tuple type.
+  if (!unpack_output) {
+    std::vector<TypePtr> new_tuple_values;
+    for (int i = 0; i < num_outputs; ++i) {
+      TypePtr ptr = node->outputs()[i]->type();
+      new_tuple_values.push_back(ptr);
+    }
+    TypePtr tuple_type = TupleType::create(std::move(new_tuple_values));
+    // The i-th tuple element receives a new tensor type with element type and shape.
+    old_node->output()->setType(tuple_type);
   }
 }
 
