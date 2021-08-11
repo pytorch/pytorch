@@ -266,7 +266,7 @@ void IRPrinter::visit(IfThenElse* v) {
 
 void IRPrinter::visit(Intrinsics* v) {
   os() << v->func_name() << "(";
-  for (auto i : c10::irange(v->nparams())) {
+  for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
@@ -419,7 +419,7 @@ void IRPrinter::visit(Allocate* v) {
        << "); // dtype=" << dtypeToCppString(v->dtype());
   os() << ", dims=[";
   const std::vector<Expr*>& dims = v->dims();
-  for (auto i : c10::irange(dims.size())) {
+  for (const auto i : c10::irange(dims.size())) {
     if (i != 0) {
       os() << ", ";
     }
@@ -594,7 +594,7 @@ std::string to_string(const Tensor* t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
   oss << "Tensor " << t->buf()->name_hint() << "[";
-  for (auto i : c10::irange(t->buf()->ndim())) {
+  for (const auto i : c10::irange(t->buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }

@@ -21,7 +21,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TSAN,
-    TEST_WITH_ASAN,
+    TEST_WITH_DEV_DBG_ASAN,
 )
 
 
@@ -213,7 +213,7 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
 
 
 # ASAN is not safe since we are spawning processes.
-if not TEST_WITH_ASAN:
+if not TEST_WITH_DEV_DBG_ASAN:
     @requires_gloo()
     @requires_nccl()
     class ProcessGroupNCCLWrapperTest(AbstractProcessGroupWrapperTest):
