@@ -1656,7 +1656,7 @@ class TestONNXRuntime(unittest.TestCase):
                     x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
                     x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
 
-        x = torch.randn(2, 3, 4)
+        x = torch.rand(2, 3, 4)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
@@ -1666,8 +1666,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return x // 3, x // 2., x // y
 
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
+        x = torch.rand(2, 3, 4)
+        y = torch.rand(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -1676,7 +1676,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x):
                 return x.new_zeros(x.size(2) // x.size(1))
 
-        x = torch.randn(2, 3, 4)
+        x = torch.rand(2, 3, 4)
         self.run_test(FloordivModule(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(FloordivModule(), (x,), remained_onnx_input_idx=[])
 
