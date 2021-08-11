@@ -739,7 +739,6 @@ struct MobileCodeImpl : CodeImpl {
         if (!op_schema.is_vararg()) {
           auto numInclude =
               CalculateNecessaryArgs(op_schema.arguments(), node->inputs());
-          std::cout << "INCLUDE: " << numInclude << std::endl;
           auto unique_name = op_schema.overload_name() != ""
               ? op_schema.name() + "." + op_schema.overload_name()
               : op_schema.name();
