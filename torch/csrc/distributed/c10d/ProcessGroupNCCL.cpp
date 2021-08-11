@@ -450,10 +450,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       options_(options),
       ncclCommCounter_(0),
       terminateProcessGroup_(false),
-      libucc("libtorch_ucc.so", nullptr, true),
-      createProcessGroupUCC(nullptr) {
+      libucc("libtorch_ucc.so", nullptr, true) {
   if (libucc.available()) {
-    createProcessGroupUCC = 
+    CreateProcessGroupUCCType createProcessGroupUCC = 
       reinterpret_cast<CreateProcessGroupUCCType>(libucc.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
     pg_ucc = createProcessGroupUCC(store, rank, size);
   }
@@ -1784,7 +1783,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
-    int /* unused */) {
+    int tag) {
+  if (pg_ucc.get() != nullptr && tensors[0].device().type() != c10::kCUDA) {
+    return pg_ucc->send(tensors, dstRank, tag);
+  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -1804,7 +1806,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
-    int /* unused */) {
+    int tag) {
+  if (pg_ucc.get() != nullptr && tensors[0].device().type() != c10::kCUDA) {
+    return pg_ucc->send(tensors, srcRank, tag);
+  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,

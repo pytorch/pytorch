@@ -48,7 +48,7 @@ if TEST_WITH_TSAN:
     print("Skip as TSAN is not fork-safe since we're forking in a multi-threaded environment", file=sys.stderr)
     sys.exit(0)
 
-if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "_internal_ucc":
+if BACKEND == "gloo" or BACKEND == "nccl":
 
     class TestDistBackendWithFork(TestDistBackend, DistributedTest._DistTestBase):
 

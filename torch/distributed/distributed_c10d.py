@@ -35,7 +35,6 @@ from .rendezvous import rendezvous, register_rendezvous_handler  # noqa: F401
 _MPI_AVAILABLE = True
 _NCCL_AVAILABLE = True
 _GLOO_AVAILABLE = True
-_UCC_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
@@ -55,11 +54,6 @@ try:
     from torch._C._distributed_c10d import _ProcessGroupWrapper
 except ImportError:
     _GLOO_AVAILABLE = False
-
-try:
-    from torch._C._distributed_c10d import ProcessGroupUCC
-except ImportError:
-    _UCC_AVAILABLE = False
 
 
 logger = logging.getLogger(__name__)
@@ -109,7 +103,6 @@ class Backend(object):
     NCCL = "nccl"
     MPI = "mpi"
     TCP = "tcp"
-    _INTERNAL_UCC = "_internal_ucc"
 
     def __new__(cls, name: str):
         if not isinstance(name, string_classes):
@@ -124,7 +117,7 @@ class Backend(object):
             )
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
-        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI and value != Backend._INTERNAL_UCC:
+        elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
             value = name
         return value
 
@@ -382,13 +375,6 @@ def is_gloo_available():
     Checks if the Gloo backend is available.
     """
     return _GLOO_AVAILABLE
-
-
-def is_ucc_available():
-    """
-    Checks if the UCC backend is available.
-    """
-    return _UCC_AVAILABLE
 
 
 def is_initialized():
@@ -649,7 +635,7 @@ def _new_process_group_helper(
     is_default_group = len(group_ranks) == 0
 
     backend = Backend(backend)
-    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL, ProcessGroupUCC]
+    pg: Union[ProcessGroupGloo, ProcessGroupMPI, ProcessGroupNCCL]
     if backend == Backend.MPI:
         if not is_mpi_available():
             raise RuntimeError(
@@ -733,10 +719,6 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
             _pg_map[pg] = (Backend.NCCL, store)
-            _pg_names[pg] = group_name
-        elif backend == Backend._INTERNAL_UCC:
-            pg = ProcessGroupUCC(prefix_store, rank, world_size)
-            _pg_map[pg] = (backend, store)
             _pg_names[pg] = group_name
         else:
             pg = getattr(Backend, backend.upper())(

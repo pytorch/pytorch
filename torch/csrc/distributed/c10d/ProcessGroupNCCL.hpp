@@ -564,7 +564,6 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   static thread_local uint64_t ncclActiveGroupCounter_;
 
   at::DynamicLibrary libucc;
-  CreateProcessGroupUCCType createProcessGroupUCC;
   c10::intrusive_ptr<ProcessGroup> pg_ucc;
 };
 
