@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/NativeFunctions.h>
@@ -288,10 +289,11 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cpu::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     }
     return;
