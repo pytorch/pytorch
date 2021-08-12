@@ -1,14 +1,15 @@
+import numpy
+import torch
 import torch.testing._internal.common_utils as common
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    dtypes
+    dtypes,
 )
 
-import torch
-import numpy
 
 def get_dtype_size(dtype):
     return int(torch.empty((), dtype=dtype).element_size())
+
 
 SIZE = 5
 SHAPE = (SIZE,)
@@ -27,11 +28,17 @@ class TestBufferProtocol(common.TestCase):
         original = memoryview(numpy_original)
         # First call PyTorch's version in case of errors.
         # If this call exits successfully, the NumPy version must also do so.
-        torch_frombuffer = torch.frombuffer(original, dtype=dtype, count=count, offset=offset, **kwargs)
-        numpy_frombuffer = numpy.frombuffer(original, dtype=numpy_dtype, count=count, offset=offset)
+        torch_frombuffer = torch.frombuffer(
+            original, dtype=dtype, count=count, offset=offset, **kwargs
+        )
+        numpy_frombuffer = numpy.frombuffer(
+            original, dtype=numpy_dtype, count=count, offset=offset
+        )
 
         self.assertEqual(numpy_frombuffer, torch_frombuffer)
-        self.assertEqual(numpy_frombuffer.__array_interface__["data"][0], torch_frombuffer.data_ptr())
+        self.assertEqual(
+            numpy_frombuffer.__array_interface__["data"][0], torch_frombuffer.data_ptr()
+        )
         return (numpy_original, torch_frombuffer)
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
@@ -91,36 +98,41 @@ class TestBufferProtocol(common.TestCase):
         bytes = get_dtype_size(dtype)
         in_bytes = SIZE * bytes
         # Empty array
-        with self.assertRaisesRegex(ValueError,
-                                    r"both buffer length \(0\) and count"):
+        with self.assertRaisesRegex(ValueError, r"both buffer length \(0\) and count"):
             empty = numpy.array([])
             torch.frombuffer(empty, dtype=dtype)
         # Count equals 0
-        with self.assertRaisesRegex(ValueError,
-                                    r"both buffer length .* and count \(0\)"):
+        with self.assertRaisesRegex(
+            ValueError, r"both buffer length .* and count \(0\)"
+        ):
             self._run_test(SHAPE, dtype, count=0)
         # Offset negative and bigger than total length
-        with self.assertRaisesRegex(ValueError,
-                                    rf"offset \(-{bytes} bytes\) must be"):
+        with self.assertRaisesRegex(ValueError, rf"offset \(-{bytes} bytes\) must be"):
             self._run_test(SHAPE, dtype, first=-1)
-        with self.assertRaisesRegex(ValueError,
-                                    rf"offset \({in_bytes} bytes\) must be .* "
-                                    rf"buffer length \({in_bytes} bytes\)"):
+        with self.assertRaisesRegex(
+            ValueError,
+            rf"offset \({in_bytes} bytes\) must be .* "
+            rf"buffer length \({in_bytes} bytes\)",
+        ):
             self._run_test(SHAPE, dtype, first=SIZE)
         # Non-multiple offset with all elements
         if bytes > 1:
             offset = bytes - 1
-            with self.assertRaisesRegex(ValueError,
-                                        rf"buffer length \({in_bytes - offset} bytes\) after "
-                                        rf"offset \({offset} bytes\) must be"):
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"buffer length \({in_bytes - offset} bytes\) after "
+                rf"offset \({offset} bytes\) must be",
+            ):
                 self._run_test(SHAPE, dtype, offset=bytes - 1)
         # Count too big for each good first element
         for first in range(SIZE):
             count = SIZE - first + 1
-            with self.assertRaisesRegex(ValueError,
-                                        rf"requested buffer length \({count} \* {bytes} bytes\) "
-                                        rf"after offset \({first * bytes} bytes\) must .*"
-                                        rf"buffer length \({in_bytes} bytes\)"):
+            with self.assertRaisesRegex(
+                ValueError,
+                rf"requested buffer length \({count} \* {bytes} bytes\) "
+                rf"after offset \({first * bytes} bytes\) must .*"
+                rf"buffer length \({in_bytes} bytes\)",
+            ):
                 self._run_test(SHAPE, dtype, count=count, first=first)
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
@@ -152,16 +164,18 @@ class TestBufferProtocol(common.TestCase):
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_not_a_buffer(self, device, dtype):
-        with self.assertRaisesRegex(ValueError,
-                                    r"object does not implement Python buffer protocol."):
+        with self.assertRaisesRegex(
+            ValueError, r"object does not implement Python buffer protocol."
+        ):
             torch.frombuffer([1, 2, 3, 4], dtype=dtype)
 
     @dtypes(*common.torch_to_numpy_dtype_dict.keys())
     def test_non_writable_buffer(self, device, dtype):
         numpy_arr = common.make_tensor((1,), device, dtype).numpy()
         byte_arr = numpy_arr.tobytes()
-        with self.assertWarnsOnceRegex(UserWarning,
-                                       r"The given buffer is not writable."):
+        with self.assertWarnsOnceRegex(
+            UserWarning, r"The given buffer is not writable."
+        ):
             torch.frombuffer(byte_arr, dtype=dtype)
 
     def test_byte_to_int(self):
@@ -170,6 +184,7 @@ class TestBufferProtocol(common.TestCase):
         self.assertEqual(tensor.numel(), 2)
         # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
+
 
 instantiate_device_type_tests(TestBufferProtocol, globals(), only_for="cpu")
 

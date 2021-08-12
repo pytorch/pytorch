@@ -1,9 +1,8 @@
-
 import torch
-from torch.utils import ThroughputBenchmark
 from torch.testing import assert_allclose
-
 from torch.testing._internal.common_utils import run_tests, TestCase, TemporaryFileName
+from torch.utils import ThroughputBenchmark
+
 
 class TwoLayerNet(torch.jit.ScriptModule):
     def __init__(self, D_in, H, D_out):
@@ -19,6 +18,7 @@ class TwoLayerNet(torch.jit.ScriptModule):
         y_pred = self.linear2(cat)
         return y_pred
 
+
 class TwoLayerNetModule(torch.nn.Module):
     def __init__(self, D_in, H, D_out):
         super(TwoLayerNetModule, self).__init__()
@@ -31,6 +31,7 @@ class TwoLayerNetModule(torch.nn.Module):
         cat = torch.cat((h1_relu, h2_relu), 1)
         y_pred = self.linear2(cat)
         return y_pred
+
 
 class TestThroughputBenchmark(TestCase):
     def linear_test(self, Module, profiler_output_path=""):
@@ -67,7 +68,6 @@ class TestThroughputBenchmark(TestCase):
 
         print(stats)
 
-
     def test_script_module(self):
         self.linear_test(TwoLayerNet)
 
@@ -79,5 +79,5 @@ class TestThroughputBenchmark(TestCase):
             self.linear_test(TwoLayerNetModule, profiler_output_path=fname)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

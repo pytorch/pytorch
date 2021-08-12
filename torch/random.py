@@ -1,8 +1,8 @@
 import contextlib
 import warnings
 
-from torch._C import default_generator
 import torch
+from torch._C import default_generator
 
 
 def set_rng_state(new_state: torch.Tensor) -> None:
@@ -82,6 +82,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
     """
 
     import torch.cuda
+
     global _fork_rng_warned_already
 
     # Internal arguments:
@@ -96,18 +97,22 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
         num_devices = torch.cuda.device_count()
         if num_devices > 1 and not _fork_rng_warned_already:
             warnings.warn(
-                ("CUDA reports that you have {num_devices} available devices, and you "
-                 "have used {caller} without explicitly specifying which devices are being used. "
-                 "For safety, we initialize *every* CUDA device by default, which "
-                 "can be quite slow if you have a lot of GPUs.  If you know that you are only "
-                 "making use of a few CUDA devices, set the environment variable CUDA_VISIBLE_DEVICES "
-                 "or the '{devices_kw}' keyword argument of {caller} with the set of devices "
-                 "you are actually using.  For example, if you are using CPU only, "
-                 "set CUDA_VISIBLE_DEVICES= or devices=[]; if you are using "
-                 "GPU 0 only, set CUDA_VISIBLE_DEVICES=0 or devices=[0].  To initialize "
-                 "all devices and suppress this warning, set the '{devices_kw}' keyword argument "
-                 "to `range(torch.cuda.device_count())`."
-                 ).format(num_devices=num_devices, caller=_caller, devices_kw=_devices_kw))
+                (
+                    "CUDA reports that you have {num_devices} available devices, and you "
+                    "have used {caller} without explicitly specifying which devices are being used. "
+                    "For safety, we initialize *every* CUDA device by default, which "
+                    "can be quite slow if you have a lot of GPUs.  If you know that you are only "
+                    "making use of a few CUDA devices, set the environment variable CUDA_VISIBLE_DEVICES "
+                    "or the '{devices_kw}' keyword argument of {caller} with the set of devices "
+                    "you are actually using.  For example, if you are using CPU only, "
+                    "set CUDA_VISIBLE_DEVICES= or devices=[]; if you are using "
+                    "GPU 0 only, set CUDA_VISIBLE_DEVICES=0 or devices=[0].  To initialize "
+                    "all devices and suppress this warning, set the '{devices_kw}' keyword argument "
+                    "to `range(torch.cuda.device_count())`."
+                ).format(
+                    num_devices=num_devices, caller=_caller, devices_kw=_devices_kw
+                )
+            )
             _fork_rng_warned_already = True
         devices = list(range(num_devices))
     else:
