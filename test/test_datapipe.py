@@ -114,7 +114,11 @@ class TestDataChunk(TestCase):
     def test_as_string(self):
         elements = list(range(10))
         chunk : DataChunk[int] = DataChunk(elements)
-        self.assertEquals(str(chunk), str(elements))
+        self.assertEqual(str(chunk), str(elements))
+
+        batch = [elements] * 3
+        chunks: List[DataChunk] = [DataChunk(elements)] * 3
+        self.assertEqual(str(chunk), str(elements))
 
 
 class TestIterableDataPipeBasic(TestCase):
