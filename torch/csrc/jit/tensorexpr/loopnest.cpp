@@ -513,6 +513,7 @@ class FunctionInliner : public IRMutator {
     for (auto i : c10::irange(buf->ndim())) {
       Var* func_callee_arg = producer_index_vars_.at(i);
       Expr* func_caller_param = dims.at(i);
+
       if (func_callee_arg == nullptr) {
         TORCH_INTERNAL_ASSERT(
             dynamic_cast<IntImm*>(func_caller_param) != nullptr &&
@@ -561,6 +562,7 @@ class FunctionInliner : public IRMutator {
       throw malformed_input(
           "Placeholder indexed access is inconsistent with its rank", v);
     }
+
     return mutate_loads(buf, v->indices());
   }
 
@@ -701,6 +703,41 @@ bool LoopNest::computeInline(Buf* b) {
   }
 
   TORCH_INTERNAL_ASSERT(relevant_store);
+  for (auto* i : relevant_store->indices()) {
+    // Cannot inline a atore if one of its indices is a compound expression
+    if (dynamic_cast<const Var*>(i) == nullptr &&
+        dynamic_cast<const IntImm*>(i) == nullptr) {
+      return false;
+    }
+    // If the index can be a constant, then that dimension must have size 1
+    // (since we don't support in-place writes). Resolves issue 52581.
+    if (dynamic_cast<const IntImm*>(i) != nullptr &&
+        dynamic_cast<IntImm*>(i)->value() != 0) {
+      return false;
+    }
+  }
+
+  // Check consumers.
+  auto loads = NodeFinder<Load>::find(root_stmt_);
+  for (auto* l : loads) {
+    if (l->buf() != b) {
+      continue;
+    }
+    for (auto* i : l->indices()) {
+      // Cannot inline a atore if one of the load indices is a compound
+      // expression
+      if (dynamic_cast<const Var*>(i) == nullptr &&
+          dynamic_cast<const IntImm*>(i) == nullptr) {
+        return false;
+      }
+      // If the index can be a constant, then that dimension must have size 1
+      // (since we don't support in-place writes). Resolves issue 52581.
+      if (dynamic_cast<const IntImm*>(i) != nullptr &&
+          dynamic_cast<IntImm*>(i)->value() != 0) {
+        return false;
+      }
+    }
+  }
 
   FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
