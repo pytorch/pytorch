@@ -226,18 +226,10 @@ std::tuple<Tensor, Tensor> get_atol_rtol(
 std::tuple<Tensor, Tensor> get_atol_rtol(
     const Tensor& input,
     double atol,
-    optional<double> rtol_opt) {
-  double rtol_value;
-  if (rtol_opt.has_value()) {
-    rtol_value = rtol_opt.value();
-  } else {
-    // default relative tolerance is atol > 0 ? 0.0 : eps*max(rows, cols)
-    ScalarType real_dtype = toValueType(input.scalar_type());
-    rtol_value = (atol > 0.0) ? 0.0 : _get_epsilon(real_dtype) * std::max(input.size(-1), input.size(-2));
-  }
+    double rtol) {
   auto options = input.options().dtype(ScalarType::Double);
   auto atol_tensor = at::full({}, atol, options);
-  auto rtol_tensor = at::full({}, rtol_value, options);
+  auto rtol_tensor = at::full({}, rtol, options);
   return std::make_tuple(atol_tensor, rtol_tensor);
 }
 
@@ -292,7 +284,7 @@ Tensor linalg_pinv(
   }
 }
 
-Tensor linalg_pinv(const Tensor& input, double atol, optional<double> rtol, bool hermitian) {
+Tensor linalg_pinv(const Tensor& input, double atol, double rtol, bool hermitian) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
   return at::linalg_pinv(input, atol_tensor, rtol_tensor, hermitian);
@@ -302,7 +294,8 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
   // For NumPy compatibility the rcond argument is used as relative tolerance
   TORCH_CHECK(!at::isComplexType(rcond.scalar_type()),
               "torch.linalg.pinv: rcond tensor of complex type is not supported.");
-  return at::linalg_pinv(input, c10::nullopt, rcond, hermitian);
+  auto options = input.options().dtype(ScalarType::Double);
+  return at::linalg_pinv(input, at::zeros({}, options), rcond, hermitian);
 }
 
 Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
@@ -328,7 +321,7 @@ Tensor& linalg_pinv_out(
 Tensor& linalg_pinv_out(
     const Tensor& input,
     double atol,
-    optional<double> rtol,
+    double rtol,
     bool hermitian,
     Tensor& result) {
   checkSameDevice("linalg_pinv", result, input);
@@ -461,7 +454,12 @@ Tensor matrix_power(const Tensor& self, int64_t n) {
 // Computes the rank of 'input' and saves the result in-place in 'result'
 // 'hermitian' controls whether SVD or eigendecomposition is used for computing the singular values
 // 'atol' and 'rtol' are the absolute and relative tolerances, respectively.
-Tensor& linalg_matrix_rank_out(const Tensor& input, const optional<Tensor>& atol_opt, const optional<Tensor>& rtol_opt, bool hermitian, Tensor& result) {
+Tensor& linalg_matrix_rank_out(
+    const Tensor& input,
+    const optional<Tensor>& atol_opt,
+    const optional<Tensor>& rtol_opt,
+    bool hermitian,
+    Tensor& result) {
   Tensor atol, rtol;
   std::tie(atol, rtol) = get_atol_rtol(input, atol_opt, rtol_opt, "torch.linalg.matrix_rank");
 
@@ -512,7 +510,7 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, const optional<Tensor>& atol
   return result;
 }
 
-Tensor& linalg_matrix_rank_out(const Tensor& input, double atol, optional<double> rtol, bool hermitian, Tensor& result) {
+Tensor& linalg_matrix_rank_out(const Tensor& input, double atol, double rtol, bool hermitian, Tensor& result) {
   Tensor atol_tensor, rtol_tensor;
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, atol, rtol);
   result = linalg_matrix_rank_out(input, atol_tensor, rtol_tensor, hermitian, result);
@@ -525,7 +523,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const optional<Tensor>& atol, con
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& input, double atol, optional<double> rtol, bool hermitian) {
+Tensor linalg_matrix_rank(const Tensor& input, double atol, double rtol, bool hermitian) {
   Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, atol, rtol, hermitian, result);
   return result;
@@ -539,13 +537,10 @@ Tensor& linalg_matrix_rank_out(const Tensor& input, const Tensor& tol, bool herm
   return result;
 }
 
-Tensor& linalg_matrix_rank_out(const Tensor& input, optional<double> tol, bool hermitian, Tensor& result) {
-  // For NumPy compatibility atol is zero if tol is None, else tol value is used as absolute tolerance
-  if (tol.has_value()) {
-    result = at::linalg_matrix_rank_outf(input, tol.value(), 0.0, hermitian, result);
-  } else {
-    result = at::linalg_matrix_rank_outf(input, 0.0, tol, hermitian, result);
-  }
+Tensor& linalg_matrix_rank_out(const Tensor& input, double tol, bool hermitian, Tensor& result) {
+  // For NumPy compatibility tol is not scaled with max(singular_value) if the value for tol is provided
+  // It is assumed that the provided value is the absolute tolerance
+  result = at::linalg_matrix_rank_outf(input, tol, 0.0, hermitian, result);
   return result;
 }
 
@@ -555,7 +550,7 @@ Tensor linalg_matrix_rank(const Tensor& input, const Tensor& tol, bool hermitian
   return result;
 }
 
-Tensor linalg_matrix_rank(const Tensor& input, optional<double> tol, bool hermitian) {
+Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   Tensor result = at::empty({0}, input.options().dtype(ScalarType::Long));
   result = at::linalg_matrix_rank_outf(input, tol, hermitian, result);
   return result;
@@ -567,7 +562,7 @@ Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
     "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
-  return at::linalg_matrix_rank(self, optional<double>(tol), symmetric);
+  return at::linalg_matrix_rank(self, tol, symmetric);
 }
 
 Tensor matrix_rank(const Tensor& self, bool symmetric) {
@@ -576,7 +571,7 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
     "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
     "renamed in torch.linalg.matrix_rank to 'hermitian'."
   );
-  return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
+  return at::linalg_matrix_rank(self, c10::nullopt, c10::nullopt, symmetric);
 }
 
 // multi_dot helper functions

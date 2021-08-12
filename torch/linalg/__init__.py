@@ -4,6 +4,8 @@ import sys
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 
+from functools import wraps
+
 Tensor = torch.Tensor
 
 common_notes = {
@@ -922,7 +924,21 @@ Examples::
             [-0.4899,  0.0822,  0.2773]]])
 """)
 
-matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
+# ATen linalg_matrix_rank function doesn't support optional float atol or rtol
+@wraps(_linalg.linalg_matrix_rank)
+def matrix_rank(A, tol=None, hermitian=False, *, atol=None, rtol=None, out=None):
+    if tol is not None and (atol is not None or rtol is not None):
+        raise RuntimeError("Specifying both tol and atol (or rtol) is not supported.")
+    if tol is not None:
+        return _linalg.linalg_matrix_rank(A, tol=tol, hermitian=hermitian, out=out)
+    else:
+        if atol is None and isinstance(rtol, float):
+            atol = 0.0
+        if rtol is None and isinstance(atol, float):
+            rtol = 0.0
+        return _linalg.linalg_matrix_rank(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
+
+_add_docstr(_linalg.linalg_matrix_rank, r"""
 linalg.matrix_rank(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
 linalg.matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
 
@@ -1643,8 +1659,22 @@ Examples::
             [4.5671]])
 """)
 
-pinv = _add_docstr(_linalg.linalg_pinv, r"""
-linalg.pinv(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
+# ATen linalg_pinv function doesn't support optional float atol or rtol
+@wraps(_linalg.linalg_pinv)
+def pinv(A, rcond=None, hermitian=False, *, atol=None, rtol=None, out=None):
+    if rcond is not None and (atol is not None or rtol is not None):
+        raise RuntimeError("Specifying both rcond and atol (or rtol) is not supported.")
+    if rcond is not None:
+        return _linalg.linalg_pinv(A, rcond=rcond, hermitian=hermitian, out=out)
+    else:
+        if atol is None and isinstance(rtol, float):
+            atol = 0.0
+        if rtol is None and isinstance(atol, float):
+            rtol = 0.0
+        return _linalg.linalg_pinv(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
+
+_add_docstr(_linalg.linalg_pinv, r"""
+linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
@@ -1674,8 +1704,6 @@ the relative tolerance is set to be
 and :math:`\varepsilon` is the epsilon value for the dtype of :attr:`A` (see :class:`torch.finfo`).
 If :attr:`A` is a batch of matrices, :attr:`rtol` is computed this way for every element of
 the batch.
-
-If both :attr:`atol` and :attr:`rtol` are specified then the value for :attr:`rtol` is ignored.
 
 .. note:: This function uses :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` and
           :func:`torch.linalg.eigh` if :attr:`hermitian`\ `= True`.
@@ -1716,7 +1744,7 @@ Args:
                                        Default: `1e-15`.
 
 Keyword args:
-    atol (float, Tensor, optional): the absolute tolerance value. Default: `0.0`.
+    atol (float, Tensor, optional): the absolute tolerance value. Default: `None`.
     rtol (float, Tensor, optional): the relative tolerance value. See above for the value it takes when `None`.
                                     Default: `None`.
     hermitian(bool, optional): indicates whether :attr:`A` is Hermitian if complex
