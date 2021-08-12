@@ -14,7 +14,9 @@ common_notes = {
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
-cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
+cholesky = _add_docstr(
+    _linalg.linalg_cholesky,
+    r"""
 linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a complex Hermitian or real symmetric positive-definite matrix.
@@ -34,9 +36,11 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. seealso::
 
@@ -84,9 +88,12 @@ Examples::
     >>> L = torch.linalg.cholesky(A)
     >>> torch.dist(L @ L.transpose(-2, -1), A)
     tensor(5.8747e-16, dtype=torch.float64)
-""")
+""",
+)
 
-cholesky_ex = _add_docstr(_linalg.linalg_cholesky_ex, r"""
+cholesky_ex = _add_docstr(
+    _linalg.linalg_cholesky_ex,
+    r"""
 linalg.cholesky_ex(A, *, upper=False, check_errors=False, out=None) -> (Tensor, Tensor)
 
 Computes the Cholesky decomposition of a complex Hermitian or real
@@ -143,9 +150,12 @@ Examples::
     >>> info
     tensor(0, dtype=torch.int32)
 
-""")
+""",
+)
 
-inv = _add_docstr(_linalg.linalg_inv, r"""
+inv = _add_docstr(
+    _linalg.linalg_inv,
+    r"""
 linalg.inv(A, *, out=None) -> Tensor
 
 Computes the inverse of a square matrix if it exists.
@@ -168,9 +178,11 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices
 then the output has the same batch dimensions.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. note::
     Consider using :func:`torch.linalg.solve` if possible for multiplying a matrix on the left by
@@ -218,9 +230,12 @@ Examples::
 
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
-""")
+""",
+)
 
-inv_ex = _add_docstr(_linalg.linalg_inv_ex, r"""
+inv_ex = _add_docstr(
+    _linalg.linalg_inv_ex,
+    r"""
 linalg.inv_ex(A, *, check_errors=False, out=None) -> (Tensor, Tensor)
 
 Computes the inverse of a square matrix if it is invertible.
@@ -267,9 +282,12 @@ Examples::
     >>> info
     tensor(0, dtype=torch.int32)
 
-""")
+""",
+)
 
-det = _add_docstr(_linalg.linalg_det, r"""
+det = _add_docstr(
+    _linalg.linalg_det,
+    r"""
 linalg.det(A, *, out=None) -> Tensor
 
 Computes the determinant of a square matrix.
@@ -278,10 +296,12 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: This function is computed using :func:`torch.lu`.
           {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. seealso::
 
@@ -304,9 +324,12 @@ Examples::
     >>> A = torch.randn(3, 2, 2)
     >>> torch.linalg.det(A)
     tensor([1.1990, 0.4099, 0.7386])
-""")
+""",
+)
 
-slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
+slogdet = _add_docstr(
+    _linalg.linalg_slogdet,
+    r"""
 linalg.slogdet(A, *, out=None) -> (Tensor, Tensor)
 
 Computes the sign and natural logarithm of the absolute value of the determinant of a square matrix.
@@ -318,10 +341,12 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: This function is computed using :func:`torch.lu`.
           {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. note:: The determinant can be recovered as `sign * exp(logabsdet)`.
 
@@ -357,9 +382,12 @@ Examples::
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
-""")
+""",
+)
 
-eig = _add_docstr(_linalg.linalg_eig, r"""
+eig = _add_docstr(
+    _linalg.linalg_eig,
+    r"""
 linalg.eig(A, *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalue decomposition of a square matrix if it exists.
@@ -381,9 +409,11 @@ the output has the same batch dimensions.
 
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. warning:: This function assumes that :attr:`A` is `diagonalizable`_ (for example, when all the
              eigenvalues are different). If it is not diagonalizable, the returned
@@ -454,9 +484,12 @@ Examples::
 
 .. _diagonalizable:
     https://en.wikipedia.org/wiki/Diagonalizable_matrix#Definition
-""")
+""",
+)
 
-eigvals = _add_docstr(_linalg.linalg_eigvals, r"""
+eigvals = _add_docstr(
+    _linalg.linalg_eigvals,
+    r"""
 linalg.eigvals(A, *, out=None) -> Tensor
 
 Computes the eigenvalues of a square matrix.
@@ -479,9 +512,11 @@ the output has the same batch dimensions.
 
           The eigenvalues of a matrix are always well-defined, even when the matrix is not diagonalizable.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. seealso::
 
@@ -505,9 +540,12 @@ Examples::
 
     >>> torch.dist(L, torch.linalg.eig(A).eigenvalues)
     tensor(2.4576e-07)
-""")
+""",
+)
 
-eigh = _add_docstr(_linalg.linalg_eigh, r"""
+eigh = _add_docstr(
+    _linalg.linalg_eigh,
+    r"""
 linalg.eigh(A, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalue decomposition of a complex Hermitian or real symmetric matrix.
@@ -534,9 +572,11 @@ the output has the same batch dimensions.
 
 The eigenvalues are returned in ascending order.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
@@ -615,9 +655,12 @@ Examples::
     >>> L, Q = torch.linalg.eigh(A)
     >>> torch.dist(Q @ torch.diag_embed(L) @ Q.transpose(-2, -1).conj(), A)
     tensor(1.5423e-15, dtype=torch.float64)
-""")
+""",
+)
 
-eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
+eigvalsh = _add_docstr(
+    _linalg.linalg_eigvalsh,
+    r"""
 linalg.eigvalsh(A, UPLO='L', *, out=None) -> Tensor
 
 Computes the eigenvalues of a complex Hermitian or real symmetric matrix.
@@ -644,9 +687,11 @@ The eigenvalues are returned in ascending order.
 - If :attr:`UPLO`\ `= 'L'` (default), only the lower triangular part of the matrix is used in the computation.
 - If :attr:`UPLO`\ `= 'U'`, only the upper triangular part of the matrix is used.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. seealso::
 
@@ -681,9 +726,12 @@ Examples::
     tensor([[ 2.5797,  3.4629],
             [-4.1605,  1.3780],
             [-3.1113,  2.7381]], dtype=torch.float64)
-""")
+""",
+)
 
-householder_product = _add_docstr(_linalg.linalg_householder_product, r"""
+householder_product = _add_docstr(
+    _linalg.linalg_householder_product,
+    r"""
 householder_product(A, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices.
@@ -752,9 +800,12 @@ Examples::
 
 .. _Representation of Orthogonal or Unitary Matrices:
     https://www.netlib.org/lapack/lug/node128.html
-""")
+""",
+)
 
-lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
+lstsq = _add_docstr(
+    _linalg.linalg_lstsq,
+    r"""
 torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 
 Computes a solution to the least squares problem of a system of linear equations.
@@ -862,9 +913,12 @@ Examples::
     https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
-""")
+""",
+)
 
-matrix_power = _add_docstr(_linalg.linalg_matrix_power, r"""
+matrix_power = _add_docstr(
+    _linalg.linalg_matrix_power,
+    r"""
 matrix_power(A, n, *, out=None) -> Tensor
 
 Computes the `n`-th power of a square matrix for an integer `n`.
@@ -920,9 +974,12 @@ Examples::
             [[ 0.2640,  0.4571, -0.5511],
             [-1.0163,  0.3491, -1.5292],
             [-0.4899,  0.0822,  0.2773]]])
-""")
+""",
+)
 
-matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
+matrix_rank = _add_docstr(
+    _linalg.linalg_matrix_rank,
+    r"""
 matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
 
 Computes the numerical rank of a matrix.
@@ -952,12 +1009,14 @@ where :math:`\sigma_1` is the largest singular value
 If :attr:`A` is a batch of matrices, :attr:`tol` is computed this way for every element of
 the batch.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: The matrix rank is computed using singular value decomposition
           :func:`torch.linalg.svd` if :attr:`hermitian`\ `= False` (default) and the eigenvalue
           decomposition :func:`torch.linalg.eigvalsh` when :attr:`hermitian`\ `= True`.
           {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
@@ -1001,9 +1060,12 @@ Examples::
     >>> torch.linalg.matrix_rank(A, tol=1.0, hermitian=True)
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
-""")
+""",
+)
 
-norm = _add_docstr(_linalg.linalg_norm, r"""
+norm = _add_docstr(
+    _linalg.linalg_norm,
+    r"""
 linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
 Computes a vector or matrix norm.
@@ -1136,9 +1198,12 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(A[0, :, :]), LA.norm(A[1, :, :])
     (tensor(3.7417), tensor(11.2250))
-""")
+""",
+)
 
-vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
+vector_norm = _add_docstr(
+    _linalg.linalg_vector_norm,
+    r"""
 linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
@@ -1208,9 +1273,12 @@ Examples::
     tensor(5.4345)
     >>> LA.vector_norm(B, ord=3.5)
     tensor(5.4345)
-""")
+""",
+)
 
-matrix_norm = _add_docstr(_linalg.linalg_matrix_norm, r"""
+matrix_norm = _add_docstr(
+    _linalg.linalg_matrix_norm,
+    r"""
 linalg.matrix_norm(A, ord='fro', dim=(-2, -1), keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a matrix norm.
@@ -1282,9 +1350,12 @@ Examples::
     tensor([14.2829, 14.2829])
     >>> LA.matrix_norm(B, dim=(0, 2))
     tensor([ 3.1623, 10.0000, 17.2627])
-""")
+""",
+)
 
-multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
+multi_dot = _add_docstr(
+    _linalg.linalg_multi_dot,
+    r"""
 linalg.multi_dot(tensors, *, out=None)
 
 Efficiently multiplies two or more matrices by reordering the multiplications so that
@@ -1349,9 +1420,12 @@ Examples::
     >>> multi_dot((A, B, C))
     tensor([[ 26,  49],
             [ 80, 148]])
-""")
+""",
+)
 
-svd = _add_docstr(_linalg.linalg_svd, r"""
+svd = _add_docstr(
+    _linalg.linalg_svd,
+    r"""
 linalg.svd(A, full_matrices=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition (SVD) of a matrix.
@@ -1479,9 +1553,12 @@ Examples::
 
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
-""")
+""",
+)
 
-svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
+svdvals = _add_docstr(
+    _linalg.linalg_svdvals,
+    r"""
 linalg.svdvals(A, *, out=None) -> Tensor
 
 Computes the singular values of a matrix.
@@ -1494,9 +1571,11 @@ The singular values are returned in descending order.
 
 .. note:: This function is equivalent to NumPy's `linalg.svd(A, compute_uv=False)`.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 .. seealso::
 
@@ -1520,9 +1599,12 @@ Examples::
 
     >>> torch.dist(S, torch.linalg.svd(A, full_matrices=False).S)
     tensor(2.4576e-07)
-""")
+""",
+)
 
-cond = _add_docstr(_linalg.linalg_cond, r"""
+cond = _add_docstr(
+    _linalg.linalg_cond,
+    r"""
 linalg.cond(A, p=None, *, out=None) -> Tensor
 
 Computes the condition number of a matrix with respect to a matrix norm.
@@ -1635,9 +1717,12 @@ Examples::
     >>> torch.linalg.cond(A)
     tensor([[4.6245],
             [4.5671]])
-""")
+""",
+)
 
-pinv = _add_docstr(_linalg.linalg_pinv, r"""
+pinv = _add_docstr(
+    _linalg.linalg_pinv,
+    r"""
 linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudoinverse (Moore-Penrose inverse) of a matrix.
@@ -1724,9 +1809,12 @@ Examples::
     https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse#Existence_and_uniqueness
 .. _through the SVD:
     https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse#Singular_value_decomposition_(SVD)
-""")
+""",
+)
 
-solve = _add_docstr(_linalg.linalg_solve, r"""
+solve = _add_docstr(
+    _linalg.linalg_solve,
+    r"""
 linalg.solve(A, B, *, out=None) -> Tensor
 
 Computes the solution of a square system of linear equations with a unique solution.
@@ -1757,9 +1845,11 @@ Letting `*` be zero or more batch dimensions,
     This function computes `X = \ `:attr:`A`\ `.inverse() @ \ `:attr:`B` in a faster and
     more numerically stable way than performing the computations separately.
 
-""" + fr"""
+"""
+    + fr"""
 .. note:: {common_notes["sync_note"]}
-""" + r"""
+"""
+    + r"""
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -1805,9 +1895,12 @@ Examples::
 
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
-""")
+""",
+)
 
-tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
+tensorinv = _add_docstr(
+    _linalg.linalg_tensorinv,
+    r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor
 
 Computes the multiplicative inverse of :func:`torch.tensordot`.
@@ -1870,9 +1963,12 @@ Examples::
     >>> Ainv = torch.linalg.inverse(A)
     >>> torch.allclose(Atensorinv, Ainv)
     True
-""")
+""",
+)
 
-tensorsolve = _add_docstr(_linalg.linalg_tensorsolve, r"""
+tensorsolve = _add_docstr(
+    _linalg.linalg_tensorsolve,
+    r"""
 linalg.tensorsolve(A, B, dims=None, *, out=None) -> Tensor
 
 Computes the solution `X` to the system `torch.tensordot(A, X) = B`.
@@ -1933,9 +2029,12 @@ Examples::
     torch.Size([6, 4])
     >>> torch.allclose(torch.tensordot(A, X, dims=X.ndim), B, atol=1e-6)
     True
-""")
+""",
+)
 
-qr = _add_docstr(_linalg.linalg_qr, r"""
+qr = _add_docstr(
+    _linalg.linalg_qr,
+    r"""
 qr(A, mode='reduced', *, out=None) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix.
@@ -2035,4 +2134,5 @@ Examples::
     tensor(1.6099e-06)
     >>> torch.dist(Q.transpose(-2, -1) @ Q, torch.eye(4))
     tensor(6.2158e-07)
-""")
+""",
+)
