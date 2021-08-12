@@ -130,9 +130,9 @@ class LayerNorm(Module):
     Examples::
 
         >>> # NLP Example
-        >>> batch, sentence_length, embedding = 20, 5, 10
-        >>> embedding = torch.randn(batch, sentence_length, embedding)
-        >>> layer_norm = nn.LayerNorm(embedding)
+        >>> batch, sentence_length, embedding_dim = 20, 5, 10
+        >>> embedding = torch.randn(batch, sentence_length, embedding_dim)
+        >>> layer_norm = nn.LayerNorm(embedding_dim)
         >>> # Activate module
         >>> layer_norm(embedding)
         >>> # Image Example
