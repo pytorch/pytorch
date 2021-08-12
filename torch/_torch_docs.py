@@ -11182,7 +11182,7 @@ Example::
            quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10)
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8).int_repr()
     tensor([ 0, 10, 20, 30], dtype=torch.uint8)
-    >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])],
+    >>> torch.quantize_per_tensor([torch.tensor([-1.0, 0.0]), torch.tensor([-2.0, 2.0])], \
         torch.tensor([0.1, 0.2]), torch.tensor([10, 20]), torch.quint8)
     (tensor([-1.,  0.], size=(2,), dtype=torch.quint8,
         quantization_scheme=torch.per_tensor_affine, scale=0.1, zero_point=10),
