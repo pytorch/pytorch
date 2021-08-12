@@ -127,7 +127,7 @@ class LayerNorm(Module):
         weight: the learnable weights of the module of shape
             :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
             The values are initialized to 1.
-        bias:   the learnable bias of the module of shape 
+        bias:   the learnable bias of the module of shape
                 :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
                 The values are initialized to 0.
 
