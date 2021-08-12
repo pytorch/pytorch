@@ -185,11 +185,12 @@ class _OverlapInfo():
         world_size (int): world size of the process group being used.
 
     Attributes:
-        uniform_bucket_assignment (bool): if ``True``, then the assignment of
-            each :class:`DistributedDataParallel` bucket is partitioned across
+        shard_buckets (bool): if ``True``, then the assignment of each
+            :class:`DistributedDataParallel` bucket is partitioned across
             possibly multiple :class:`ZeroRedundancyOptimizer` instances (i.e.
-            across possibly multiple ranks) to approximate uniformity; if
-            ``False``, then each bucket is wholly assigned to a single
+            across possibly multiple ranks) to approximate uniformity following
+            a threshold given by the total parameter size divided by the world
+            size; if ``False``, then each bucket is wholly assigned to a single
             :class:`ZeroRedundancyOptimizer` instance (i.e. to a single rank);
             this should be set to the value passed into the hook constructor.
         status (_OverlapStatus): current status; see :class:`_OverlapStatus`
@@ -207,10 +208,10 @@ class _OverlapInfo():
         num_bucket_assignments (int): total number of bucket assignments across
             all ranks; this is equal to the number of
             :class:`DistributedDataParallel` gradient buckets if
-            ``uniform_bucket_assignment=False`` and possibly greater otherwise.
+            ``shard_buckets=False`` and possibly greater otherwise.
         total_size (int, optional): total size of all buckets (i.e. sum of
             ``param.numel()`` for all ``param`` across all buckets) if
-            ``uniform_bucket_assignment=True``; otherwise, ``None``.
+            ``shard_buckets=True``; otherwise, ``None``.
         broadcast_handles (List[Work]): :class:`list` of async work handles for
             the parameter broadcasts.
         bucket_index_to_future (Dict[int, torch.futures.Future]):
@@ -223,7 +224,7 @@ class _OverlapInfo():
     """
     def __init__(self, world_size) -> None:
         self.status: _OverlapStatus = _OverlapStatus.UNINITIALIZED
-        self.uniform_bucket_assignment: bool = False
+        self.shard_buckets: bool = False
 
         # Modified per bucket reconstruction
         self.params_per_bucket: List[List[torch.Tensor]] = []
@@ -882,7 +883,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._bucket_assignments_per_rank_cache = [{} for _ in range(self.world_size)]
         params_per_bucket = overlap_info.params_per_bucket
 
-        if overlap_info.uniform_bucket_assignment:
+        if overlap_info.shard_buckets:
             # Define the assignment threshold to approximate uniformity
             assert overlap_info.total_size is not None, \
                 "`total_size` was not computed"
@@ -892,7 +893,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         num_buckets = len(params_per_bucket)
         overlap_info.assigned_ranks_per_bucket = [set() for _ in range(num_buckets)]
         assigned_ranks_per_bucket = overlap_info.assigned_ranks_per_bucket
-        if not overlap_info.uniform_bucket_assignment:
+        if not overlap_info.shard_buckets:
             # Assign each DDP bucket entirely to a single rank
             for bucket_index, bucket_params in enumerate(params_per_bucket):
                 assert len(bucket_params) > 0, "Empty bucket"
@@ -1439,7 +1440,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             bucket_index (int): index of the :class:`DistributedDataParallel`
                 bucket for which to get the assigned rank.
         """
-        assert not self._overlap_info.uniform_bucket_assignment, \
+        assert not self._overlap_info.shard_buckets, \
             "The bucket assignment requires global bucket information and " \
             "will be computed later; there should be no need to use this " \
             "method"
