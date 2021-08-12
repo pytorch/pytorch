@@ -75,6 +75,7 @@
 namespace c10 {
 // std::string serializeType(const Type &t);
 TypePtr parseType(const std::string& pythonStr);
+TypePtr parseCustomType(IValue custom_type);
 } // namespace c10
 
 namespace torch {
@@ -438,38 +439,7 @@ void BytecodeDeserializer::parseMethods(
           function->append_type(c10::parseType(t.toStringRef()));
         }
       } else {
-        //  Example NamedTuple type structure:
-        //  ('__torch__.A.B.CType',z
-        //   ('NamedTuple',
-        //     ('id_list_features', 'Dict[int, Tensor]'),
-        //     ('label', 'Tuple[Tensor, Tensor]'),
-        //     ('weight', 'Tuple[Tensor, Tensor]'),
-        //     ('id_score_list_features', 'Dict[int, Tensor]')))),
-        auto tuple_difinition = t.toTuple()->elements();
-        // get type name: '__torch__.A.B.CType'
-        const std::string name = tuple_difinition[0].toString()->string();
-        // get namedtuple definition
-        std::vector<IValue> name_type_pairs =
-            tuple_difinition[1].toTuple()->elements();
-
-        at::QualifiedName qualified_name = at::QualifiedName(name);
-        std::vector<std::string> field_names;
-        std::vector<TypePtr> field_types;
-
-        // Find all type names and it's corresponding type
-        for (auto const& name_type_pair :
-             name_type_pairs[1].toTuple()->elements()) {
-          std::vector<IValue> name_type_vector =
-              name_type_pair.toTuple()->elements();
-          std::string field_name = name_type_vector[0].toString()->string();
-          TypePtr field_type =
-              c10::parseType(name_type_vector[1].toString()->string());
-          field_names.emplace_back(field_name);
-          field_types.emplace_back(field_type);
-        }
-        // Create the NamedTuple type after reading from the tuple, and add it to function
-        auto tt =
-            TupleType::createNamed(qualified_name, field_names, field_types);
+        auto tt = c10::parseCustomType(t);
         function->append_type(tt);
       }
     }

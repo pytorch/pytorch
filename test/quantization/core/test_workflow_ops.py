@@ -340,7 +340,7 @@ class TestFakeQuantizeOps(TestCase):
             obs.to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+            quant_min, quant_max = obs.quant_min, obs.quant_max
             if not tensor_qparam:
                 scale, zero_point = float(scale), int(zero_point)
             Y_test = torch.fake_quantize_per_tensor_affine(
@@ -373,7 +373,7 @@ class TestFakeQuantizeOps(TestCase):
             scale, zero_point = obs.calculate_qparams()
             if not tensor_qparam:
                 scale, zero_point = float(scale), int(zero_point)
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+            quant_min, quant_max = obs.quant_min, obs.quant_max
 
             # forward pass
             Y_test = torch.fake_quantize_per_tensor_affine(
@@ -702,7 +702,7 @@ class TestFakeQuantizeOps(TestCase):
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
             zero_point = zero_point.to(torch.int32)
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+            quant_min, quant_max = obs.quant_min, obs.quant_max
 
             Y = _fake_quantize_per_channel_affine_reference(
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
@@ -829,7 +829,7 @@ class TestFakeQuantizeOps(TestCase):
             scale, zero_point = obs.calculate_qparams()
             # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
             zero_point = zero_point.to(torch.int32)
-            quant_min, quant_max = obs._calculate_qmin_qmax()
+            quant_min, quant_max = obs.quant_min, obs.quant_max
             X.requires_grad_()
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)

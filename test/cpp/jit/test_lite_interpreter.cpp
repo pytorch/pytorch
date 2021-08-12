@@ -749,7 +749,157 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
   AT_ASSERT(runtime_ops.size() > 2900);
 }
 
+TEST(LiteInterpreterTest, CompatiblePrimitiveType) {
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+
+  // test trivial success case
+  std::vector<IValue> type_table = {IValue("List[int]")};
+
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, type_table};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
+}
+
+TEST(LiteInterpreterTest, CompatibleCustomType) {
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+
+  // Construct a simple NamedTuple custom type:
+  // ("mynamedtuple",
+  //   ("NamedTuple",
+  //     (("id", List[int]), ("name", List[int]))
+  //   )
+  // )
+  std::vector<IValue> namedtuple_definition(
+      {c10::ivalue::Tuple::create(
+           std::vector<IValue>({IValue("id"), IValue("List[int]")})),
+       c10::ivalue::Tuple::create(
+           std::vector<IValue>({IValue("name"), IValue("List[int]")}))});
+  std::vector<IValue> namedtuple_vector = std::vector<IValue>(
+      {"NamedTuple",
+       c10::ivalue::Tuple::create(std::move(namedtuple_definition))});
+  std::vector<IValue> namedtuple_type_vector(
+      {IValue("mynamedtuple"),
+       c10::ivalue::Tuple::create(std::move(namedtuple_vector))});
+  IValue named_tuple_dummy =
+      c10::ivalue::Tuple::create(std::move(namedtuple_type_vector));
+  std::vector<IValue> type_table = {IValue("List[int]"), named_tuple_dummy};
+
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, type_table};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
+}
+
+TEST(LiteInterpreterTest, IncompatiblePrimitiveType) {
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+
+  // test trivial success case
+  std::vector<IValue> type_table = {IValue("List[int]"), IValue("NamedTuple")};
+
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, type_table};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
+}
+
+TEST(LiteInterpreterTest, InCompatibleCustomType) {
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+
+  // Construct a simple NamedTuple custom type:
+  // ("mycustomdict",
+  //   ("Dict",
+  //     (("id", List[int]), ("name", List[int]))
+  //   )
+  // )
+  std::vector<IValue> namedtuple_definition(
+      {c10::ivalue::Tuple::create(
+           std::vector<IValue>({IValue("id"), IValue("List[int]")})),
+       c10::ivalue::Tuple::create(
+           std::vector<IValue>({IValue("name"), IValue("List[int]")}))});
+  std::vector<IValue> namedtuple_vector = std::vector<IValue>(
+      {"Dict", c10::ivalue::Tuple::create(std::move(namedtuple_definition))});
+  std::vector<IValue> namedtuple_type_vector(
+      {IValue("mycustomdict"),
+       c10::ivalue::Tuple::create(std::move(namedtuple_vector))});
+  IValue named_tuple_dummy =
+      c10::ivalue::Tuple::create(std::move(namedtuple_type_vector));
+  std::vector<IValue> type_table = {IValue("List[int]"), named_tuple_dummy};
+
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, type_table};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
+}
+
+TEST(LiteInterpreterTest, isCompatibleSuccess) {
+  // test trivial success case
+  auto runtime_info = RuntimeCompatibilityInfo::get();
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::OK);
+}
+
+TEST(LiteInterpreterTest, isCompatibleFail) {
+  // test trivial failure due to ops
+  std::unordered_map<std::string, OperatorInfo> model_ops;
+  model_ops["aten::add.Scalar"] = OperatorInfo{2};
+  auto model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops};
+  std::unordered_map<std::string, OperatorInfo> runtime_ops;
+  runtime_ops["aten::add.Int"] = OperatorInfo{2};
+  auto runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      _get_supported_types(),
+      runtime_ops};
+
+  auto result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+  AT_ASSERT(
+      result.errors[0] ==
+      "Operator 'aten::add.Scalar' missing from runtime (not found)");
+
+  // test trivial failure due to bytecode
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      _get_supported_types(),
+      runtime_ops};
+  model_info.bytecode_version =
+      caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+}
+
 #if !defined FB_XPLAT_BUILD
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(LiteInterpreterTest, SequentialModuleInfo) {
   Module a("A");
   a.define(R"JIT(

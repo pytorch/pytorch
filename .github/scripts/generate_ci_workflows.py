@@ -115,25 +115,6 @@ class CIWorkflow:
         if self.is_libtorch:
             self.exclude_test = True
 
-        # The following code allows for scheduled jobs to be debuggable by
-        # adding the label 'ciflow/scheduled' and assigning + unassigning pytorchbot,
-        # without overwriting the workflow's own ciflow_config, if already enabled.
-        if self.is_scheduled:
-            if self.ciflow_config.enabled:
-                self.ciflow_config.labels.add('ciflow/scheduled')
-            else:
-                self.ciflow_config = CIFlowConfig(
-                    enabled=True,
-                    labels={'ciflow/scheduled'}
-                )
-
-        # CIFlow requires on_pull_request to be set in order to be enabled.
-        # If on_pull_request wasn't previously specified, we set trigger_action_only
-        # to True as we want to avoid unintentional pull_request event triggers
-        if self.ciflow_config.enabled:
-            self.ciflow_config.trigger_action_only = self.ciflow_config.trigger_action_only or not self.on_pull_request
-            self.on_pull_request = True
-
         if not self.on_pull_request:
             self.only_build_on_pull_request = False
 
@@ -156,11 +137,11 @@ class CIWorkflow:
             assert self.test_runner_type in WINDOWS_RUNNERS, err_message
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
-        output_file_path = GITHUB_DIR / f"workflows/generated-{workflow.build_environment}.yml"
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
         with open(output_file_path, "w") as output_file:
-            GENERATED = "generated"
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
-            output_file.write(workflow_template.render(asdict(workflow)))
+            output_file.write(workflow_template.render(asdict(self)))
             output_file.write("\n")
         print(output_file_path)
 
@@ -197,6 +178,12 @@ WINDOWS_WORKFLOWS = [
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={'ciflow/scheduled'}
+        ),
     ),
 ]
 
@@ -269,7 +256,7 @@ LINUX_WORKFLOWS = [
             enabled=True,
             trigger_action_only=True,
             labels=set(['ciflow/slow']),
-        )
+        ),
     ),
     CIWorkflow(
         arch="linux",
@@ -299,6 +286,12 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
         is_scheduled="45 0,4,8,12,16,20 * * *",
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={'ciflow/scheduled'}
+        ),
     ),
     CIWorkflow(
         arch="linux",
@@ -307,6 +300,12 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            trigger_action_only=True,
+            labels={'ciflow/scheduled'},
+        ),
     ),
     # CIWorkflow(
     #     arch="linux",
@@ -401,6 +400,11 @@ BAZEL_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-gcc7-bazel-test",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc7",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
+        on_pull_request=True,
+        ciflow_config=CIFlowConfig(
+            enabled=True,
+            labels=set(['ciflow/default']),
+        ),
     ),
 ]
 
