@@ -1,5 +1,3 @@
-
-
 import argparse
 import sys
 
@@ -76,9 +74,11 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
             + "        return false;\n"
             + "      }"
         )
-        code.append("""\
+        code.append(
+            """\
       int64_t end_offset = offsets[rangeIndex + 1];
-      int64_t length = end_offset - offsets[rangeIndex];""")
+      int64_t length = end_offset - offsets[rangeIndex];"""
+        )
         code.append(
             "      for ("
             + "int64_t"
@@ -169,7 +169,9 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused, use_offsets)
     if use_offsets:
         code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / length);")
     else:
-        code.append("        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);")
+        code.append(
+            "        __m256 vlen_inv = _mm256_set1_ps(1.0f / lengths[rangeIndex]);"
+        )
     for i in range(0, uf):
         j = 8 * i
         code.append(
@@ -230,8 +232,6 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
     if InType == "at::Half":
         code.append("    alignas(64) at::Half vtmp1[8] = {0};")
 
-
-
     if use_offsets:
         code.append(
             "    for ("
@@ -263,9 +263,11 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused, use_offsets):
             + "        return false;\n"
             + "      }"
         )
-        code.append("""\
+        code.append(
+            """\
       int64_t end_offset = offsets[rangeIndex + 1];
-      int64_t length = end_offset - offsets[rangeIndex];""")
+      int64_t length = end_offset - offsets[rangeIndex];"""
+        )
         code.append(
             "      for ("
             + "int64_t"
@@ -475,16 +477,26 @@ for o in options:
     # code.append("printf(\"calling " + fn + "\\n\");");
 
     code.append("  if (block_size == 128) {")
-    code += unroll(16, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
+    code += unroll(
+        16, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets
+    )
     code.append("  } else if (block_size == 64) {")
-    code += unroll(8, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
+    code += unroll(
+        8, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets
+    )
     code.append("  } else if (block_size == 32) {")
-    code += unroll(4, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
+    code += unroll(
+        4, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets
+    )
     code.append("  } else if (block_size == 16) {")
-    code += unroll(2, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
+    code += unroll(
+        2, IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets
+    )
     code.append("  } else {")
     code.append("    // generic code")
-    code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets)
+    code += generic(
+        IndexType, InType, OutType, True, "AVX2", opts.fused, opts.use_offsets
+    )
     code.append("  }")
     code.append("  return dataInd == index_size;")
 
@@ -499,7 +511,15 @@ for o in options:
         if len(ret_string) <= 80:
             code.append(ret_string)
         else:
-            code.append("  return " + fn_base + suffix + "<" + extra_space + is_weight_positional + ">(")
+            code.append(
+                "  return "
+                + fn_base
+                + suffix
+                + "<"
+                + extra_space
+                + is_weight_positional
+                + ">("
+            )
         code.append("      block_size,")
         code.append("      output_size,")
         code.append("      index_size,")
