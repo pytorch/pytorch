@@ -1,3 +1,5 @@
+#include <ATen/nnapi/nnapi_bind.h>
+
 // Set flag if running on ios
 #ifdef __APPLE__
   #include <TargetConditionals.h>
@@ -7,17 +9,13 @@
 #endif
 
 #ifndef IS_IOS_NNAPI_BIND
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-static auto register_NnapiCompilation = [](){
-  try {
-    TORCH_LIBRARY("_nnapi", m) {
-        register_nnapi(m);
-    }
-  } catch (std::exception& exn) {
-    LOG(ERROR) << "Failed to register class nnapi.Compilation: " << exn.what();
-    throw;
-  }
-}();
+TORCH_LIBRARY(_nnapi, m) {
+  m.class_<torch::nnapi::bind::NnapiCompilation>("Compilation")
+    .def(torch::jit::init<>())
+    .def("init", &torch::nnapi::bind::NnapiCompilation::init)
+    .def("run", &torch::nnapi::bind::NnapiCompilation::run)
+    ;
+}
 #else
   #undef IS_IOS_NNAPI_BIND
 #endif
