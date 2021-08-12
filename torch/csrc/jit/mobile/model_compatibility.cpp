@@ -251,7 +251,7 @@ std::unordered_set<std::string> splitString(const std::string& str) {
   std::string delimiters = "[], ";
   std::string::size_type last = str.find_first_of(delimiters);
 
-  // keep searching another delimeters until the end of the string.
+  // keep searching another delimiters until the end of the string.
   while (last != std::string::npos) {
     // if last is greater, one token is ready
     if (last > start) {
