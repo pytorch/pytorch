@@ -1585,6 +1585,76 @@ class TestFrozenOptimizations(JitTestCase):
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.rand(1).to(torch.int), expect_success=False)
 
+    # @unittest.skipIf(not torch._C.has_cuda, "Optimization currently only run for GPU")
+    def test_linear_concat(self):
+        out_dimms = [[5, 5], [5, 10], [1, 5]]
+
+        for w1_dim, w2_dim in out_dimms:
+            @torch.no_grad()
+            def test_example(self, in_tensor):
+                w1 = torch.rand([w1_dim, 5])
+                b1 = torch.rand([w1_dim])
+                w2 = torch.rand([w2_dim, 5])
+                b2 = torch.rand([w2_dim])
+
+                res1 = torch.nn.functional.linear(in_tensor, w1, b1)
+                res2 = torch.nn.functional.linear(in_tensor, w2, b2)
+                return res1, res2
+
+            fn_script = torch.jit.script(test_example)
+            op_graph = fn_script.graph
+
+            FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+            # successively no-ops with non-const inputs
+            self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
+            FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+
+            fn_script = torch.jit.freeze(fn_script)
+            op_graph = fn_script.graph
+            self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
+            FileCheck().check("aten::linear", 1, exactly=True).run(op_graph)
+
+            test_val = torch.rand([50, 5])
+            self.assertEqual(test_example(test_val), fn_script(test_val))
+
+    def test_linear_concat_different_input(self):
+        """
+        There should be no change to the graph due to the optimization pass
+        due to the two input tensors being different
+        """
+
+        w1_dim, w2_dim = 5, 5
+
+        # @torch.no_grad()
+        def test_example(self, in_tensor1, in_tensor2):
+            w1 = torch.rand([w1_dim, 5])
+            b1 = torch.rand([w1_dim])
+            w2 = torch.rand([w2_dim, 5])
+            b2 = torch.rand([w2_dim])
+
+            res1 = torch.nn.functional.linear(in_tensor1, w1, b1)
+            res2 = torch.nn.functional.linear(in_tensor2, w2, b2)
+            return res1, res2
+
+        fn_script = torch.jit.script(test_example)
+        op_graph = fn_script.graph
+
+        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+        # successively no-ops with non-const inputs
+        self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
+        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+
+        fn_script = torch.jit.freeze(fn_script)
+        op_graph = fn_script.graph
+        self.run_pass("fold_frozen_conv_mul_or_div", op_graph)
+        FileCheck().check("aten::linear", 2, exactly=True).run(op_graph)
+
+        test_val1 = torch.rand([50, 5])
+        test_val2 = torch.rand([50, 5])
+        self.assertEqual(test_example(test_val1, test_val2), fn_script(test_val1, test_val_2))
+
+
+
     def test_optimize_freeze_module(self):
         in_channels, out_channels = 3, 32
         conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)

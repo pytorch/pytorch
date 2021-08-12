@@ -20,6 +20,8 @@ namespace {
 using Tensor = at::Tensor;
 
 bool nonConstantParameters(Node* n) {
+  // Checks if the parameters, not including the
+  // first param are all constants.
   for (size_t i = 1; i < n->inputs().size(); i++) {
     if (n->inputs().at(i)->node()->kind() != prim::Constant) {
       return true;
@@ -164,7 +166,6 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     return false;
   }
 
-  auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
   Tensor weight_tensor =
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
@@ -360,6 +361,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
     }
   }
 }
+
 
 } // namespace
 
