@@ -401,6 +401,13 @@ make flake8
 make mypy
 
 make cmakelint
+
+make clang-tidy
+```
+
+To run a lint only on changes, add the `CHANGED_ONLY` option:
+```bash
+make <name of lint> CHANGED_ONLY=--changed-only
 ```
 
 ### Running `mypy`
@@ -1069,7 +1076,6 @@ static_assert(std::is_same(A*, decltype(A::singleton()))::value, "hmm");
 CUDA, MSVC, and PyTorch versions are interdependent; please install matching versions from this table:
 | CUDA version | Newest supported VS version                             | PyTorch version |
 | ------------ | ------------------------------------------------------- | --------------- |
-| 9.2          | Visual Studio 2017 Update 5 (15.5) (`_MSC_VER` <= 1912) |  0.4.1 ~ 1.5.1  |
 | 10.1         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.3.0 ~ 1.7.0  |
 | 10.2         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |  1.5.0 ~ 1.7.0  |
 | 11.0         | Visual Studio 2019 (16.X) (`_MSC_VER` < 1930)           |      1.7.0      |
@@ -1087,27 +1093,26 @@ for the simple commands we use for this.
 
 To run clang-tidy locally, follow these steps:
 
-1. Install clang-tidy. First, check if you already have clang-tidy by simply
-writing `clang-tidy` in your terminal. If you don't yet have clang-tidy, you
-should be able to install it easily with your package manager, e.g. by writing
-`apt-get install clang-tidy` on Ubuntu. See https://apt.llvm.org for details on
-how to install the latest version. Note that newer versions of clang-tidy will
-have more checks than older versions. In our CI, we run clang-tidy-6.0.
+1. Install clang-tidy.
+We provide custom built binaries which have additional checks enabled. You can install it by running:
+```bash
+python3 -m tools.linter.install.clang_tidy
+```
+We currently only support Linux and MacOS (x86).
 
-2. Use our driver script to run clang-tidy over any changes relative to some
-   git revision (you may want to replace `HEAD~1` with `HEAD` to pick up
-   uncommitted changes). Changes are picked up based on a `git diff` with the
-   given revision:
-  ```bash
-  git diff HEAD~1 > pr.diff
-  python tools/linter/clang_tidy --paths torch/csrc --diff-file "pr.diff"
-  ```
+2. Install clang-tidy driver script dependencies
+```bash
+pip3 install -r tools/linter/clang_tidy/requirements.txt
+```
 
-Above, it is assumed you are in the PyTorch root folder. `path/to/build` should
-be the path to where you built PyTorch from source, e.g. `build` in the PyTorch
-root folder if you used `setup.py build`. You can use `-c <clang-tidy-binary>`
-to change the clang-tidy this script uses. Make sure you have PyYaml installed,
-which is in PyTorch's `requirements.txt`.
+3. Run clang-tidy
+```bash
+# Run clang-tidy on the entire codebase
+make clang-tidy
+# Run clang-tidy only on your changes
+make clang-tidy CHANGED_ONLY=--changed-only
+```
+This internally invokes our driver script and closely mimics how clang-tidy is run on CI.
 
 ## Pre-commit tidy/linting hook
 

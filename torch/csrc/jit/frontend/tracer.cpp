@@ -78,7 +78,7 @@ void delValueTrace(const IValue& var) {
   getTracingState()->delValue(var);
 }
 void TracingState::delValue(const IValue& var) {
-  for (size_t i = 0; i < env_stack.size(); ++i) {
+  for (const auto i : c10::irange(env_stack.size())) {
     auto& value_map = env_stack.at(env_stack.size() - 1 - i);
     auto it = value_map.find(var);
     if (it == value_map.end()) {
@@ -144,7 +144,7 @@ Value* TracingState::getValue(const IValue& var) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
     }
-    for (size_t i = 0; i < env_stack.size(); ++i) {
+    for (const auto i : c10::irange(env_stack.size())) {
       auto& value_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = value_map.find(var);
       if (it == value_map.end()) {
@@ -176,7 +176,7 @@ Value* TracingState::getValue(const IValue& var) {
     auto it = env_stack.back().emplace(var, constant);
     return it.first->second;
   } else if (var.isFuture() || var.isObject()) {
-    for (size_t i = 0; i < env_stack.size(); ++i) {
+    for (const auto i : c10::irange(env_stack.size())) {
       auto& future_map = env_stack.at(env_stack.size() - 1 - i);
       auto it = future_map.find(var);
       if (it == future_map.end()) {
@@ -192,7 +192,7 @@ Value* TracingState::getValue(const IValue& var) {
       auto custom_class_type = getCustomClass(qualname->qualifiedName());
       if (custom_class_type) {
         auto capsule = var.toObject()->getAttr("capsule");
-        for (size_t i = 0; i < env_stack.size(); ++i) {
+        for (const auto i : c10::irange(env_stack.size())) {
           auto& value_map = env_stack.at(env_stack.size() - 1 - i);
           auto it = value_map.find(capsule);
           if (it == value_map.end()) {
@@ -351,7 +351,7 @@ static IValue addInput(
     size_t num_elems = elems.size();
     AT_ASSERT(
         elem_values.size() == num_elems && elem_types.size() == num_elems);
-    for (size_t i = 0; i < num_elems; ++i) {
+    for (const auto i : c10::irange(num_elems)) {
       elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
     return tuple;
@@ -542,20 +542,20 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto outputs = v.toTensorList();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, outputs.size()));
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs.get(i), unpack_node->outputs()[i]);
     }
   } else if (v.isTuple()) {
     auto outputs = v.toTuple()->elements();
     Node* unpack_node = graph->insertNode(graph->createTupleUnpack(value));
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       setValue(outputs[i], unpack_node->outputs()[i]);
     }
   } else if (v.isList()) {
     auto elements = v.toListRef();
     Node* unpack_node =
         graph->insertNode(graph->createListUnpack(value, elements.size()));
-    for (size_t i = 0; i < elements.size(); ++i) {
+    for (const auto i : c10::irange(elements.size())) {
       setValue(elements[i], unpack_node->outputs()[i]);
     }
   } else if (isCustomClass(v)) {
@@ -764,7 +764,7 @@ void addInputs(Node* n, const char* name, at::IntArrayRef value) {
       : ArgumentStash::IntArrayRefTrace(value.size());
 
   auto& g = getTracingState()->graph;
-  for (size_t i = 0; i < info.size(); ++i) {
+  for (const auto i : c10::irange(info.size())) {
     if (info[i] != nullptr)
       continue;
     info[i] = g->insertConstant(value[i]);
@@ -830,7 +830,7 @@ void addOutput(Node* node, const std::vector<at::Tensor>& outputs) {
   Graph* graph = node->owningGraph();
   Node* unpack_node = graph->insertNode(
       graph->create(prim::ListUnpack, {value}, outputs.size()));
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     Value* output_val = unpack_node->outputs()[i];
     output_val->inferTypeFrom(outputs[i]);
     setValueTrace(outputs[i], output_val);

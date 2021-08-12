@@ -2246,7 +2246,7 @@ class LoopOrderHelper : public IRVisitor {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-explicit--functions,modernize-use-override)
-  void visit(const For* v) {
+  void visit(For* v) {
     ordering << v->var()->name_hint() << ",";
     IRVisitor::visit(v);
   }

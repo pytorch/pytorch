@@ -48,7 +48,7 @@ const auto list_unpack_script = R"JIT(
     c = [a, b]
     x, y = c
     z = x + y
-    return z
+    return z.clone()
 )JIT";
 
 const auto list_unpack_script_2 = R"JIT(
@@ -341,6 +341,16 @@ const auto div_scalar_mode = R"JIT(
       return torch.div(a, b, rounding_mode=c).clone()
 )JIT";
 
+const auto mul_tensor = R"JIT(
+  def forward(self, a: Tensor, b: Tensor):
+      return torch.mul(a, b).clone()
+)JIT";
+
+const auto mul_scalar = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.mul(a, b).clone()
+)JIT";
+
 const auto log_tensor = R"JIT(
   def forward(self, inp: Tensor):
       a = torch.log(inp).clone()
@@ -365,6 +375,31 @@ const auto sub_tensor_alpha = R"JIT(
 const auto sub_scalar_alpha = R"JIT(
   def forward(self, a: Tensor, b: float, c: int):
       return torch.sub(a, b, alpha=c).clone()
+)JIT";
+
+const auto nan_to_num_script = R"JIT(
+  def forward(self, a: Tensor, nan: float, posinf: float, neginf: float):
+      return torch.nan_to_num(a, nan, posinf, neginf).clone()
+)JIT";
+
+const auto stack_dim = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, dim: int):
+      return torch.stack((a, b), dim = dim).clone()
+)JIT";
+
+const auto stack_three = R"JIT(
+  def forward(self, a: Tensor, b: Tensor, c: Tensor):
+      return torch.stack((a, b, c)).clone()
+)JIT";
+
+const auto relu_script = R"JIT(
+  def forward(self, a: Tensor):
+      return torch.relu(a).clone()
+)JIT";
+
+const auto tanh_script = R"JIT(
+  def forward(self, a):
+      return torch.tanh(a).clone()
 )JIT";
 
 const std::string layer_norm_with_weights = R"JIT(
@@ -417,6 +452,23 @@ const auto clamp_script_2 = R"JIT(
   def forward(self, inp: Tensor, min: Tensor, max: Tensor):
       a = torch.clamp(inp, min, max).clone()
       return (a)
+)JIT";
+
+const auto full_script = R"JIT(
+  def forward(self,
+              size: List[int],
+              fill_value: int,
+              dtype: Optional[int],
+              layout: Optional[int],
+              device: Optional[Device],
+              pin_memory: Optional[bool]):
+      a = torch.full(size,
+                     fill_value,
+                     dtype=dtype,
+                     layout=layout,
+                     device=device,
+                     pin_memory=pin_memory)
+      return (a.clone())
 )JIT";
 
 const auto full_like_script = R"JIT(
@@ -539,3 +591,81 @@ graph(%a.1 : Tensor,
   %t0 : Float(2, 2, strides=[2, 1], device=cpu), %t1 : Float(3, 3, strides=[3, 1]), %type_matched : bool = prim::TypeCheck[types=[Float(2, 2, strides=[2, 1], device=cpu), Float(3, 3, strides=[3, 1])]](%a.1, %b.1)
   return (%t0, %t1, %type_matched)
 )IR";
+
+const auto index_without_none_script = R"JIT(
+  def forward(self, a: Tensor, idx: Tensor):
+      return a[idx].clone()
+)JIT";
+
+const auto index_with_none_script = R"JIT(
+  def forward(self, a: Tensor, idx: Tensor):
+      return a[idx, None].clone()
+)JIT";
+
+const auto index_with_two_tensors_script = R"JIT(
+  def forward(self, a: Tensor, idx_a: Tensor, idx_b: Tensor):
+      return a[idx_a, idx_b].clone()
+)JIT";
+
+const auto clamp_min_int_script = R"JIT(
+  def forward(self, a: Tensor, b: int):
+      return torch.clamp_min(a, b).clone()
+)JIT";
+
+const auto clamp_min_float_script = R"JIT(
+  def forward(self, a: Tensor, b: float):
+      return torch.clamp_min(a, b).clone()
+)JIT";
+
+const auto argmin_script = R"JIT(
+  def forward(self, a: Tensor):
+      return torch.argmin(a).clone()
+)JIT";
+
+const auto argmin_with_dim_script = R"JIT(
+  def forward(self, a: Tensor, dim: int):
+      return torch.argmin(a, dim).clone()
+)JIT";
+
+const auto argmin_with_keep_dim_script = R"JIT(
+  def forward(self, a: Tensor, dim: int):
+      return torch.argmin(a, dim, True).clone()
+)JIT";
+
+const auto getitem_tensor_script = R"JIT(
+  def forward(self, key: Tensor):
+      d = {key: 1}
+      return d[key]
+)JIT";
+
+const auto getitem_int_script = R"JIT(
+  def forward(self, key: int):
+      d = {key: 1}
+      return d[key]
+)JIT";
+
+const auto getitem_str_script = R"JIT(
+  def forward(self, key: str):
+      d = {key: 1}
+      return d[key]
+)JIT";
+
+const auto transpose_script = R"JIT(
+  def forward(self, a: Tensor, dim1: int, dim2: int):
+      return torch.transpose(a, dim1, dim2).clone()
+)JIT";
+
+const auto permute_script = R"JIT(
+  def forward(self, a: Tensor, dims: List[int]):
+      return torch.permute(a, dims).clone()
+)JIT";
+
+const auto slice_script = R"JIT(
+  def forward(self, a: Tensor, dim: int, start: int, end: int, step: int):
+    return a.slice(dim, start, end, step).clone()
+)JIT";
+
+const auto narrow_with_int_script = R"JIT(
+  def forward(self, a: Tensor, dim: int, start: int, length: int):
+      return a.narrow(dim, start, length).clone()
+)JIT";
