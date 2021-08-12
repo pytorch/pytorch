@@ -103,7 +103,7 @@ the autograd engine.
   to calling backward, and so your code will need to handle such objects as if they were
   tensors filled with zeros. The default value of this setting is True.
 
-**Step 3:** If your `~Function` does not support double backward
+**Step 3:** If your :class:`~Function` does not support double backward
 you should explicitly declare this by decorating backward with the
 :func:`~function.once_differentiable`. With this decorator, attempts to
 perform double backward through your function will produce an error.
