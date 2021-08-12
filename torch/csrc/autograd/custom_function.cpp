@@ -79,7 +79,8 @@ void autogradNotImplementedFallback(const c10::OperatorHandle& op, DispatchKeySe
   size_t num_tensor_inputs = 0;  // Only used for DEBUG-only checks
 
   _foreach_tensor([&](size_t _, size_t idx_arg, const at::Tensor& t) {
-    TORCH_CHECK(t.defined(), "Expected argument ", idx_arg, " of ", op_name, " to be defined.");
+    // TODO: We need to skip this check if the tensor is optional (how?)
+    // TORCH_CHECK(t.defined(), "Expected argument ", idx_arg, " of ", op_name, " to be defined.");
     if (grad_mode && t.requires_grad()) {
       tensors_requiring_grad.push_back(&t);
     }

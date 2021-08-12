@@ -6086,15 +6086,25 @@ class TestAutogradNotImplementedKernel(TestCase):
                 """)
         return self._compile_and_load_op(*func, boxed), ref
 
-    def _get_custom_op_return_non_tensor(self, boxed):
+    def _get_custom_op_return_tuple_non_tensor(self, boxed):
         def ref(x, y):
             return x - y, x + y, 12
         func = ("Tensor self, Tensor other", "(Tensor, Tensor, int)",
                 "const torch::Tensor& self, const torch::Tensor& other", "std::tuple<torch::Tensor, torch::Tensor, int64_t>",
-                "ret_non_tensor", """
+                "ret_tuple_non_tensor", """
                      torch::Tensor a = self - other;
                      torch::Tensor b = self + other;
                      return std::tuple<torch::Tensor, torch::Tensor, int64_t>(a, b, 12);
+                """)
+        return self._compile_and_load_op(*func, boxed), ref
+
+    def _get_custom_op_return_single_non_tensor(self, boxed):
+        def ref(x, y):
+            return 12
+        func = ("Tensor self, Tensor other", "int",
+                "const torch::Tensor& self, const torch::Tensor& other", "int64_t",
+                "ret_single_non_tensor", """
+                     return 12;
                 """)
         return self._compile_and_load_op(*func, boxed), ref
 
@@ -6152,7 +6162,7 @@ class TestAutogradNotImplementedKernel(TestCase):
         for boxed in (True, False):
             funcs = [
                 self._get_custom_op(boxed),
-                self._get_custom_op_return_non_tensor(boxed),
+                self._get_custom_op_return_tuple_non_tensor(boxed),
                 self._get_custom_view_op(boxed),
             ]
             for (name, op), ref in funcs:
@@ -6182,6 +6192,16 @@ class TestAutogradNotImplementedKernel(TestCase):
 
                 if ref is not None:
                     self.assertEqual(op(a, b), ref(a, b))
+
+    def test_check_single_nontensor(self):
+        for boxed in (True, False):
+            (_, op), ref = self._get_custom_op_return_single_non_tensor(boxed)
+
+            a = torch.tensor(1., requires_grad=True)
+            b = torch.tensor(1.)
+
+            c = op(a, b)
+            self.assertEqual(c, ref(a, b))
 
     def test_check_inplace(self):
         """Check basic inplace behavior"""

@@ -35,8 +35,8 @@ struct ForEachTensor : IterArgs<ForEachTensor<F>> {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (x.has_value() && x.value().defined()) {
       fn_(idx_tensor_, idx_arg_, x.value());
+      idx_tensor_++;
     }
-    idx_tensor_++;
     idx_arg_++;
   }
   void operator()(const at::Tensor& x) const {
@@ -71,12 +71,12 @@ void for_each_tuple(
 }
 
 template<typename F>
-void for_each_output_tensor(const at::Tensor& t, F fn) {
+void for_each_output_tensor(at::Tensor& t, F fn) {
   fn(0, 0, t);
 }
 
 template<typename T, typename F>
-enable_if_t<!std::__is_tuple_like<T>::value> for_each_output_tensor(T& not_tup, F fn) {
+void for_each_output_tensor(T& not_tup, F fn) {
   (ForEachTensor<F>(fn))(not_tup);
 }
 
