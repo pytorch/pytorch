@@ -14,7 +14,11 @@ GENERATED_CPP = [
     "autograd/generated/TraceType_4.cpp",
     "autograd/generated/ADInplaceOrViewType_0.cpp",
     "autograd/generated/ADInplaceOrViewType_1.cpp",
-    "autograd/generated/python_functions.cpp",
+    "autograd/generated/python_functions_0.cpp",
+    "autograd/generated/python_functions_1.cpp",
+    "autograd/generated/python_functions_2.cpp",
+    "autograd/generated/python_functions_3.cpp",
+    "autograd/generated/python_functions_4.cpp",
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
@@ -309,7 +313,7 @@ core_sources_full_mobile_no_backend_debug = [
     "torch/csrc/utils/variadic.cpp",
 ] + libtorch_profiler_sources
 
-core_sources_full_mobile = core_sources_full_mobile_no_backend_debug + [
+core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
     "torch/csrc/jit/backends/backend_debug_info.cpp",
     "torch/csrc/jit/backends/backend_interface.cpp",
 ]
@@ -741,7 +745,11 @@ libtorch_python_distributed_sources = libtorch_python_distributed_core_sources +
 
 def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
     _libtorch_python_sources = [gencode_pattern.format(name) for name in [
-        "autograd/generated/python_functions.cpp",
+        "autograd/generated/python_functions_0.cpp",
+        "autograd/generated/python_functions_1.cpp",
+        "autograd/generated/python_functions_2.cpp",
+        "autograd/generated/python_functions_3.cpp",
+        "autograd/generated/python_functions_4.cpp",
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
