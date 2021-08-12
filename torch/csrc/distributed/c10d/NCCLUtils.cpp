@@ -21,9 +21,9 @@ std::string getNcclVersion() {
       // this condition is meant to mirror what is done in upstream NCCL
       // e.g., 2.8.0 -> 2800, 2.9.0 -> 20900
       if (version >= 2900) {
-        ncclMajor = version / 10000;
-        ncclMinor = (version % 10000) / 100;
-        ncclPatch = version % (ncclMajor * 10000 + ncclMinor * 100);
+        auto ncclMajor = version / 10000;
+        auto ncclMinor = (version % 10000) / 100;
+        auto ncclPatch = version % (ncclMajor * 10000 + ncclMinor * 100);
         versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
       } else {
