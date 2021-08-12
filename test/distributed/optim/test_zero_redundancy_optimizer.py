@@ -1099,7 +1099,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_ddp_with_zero_step_uniform_parity_gpu(self):
         r"""
         Check that overlapping DDP with ZeRO using
-        ``hook_with_zero_step()`` with ``uniform_bucket_assignment=True``
+        ``hook_with_zero_step()`` with ``shard_buckets=True``
         achieves parity with DDP using a local optimizer when running on GPU.
 
         NOTE: The test is skipped if using Windows since functional optimizers
@@ -1115,7 +1115,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 hook_with_zero_step,
                 gradient_as_bucket_view,
                 static_graph,
-                uniform_bucket_assignment=True,
+                shard_buckets=True,
             )
     # TODO: Add `test_ddp_with_zero_step_uniform_parity_cpu()` once the Gloo
     # synchronization issue causing hangs is fixed.
@@ -1127,7 +1127,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_ddp_with_zero_step_interleaved_uniform_parity_gpu(self):
         r"""
         Check that overlapping DDP with ZeRO using
-        ``hook_with_zero_step()`` with ``uniform_bucket_assignment=True``
+        ``hook_with_zero_step()`` with ``shard_buckets=True``
         achieves parity with DDP using a local optimizer when running on GPU.
 
         NOTE: The test is skipped if using Windows since functional optimizers
@@ -1143,7 +1143,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 hook_with_zero_step_interleaved,
                 gradient_as_bucket_view,
                 static_graph,
-                uniform_bucket_assignment=True,
+                shard_buckets=True,
             )
     # TODO: Add `test_ddp_with_zero_step_interleaved_uniform_parity_cpu()` once
     # the Gloo synchronization issue causing hangs is fixed.
