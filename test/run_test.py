@@ -171,6 +171,7 @@ TESTS = [
     'distributed/elastic/utils/distributed_test',
     'distributed/elastic/multiprocessing/api_test',
     'distributed/_sharding_spec/test_sharding_spec',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 # Tests need to be run with pytest.
@@ -235,6 +236,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_worker',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
+    'distributed/_sharded_tensor/test_sharded_tensor',
 ]
 
 ROCM_BLOCKLIST = [
