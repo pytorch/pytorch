@@ -178,7 +178,7 @@ in following structure:
     )
 )
 
-For example, pythron source code is:
+For example, python source code is:
 
 class Foo(NamedTuple):
     id: torch.Tensor
