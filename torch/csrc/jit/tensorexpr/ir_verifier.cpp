@@ -134,7 +134,7 @@ void IRVerifier::visit(Store* v) {
       index_dtype.scalar_type() != ScalarType::Long) {
     throw malformed_ir("Index scalar dtype is not Int or Long!");
   }
-  if (v->buf()->dtype() != v->value()->dtype()) {
+  if (v->buf()->dtype().scalar_type() != v->value()->dtype().scalar_type()) {
     throw malformed_ir("buf and value dtype mismatch in Store");
   }
 
