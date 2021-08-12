@@ -1,8 +1,7 @@
-import unittest
-
-import torch
 from torch.testing._internal.common_utils import run_tests
 
+import torch
+import unittest
 
 class TestPublicBindings(unittest.TestCase):
     def test_no_new_bindings(self):
@@ -248,13 +247,14 @@ class TestPublicBindings(unittest.TestCase):
             "qscheme",
             "set_anomaly_enabled",
             "set_autocast_enabled",
-            "set_autocast_gpu_dtype",
-            "get_autocast_gpu_dtype",
+            'set_autocast_gpu_dtype',
+            'get_autocast_gpu_dtype',
             "set_flush_denormal",
             "set_num_interop_threads",
             "set_num_threads",
             "unify_type_list",
             "vitals_enabled",
+
             "wait",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
@@ -268,5 +268,5 @@ class TestPublicBindings(unittest.TestCase):
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()
