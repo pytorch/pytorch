@@ -19,7 +19,7 @@ std::string getNcclVersion() {
       versionString = "Unknown NCCL version";
     } else {
       // this condition is meant to mirror what is done in upstream NCCL
-      // e.g., 2.8.0 -> 2800, 2.9.0 -> 20900
+      // e.g., 2.8.99 -> 2899, 2.9.0 -> 20900
       int ncclMajor, ncclMinor, ncclPatch;
       if (version >= 2900) {
         ncclMajor = version / 10000;
