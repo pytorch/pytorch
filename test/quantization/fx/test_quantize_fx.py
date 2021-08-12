@@ -581,14 +581,41 @@ class TestQuantizeFx(QuantizationTestCase):
             node_occurrence = dict()
             if weight_prepack_node:
                 node_occurrence[weight_prepack_node] = 0
-            self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 ModuleClass(*module_constructor_inputs),
                 inputs, quant_type,
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 is_reference=True)
-            # TODO: extra checks to make sure weight_activation_post_process is attached
-            # to the float modules in reference patterns
+            qr = result_dict["quantized_reference"]
+
+            def checkWeightQParams(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        self.assertTrue(hasattr(qr.get_submodule(module_name), "_weight_qparams"))
+                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+
+            def checkSerDeser(model):
+                for module_name in ("linear", "conv"):
+                    if hasattr(model, module_name):
+                        # make sure seralization works
+                        state_dict = copy.deepcopy(model.state_dict())
+                        self.assertTrue(module_name + "._weight_qparams" in state_dict)
+
+                        # check load_state_dict restores states
+                        module = getattr(model, module_name)
+                        prev_scale = module._weight_qparams["scale"]
+                        module._weight_qparams["scale"] = None
+                        model.load_state_dict(state_dict)
+                        self.assertTrue(torch.equal(prev_scale, module._weight_qparams["scale"]))
+
+
+            checkWeightQParams(qr)
+            qr = copy.deepcopy(qr)
+            # make sure the qparams are preserved after copy
+            checkWeightQParams(qr)
+
+            checkSerDeser(qr)
 
     @skipIfNoFBGEMM
     def test_dynamic_quant_weight_observer(self):
@@ -664,12 +691,13 @@ class TestQuantizeFx(QuantizationTestCase):
                 else quantized_convs[dim])
             m = M(dim, has_relu)
             m_eager = copy.deepcopy(m)
-            result = self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 m,
                 self.img_data_dict[dim],
                 quant_type,
                 expected_node=expected_node,
             )
+            result = result_dict["result"]
 
             # check numerics
             qengine = torch.backends.quantized.engine
@@ -3032,7 +3060,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             3: ns.call_module(nnq.Conv3d),
         }
         for dim, quant_type in options:
-            model = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 ConvWrapper(dim), self.img_data_dict[dim], quant_type,
                 quantized_nodes[dim])
 
@@ -3528,7 +3556,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
         }
         for quant_type, dim, is_reference in options:
-            model = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[is_reference][dim], is_reference=is_reference)
 
     @skipIfNoFBGEMM
@@ -3599,17 +3627,24 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 else:
                     return self.op(input, self.inplace)
 
-        options = itertools.product([True, False], [True, False], self.static_quant_types)
+        options = itertools.product([True, False], [True, False], self.static_quant_types, [True, False])
         quantized_nodes = {
             # is_module
-            True: ns.call_module(quantized_module),
-            False: ns.call_function(quantized_op),
+            True: {
+                # is_reference
+                True: ns.call_module(float_module),
+                False: ns.call_module(quantized_module),
+            },
+            False: {
+                True: ns.call_function(float_op),
+                False: ns.call_function(quantized_op),
+            }
         }
 
-        for is_module, is_inplace, quant_type in options:
+        for is_module, is_inplace, quant_type, is_reference in options:
             self.checkGraphModeFxOp(
                 M(is_module, is_inplace), self.img_data_2d,
-                quant_type, quantized_nodes[is_module])
+                quant_type, quantized_nodes[is_module][is_reference], is_reference=is_reference)
 
     def test_hardswish(self):
         self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
@@ -3958,7 +3993,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
         for quant_type in self.static_quant_types:
-            m = self.checkGraphModeFxOp(
+            self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
 
     def test_fixed_qparams_ops_fp16(self):
@@ -3985,7 +4020,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         node_occurrence = {
             ns.call_method("to"): 7
         }
-        m = self.checkGraphModeFxOp(
+        self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_dict,
             expected_node_occurrence=node_occurrence)
 
@@ -4519,11 +4554,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m2.load_state_dict(m1.state_dict())
             m2 = torch.quantization.QuantWrapper(m2)
             # FX graph
-            q_result1 = self.checkGraphModeFxOp(
+            result_dict = self.checkGraphModeFxOp(
                 m1, (data,), QuantType.STATIC,
                 expected_node_occurrence={
                     ns.call_module(q_cls): 1,
                 })
+            q_result1 = result_dict["result"]
             # Eager
             m2.qconfig = get_default_qconfig(torch.backends.quantized.engine)
             m2.eval()
