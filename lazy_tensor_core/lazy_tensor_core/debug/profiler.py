@@ -1,6 +1,4 @@
-from concurrent import futures
 import lazy_tensor_core
-import lazy_tensor_core.core.ltc_env_vars as xenv
 import lazy_tensor_core.core.lazy_model as ltm
 from typing import Optional
 

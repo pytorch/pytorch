@@ -5,7 +5,6 @@ import json
 import io
 import os
 import torch
-import lazy_tensor_core
 import lazy_tensor_core.core.lazy_model as ltm
 import lazy_tensor_core.utils.gcsfs as gcs
 

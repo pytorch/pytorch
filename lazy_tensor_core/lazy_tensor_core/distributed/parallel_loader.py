@@ -1,13 +1,10 @@
 from __future__ import division
 from __future__ import print_function
 
-from six import iteritems, itervalues
 import threading
 import torch
-import lazy_tensor_core
 import lazy_tensor_core.debug.profiler as xp
 import lazy_tensor_core.utils.keyd_queue as kq
-import lazy_tensor_core.utils.utils as xu
 import lazy_tensor_core.core.lazy_model as ltm
 
 

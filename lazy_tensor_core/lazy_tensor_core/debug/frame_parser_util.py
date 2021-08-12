@@ -2,7 +2,6 @@ import collections
 import logging
 import os
 import re
-import sys
 
 logging.basicConfig(format='%(name)s: %(message)s')
 logger = logging.getLogger('pt-ltc-profiler')

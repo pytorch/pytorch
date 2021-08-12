@@ -1,9 +1,7 @@
 from __future__ import print_function
 
-import collections
 import io
 import sys
-import os
 import re
 import threading
 import time
@@ -14,7 +12,6 @@ import lazy_tensor_core.core.ltc_env_vars as xenv
 import lazy_tensor_core.debug.metrics_saver as ms
 import lazy_tensor_core.utils.utils as xu
 import lazy_tensor_core.utils.closures as xc
-import lazy_tensor_core.utils.keyd_queue as kq
 
 _DEVICES = xu.LazyProperty(lambda: lazy_tensor_core._LAZYC._ltc_get_devices())
 

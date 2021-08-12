@@ -1,14 +1,11 @@
 from datetime import datetime
 import multiprocessing
-import os
-import sys
 import time
 import unittest
 
 import lazy_tensor_core.core.lazy_model as ltm
 import lazy_tensor_core.debug.metrics as met
 import lazy_tensor_core.debug.metrics_compare_utils as mcu
-import lazy_tensor_core.utils.utils as xu
 
 
 def mp_test(func):

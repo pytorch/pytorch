@@ -2,7 +2,6 @@ from __future__ import print_function
 
 import os
 import threading
-import lazy_tensor_core
 import lazy_tensor_core.debug.metrics as met
 
 _STEP_METRICS_FILE_LOCK = threading.Lock()

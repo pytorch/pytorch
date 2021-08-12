@@ -7,9 +7,7 @@ import sys
 import threading
 import torch
 import torch.autograd
-import lazy_tensor_core
 import lazy_tensor_core.distributed.parallel_loader as pl
-import lazy_tensor_core.utils.utils as xu
 import lazy_tensor_core.core.lazy_model as ltm
 import traceback
 

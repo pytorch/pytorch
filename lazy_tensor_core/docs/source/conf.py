@@ -7,7 +7,6 @@
 from sphinx import addnodes
 from sphinx.util.docfields import TypedField
 from docutils import nodes
-import torch
 import lazy_tensor_core
 import pytorch_sphinx_theme
 
