@@ -12,6 +12,7 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    Union,
 )
 
 # No 'default_generator' in torch/__init__.pyi
@@ -203,7 +204,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -241,7 +242,9 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
 
 
 class SliceIterDataPipe(IterableDataset):
-    def __init__(self, source_dp, apply_slice):
+    _slice: Union[Tuple, int, slice]
+
+    def __init__(self, source_dp, apply_slice: Union[Tuple, int, slice]):
         self.source_dp = source_dp
         if isinstance(apply_slice, slice) or isinstance(apply_slice, int):
             self._slice = apply_slice
@@ -261,7 +264,7 @@ class SliceIterDataPipe(IterableDataset):
         if self._slice_is_tuple:
             for data in self.source_dp:
                 result = []
-                for slice_param in self._slice:
+                for slice_param in self._slice:  # type: ignore[union-attr]
                     if isinstance(slice_param, int):
                         result.append(data[slice_param])
                     elif isinstance(slice_param, slice):
@@ -271,12 +274,14 @@ class SliceIterDataPipe(IterableDataset):
             for data in self.source_dp:
                 yield data[self._slice]
 
+
 class _DataPipeSlice:
     def __init__(self, source_datapipe):
         self.source_datapipe = source_datapipe
 
     def __getitem__(self, slice):
         return SliceIterDataPipe(self.source_datapipe, slice)
+
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
@@ -360,6 +365,7 @@ class ChainDataset(IterableDataset):
     Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
+
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super(ChainDataset, self).__init__()
         self.datasets = datasets
@@ -420,4 +426,4 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
     indices = randperm(sum(lengths), generator=generator).tolist()
-    return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
+    return [Subset(dataset, indices[offset - length: offset]) for offset, length in zip(_accumulate(lengths), lengths)]
