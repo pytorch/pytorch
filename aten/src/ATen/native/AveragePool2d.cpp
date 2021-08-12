@@ -19,18 +19,18 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   // #20866, #22032: Guarantee this for the official C++ API?
   TORCH_CHECK(kernel_size.size() == 1 || kernel_size.size() == 2,
     "avg_pool2d: kernel_size must either be a single int, or a tuple of two ints");
-  const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
-  const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
+  const int64_t kH = kernel_size[0];
+  const int64_t kW = kernel_size.size() == 1 ? kH : kernel_size[1];
 
   TORCH_CHECK(stride.empty() || stride.size() == 1 || stride.size() == 2,
     "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
-  const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty() ? kW : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int64_t dH = stride.empty() ? kH : stride[0];
+  const int64_t dW = stride.empty() ? kW : stride.size() == 1 ? dH : stride[1];
 
   TORCH_CHECK(padding.size() == 1 || padding.size() == 2,
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
+  const int64_t padH = padding[0];
+  const int64_t padW = padding.size() == 1 ? padH : padding[1];
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
@@ -150,12 +150,12 @@ namespace native {
 
 TORCH_IMPL_FUNC(avg_pool2d_out_cpu)
 (const Tensor& input,
- int kH,
- int kW,
- int dH,
- int dW,
- int padH,
- int padW,
+ int64_t kH,
+ int64_t kW,
+ int64_t dH,
+ int64_t dW,
+ int64_t padH,
+ int64_t padW,
  bool ceil_mode,
  bool count_include_pad,
  c10::optional<int64_t> divisor_override,

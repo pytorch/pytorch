@@ -40,7 +40,8 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> List
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto impl_args_replaced.
                 for replacement in precompute.replace[a.name]:
-                    impl_args_replaced.append(replacement.decl())
+                    cpp_type = structured.argument_type(replacement, binds=replacement.name)
+                    impl_args_replaced.append(f"{cpp_type.cpp_type(strip_ref=True)} {replacement.name}")
             else:
                 # If not, push a as is.
                 impl_args_replaced.append(a.decl())

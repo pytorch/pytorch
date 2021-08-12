@@ -617,10 +617,10 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
 
                     for expr in impl_exprs_gen:
                         if expr in self.g.out.precomputed.replace:
-                        # If expr is in precompute.replace, append the argument
-                        # that should replace it on to impl_exprs_replaced. This argument
-                        # will be a specific member of the precomputed_out struct returned
-                        # by the meta function.
+                            # If expr is in precompute.replace, append the argument
+                            # that should replace it on to impl_exprs_replaced. This argument
+                            # will be a specific member of the precomputed_out struct returned
+                            # by the meta function.
                             for replacement in self.g.out.precomputed.replace[expr]:
                                 impl_exprs_replaced.append(f"precompute.{replacement.name}")
                         else:

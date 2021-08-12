@@ -1540,7 +1540,7 @@ class PrecomputedElement:
 class Precompute:
     # A map from kernel argument name -> a list of precomputed
     # elements that replaces/supersedes it.
-    replace: Dict[str, List[PrecomputedElement]]
+    replace: Dict[str, List[Argument]]
 
     @staticmethod
     def parse(src: Dict[str, Any]) -> 'Precompute':
@@ -1549,7 +1549,7 @@ class Precompute:
 
         # Parse the "elements" field to get the names and types of all precomputed elements.
         raw_elements = src["elements"].split(",")
-        elements = [PrecomputedElement.parse(element.lstrip()) for element in raw_elements]
+        elements = [Argument.parse(element.lstrip()) for element in raw_elements]
         # Create a set out of elements just to sanity check below that all elements are
         # mentioned in the "replace" field.
         elements_set = set(elements)

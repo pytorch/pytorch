@@ -488,7 +488,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    elements: int64_t dim
+    elements: int dim
     replace:
       - dim -> dim
   dispatch:
@@ -513,7 +513,7 @@
   device_check: NoCheck   # TensorIterator
   structured: True
   precomputed:
-    elements: int64_t dim
+    elements: int dim
     replace:
       - dim -> dim
   dispatch:
