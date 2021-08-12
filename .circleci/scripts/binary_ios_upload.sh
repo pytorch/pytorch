@@ -59,7 +59,6 @@ cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${
 
 # update pod info
 sed -i '' -e "s/IOS_NIGHTLY_POD_NAME/${IOS_NIGHTLY_POD_NAME}/g" ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
-cat ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
 sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
 cat ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
 
