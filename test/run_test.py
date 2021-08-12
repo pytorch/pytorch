@@ -394,6 +394,11 @@ JIT_EXECUTOR_TESTS = [
     'test_jit_fuser_legacy',
 ]
 
+DISTRIBUTED_TESTS = [
+    'distributed/test_distributed_fork',
+    'distributed/test_distributed_spawn',
+]
+
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
 # options.run_specified_test_cases is enabled.
 # For example:
@@ -641,6 +646,11 @@ def parse_args():
         action='store_true',
         help='run all jit tests')
     parser.add_argument(
+        '--distributed-tests',
+        '--distributed-tests',
+        action='store_true',
+        help='run all distributed tests')
+    parser.add_argument(
         '-pt', '--pytest', action='store_true',
         help='If true, use `pytest` to execute the tests. E.g., this runs '
              'TestTorch with pytest in verbose and coverage mode: '
@@ -722,6 +732,11 @@ def parse_args():
         '--exclude-jit-executor',
         action='store_true',
         help='exclude tests that are run for a specific jit config'
+    )
+    parser.add_argument(
+        '--exclude-distributed-tests',
+        action='store_true',
+        help='exclude distributed tests'
     )
     parser.add_argument(
         '--run-specified-test-cases',
@@ -823,6 +838,9 @@ def get_selected_tests(options):
 
     if options.exclude_jit_executor:
         options.exclude.extend(JIT_EXECUTOR_TESTS)
+    
+    if options.exclude_distributed_tests:
+        options.exclude.extend(DISTRIBUTED_TESTS)
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
 
@@ -1032,6 +1050,9 @@ def main():
 
     if options.jit:
         selected_tests = filter(lambda test_name: "jit" in test_name, TESTS)
+
+    if options.distributed_tests:
+        selected_tests = filter(lambda test_name: test_name in DISTRIBUTED_TESTS, TESTS)
 
     if options.determine_from is not None and os.path.exists(options.determine_from):
         slow_tests = get_slow_tests_based_on_S3(TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD)
