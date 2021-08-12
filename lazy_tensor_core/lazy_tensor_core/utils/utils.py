@@ -63,13 +63,13 @@ class SampleGenerator(object):
         return self._sample_count
 
     def __next__(self):
-        return self.next()
-
-    def next(self):
         if self._count >= self._sample_count:
             raise StopIteration
         self._count += 1
         return self._data
+
+    def next(self):
+        return self.__next__()
 
 
 class FnDataGenerator(object):
@@ -94,15 +94,15 @@ class FnDataGenerator(object):
             count=self._count)
 
     def __next__(self):
-        return self.next()
-
-    def next(self):
         if self._emitted >= self._count:
             raise StopIteration
         data = self._gen_tensor(self._batch_size, *self._dims)
         target = self._func(data)
         self._emitted += 1
         return data, target
+
+    def next(self):
+        return self.__next__()
 
 
 class DataWrapper(object):
