@@ -123,6 +123,14 @@ class LayerNorm(Module):
             has learnable per-element affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
 
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 1.
+        bias:   the learnable bias of the module of shape 
+                :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+                The values are initialized to 0.
+                
     Shape:
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
@@ -135,6 +143,7 @@ class LayerNorm(Module):
         >>> layer_norm = nn.LayerNorm(embedding_dim)
         >>> # Activate module
         >>> layer_norm(embedding)
+        >>>
         >>> # Image Example
         >>> N, C, H, W = 20, 5, 10, 10
         >>> input = torch.randn(N, C, H, W)
