@@ -726,6 +726,7 @@ class TestFunctionalIterDataPipe(TestCase):
             bucket_dp = dp.iter.BucketBatch(input_dp, **kwargs)
 
             self.assertEqual(len(bucket_dp), data_len // 3 if kwargs['drop_last'] else data_len // 3 + 1)
+
             def _verify_bucket_sorted(bucket):
                 # Sort batch in a bucket
                 bucket = sorted(bucket, key=lambda x: x[0])
