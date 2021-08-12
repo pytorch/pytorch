@@ -19,6 +19,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   // This dummy tensor holds an at::RecordFunction when profiling is enabled.
@@ -86,6 +87,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
     std::vector<c10::IValue>& stack,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution) {
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
@@ -110,6 +112,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         userRRefPtr->rrefId(),
         userRRefPtr->forkId(),
+        meta,
         isAsyncExecution);
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
@@ -137,6 +140,7 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         ownerRRefPtr->rrefId(),
         ownerRRefPtr->rrefId(),
+        meta,
         isAsyncExecution);
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(

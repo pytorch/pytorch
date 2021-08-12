@@ -681,11 +681,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       "_invoke_rpc_builtin",
       [](const WorkerInfo& dst,
          const std::string& opName,
+         const std::string& meta,
          const float rpcTimeoutSeconds,
          const py::args& args,
          const py::kwargs& kwargs) {
         return std::make_shared<jit::PythonFutureWrapper>(
-            pyRpcBuiltin(dst, opName, args, kwargs, rpcTimeoutSeconds));
+            pyRpcBuiltin(dst, opName, meta, args, kwargs, rpcTimeoutSeconds));
       },
       py::call_guard<py::gil_scoped_acquire>());
 
@@ -694,12 +695,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       [](const WorkerInfo& dst,
          std::string& pickledPythonUDF,
          std::vector<torch::Tensor>& tensors,
+         const std::string& meta,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcPythonUdf(
             dst,
             pickledPythonUDF,
             tensors,
+            meta,
             rpcTimeoutSeconds,
             isAsyncExecution));
       },
@@ -711,6 +714,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
          const std::string& qualifiedNameStr,
          const py::tuple& argsTuple,
          const py::dict& kwargsDict,
+         const std::string& meta,
          const float rpcTimeoutSeconds,
          const bool isAsyncExecution) {
         return std::make_shared<jit::PythonFutureWrapper>(pyRpcTorchscript(
@@ -718,6 +722,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
             qualifiedNameStr,
             argsTuple,
             kwargsDict,
+            meta,
             rpcTimeoutSeconds,
             isAsyncExecution));
       },

@@ -77,7 +77,7 @@ class TestE2EBase : public ::testing::Test {
     ctx.addSelfAsFork(ownerRRef);
 
     ScriptRemoteCall scriptRemoteCall(
-        op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId());
+        op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId(), "fromMessage");
     auto jitFuture = autograd::sendMessageWithAutograd(
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),

@@ -24,6 +24,7 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
 c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const std::string& meta,
     const py::args& args,
     const py::kwargs& kwargs,
     const float rpcTimeoutSeconds);
@@ -32,6 +33,7 @@ c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution);
 
@@ -40,12 +42,14 @@ c10::intrusive_ptr<JitFuture> pyRpcTorchscript(
     const std::string& qualifiedNameStr,
     const py::tuple& argsTuple,
     const py::dict& kwargsDict,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution);
 
 PyRRef pyRemoteBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const py::args& args,
     const py::kwargs& kwargs);
@@ -54,12 +58,14 @@ PyRRef pyRemotePythonUdf(
     const WorkerInfo& dst,
     std::string& pickledPythonUDF,
     std::vector<torch::Tensor>& tensors,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution);
 
 PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
+    const std::string& meta,
     const float rpcTimeoutSeconds,
     const bool isAsyncExecution,
     const py::args& args,

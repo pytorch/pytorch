@@ -171,13 +171,15 @@ class TORCH_API OutgoingMessage final : public torch::CustomClassHolder {
   OutgoingMessage(
       std::vector<char>&& payload,
       std::vector<torch::Tensor>&& tensors,
-      MessageType type);
+      MessageType type,
+      const std::string& meta = "");
 
   OutgoingMessage(
       std::vector<char>&& payload,
       std::vector<torch::Tensor>&& tensors,
       MessageType type,
-      int64_t id);
+      int64_t id,
+      const std::string& meta = "");
 
   friend c10::intrusive_ptr<OutgoingMessage>;
 
@@ -211,6 +213,7 @@ class TORCH_API OutgoingMessage final : public torch::CustomClassHolder {
 
  private:
   c10::intrusive_ptr<Message> message_;
+  std::string meta_;
 };
 
 // Create a response Message of type Exception.

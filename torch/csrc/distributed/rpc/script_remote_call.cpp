@@ -12,20 +12,24 @@ ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
-    const ForkId& retForkId)
+    const ForkId& retForkId,
+    const std::string& meta)
     : ScriptCall(std::move(op), std::move(stack)),
       retRRefId_(retRRefId),
-      retForkId_(retForkId) {}
+      retForkId_(retForkId),
+      meta_(meta) {}
 
 ScriptRemoteCall::ScriptRemoteCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
     const ForkId& retForkId,
+    const std::string& meta,
     const bool isAsyncExecution)
     : ScriptCall(qualifiedName, std::move(stack), isAsyncExecution),
       retRRefId_(retRRefId),
-      retForkId_(retForkId) {}
+      retForkId_(retForkId),
+      meta_(meta) {}
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
@@ -39,13 +43,14 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
 
   if (scriptCallPtr->hasOp()) {
     return std::make_unique<ScriptRemoteCall>(
-        scriptCallPtr->op(), std::move(ivalues), retRRefId, retForkId);
+        scriptCallPtr->op(), std::move(ivalues), retRRefId, retForkId, "fromMessage");
   } else {
     return std::make_unique<ScriptRemoteCall>(
         scriptCallPtr->qualifiedName(),
         std::move(ivalues),
         retRRefId,
         retForkId,
+        "fromMessage",
         scriptCallPtr->isAsyncExecution());
   }
 }
@@ -63,7 +68,8 @@ c10::intrusive_ptr<OutgoingMessage> ScriptRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::SCRIPT_REMOTE_CALL);
+      MessageType::SCRIPT_REMOTE_CALL,
+      meta_);
 }
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(

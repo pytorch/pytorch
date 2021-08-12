@@ -81,24 +81,26 @@ OutgoingMessage::OutgoingMessage() = default;
 OutgoingMessage::OutgoingMessage(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
-    MessageType type)
+    MessageType type,
+    const std::string& meta)
     : message_(c10::make_intrusive<Message>(
         std::move(payload),
         std::move(tensors),
         type
-      )) {}
+      )), meta_(meta) {}
 
 OutgoingMessage::OutgoingMessage(
     std::vector<char>&& payload,
     std::vector<torch::Tensor>&& tensors,
     MessageType type,
-    int64_t id)
+    int64_t id,
+    const std::string& meta)
     : message_(c10::make_intrusive<Message>(
         std::move(payload),
         std::move(tensors),
         type,
         id
-      )) {}
+      )), meta_(meta) {}
 
 std::vector<char>&& OutgoingMessage::movePayload() && {
   return std::move(*message_).movePayload();

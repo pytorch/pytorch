@@ -6,9 +6,10 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution)
+PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution, const std::string& meta)
     : serializedPyObj_(std::move(serializedPyObj)),
-      isAsyncExecution_(isAsyncExecution) {}
+      isAsyncExecution_(isAsyncExecution),
+      meta_(meta) {}
 
 c10::intrusive_ptr<OutgoingMessage> PythonCall::toMessageImpl() && {
   std::vector<char> payload;
@@ -22,7 +23,8 @@ c10::intrusive_ptr<OutgoingMessage> PythonCall::toMessageImpl() && {
   return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::move(serializedPyObj_.tensors_),
-      MessageType::PYTHON_CALL);
+      MessageType::PYTHON_CALL,
+      meta_);
 }
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
@@ -39,7 +41,7 @@ std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
   std::vector<Tensor> tensors = message.tensors();
   SerializedPyObj serializedPyObj(std::move(payload), std::move(tensors));
   return std::make_unique<PythonCall>(
-      std::move(serializedPyObj), isAsyncExecution);
+      std::move(serializedPyObj), isAsyncExecution, "fromMessage"); // TODO: this is bad!
 }
 
 const SerializedPyObj& PythonCall::serializedPyObj() const {
