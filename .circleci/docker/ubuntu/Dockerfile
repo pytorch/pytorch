@@ -82,13 +82,6 @@ RUN rm AndroidManifest.xml
 RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
-# (optional) Install breakpad
-ARG BREAKPAD
-ADD ./common/install_breakpad.sh install_breakpad.sh
-RUN if [ -n "${BREAKPAD}" ]; then bash ./install_breakpad.sh; fi
-RUN rm install_breakpad.sh
-ENV INSTALLED_BREAKPAD ${BREAKPAD}
-
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
 ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
