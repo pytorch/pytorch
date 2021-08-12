@@ -7,6 +7,10 @@
 namespace at {
 
 static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wrap_scalar=true) {
+  // dim_post_expr can be negative only when wrap_scalar is true, which will
+  // automatically set it to 1.
+  // dim should be in the range [-dim_post_expr, dim_post_expr-1]
+  // maximum interval for dim is [-1, 0]
   return c10::maybe_wrap_dim(dim, dim_post_expr, wrap_scalar);
 }
 
