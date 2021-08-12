@@ -2,9 +2,8 @@ import os.path
 import tempfile
 
 import torch
-from torch import ops
-
 from model import Model, get_custom_op_library_path
+from torch import ops
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 

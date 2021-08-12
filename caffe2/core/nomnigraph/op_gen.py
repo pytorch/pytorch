@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 
 
-
-
-
-
 import argparse
-from textwrap import dedent
 from subprocess import call
+from textwrap import dedent
 
 
 def parse_lines(lines):
@@ -107,9 +103,11 @@ def gen_class(op, op_def):
             type=t, lower_name=lower_name + default_arg
         )
         attr_init = "{private_name}({lower_name})".format(
-            private_name=private_name, lower_name=lower_name)
+            private_name=private_name, lower_name=lower_name
+        )
         attr_declare = "{type} {private_name};".format(
-            type=t, private_name=private_name)
+            type=t, private_name=private_name
+        )
         attr_get = dedent(
             """
               {type} get{name}() const {{
