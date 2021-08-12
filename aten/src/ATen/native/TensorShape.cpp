@@ -193,7 +193,11 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
 
   // skip resizing if size of result is same as expected
   // raise a warning while resizing if output has one or more elements
-  at::native::resize_output(result, result_size, first_tensor_mem_format);
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  if (at::native::resize_output_check(result, result_size)) {
+    result.resize_(result_size, first_tensor_mem_format);
+  }
 
   if (result.numel() == 0) {
     return result;

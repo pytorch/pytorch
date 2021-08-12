@@ -530,7 +530,11 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
 
   // skip resizing if size of result is same as expected
   // raise a warning while resizing if output has one or more elements
-  at::native::resize_output(out, size, memory_format);
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  if (at::native::resize_output_check(out, size)) {
+    out.resize_(size, memory_format);
+  }
 
   if (out.numel() == 0) {
     return out;
