@@ -562,13 +562,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(INTERN_DISABLE_MOBILE_INTERP ON)
 endif()
 
-# To build with profiler we need to add
-# dependency to libkineto in android/pytorch_android/CMakeLists.txt
-# For now we avoid that.
-if(BUILD_JNI)
-  set(USE_LITE_INTERPRETER_PROFILER OFF)
-endif()
-
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
