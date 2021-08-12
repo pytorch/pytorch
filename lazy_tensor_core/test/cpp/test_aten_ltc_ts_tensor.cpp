@@ -6163,6 +6163,22 @@ TEST_F(AtenLtcTsTensorTest, TestLogSoftmaxCast) {
   });
 }
 
+TEST_F(AtenLtcTsTensorTest, TestLogSoftmaxWrapper) {
+  torch::Tensor input =
+      torch::rand({10, 2, 6, 4}, torch::TensorOptions(torch::kFloat));
+  ForEachDevice([&](const torch::Device& device) {
+    torch::Tensor xla_input = CopyToDevice(input, device);
+    int rank = input.dim();
+    for (int dim = -rank; dim < rank; ++dim) {
+      torch::Tensor output =
+          torch::_log_softmax(input, dim, /*half_to_float=*/false);
+      torch::Tensor xla_output =
+          torch::_log_softmax(xla_input, dim, /*half_to_float=*/false);
+      AllClose(output, xla_output, /*rtol=*/1e-3);
+    }
+  });
+}
+
 TEST_F(AtenLtcTsTensorTest, TestSoftmax) {
   torch::Tensor input =
       torch::rand({10, 2, 6, 4}, torch::TensorOptions(torch::kFloat));

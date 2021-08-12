@@ -1,6 +1,7 @@
 backend: Lazy
 cpp_namespace: torch_lazy_tensors
 supported:
+  - _log_softmax
   - add.Tensor
   - addcdiv
   - addcdiv_
