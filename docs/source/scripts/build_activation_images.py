@@ -5,19 +5,19 @@ online tutorials.
 """
 
 import os.path
-import torch.nn.modules.activation
-import torch.autograd
-import matplotlib
 
-matplotlib.use('Agg')
+import matplotlib
+import torch.autograd
+import torch.nn.modules.activation
+
+matplotlib.use("Agg")
 
 import pylab
 
 
 # Create a directory for the images, if it doesn't exist
 ACTIVATION_IMAGE_PATH = os.path.join(
-    os.path.realpath(os.path.join(__file__, "..")),
-    "activation_images"
+    os.path.realpath(os.path.join(__file__, "..")), "activation_images"
 )
 
 if not os.path.exists(ACTIVATION_IMAGE_PATH):
@@ -26,26 +26,26 @@ if not os.path.exists(ACTIVATION_IMAGE_PATH):
 # In a refactor, these ought to go into their own module or entry
 # points so we can generate this list programmaticly
 functions = [
-    'ELU',
-    'Hardshrink',
-    'Hardtanh',
-    'LeakyReLU',  # Perhaps we should add text explaining slight slope?
-    'LogSigmoid',
-    'PReLU',
-    'ReLU',
-    'ReLU6',
-    'RReLU',
-    'SELU',
-    'SiLU',
-    'Mish',
-    'CELU',
-    'GELU',
-    'Sigmoid',
-    'Softplus',
-    'Softshrink',
-    'Softsign',
-    'Tanh',
-    'Tanhshrink'
+    "ELU",
+    "Hardshrink",
+    "Hardtanh",
+    "LeakyReLU",  # Perhaps we should add text explaining slight slope?
+    "LogSigmoid",
+    "PReLU",
+    "ReLU",
+    "ReLU6",
+    "RReLU",
+    "SELU",
+    "SiLU",
+    "Mish",
+    "CELU",
+    "GELU",
+    "Sigmoid",
+    "Softplus",
+    "Softshrink",
+    "Softsign",
+    "Tanh",
+    "Tanhshrink"
     # 'Threshold'  Omit, pending cleanup. See PR5457
 ]
 
@@ -57,9 +57,7 @@ def plot_function(function, **args):
     """
     xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
     pylab.plot(
-        xrange.numpy(),
-        function(torch.autograd.Variable(xrange)).data.numpy(),
-        **args
+        xrange.numpy(), function(torch.autograd.Variable(xrange)).data.numpy(), **args
     )
 
 
@@ -71,7 +69,7 @@ for function_name in functions:
 
         # Start a new plot
         pylab.clf()
-        pylab.grid(color='k', alpha=0.2, linestyle='--')
+        pylab.grid(color="k", alpha=0.2, linestyle="--")
 
         # Plot the current function
         plot_function(function)
@@ -85,4 +83,4 @@ for function_name in functions:
 
         # And save it
         pylab.savefig(plot_path)
-        print('Saved activation image for {} at {}'.format(function, plot_path))
+        print("Saved activation image for {} at {}".format(function, plot_path))

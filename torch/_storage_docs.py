@@ -5,17 +5,17 @@ from torch._C import _add_docstr as add_docstr
 
 
 storage_classes = [
-    'DoubleStorageBase',
-    'FloatStorageBase',
-    'LongStorageBase',
-    'IntStorageBase',
-    'ShortStorageBase',
-    'CharStorageBase',
-    'ByteStorageBase',
-    'BoolStorageBase',
-    'BFloat16StorageBase',
-    'ComplexDoubleStorageBase',
-    'ComplexFloatStorageBase',
+    "DoubleStorageBase",
+    "FloatStorageBase",
+    "LongStorageBase",
+    "IntStorageBase",
+    "ShortStorageBase",
+    "CharStorageBase",
+    "ByteStorageBase",
+    "BoolStorageBase",
+    "BFloat16StorageBase",
+    "ComplexDoubleStorageBase",
+    "ComplexFloatStorageBase",
 ]
 
 
@@ -28,8 +28,9 @@ def add_docstr_all(method, docstr):
             pass
 
 
-add_docstr_all('from_file',
-               """
+add_docstr_all(
+    "from_file",
+    """
 from_file(filename, shared=False, size=0) -> Storage
 
 If `shared` is `True`, then memory is shared between all processes.
@@ -45,4 +46,5 @@ Args:
     filename (str): file name to map
     shared (bool): whether to share memory
     size (int): number of elements in the storage
-""")
+""",
+)

@@ -6,10 +6,11 @@ import torch
 from torch import nn
 from torch.ao.sparsity import BasePruner, PruningParametrization
 from torch.nn.utils import parametrize
-
 from torch.testing._internal.common_utils import TestCase
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 
 DEVICES = {"cpu", "cuda" if torch.cuda.is_available() else "cpu"}
 
@@ -17,9 +18,7 @@ DEVICES = {"cpu", "cuda" if torch.cuda.is_available() else "cpu"}
 class Linear(nn.Module):
     def __init__(self):
         super().__init__()
-        self.seq = nn.Sequential(
-            nn.Linear(16, 16, bias=False)
-        )
+        self.seq = nn.Sequential(nn.Linear(16, 16, bias=False))
         self.linear = nn.Linear(16, 16, bias=False)
 
     def forward(self, x):
@@ -31,9 +30,7 @@ class Linear(nn.Module):
 class LinearB(nn.Module):
     def __init__(self):
         super().__init__()
-        self.seq = nn.Sequential(
-            nn.Linear(16, 16, bias=True)
-        )
+        self.seq = nn.Sequential(nn.Linear(16, 16, bias=True))
         self.linear = nn.Linear(16, 16, bias=True)
 
     def forward(self, x):
@@ -50,7 +47,7 @@ class MultipleLinear(nn.Module):
             nn.ReLU(),
             nn.Linear(5, 8, bias=False),
             nn.ReLU(),
-            nn.Linear(8, 6, bias=False)
+            nn.Linear(8, 6, bias=False),
         )
         self.linear = nn.Linear(6, 4, bias=False)
 
@@ -68,7 +65,7 @@ class MultipleLinearB(nn.Module):
             nn.ReLU(),
             nn.Linear(5, 8, bias=True),
             nn.ReLU(),
-            nn.Linear(8, 6, bias=True)
+            nn.Linear(8, 6, bias=True),
         )
         self.linear = nn.Linear(6, 4, bias=True)
 
@@ -86,7 +83,7 @@ class MultipleLinearMixed(nn.Module):
             nn.ReLU(),
             nn.Linear(5, 8, bias=False),
             nn.ReLU(),
-            nn.Linear(8, 6, bias=True)
+            nn.Linear(8, 6, bias=True),
         )
         self.linear = nn.Linear(6, 4, bias=False)
 
@@ -151,10 +148,10 @@ class MultiplePruner(BasePruner):
 class TestBasePruner(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
         for g in pruner.module_groups:
-            module = g['module']
+            module = g["module"]
             assert module.weight.device == device
             # Check mask exists
-            assert hasattr(module, 'mask')
+            assert hasattr(module, "mask")
             # Check parametrization exists and is correct
             assert parametrize.is_parametrized(module)
             assert hasattr(module, "parametrizations")
@@ -163,39 +160,40 @@ class TestBasePruner(TestCase):
 
     def _check_pruner_converted(self, model, pruner, device):
         for g in pruner.module_groups:
-            module = g['module']
+            module = g["module"]
             assert module.weight.device == device
             assert not hasattr(module, "parametrizations")
-            assert not hasattr(module, 'mask')
+            assert not hasattr(module, "mask")
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for g in pruner.module_groups:
-            module = g['module']
+            module = g["module"]
             assert module.weight.device == device
             assert module.parametrizations.weight[0].pruned_outputs == set()
 
     def _check_pruner_valid_after_step(self, model, pruner, pruned_set, device):
         for g in pruner.module_groups:
-            module = g['module']
+            module = g["module"]
             assert module.weight.device == device
             assert module.parametrizations.weight[0].pruned_outputs == pruned_set
 
     def _test_constructor_on_device(self, model, device):
-        self.assertRaisesRegex(TypeError, 'with abstract methods update_mask',
-                               BasePruner)
+        self.assertRaisesRegex(
+            TypeError, "with abstract methods update_mask", BasePruner
+        )
         model = model.to(device)
         pruner = SimplePruner(model, None, None)
         for g in pruner.module_groups:
-            module = g['module']
+            module = g["module"]
             assert module.weight.device == device
         assert len(pruner.module_groups) == 2
         pruner.step()
         # Can instantiate the model with configs
-        pruner = SimplePruner(model, [model.linear], {'test': 3})
+        pruner = SimplePruner(model, [model.linear], {"test": 3})
         assert len(pruner.module_groups) == 1
-        assert pruner.module_groups[0]['path'] == 'linear'
-        assert 'test' in pruner.module_groups[0]
-        assert pruner.module_groups[0]['test'] == 3
+        assert pruner.module_groups[0]["path"] == "linear"
+        assert "test" in pruner.module_groups[0]
+        assert pruner.module_groups[0]["test"] == 3
 
     def test_constructor(self):
         model = Linear()
