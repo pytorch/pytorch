@@ -6,7 +6,6 @@ import shutil
 
 import torch
 import lazy_tensor_core
-import lazy_tensor_core.utils.utils as xu
 import lazy_tensor_core.core.lazy_model as ltm
 
 

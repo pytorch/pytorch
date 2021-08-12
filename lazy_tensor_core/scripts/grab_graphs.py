@@ -9,7 +9,6 @@ import collections
 import difflib
 import os
 import re
-import shutil
 import sys
 
 GraphInfo = collections.namedtuple('GraphInfo',

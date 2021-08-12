@@ -4,10 +4,8 @@ Compares metric reports contained in two separate files, and prints a summary
 of differences, sorted by the percent change.
 """
 
-import sys
 import argparse
 import collections
-from datetime import timedelta
 
 import lazy_tensor_core.debug.metrics_compare_utils as mcu
 
@@ -77,10 +75,8 @@ def sort_counters(report1, report2):
     for key, val1 in report1.items():
         if isinstance(val1, tuple):
             v1, v2 = val1[0], report2[key][0]
-            #v1, v2 = int(val1[0]), int(report2[key][0])
         else:
             v1, v2 = val1, report2[key]
-            #v1, v2 = int(val1), int(report2[key])
         delta[key] = (-v1 + v2) / v1 * 100
     delta = sorted(delta.items(), key=lambda item: abs(item[1]), reverse=True)
     delta = [(key, report1[key], report2[key], pct_change)

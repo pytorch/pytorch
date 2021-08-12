@@ -52,25 +52,6 @@ class ClientWorker(Worker):
     def __hash__(self):
         return hash(repr(self))
 
-    def __repr__(self):
-        return ('{{{internal_ip}, {machine_type}, {zone},'
-                ' {hostname}}}').format(
-                    internal_ip=self._internal_ip,
-                    machine_type=self._machine_type,
-                    zone=self._zone,
-                    hostname=self._hostname)
-
-    def __eq__(self, other):
-        return (self._internal_ip == other._internal_ip and
-                self._machine_type == other._machine_type and
-                self._zone == other._zone and self._hostname == other._hostname)
-
-    def __ne__(self, other):
-        return not self.__eq__(self, other)
-
-    def __hash__(self):
-        return hash(repr(self))
-
 
 class ServiceWorker(Worker):
 

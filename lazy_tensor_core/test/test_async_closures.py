@@ -54,7 +54,7 @@ class AsyncClosuresTest(unittest.TestCase):
             ltm.add_step_closure(closure)
             ltm.mark_step()
 
-            assert False  # Should not reach here
+            raise AssertionError()  # Should not reach here
         except RuntimeError as e:
             assert flag.is_set(), "Should have caught exception from closure"
 
@@ -78,7 +78,7 @@ class AsyncClosuresTest(unittest.TestCase):
             ltm.add_step_closure(closure2, run_async=True)
             ltm.mark_step()
 
-            assert False  # Should not reach here
+            raise AssertionError()  # Should not reach here
         except RuntimeError as e:
             # Should have caught exception from closure1
             pass
