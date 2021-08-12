@@ -2,9 +2,10 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Set
+from typing import Dict, Set
 
 import jinja2
+import json
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -80,6 +81,32 @@ class CIFlowConfig:
             self.reset_root_job()
             return
         self.gen_root_job_condition()
+
+
+@dataclass
+class CIFlowRuleset:
+    version = 'v1'
+    output_file = f'{GITHUB_DIR}/generated-ciflow-ruleset.json'
+    label_rules: Dict[str, Set[str]] = field(default_factory=dict)
+
+    def add_label_rule(self, labels: Set[str], workflow_name: str) -> None:
+        for label in labels:
+            if label in self.label_rules:
+                self.label_rules[label].add(workflow_name)
+            else:
+                self.label_rules[label] = {workflow_name}
+
+    def generate_json(self) -> None:
+        output = {
+            "version": self.version,
+            "label_rules": {
+                label: sorted(list(workflows))
+                for label, workflows in self.label_rules.items()
+            }
+        }
+        with open(self.output_file, 'w') as outfile:
+            json.dump(output, outfile, indent=2, sort_keys=True)
+            outfile.write('\n')
 
 
 @dataclass
@@ -418,6 +445,17 @@ if __name__ == "__main__":
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
+    ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
+
+            if workflow.ciflow_config.enabled:
+                ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+            elif workflow.on_pull_request:
+                # If ciflow is disabled but still on_pull_request, we can denote
+                # it as a special label 'ciflow/default' in the ruleset, which will be later
+                # turned into an actual 'ciflow/default' label in the workflow.
+                # During the rollout phase, it has the same effect as 'ciflow/default'
+                ciflow_ruleset.add_label_rule({'ciflow/default'}, workflow.build_environment)
+    ciflow_ruleset.generate_json()
