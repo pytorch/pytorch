@@ -98,7 +98,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
                       "next PyTorch release. It's combined with `verbose' argument now. ")
     if example_outputs is not None:
         warnings.warn("`example_outputs' is deprecated and ignored. Will be removed in "
-                      "next release.")
+                      "next PyTorch release.")
     _export(model, args, f, export_params, verbose, training, input_names, output_names,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, example_outputs=example_outputs,
@@ -484,14 +484,14 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         input_args = copy.deepcopy(args)
         input_kwargs = {}
-        if isinstance(input_args[-1], dict):
+        if input_args and isinstance(input_args[-1], dict):
             input_kwargs = input_args[-1]
             input_args = input_args[:-1]
         try:
             model_copy = copy.deepcopy(model)
-            output = model_copy(*input_args, **input_kwargs)
+            example_outputs = model_copy(*input_args, **input_kwargs)
         except Exception:
-            output = model(*input_args, **input_kwargs)
+            example_outputs = model(*input_args, **input_kwargs)
 
         if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
             example_outputs = (example_outputs,)
