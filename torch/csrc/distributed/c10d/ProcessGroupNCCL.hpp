@@ -15,7 +15,6 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/DynamicLibrary.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -23,8 +22,6 @@
 #include <c10/cuda/CUDAStream.h>
 
 #include <torch/custom_class.h>
-
-#include <c10d/ucc/ProcessGroupUCC.hpp>
 
 namespace c10d {
 
@@ -36,7 +33,7 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
-constexpr const char* NCCL_BACKEND_NAME = "nccl";
+constexpr const char* NCCL_BACKEND_NAME = "_internal_nccl";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -328,7 +325,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
-   // Agrees on an initial sequence number for the whole group by having rank 0
+  // Agrees on an initial sequence number for the whole group by having rank 0
   // create it and broadcast it to other ranks using the store.
   void setSequenceNumberForGroup() override;
 
@@ -562,9 +559,6 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
   // is called.
   static thread_local uint64_t ncclActiveGroupCounter_;
-
-  at::DynamicLibrary libucc;
-  c10::intrusive_ptr<ProcessGroup> pg_ucc;
 };
 
 } // namespace c10d

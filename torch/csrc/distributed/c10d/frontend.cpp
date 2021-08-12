@@ -17,16 +17,16 @@
 #include <c10d/ProcessGroupGloo.hpp>
 #endif
 
+#if defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
+#include <c10d/ProcessGroupNCCLWithUCC.hpp>
+#endif
+
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
 #include <c10d/ProcessGroupMPI.hpp>
-#endif
-
-#ifdef USE_C10D_UCC
-#include <c10d/ucc/ProcessGroupUCC.hpp>
 #endif
 
 namespace c10d {
@@ -216,7 +216,7 @@ c10::intrusive_ptr<ProcessGroup> DistributedC10d::newProcessGroupHelper(
 
       options->is_high_priority_stream = false;
       options->timeout = timeout;
-      pg = c10::make_intrusive<ProcessGroupNCCL>(
+      pg = c10::make_intrusive<ProcessGroupNCCLWithUCC>(
           prefix_store, rank, world_size, options);
 #else
       AT_ERROR(

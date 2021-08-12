@@ -449,13 +449,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       options_(options),
       ncclCommCounter_(0),
-      terminateProcessGroup_(false),
-      libucc("libtorch_ucc.so", nullptr, true) {
-  if (libucc.available()) {
-    CreateProcessGroupUCCType createProcessGroupUCC = 
-      reinterpret_cast<CreateProcessGroupUCCType>(libucc.sym("_Z21createProcessGroupUCCRKN3c1013intrusive_ptrIN4c10d5StoreENS_6detail34intrusive_target_default_null_typeIS2_EEEEii"));
-    pg_ucc = createProcessGroupUCC(store, rank, size);
-  }
+      terminateProcessGroup_(false) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
@@ -1784,9 +1778,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
-  if (pg_ucc.get() != nullptr && tensors[0].device().type() != c10::kCUDA) {
-    return pg_ucc->send(tensors, dstRank, tag);
-  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -1807,9 +1798,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {
-  if (pg_ucc.get() != nullptr && tensors[0].device().type() != c10::kCUDA) {
-    return pg_ucc->recv(tensors, srcRank, tag);
-  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,

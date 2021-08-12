@@ -15,6 +15,10 @@
 #include <c10d/ProcessGroupWrapper.hpp>
 #endif
 
+#if defined(USE_C10D_NCCL) || defined(USE_C10D_UCC)
+#include <c10d/ProcessGroupNCCLWithUCC.hpp>
+#endif
+
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
@@ -1371,7 +1375,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
 #ifdef USE_C10D_NCCL
   auto processGroupNCCL =
-      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCLWithUCC>(
           module, "ProcessGroupNCCL", processGroup)
           .def(
               py::init<
