@@ -366,7 +366,7 @@ def hook_with_zero_step_interleaved(
             # properly initialized yet, collect the information needed
             if overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
                 _collect_ddp_bucket_info(bucket, zero, rank, assigned_rank)
-                return bucket.get_tensor()
+                return bucket.buffer()
 
             overlap_info.bucket_indices_seen.append(bucket_index)
             if assigned_rank == rank:
@@ -381,7 +381,7 @@ def hook_with_zero_step_interleaved(
                 overlap_info.wait_for_broadcasts(num_buckets, rank)
                 overlap_info.clear_per_iter_info()
 
-            return bucket.get_tensor()
+            return bucket.buffer()
 
         return fut.then(zero_step)
 

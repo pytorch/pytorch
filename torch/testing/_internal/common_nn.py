@@ -97,6 +97,7 @@ def get_weight(m):
 # - `test_cpp_api_parity`: if `False`, skips the C++ parity test for this test dict. Default: True.
 # - `has_parity`: if `False`, expects this test dict to fail the C++ parity test. Default: True.
 
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -1257,6 +1258,7 @@ def single_batch_reference_fn(input, parameters, module):
     single_batch_input = input.unsqueeze(0)
     with freeze_rng_state():
         return module(single_batch_input).squeeze(0)
+
 
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
@@ -3993,6 +3995,7 @@ def kldivloss_reference(input, target, reduction='mean'):
         return result.sum() / result.size(0)
     return result
 
+
 def kldivloss_log_target_reference(input, target, reduction='mean'):
     result = torch.exp(target) * (target - input)
     if reduction == 'mean':
@@ -5100,13 +5103,12 @@ regression_criterion_no_batch = [
     'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
-for regression_criterion, reduction in product(regression_criterion_no_batch,
-                                               reductions):
+for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
-        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
-        target_fn=lambda: torch.randn(3),
+        target_size=(3, ),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5130,7 +5132,7 @@ reductions = ['none', 'mean', 'sum']
 for (name, input_fn, target_fn), reduction in product(classification_criterion_no_batch,
                                                       reductions):
     classification_test_info = dict(
-        fullname="{}_no_batch_dim_cls_{}".format(name, reduction),
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
         constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_fn=lambda f=input_fn: f(),
         target_fn=lambda f=target_fn: f(),
@@ -5520,6 +5522,7 @@ class ModuleTest(TestBase):
 
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
+
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
@@ -5828,8 +5831,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
+        cpu_gradInput = test_case._backward_criterion(
+            cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = test_case._backward_criterion(
+            gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
