@@ -130,7 +130,7 @@ class LayerNorm(Module):
         bias:   the learnable bias of the module of shape 
                 :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
                 The values are initialized to 0.
-                
+
     Shape:
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
