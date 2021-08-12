@@ -253,10 +253,6 @@ bool conv2dIsSupported(
   }
   auto KH = weight.dims[2];
   auto KW = weight.dims[3];
-  if (KH != 3 || KW != 3) {
-    GRAPH_DEBUG("conv2dIsSupported: not 3x3");
-    return false;
-  }
   if (stride.size() != 2 || stride[0] != stride[1]) {
     GRAPH_DEBUG("conv2dIsSupported: unsupported stride");
     return false;
@@ -267,6 +263,10 @@ bool conv2dIsSupported(
   }
   if (dilation.size() != 2 || dilation[0] != 1 || dilation[1] != 1) {
     GRAPH_DEBUG("conv2dIsSupported: unsupported dilation");
+    return false;
+  }
+  if ((KH != 3 || KW != 3) && (KH != 5 || KW != 5)) {
+    GRAPH_DEBUG("conv2dIsSupported: not 3x3 or 5x5");
     return false;
   }
   return true;
@@ -290,14 +290,27 @@ static bool isContiguous(const torch::jit::Value* v) {
 
 // The fuser only supports conv2d with very specific properties:
 // - Static shapes: 4-d input and filter, 1-d bias.
-// - Constant strides/padding/dilation/groups
-// - Equal padding and strides, dilation == 1.
+// - Constant strides/padding/dilation/groups, dilation == 1
 // - Depthwise (groups == in_channels == out_channels)
-// - 3x3 kernel
+// - Either of the following two,
+// - 1) Equal padding and strides, 3x3 kernel
+// - 2) 5x5 kernel
 bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
   auto const& bias = getTensorInfoJit(node->input(2));
+
+  //  c10::optional<c10::IValue> stride;
+  //  if (node->input(3)->node()->kind() == prim::ListConstruct){
+  //      auto const& stride_h = toIValue(node->input(3)->node()->input(0));
+  //      auto const& stride_w = toIValue(node->input(3)->node()->input(1));
+  //      if (stride_h == stride_w){
+  //        stride = stride_h;
+  //      }
+  //  } else {
+  //      stride = toIValue(node->input(3));
+  //  }
+
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
