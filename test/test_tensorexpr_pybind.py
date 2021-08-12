@@ -1,10 +1,10 @@
-import unittest
-
-import numpy as np
 import torch
+import numpy as np
 import torch._C._te as te
+
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
+import unittest
 
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -19,19 +19,19 @@ class kernel_arena_scope(object):
 
 def construct_adder(n: int, dtype=te.Dtype.Float):
     dN = te.ExprHandle.int(n)
-    A = te.Placeholder("A", dtype, [dN])
-    B = te.Placeholder("B", dtype, [dN])
+    A = te.Placeholder('A', dtype, [dN])
+    B = te.Placeholder('B', dtype, [dN])
 
     def compute(i):
         return A.load([i]) + B.load([i])
 
-    C = te.Compute("C", [te.DimArg(dN, "i")], compute)
+    C = te.Compute('C', [te.DimArg(dN, 'i')], compute)
 
     loopnest = te.LoopNest([C])
     loopnest.prepare_for_codegen()
     stmt = te.simplify(loopnest.root_stmt())
 
-    return te.construct_codegen("ir_eval", stmt, [A, B, C])
+    return te.construct_codegen('ir_eval', stmt, [A, B, C])
 
 
 class TestTensorExprPyBind(JitTestCase):
@@ -63,17 +63,15 @@ class TestTensorExprPyBind(JitTestCase):
 
             ONE = te.ExprHandle.int(1)
             FOUR = te.ExprHandle.int(4)
-            A = te.BufHandle("A", [ONE, FOUR], dtype)
-            B = te.BufHandle("B", [FOUR, ONE], dtype)
-            C = te.BufHandle("C", [ONE, ONE], dtype)
+            A = te.BufHandle('A', [ONE, FOUR], dtype)
+            B = te.BufHandle('B', [FOUR, ONE], dtype)
+            C = te.BufHandle('C', [ONE, ONE], dtype)
 
             s = te.ExternalCall(C, "nnc_aten_matmul", [A, B], [])
 
             loopnest = te.LoopNest(s, [C])
             loopnest.prepare_for_codegen()
-            codegen = te.construct_codegen(
-                "ir_eval", s, [te.BufferArg(x) for x in [A, B, C]]
-            )
+            codegen = te.construct_codegen('ir_eval', s, [te.BufferArg(x) for x in [A, B, C]])
 
             tA = torch.ones(1, 4)
             tB = torch.ones(4, 1)
@@ -90,12 +88,15 @@ class TestTensorExprPyBind(JitTestCase):
             def compute(i):
                 return A.load(i) - B.load(i)
 
-            C = te.Compute("C", [dN], compute)
+            C = te.Compute('C', [dN], compute)
 
             loopnest = te.LoopNest([C])
             loopnest.prepare_for_codegen()
 
-            cg = te.construct_codegen("ir_eval", loopnest.simplify(), [A, B, C, dN])
+            cg = te.construct_codegen(
+                'ir_eval',
+                loopnest.simplify(),
+                [A, B, C, dN])
 
             def test_with_shape(n):
                 tA = torch.randn(n, dtype=torch.double)
@@ -112,14 +113,15 @@ class TestTensorExprPyBind(JitTestCase):
             one = te.ExprHandle.int(1)
             te.Placeholder([one], torch.float32)  # ok
             te.Placeholder([one])  # ok
-            self.assertRaises(TypeError, lambda: te.Placeholder([one], "float55"))
+            self.assertRaises(TypeError,
+                              lambda: te.Placeholder([one], "float55"))
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_with_tensor_inputs(self):
         def f(a, b, c):
             return a + b + c
 
-        device, size = "cpu", (4, 4)
+        device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
         y = torch.rand(size, device=device)
         z = torch.rand(size, device=device)
@@ -147,9 +149,9 @@ graph(%a.1 : Float(4, 4, strides=[4, 1], requires_grad=0, device=cpu),
         def f(a, b, c):
             return a + b + c
 
-        x = torch.tensor(0.1, dtype=torch.float, device="cpu")
-        y = torch.tensor(0.6, dtype=torch.float, device="cpu")
-        z = torch.tensor(0.7, dtype=torch.float, device="cpu")
+        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
+        y = torch.tensor(0.6, dtype=torch.float, device='cpu')
+        z = torch.tensor(0.7, dtype=torch.float, device='cpu')
 
         graph_str = """
 graph(%a.1 : Float(requires_grad=0, device=cpu),
@@ -171,7 +173,7 @@ graph(%a.1 : Float(requires_grad=0, device=cpu),
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_kernel_shape_prop(self):
-        device, size = "cpu", (4, 4)
+        device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
         y = torch.rand(size, device=device)
 
@@ -251,7 +253,7 @@ graph(%a : Tensor, %b : Tensor):
         # Now compilation should pass
         kernel = torch._C._te.TensorExprKernel(graph)
 
-        device, size = "cpu", (4, 4)
+        device, size = 'cpu', (4, 4)
         x = torch.rand(size, device=device)
         y = torch.rand(size, device=device)
 
@@ -264,7 +266,7 @@ graph(%a : Tensor, %b : Tensor):
         def f(a):
             return a.t()
 
-        device, size = "cpu", (3, 4)
+        device, size = 'cpu', (3, 4)
         x = torch.rand(size, device=device)
 
         graph_str = """
@@ -286,7 +288,7 @@ graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
         def f(a):
             return a.transpose(-1, -2)
 
-        device, size = "cpu", (3, 4)
+        device, size = 'cpu', (3, 4)
         x = torch.rand(size, device=device)
 
         graph_str = """
@@ -310,7 +312,7 @@ graph(%a.1 : Float(3, 4, strides=[4, 1], requires_grad=0, device=cpu)):
         def f(a):
             return a.permute([2, 1, 0])
 
-        device, size = "cpu", (3, 4, 5)
+        device, size = 'cpu', (3, 4, 5)
         x = torch.rand(size, device=device)
 
         graph_str = """
@@ -336,7 +338,7 @@ graph(%a.1 : Float(3, 4, 5, strides=[20, 5, 1], requires_grad=0, device=cpu)):
         def f(a):
             return a.nan_to_num()
 
-        device = "cpu"
+        device = 'cpu'
         x = torch.ones((2, 2), device=device)
         x[0, 0] = x[1, 1] = torch.nan
         graph_str = """
@@ -351,20 +353,15 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
             def get_dim_args(dims):
                 dim_args = []
                 for dim in dims:
-                    dim_args.append(te.DimArg(dim, "i" + str(len(dim_args))))
+                    dim_args.append(te.DimArg(dim, 'i' + str(len(dim_args))))
                 return dim_args
 
             def compute(idxs):
                 load = inputs[0].as_buf().load(idxs)
-                return te.ifThenElse(
-                    te.ExprHandle.isnan(load), te.ExprHandle.float(0.0), load
-                )
-
+                return te.ifThenElse(te.ExprHandle.isnan(load), te.ExprHandle.float(0.), load)
             return te.Compute2("custom_nan_to_num", get_dim_args(out_shape), compute)
 
-        kernel = torch._C._te.TensorExprKernel(
-            graph, {"aten::nan_to_num": my_custom_lowering}
-        )
+        kernel = torch._C._te.TensorExprKernel(graph, {'aten::nan_to_num' : my_custom_lowering})
         res1 = kernel.run((x,))
         res2 = kernel.fallback((x,))
         correct = f(x)
@@ -376,7 +373,7 @@ graph(%x : Float(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
         def f(a):
             return a.expand((2, 3, 4))
 
-        device = "cpu"
+        device = 'cpu'
         x = torch.rand((1, 3, 1), device=device)
         graph_str = """
 graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
@@ -398,21 +395,19 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
         np.testing.assert_allclose(res2.numpy(), correct.numpy(), atol=2e-3)
 
     def test_forgot_kernel_arena(self):
-        self.assertRaises(
-            RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int)
-        )
+        self.assertRaises(RuntimeError, lambda: torch._C._te.VarHandle("n", torch._C._te.Dtype.Int))
 
     @unittest.skipIf(not LLVM_ENABLED, "LLVM backend not enabled")
     def test_alloc_in_loop(self):
         with kernel_arena_scope():
             a, tmp, b = [
                 te.Placeholder(name, te.Dtype.Float, [te.ExprHandle.int(1)])
-                for name in ["a", "tmp", "b"]
-            ]
+                for name in ["a", "tmp", "b"]]
             t0, t100 = [te.ExprHandle.int(n) for n in [0, 100]]
-            body = te.Block(
-                [tmp.store([t0], a.load([t0])), b.store([t0], tmp.load([t0]))]
-            )
+            body = te.Block([
+                tmp.store([t0], a.load([t0])),
+                b.store([t0], tmp.load([t0]))
+            ])
             for _ in range(4):
                 i = te.VarHandle("i", te.Dtype.Int)
                 body = te.For.make(i, t0, t100, body)
@@ -422,6 +417,5 @@ graph(%a : Float(1, 3, 1, strides=[3, 1, 1], requires_grad=0, device=cpu)):
             ta, tb = [torch.ones(1) for _ in range(2)]
             f.call([ta.data_ptr(), tb.data_ptr()])
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

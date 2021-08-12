@@ -7,13 +7,13 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 # S3 bucket (see tools/stats/print_test_stats.py)
 class TestImportTime(TestCase):
     def test_time_import_torch(self):
-        TestCase.runWithPytorchAPIUsageStderr("import torch")
+        TestCase.runWithPytorchAPIUsageStderr('import torch')
 
     def test_time_cuda_device_count(self):
         TestCase.runWithPytorchAPIUsageStderr(
-            "import torch; torch.cuda.device_count()",
+            'import torch; torch.cuda.device_count()',
         )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

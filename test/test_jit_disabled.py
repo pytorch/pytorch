@@ -1,8 +1,7 @@
-import contextlib
-import os
-import subprocess
 import sys
-
+import os
+import contextlib
+import subprocess
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
 
 
@@ -31,11 +30,15 @@ class TestJitDisabled(TestCase):
         # Write `src` out to a temporary so our source inspection logic works
         # correctly.
         with TemporaryFileName() as fname:
-            with open(fname, "w") as f:
+            with open(fname, 'w') as f:
                 f.write(src)
                 with _jit_disabled():
-                    out_disabled = subprocess.check_output([sys.executable, fname])
-                out_enabled = subprocess.check_output([sys.executable, fname])
+                    out_disabled = subprocess.check_output([
+                        sys.executable,
+                        fname])
+                out_enabled = subprocess.check_output([
+                    sys.executable,
+                    fname])
                 self.assertEqual(out_disabled, out_enabled)
 
     def test_attribute(self):
@@ -86,6 +89,5 @@ print("Didn't throw exception")
 """
         self.compare_enabled_disabled(_program_string)
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()
