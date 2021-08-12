@@ -8,7 +8,7 @@ namespace c10d {
 
 c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
     GradBucket& bucket) {
-  std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
+  std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
   // Apply the division first to avoid overflow, especially for FP16.
   tensors[0] /= state_->getSize();
   return state_->allreduce(tensors)->getFuture();
@@ -16,7 +16,7 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
 
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
     GradBucket& bucket) {
-  auto& tensor = bucket.getTensorRef();
+  auto& tensor = bucket.getBufferRef();
   tensor.copy_(tensor.to(torch::kFloat16));
   std::vector<at::Tensor> tensors = {tensor};
   // Apply the division first to avoid overflow.
@@ -38,7 +38,7 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::
     runHook(GradBucket& bucket) {
-  std::vector<at::Tensor> tensors = {bucket.getTensorRef()};
+  std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
   return state_->allreduce(tensors)->getFuture();
 }
 
