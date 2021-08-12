@@ -169,8 +169,51 @@ class TypeParser {
 };
 
 /*
-CustomTypeParser manages a list of backport from n to n-1 function, and provides
-function to check if a specific function exists.
+CustomTypeParser to parse custom type. Currently custom type will be
+in following structure:
+('type_name',
+    ('NamedTuple',
+        ('filed_name_1', 'field_type_1')
+        ('filed_name_2', 'field_type_2')
+    )
+)
+
+For example, pythron source code is:
+
+class Foo(NamedTuple):
+    id: torch.Tensor
+
+class Bar(torch.nn.Module):
+    def __init__(self):
+        super(Bar, self).__init__()
+        self.foo = Foo(torch.tensor(1))
+
+    def forward(self, a: torch.Tensor):
+        self.foo = Foo(a)
+        return self.foo
+
+The corresponding bytecode will be:
+(6,
+ ('__torch__.Bar.forward',
+  (('instructions',
+    (('STOREN', 1, 2),
+     ('LOAD', 1, 0),
+     ('MOVE', 2, 0),
+     ('NAMED_TUPLE_CONSTRUCT', 0, 1),
+     ('SET_ATTR', 2, 0),
+     ('MOVE', 1, 0),
+     ('GET_ATTR', 2, 0),
+     ('RET', 0, 0))),
+   ('operators', ()),
+   ('constants', ()),
+   ('types', (('__torch__.Foo', ('NamedTuple', (('id', 'Tensor'),))),)),
+   ('register_size', 2)),
+  (('arguments',
+    ((('name', 'self'), ('type', '__torch__.Bar'), ('default_value', None)),
+     (('name', 'a'), ('type', 'Tensor'), ('default_value', None)))),
+   ('returns',
+    ((('name', ''), ('type', 'Tuple[Tensor]'), ('default_value', None)),)))))
+
 */
 class CustomTypeParser final {
  public:
@@ -220,14 +263,14 @@ class CustomTypeParser final {
     return difinition.toTuple()->elements()[0].toString()->string();
   }
 
-  std::unordered_map<std::string, std::function<TypePtr(IValue&)>>&
-  parserFunctions() const {
+  [[nodiscard]] std::
+      unordered_map<std::string, std::function<TypePtr(IValue&)>>&
+      parserFunctions() const {
     static std::unordered_map<std::string, std::function<TypePtr(IValue&)>>
         custom_type_parser_functions;
     return custom_type_parser_functions;
   }
 
-  // Registry of backport functions.
   void registerParserFunction(
       const std::string& custom_type,
       const std::function<TypePtr(IValue&)>& custom_type_parser_function) {
