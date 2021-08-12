@@ -1167,9 +1167,7 @@ class DistributedTest:
                 with self.assertRaisesRegex(
                     RuntimeError, "dense"
                 ):
-                    send_tensor = _build_tensor(rank + 1)
-                    send_tensor = torch.stack([send_tensor, send_tensor, send_tensor], dim=-1)[..., 1]
-                    print(send_tensor.stride())
+                    send_tensor = _build_tensor(10)[..., 1]
                     send_op = dist.P2POp(dist.isend, send_tensor, 1)
                     reqs = dist.batch_isend_irecv([send_op])
                     for req in reqs:
