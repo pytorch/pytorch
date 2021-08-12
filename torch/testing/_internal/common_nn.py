@@ -1215,14 +1215,9 @@ def fractional_max_pool2d_test(test_case):
 
 
 def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
-    def max_pool2d_single_batch_reference_fn(input, parameters, module):
-        # unsqueeze random_samples for single batch
-        module._random_samples.unsqueeze_(0)
-        return single_batch_reference_fn(input, parameters, module)
-
     if use_random_samples:
         # random_samples enables CPU and GPU checks to be consistent
-        random_samples = torch.empty((3, 2), dtype=torch.double).uniform_()
+        random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
         if test_case == 'ratio':
             return dict(
                 constructor=lambda: nn.FractionalMaxPool2d(
@@ -1232,7 +1227,7 @@ def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
                                         ._random_samples(random_samples)''',
                 input_size=(3, 5, 7),
                 cpp_var_map={'random_samples': random_samples},
-                reference_fn=max_pool2d_single_batch_reference_fn,
+                reference_fn=single_batch_reference_fn,
                 fullname='FractionalMaxPool2d_ratio_no_batch_dim')
         elif test_case == 'size':
             return dict(
@@ -1243,7 +1238,7 @@ def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
                                         ._random_samples(random_samples)''',
                 input_size=(3, 7, 6),
                 cpp_var_map={'random_samples': random_samples},
-                reference_fn=max_pool2d_single_batch_reference_fn,
+                reference_fn=single_batch_reference_fn,
                 fullname='FractionalMaxPool2d_size_no_batch_dim')
     else:
         # can not check cuda because there RNG is different between cpu and cuda

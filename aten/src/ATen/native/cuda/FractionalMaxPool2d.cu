@@ -154,13 +154,11 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   auto output_ = output;
   auto input_ = input;
   auto indices_ = indices;
-  auto randomSamples_ = randomSamples;
 
   if(ndims == 3) {
     output_ = output_.reshape({1, numPlanes, outputH, outputW});
     indices_ = indices_.reshape({1, numPlanes, outputH, outputW});
     input_ = input_.reshape({1, input.size(0), input.size(1), input.size(2)});
-    randomSamples_ = randomSamples_.unsqueeze(0);
   }
 
   if (output_.numel() == 0) {
@@ -182,7 +180,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
       auto devInput = input_.packed_accessor<scalar_t, 4>();
       auto devOutput = output_.packed_accessor<scalar_t, 4>();
       auto devIndices = indices_.packed_accessor<int64_t, 4>();
-      auto devSamples = randomSamples_.packed_accessor<scalar_t, 3>();
+      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
