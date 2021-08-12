@@ -519,6 +519,7 @@ class OpInfo(object):
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
+                 assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
@@ -614,6 +615,8 @@ class OpInfo(object):
         self.aliases = ()
         if aliases is not None:
             self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore[assignment]
+
+        self.assert_jit_shape_analysis = assert_jit_shape_analysis
 
         self.test_conjugated_samples = test_conjugated_samples
         self.test_neg_view = test_neg_view
@@ -6506,6 +6509,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                                 *[torch.bfloat16] if (SM60OrLater and CUDA11OrLater) else []),
            assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_matmul,
            skips=(
                # matmul does not correctly warn when resizing out= inputs
@@ -6676,7 +6680,7 @@ op_db: List[OpInfo] = [
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
            dtypes=all_types_and(torch.bool),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            decorators=(onlyOnCPUAndCUDA,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
@@ -6684,14 +6688,6 @@ op_db: List[OpInfo] = [
                # FIXME: aminmax does not check for safe casting to output
                SkipInfo('TestCommon', 'test_out'),
            )),
-    OpInfo('nn.functional.adaptive_avg_pool2d',
-           dtypes=floating_types(),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-           skips=(
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
-           supports_out=False,
-           sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
     OpInfo('nn.functional.relu',
            aten_name="relu",
            supports_autograd=True,
@@ -7691,9 +7687,6 @@ op_db: List[OpInfo] = [
            op=lambda x, other: x.reshape_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_view_as_reshape_as,
-           skips=(
-               # Because reshape_as does not have a function variant.
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),),
            supports_out=False,
            supports_forward_ad=True,
            ),
@@ -7918,10 +7911,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('resize_as_',
            op=lambda x, other: torch.resize_as_(x.clone(), other),
@@ -7930,10 +7919,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_autograd=False,
-           skips=(
-               # JIT has issue when op is passed as lambda
-               SkipInfo('TestJit', 'test_variant_consistency_jit'),
-           ),
            sample_inputs_func=sample_inputs_resize_ops),
     OpInfo('take_along_dim',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),

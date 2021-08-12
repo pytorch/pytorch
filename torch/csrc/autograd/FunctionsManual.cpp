@@ -834,6 +834,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
   for (const auto i : c10::irange(num_unsqueezed)) {
+    (void)i; // Suppress unused variable warning
     grad = grad.sum(0, false);
   }
 
