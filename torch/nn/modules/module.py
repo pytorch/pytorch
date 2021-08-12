@@ -531,9 +531,32 @@ class Module:
         return buffer
 
     def get_extra_state(self) -> Dict[str, Any]:
+        """
+        Returns any extra state to include in the module's state_dict.
+        Implement this and a corresponding :func:`set_extra_state` for your module
+        if you need to store extra state. This function is called when building the
+        module's `state_dict()`.
+
+        Note that extra state should be pickleable to ensure working serialization
+        of the module. We only provide provide backwards compatibility guarantees
+        for serializing Tensors; other objects may break backwards compatibility if
+        their serialized pickle form changes.
+
+        Returns:
+            dict or OrderedDict: Any extra state to store in the module's state_dict
+        """
         raise NotImplementedError()
 
     def set_extra_state(self, state: Dict[str, Any]):
+        """
+        This function is called from :func:`load_state_dict` to handle any extra state
+        found within the `state_dict`. Implement this function and a corresponding
+        :func:`get_extra_state` for your module if you need to store extra state within its
+        `state_dict`.
+
+        Args:
+            state (dict): Extra state from the `state_dict`
+        """
         raise NotImplementedError()
 
     def _apply(self, fn):
