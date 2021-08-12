@@ -2724,6 +2724,16 @@ graph(%Ra, %Rb):
         s = str(torch.ops)
         self.assertRegex(s, r'ops')
 
+    def test_print_classes_module(self):
+        s = str(torch.classes)
+        self.assertRegex(s, r'classes')
+
+    def test_print_torch_ops_modules(self):
+        s = str(torch._ops.ops.quantized)
+        self.assertRegex(s, r'torch.ops')
+        s = str(torch._ops.ops.atan)
+        self.assertRegex(s, r'torch.ops')
+
     @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
     def test_profiler(self):
         prev_opt = torch._C._get_graph_executor_optimize()
