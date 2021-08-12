@@ -12,6 +12,7 @@
 #include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -69,6 +70,7 @@ void OptimizeGraph(
   if (!PeepholeOptimize(graph)) {
     EliminateDeadCode(graph);
   }
+  LowerSimpleTuples(graph);
 
   FuseInferenceOpsForSparseNN(graph);
   UseVariadicCat(graph);
