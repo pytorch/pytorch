@@ -6,7 +6,7 @@ button.copybtn {
     right: .5em;
     width: 1.7em;
     height: 1.7em;
-	opacity: 0;
+    opacity: 0;
     transition: opacity 0.3s, border .3s, background-color .3s;
     user-select: none;
     padding: 0;
@@ -31,7 +31,7 @@ div.highlight  {
 }
 
 .highlight:hover button.copybtn {
-	opacity: 1;
+    opacity: 1;
 }
 
 .highlight button.copybtn:hover {
