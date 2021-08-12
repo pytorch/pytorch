@@ -1,7 +1,8 @@
-from torch.testing._internal.common_utils import run_tests
+import unittest
 
 import torch
-import unittest
+from torch.testing._internal.common_utils import run_tests
+
 
 class TestPublicBindings(unittest.TestCase):
     def test_no_new_bindings(self):
@@ -212,6 +213,47 @@ class TestPublicBindings(unittest.TestCase):
             "unify_type_list",
             "Use",
             "Value",
+            "autocast_decrement_nesting",
+            "autocast_increment_nesting",
+            "clear_autocast_cache",
+            "cpp",
+            "default_generator",
+            "device",
+            "dtype",
+            "finfo",
+            "fork",
+            "get_default_dtype",
+            "get_num_interop_threads",
+            "get_num_threads",
+            "has_cuda",
+            "has_cudnn",
+            "has_lapack",
+            "has_mkl",
+            "has_mkldnn",
+            "has_mlc",
+            "has_openmp",
+            "iinfo",
+            "import_ir_module",
+            "import_ir_module_from_buffer",
+            "init_num_threads",
+            "is_anomaly_enabled",
+            "is_autocast_enabled",
+            "is_grad_enabled",
+            "layout",
+            "memory_format",
+            "merge_type_from_type_comment",
+            "parse_ir",
+            "parse_schema",
+            "parse_type_comment",
+            "qscheme",
+            "set_anomaly_enabled",
+            "set_autocast_enabled",
+            "set_autocast_gpu_dtype",
+            "get_autocast_gpu_dtype",
+            "set_flush_denormal",
+            "set_num_interop_threads",
+            "set_num_threads",
+            "unify_type_list",
             "vitals_enabled",
             "wait",
         }
@@ -226,5 +268,5 @@ class TestPublicBindings(unittest.TestCase):
         self.assertTrue(torch_C_bindings.issubset(torch_C_allowlist_superset), msg)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

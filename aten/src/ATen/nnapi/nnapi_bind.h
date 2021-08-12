@@ -46,6 +46,8 @@ struct NnapiCompilation : torch::jit::CustomClassHolder {
     int32_t num_outputs_ {};
 };
 
+void register_nnapi(torch::Library& m);
+
 } // namespace bind
 } // namespace nnapi
 } // namespace torch

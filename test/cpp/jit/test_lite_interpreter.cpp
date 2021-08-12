@@ -751,7 +751,7 @@ TEST(LiteInterpreterTest, GetRuntimeOpsAndInfo) {
 
 TEST(LiteInterpreterTest, isCompatibleSuccess) {
   // test trivial success case
-  auto runtime_info = get_runtime_compatibility_info();
+  auto runtime_info = RuntimeCompatibilityInfo::get();
   std::unordered_map<std::string, OperatorInfo> model_ops;
   model_ops["aten::add.Scalar"] = OperatorInfo{2};
 

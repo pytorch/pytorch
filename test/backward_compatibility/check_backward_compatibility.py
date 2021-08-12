@@ -112,7 +112,10 @@ ALLOW_LIST = [
     ("aten::_view_as_real_physical", datetime.date(2021, 8, 1)),
     ("aten::_bmm", datetime.date(2021, 8, 14)),
     ("aten::_bmm.out", datetime.date(2021, 8, 14)),
-    ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
+    (
+        "aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams",
+        datetime.date(2021, 8, 15),
+    ),
     ("aten::_cumsum", datetime.date(2021, 8, 31)),
     ("aten::_cumprod", datetime.date(2021, 8, 31)),
 ]
@@ -122,8 +125,11 @@ ALLOW_LIST_COMPILED = [
         re.compile(item[0]),
         item[1],
         re.compile(item[2]) if len(item) > 2 else None,
-    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+    )
+    for item in ALLOW_LIST
+    if item[1] >= datetime.date.today()
 ]
+
 
 def allow_listed(schema):
     for item in ALLOW_LIST_COMPILED:

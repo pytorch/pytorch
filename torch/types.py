@@ -1,7 +1,7 @@
-import torch
+import builtins
 from typing import Any, List, Sequence, Tuple, Union
 
-import builtins
+import torch
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -32,13 +32,14 @@ Device = Union[_device, str, None]
 
 # Storage protocol implemented by ${Type}StorageBase classes
 
+
 class Storage(object):
     _cdata: int
 
-    def __deepcopy__(self, memo) -> 'Storage':
+    def __deepcopy__(self, memo) -> "Storage":
         ...
 
-    def _new_shared(self, int) -> 'Storage':
+    def _new_shared(self, int) -> "Storage":
         ...
 
     def _write_file(self, f: Any, is_real_file: _bool, save_size: _bool) -> None:
@@ -50,7 +51,7 @@ class Storage(object):
     def is_shared(self) -> bool:
         ...
 
-    def share_memory_(self) -> 'Storage':
+    def share_memory_(self) -> "Storage":
         ...
 
     def size(self) -> int:
