@@ -2636,14 +2636,22 @@
   variants: function, method
 
 - func: _log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  structured_delegate: _log_softmax.out
+
+- func: _log_softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: log_softmax_cpu
-    CUDA: log_softmax_cuda
+    CPU: log_softmax_cpu_out
+    CUDA: log_softmax_cuda_out
 
 - func: _log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  structured_delegate: _log_softmax_backward_data.out
+
+- func: _log_softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: log_softmax_backward_cpu
-    CUDA: log_softmax_backward_cuda
+    CPU: log_softmax_backward_cpu_out
+    CUDA: log_softmax_backward_cuda_out
 
 - func: _logcumsumexp(Tensor self, int dim) -> Tensor
   dispatch:
@@ -3864,15 +3872,24 @@
   variants: function, method
 
 - func: _softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  structured_delegate: _softmax.out
   dispatch:
-    CPU: softmax_cpu
-    CUDA: softmax_cuda
     MkldnnCPU: mkldnn_softmax
 
-- func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+- func: _softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
+  structured: True
   dispatch:
-    CPU: softmax_backward_cpu
-    CUDA: softmax_backward_cuda
+    CPU: softmax_cpu_out
+    CUDA: softmax_cuda_out
+
+- func: _softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
+  structured_delegate: _softmax_backward_data.out
+
+- func: _softmax_backward_data.out(Tensor grad_output, Tensor output, int dim, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: softmax_backward_cpu_out
+    CUDA: softmax_backward_cuda_out
 
 - func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   variants: function, method
@@ -8182,6 +8199,15 @@
   dispatch:
     CPU: searchsorted_cpu
     CUDA: searchsorted_cuda
+
+- func: _convert_indices_from_coo_to_csr(Tensor self, int size, *, bool out_int32=False) -> Tensor
+  structured_delegate: _convert_indices_from_coo_to_csr.out
+
+- func: _convert_indices_from_coo_to_csr.out(Tensor self, int size, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: _convert_indices_from_coo_to_csr_structured_cpu
+    CUDA: _convert_indices_from_coo_to_csr_structured_cuda
 
 ## NN wrappers
 
