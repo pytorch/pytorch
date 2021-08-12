@@ -206,8 +206,8 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(options.num_layers())) {
+    (void)i; // Suppress unused variable warning
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -219,8 +219,7 @@ void TransformerEncoderImpl::reset() {
 
 void TransformerEncoderImpl::reset_parameters() {
   TORCH_CHECK(
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    layers->size() == options.num_layers(),
+    layers->size() == static_cast<size_t>(options.num_layers()),
     "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
 
   size_t num_layers = layers->size();
@@ -269,8 +268,8 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 void TransformerDecoderImpl::reset() {
 
   layers = this->register_module("layers", ModuleList());
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores,clang-diagnostic-unused-variable)
   for (const auto i : c10::irange(options.num_layers())) {
+    (void)i; // Suppress unused variable warning
     layers->push_back(options.decoder_layer()->clone());
   }
 
@@ -282,8 +281,7 @@ void TransformerDecoderImpl::reset() {
 
 void TransformerDecoderImpl::reset_parameters() {
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_CHECK(layers->size() == options.num_layers(),
+  TORCH_CHECK(layers->size() == static_cast<size_t>(options.num_layers()),
     "TransformerDecoder should have", options.num_layers(),
     " decoder layers, but got ", layers->size());
 
