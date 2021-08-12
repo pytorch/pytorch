@@ -48,7 +48,7 @@ from tools.codegen.utils import mapMaybe
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
-from typing import Callable, List, Optional, Sequence, Union
+from typing import Callable, List, Optional, Sequence, Union, Dict
 
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
@@ -369,22 +369,24 @@ def gen_variable_type(
     compute the output. The grad_fn is attached to differentiable functions.
     """
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
-    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.h', 'VariableType.h')
+    fm.write('VariableType.h', lambda: {
+        'generated_comment': f'@generated from {template_path}/VariableType.h'
+    })
 
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 5
-    shards: List[List[NativeFunctionWithDifferentiabilityInfo]] = [[] for _ in range(num_shards)]
-
-    # functions are assigned arbitrarily but stably to a file based on hash
-    for fn in fns_with_diff_infos:
-        x = sum(ord(c) for c in cpp.name(fn.func.func)) % num_shards
-        shards[x].append(fn)
-
-    for i, shard in enumerate(shards):
-        gen_variable_type_shard(fm, shard, 'VariableType.cpp', f'VariableType_{i}.cpp')
-
-    gen_variable_type_shard(fm, fns_with_diff_infos, 'VariableType.cpp', 'VariableTypeEverything.cpp')
+    fm.write_sharded(
+        'VariableType.cpp',
+        [fn for fn in fns_with_diff_infos if use_derived(fn)],
+        key_fn=lambda fn: cpp.name(fn.func.func),
+        base_env={
+            'generated_comment':
+            f'@generated from {template_path}/VariableType.cpp',
+        },
+        env_callable=gen_variable_type_func,
+        num_shards=5,
+        sharded_keys={'type_derived_method_definitions', 'wrapper_registrations'}
+    )
 
 @with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
@@ -394,47 +396,38 @@ def gen_wrapper_registration(f: NativeFunction) -> str:
         class_type='VariableType',
     )
 
-def gen_variable_type_shard(
-    fm: FileManager,
-    fns_with_diff_infos: List[NativeFunctionWithDifferentiabilityInfo],
-    template_name: str,
-    output_name: str,
-) -> None:
-    type_definitions: List[str] = []
-    wrapper_registrations: List[str] = []
+def gen_variable_type_func(
+    fn: NativeFunctionWithDifferentiabilityInfo
+) -> Dict[str, List[str]]:
+    f = fn.func
+    with native_function_manager(f):
+        name = cpp.name(f.func)
+        formals = gen_formals(f)
 
-    filtered_fns_with_diff_infos = list(filter(use_derived, fns_with_diff_infos))
-    for fn in filtered_fns_with_diff_infos:
-        f = fn.func
-        with native_function_manager(f):
-            name = cpp.name(f.func)
-            formals = gen_formals(f)
+        type_definition = METHOD_DEFINITION.substitute(
+            return_type=cpp.returns_type(f.func.returns).cpp_type(),
+            type_wrapper_name=type_wrapper_name(f),
+            type_definition_body=emit_body(fn),
+            formals=formals,
+        )
+        wrapper_registration = gen_wrapper_registration(f)
 
-            type_definitions.append(METHOD_DEFINITION.substitute(
-                return_type=cpp.returns_type(f.func.returns).cpp_type(),
-                type_wrapper_name=type_wrapper_name(f),
-                type_definition_body=emit_body(fn),
-                formals=formals,
-            ))
-            wrapper_registrations.append(gen_wrapper_registration(f))
+    # See Note [Manual Backend kernels]
+    assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
+    # If you want to register a kernel to Autograd, you must make the op abstract.
+    # In other words, this op must have dispatch section in native_functions.yaml.
+    if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
+        msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
+               f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
+               f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
+               f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
+               f'for instructions to choose the right dispatch keyword.')
+        assert f.is_abstract, msg
 
-        # See Note [Manual Backend kernels]
-        assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
-        # If you want to register a kernel to Autograd, you must make the op abstract.
-        # In other words, this op must have dispatch section in native_functions.yaml.
-        if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
-            msg = (f'There\'s a formula for {name}(or its functional variant) in derivatives.yaml. '
-                   f'It\'s required to add a dispatch section for it with explicit supported backends e.g CPU/CUDA '
-                   f'or CompositeExplicitAutograd in native_functions.yaml. Please see '
-                   f'https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword '
-                   f'for instructions to choose the right dispatch keyword.')
-            assert f.is_abstract, msg
-
-    fm.write_with_template(output_name, template_name, lambda: {
-        'generated_comment': '@' f'generated from {fm.template_dir}/{template_name}',
-        'type_derived_method_definitions': type_definitions,
-        'wrapper_registrations': wrapper_registrations,
-    })
+    return {
+        'type_derived_method_definitions': [type_definition],
+        'wrapper_registrations': [wrapper_registration],
+    }
 
 @with_native_function_with_differentiability_info
 def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
