@@ -53,6 +53,7 @@ TORCH_API std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 struct ModelCompatibilityInfo {
   uint64_t bytecode_version;
   std::unordered_map<std::string, OperatorInfo> operator_info;
+  std::vector<at::IValue> type_table;
 
   // Factory Methods
   static TORCH_API ModelCompatibilityInfo get(std::istream& in);
