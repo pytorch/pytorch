@@ -12,7 +12,7 @@ constexpr auto kProfileEventsStartIdx = 3;
 // it as a message over the wire.
 RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::MessageType messageType,
-    c10::intrusive_ptr<rpc::Message> wrappedMessage,
+    c10::intrusive_ptr<rpc::OutgoingMessage> wrappedMessage,
     std::vector<torch::autograd::profiler::LegacyEvent> profiledEvents,
     rpc::ProfilingId profilingId)
     : messageType_(messageType),

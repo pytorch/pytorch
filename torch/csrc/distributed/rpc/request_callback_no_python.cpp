@@ -473,7 +473,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
                 MessageType::RUN_WITH_PROFILING_RESP,
-                wrappedRpcResponseFuture.value().toCustomClass<Message>(),
+                wrappedRpcResponseFuture.value().toCustomClass<OutgoingMessage>(),
                 profiledEvents,
                 profilingKeyId);
             return withStorages(std::move(*rpcWithProfilingResp).toMessage());
