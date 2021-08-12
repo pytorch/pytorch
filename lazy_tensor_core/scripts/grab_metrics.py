@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Given a log file in which the metrics report has been dumped, extracts the
 # different metrics across multiple points and produces data in a format which
 # can be graphed.

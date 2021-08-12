@@ -160,7 +160,7 @@ Lazy tensors can be moved from the CPU to a lazy device and from a lazy device
 to the CPU. If a view is moved then the data its viewing is also copied to the
 other device and the view relationship is not preserved. Put another way,
 once data is copied to another device it has no relationship with its
-previous device or any tensors on it. Again, depending on how your code operates, 
+previous device or any tensors on it. Again, depending on how your code operates,
 appreciating and accommodating this transition can be important.
 
 ### Saving and Loading lazy tensors

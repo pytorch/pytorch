@@ -28,4 +28,3 @@ Example:
 # or
 my_awesome_branch # (must live in `pytorch/pytorch`)
 ```
-

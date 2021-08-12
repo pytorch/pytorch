@@ -64,7 +64,7 @@ lowering in the accelerator plugin.
 In addition, to manually inspecting the above metrics we provide ways to automatically analyze the above metrics report and provide a summary. Simply run your workload with `PT_XLA_DEBUG=1`.
 
 To profile your workload in depth to undertand bottlenecks please check the following resources:
-* [Official tutorial](https://cloud.google.com/tpu/docs/pytorch-xla-performance-profiling) 
+* [Official tutorial](https://cloud.google.com/tpu/docs/pytorch-xla-performance-profiling)
 * [Colab notebook](https://colab.research.google.com/github/pytorch/xla/blob/master/contrib/colab/pytorch-xla-profiling-colab.ipynb)
 * [Sample MNIST training script with profiling](https://github.com/pytorch/xla/blob/master/test/test_profile_mp_mnist.py)
 
@@ -212,7 +212,7 @@ only be enabled for debugging.
 
 * ```LTC_USE_32BIT_LONG```: If set to 1, maps _PyTorch_ _Long_ types to 32bit type.
   On some accelerators, 64-bit integer computations are expensive, so setting
-  this flag might help. It should be verified by the user that truncating to 32-bit 
+  this flag might help. It should be verified by the user that truncating to 32-bit
   values is a valid operation according to the use of _PyTorch_ _Long_ values in it.
 
 ### Retrieving Stack Traces
