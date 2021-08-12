@@ -13903,8 +13903,8 @@ class TestNNDeviceType(NNTestCase):
                 model(torch.tensor(x, device=device, dtype=dtype))
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), "Expected 2D or 3D input tensor, but got 0")
-        check([], (1,), "Expected 2D or 3D input tensor, but got 1")
+        check(0, (1,), "Expected 2D or 3D input tensor, but got")
+        check([], (1,), "Expected 2D or 3D input tensor, but got")
         check([[]], (1, 0), "stride must be greater than zero, but got 0")
         check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
         check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
