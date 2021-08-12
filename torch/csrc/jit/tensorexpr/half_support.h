@@ -32,7 +32,7 @@ class HalfChecker : public IRVisitor {
     IRVisitor::visit(v);
   }
 
-  void visit(const HalfImm* v) override {
+  void visit(HalfImm* v) override {
     hasHalf_ = true;
   }
 
