@@ -150,11 +150,11 @@ public:
 
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
-  void assertSignatureIsCorrect() {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (CppSignature::make<FuncType>() != cpp_signature_->signature))) {
-      reportSignatureError(CppSignature::make<FuncType>().name());
-    }
+  void assertSignatureIsCorrect() const {
+    assertSignatureIsCorrect(CppSignature::make<FuncType>());
   }
+
+  void assertSignatureIsCorrect(const CppSignature signature) const;
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
 
@@ -236,7 +236,6 @@ private:
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
-  [[noreturn]] void reportSignatureError(std::string name) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
