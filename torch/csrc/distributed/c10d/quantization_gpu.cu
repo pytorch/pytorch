@@ -1,6 +1,6 @@
 
-#include "caffe2/operators/segment_reduction_op_gpu.cuh"
-#include "caffe2/torch/csrc/distributed/c10d/quantization_gpu.h"
+#include <caffe2/operators/segment_reduction_op_gpu.cuh>
+#include <torch/csrc/distributed/c10d/quantization_gpu.h>
 
 // FP32 -> BF16 kernel
 __global__ inline void _float_to_bfloat16_cuda_kernel(

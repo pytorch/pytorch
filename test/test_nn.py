@@ -16678,6 +16678,7 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
 
     @onlyCUDA
+    @skipCUDAIfRocm
     @skipCUDAIfNoCudnn
     @dtypes(torch.float, torch.double, torch.float16)
     def test_cudnn_convolution_relu(self, device, dtype):
