@@ -1,13 +1,13 @@
 Pod::Spec.new do |s|
     s.name             = 'LibTorch-Lite-Nightly'
-    s.version          = '1.9.0'
+    s.version          = 'IOS_NIGHTLY_BUILD_VERSION'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }
     s.homepage         = 'https://github.com/pytorch/pytorch'
-    s.source           = { :http => "https://ossci-ios-build.s3.amazonaws.com/libtorch_ios_nightly_build.zip" }
-    s.summary          = 'The PyTorch C++ library for iOS'
+    s.source           = { :http => "https://ossci-ios-build.s3.amazonaws.com/libtorch_lite_ios_nightly_#{s.version}.zip" }
+    s.summary          = 'The nightly build version of PyTorch C++ library for iOS'
     s.description      = <<-DESC
-        The PyTorch C++ library for iOS.
+        The nightly build version of PyTorch C++ library for iOS.
     DESC
     s.ios.deployment_target = '12.0'
     s.default_subspec = 'Core'
@@ -33,6 +33,5 @@ Pod::Spec.new do |s|
         'VALID_ARCHS' => 'x86_64 arm64'
     }
     s.library = ['c++', 'stdc++']
-    s.frameworks = 'Accelerate', 'MetalPerformanceShaders'
-    s.preserve_path = 'version.txt'
+    s.frameworks = 'Accelerate', 'MetalPerformanceShaders', 'CoreML'
 end
