@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from typing import Any, List
 
 
 class PruningParametrization(nn.Module):
@@ -27,10 +28,9 @@ class ActivationReconstruction:
         sizes[1] = len(max_outputs)
 
         # get valid indices of reconstructed output
-        indices = []
+        indices: List[Any] = []
         for size in output.shape:
             indices.append(slice(0, size, 1))
-        assert type(valid_columns) == list  # for mypy
         indices[1] = valid_columns
 
         reconstructed_tensor = torch.zeros(sizes)
