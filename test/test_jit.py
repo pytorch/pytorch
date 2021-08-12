@@ -13250,12 +13250,12 @@ dedent """
 
             def arg_false(x):
                 # type: (Tensor) -> Tensor
-                return F.max_pool1d(x, 1, 1, 0, 1, False, True)
+                return F.max_pool1d(x, 1, 1, 0, 1, False, False)
             self.checkScript(arg_false, (torch.randn(3, 3, 3),))
 
             def arg_true(x):
                 # type: (Tensor) -> Tuple[Tensor, Tensor]
-                return F.max_pool1d(x, 1, 1, 0, 1, True, False)
+                return F.max_pool1d(x, 1, 1, 0, 1, False, True)
             self.checkScript(arg_true, (torch.randn(3, 3, 3),))
 
     def test_infer_size(self):
