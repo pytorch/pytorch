@@ -924,20 +924,6 @@ Examples::
             [-0.4899,  0.0822,  0.2773]]])
 """)
 
-# ATen linalg_matrix_rank function doesn't support optional float atol or rtol
-@wraps(_linalg.linalg_matrix_rank)
-def matrix_rank(A, tol=None, hermitian=False, *, atol=None, rtol=None, out=None):
-    if tol is not None and (atol is not None or rtol is not None):
-        raise RuntimeError("Specifying both tol and atol (or rtol) is not supported.")
-    if tol is not None:
-        return _linalg.linalg_matrix_rank(A, tol=tol, hermitian=hermitian, out=out)
-    else:
-        if atol is None and isinstance(rtol, float):
-            atol = 0.0
-        if rtol is None and isinstance(atol, float):
-            rtol = 0.0
-        return _linalg.linalg_matrix_rank(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
-
 _add_docstr(_linalg.linalg_matrix_rank, r"""
 linalg.matrix_rank(A, *, atol=0.0, rtol=None, hermitian=False, out=None) -> Tensor
 linalg.matrix_rank(A, tol=None, hermitian=False, *, out=None) -> Tensor
@@ -1024,6 +1010,20 @@ Examples::
     tensor([[2, 2, 2, 1],
             [1, 2, 2, 2]])
 """)
+
+# ATen linalg_matrix_rank function doesn't support optional float atol or rtol
+@wraps(_linalg.linalg_matrix_rank)
+def matrix_rank(A, tol=None, hermitian=False, *, atol=None, rtol=None, out=None):
+    if tol is not None and (atol is not None or rtol is not None):
+        raise RuntimeError("Specifying both tol and atol (or rtol) is not supported.")
+    if tol is not None:
+        return _linalg.linalg_matrix_rank(A, tol=tol, hermitian=hermitian, out=out)
+    else:
+        if atol is None and isinstance(rtol, float):
+            atol = 0.0
+        if rtol is None and isinstance(atol, float):
+            rtol = 0.0
+        return _linalg.linalg_matrix_rank(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
@@ -1659,20 +1659,6 @@ Examples::
             [4.5671]])
 """)
 
-# ATen linalg_pinv function doesn't support optional float atol or rtol
-@wraps(_linalg.linalg_pinv)
-def pinv(A, rcond=None, hermitian=False, *, atol=None, rtol=None, out=None):
-    if rcond is not None and (atol is not None or rtol is not None):
-        raise RuntimeError("Specifying both rcond and atol (or rtol) is not supported.")
-    if rcond is not None:
-        return _linalg.linalg_pinv(A, rcond=rcond, hermitian=hermitian, out=out)
-    else:
-        if atol is None and isinstance(rtol, float):
-            atol = 0.0
-        if rtol is None and isinstance(atol, float):
-            rtol = 0.0
-        return _linalg.linalg_pinv(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
-
 _add_docstr(_linalg.linalg_pinv, r"""
 linalg.pinv(A, *, atol=None, rtol=None, hermitian=False, out=None) -> Tensor
 linalg.pinv(A, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
@@ -1781,6 +1767,20 @@ Examples::
 .. _through the SVD:
     https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse#Singular_value_decomposition_(SVD)
 """)
+
+# ATen linalg_pinv function doesn't support optional float atol or rtol
+@wraps(_linalg.linalg_pinv)
+def pinv(A, rcond=None, hermitian=False, *, atol=None, rtol=None, out=None):
+    if rcond is not None and (atol is not None or rtol is not None):
+        raise RuntimeError("Specifying both rcond and atol (or rtol) is not supported.")
+    if rcond is not None:
+        return _linalg.linalg_pinv(A, rcond=rcond, hermitian=hermitian, out=out)
+    else:
+        if atol is None and isinstance(rtol, float):
+            atol = 0.0
+        if rtol is None and isinstance(atol, float):
+            rtol = 0.0
+        return _linalg.linalg_pinv(A, atol=atol, rtol=rtol, hermitian=hermitian, out=out)
 
 solve = _add_docstr(_linalg.linalg_solve, r"""
 linalg.solve(A, B, *, out=None) -> Tensor
