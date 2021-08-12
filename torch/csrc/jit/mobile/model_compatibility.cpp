@@ -281,6 +281,16 @@ SupportedType possible_types(IValue type_ivalue) {
     auto primitive_types = splitString(type_name);
     possible_primitive_types.insert(
         primitive_types.begin(), primitive_types.end());
+  } else if (type_ivalue.isTuple()) {
+    std::vector<IValue> type_vector = type_ivalue.toTuple()->elements();
+    if (type_vector.size() == 2) {
+      std::vector<IValue> type_definition =
+          type_vector[1].toTuple()->elements();
+      if (type_definition.size() == 2) {
+        std::string type_name = type_definition[0].toString()->string();
+        possible_custom_types.insert(type_name);
+      }
+    }
   }
   return SupportedType{possible_primitive_types, possible_custom_types};
 }
@@ -299,7 +309,7 @@ ModelCompatCheckResult is_compatible(
     result.errors.emplace_back(s.str());
   }
 
-  SupportedType supported_type = _get_supported_types();
+  SupportedType supported_type = runtime_info.supported_types;
   std::unordered_set<std::string> all_primitive_types;
   std::unordered_set<std::string> all_custom_types;
 

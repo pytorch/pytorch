@@ -17,6 +17,9 @@ using torch::jit::valid_single_char_tokens;
 
 namespace c10 {
 namespace {
+
+static constexpr const char* kTypingNamedTuple = "NamedTuple";
+
 bool isSpecialChar(char a) {
   for (const char* c = valid_single_char_tokens; *c; c++) {
     if (a == *c)
@@ -164,6 +167,122 @@ class TypeParser {
   size_t start_;
   std::string next_token_;
 };
+
+/*
+CustomTypeParser manages a list of backport from n to n-1 function, and provides
+function to check if a specific function exists.
+*/
+class CustomTypeParser final {
+ public:
+  CustomTypeParser(CustomTypeParser const&) = delete;
+  CustomTypeParser& operator=(CustomTypeParser const&) = delete;
+  CustomTypeParser() {
+    registerParserFunction(kTypingNamedTuple, parseCustomTypeNamedTuple);
+  }
+
+  TypePtr parse(IValue custom_type) {
+    // Parse custom type, currently only support NamedTuple
+    if (custom_type.isTuple()) {
+      auto tuple_difinition = custom_type.toTuple()->elements();
+      const std::string type_name = getType(custom_type);
+      if (hasParserFunction(type_name)) {
+        return parserFunctions()[type_name](custom_type);
+      } else {
+        TORCH_CHECK(
+            false,
+            "The custom type: ",
+            type_name,
+            " is currently not supported.")
+      }
+    }
+    TORCH_CHECK(
+        false,
+        "For custom type, the definition needs to tuple, however receives : ",
+        custom_type.tagKind())
+    return nullptr;
+  }
+
+  [[nodiscard]] std::unordered_set<std::string> getSupportedTypes() {
+    std::unordered_set<std::string> supported_type_list;
+    for (const auto& type_name : parserFunctions()) {
+      supported_type_list.insert(type_name.first);
+    }
+    return supported_type_list;
+  }
+
+ private:
+  [[nodiscard]] bool hasParserFunction(const std::string& custom_type) const {
+    return parserFunctions().count(custom_type);
+  }
+
+  std::string getType(IValue custom_type) {
+    auto difinition = custom_type.toTuple()->elements()[1];
+    return difinition.toTuple()->elements()[0].toString()->string();
+  }
+
+  std::unordered_map<std::string, std::function<TypePtr(IValue&)>>&
+  parserFunctions() const {
+    static std::unordered_map<std::string, std::function<TypePtr(IValue&)>>
+        custom_type_parser_functions;
+    return custom_type_parser_functions;
+  }
+
+  // Registry of backport functions.
+  void registerParserFunction(
+      const std::string& custom_type,
+      const std::function<TypePtr(IValue&)>& custom_type_parser_function) {
+    parserFunctions()[custom_type] = custom_type_parser_function;
+  }
+
+  static TypePtr parseCustomTypeNamedTuple(IValue named_tuple_type_tuple) {
+    //  Example NamedTuple type structure:
+    //  ('__torch__.A.B.CType',
+    //   ('NamedTuple',
+    //     ('id_list_features', 'Dict[int, Tensor]'),
+    //     ('label', 'Tuple[Tensor, Tensor]'),
+    //     ('weight', 'Tuple[Tensor, Tensor]'),
+    //     ('id_score_list_features', 'Dict[int, Tensor]')))),
+    named_tuple_type_tuple.dump();
+    std::vector<IValue> named_tuple_type =
+        named_tuple_type_tuple.toTuple()->elements();
+
+    TORCH_CHECK(
+        named_tuple_type.size() == 2, "Invalid NamedTuple type definition.")
+
+    const std::string custom_type_name =
+        named_tuple_type[0].toString()->string();
+
+    // get namedtuple definition
+    std::vector<IValue> name_type_pairs =
+        named_tuple_type[1].toTuple()->elements();
+
+    TORCH_CHECK(
+        name_type_pairs.size() == 2, "Invalid NamedTuple type definition.")
+
+    at::QualifiedName qualified_name = at::QualifiedName(custom_type_name);
+    std::vector<std::string> field_names;
+    std::vector<TypePtr> field_types;
+
+    // Find all type names and it's corresponding type
+    for (auto const& name_type_pair :
+         name_type_pairs[1].toTuple()->elements()) {
+      std::vector<IValue> name_type_vector =
+          name_type_pair.toTuple()->elements();
+      TORCH_CHECK(
+          name_type_vector.size() == 2, "Invalid NamedTuple type definition.")
+      std::string field_name = name_type_vector[0].toString()->string();
+      TypePtr field_type =
+          c10::parseType(name_type_vector[1].toString()->string());
+      field_names.emplace_back(field_name);
+      field_types.emplace_back(field_type);
+    }
+    // Create the NamedTuple type after reading from the tuple, and add it
+    // to function
+    auto tt = TupleType::createNamed(qualified_name, field_names, field_types);
+    return tt;
+  }
+};
+
 } // namespace
 
 TORCH_API TypePtr parseType(const std::string& pythonStr) {
@@ -171,8 +290,15 @@ TORCH_API TypePtr parseType(const std::string& pythonStr) {
   return paser.parse();
 }
 
+TORCH_API TypePtr parseCustomType(IValue custom_type) {
+  CustomTypeParser custom_type_parser;
+  return custom_type_parser.parse(custom_type);
+}
+
 TORCH_API torch::jit::SupportedType getSupportedType() {
+  CustomTypeParser custom_type_parser;
   std::unordered_set<std::string> primitive_types;
+
   for (const auto& it : string_to_type_lut()) {
     primitive_types.insert(it.first);
   }
@@ -180,7 +306,8 @@ TORCH_API torch::jit::SupportedType getSupportedType() {
       TypeParser::getNonSimpleType().begin(),
       TypeParser::getNonSimpleType().end());
 
-  return torch::jit::SupportedType{primitive_types, {}};
+  return torch::jit::SupportedType{
+      primitive_types, custom_type_parser.getSupportedTypes()};
 }
 
 } // namespace c10
