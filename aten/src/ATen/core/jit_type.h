@@ -134,7 +134,7 @@ struct TORCH_API UnionType : public Type {
 
   TypePtr getContainedElementIfOptional() const;
 
-  TypePtr subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
+  c10::optional<TypePtr> subtractTypeSet(std::vector<TypePtr>& to_subtract) const;
 
  protected:
     explicit UnionType(std::vector<TypePtr> types);
@@ -146,23 +146,6 @@ struct TORCH_API UnionType : public Type {
     std::vector<TypePtr> types_;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool can_hold_none_;
-};
-
-// `OptionalType` has been DEPRECATED. Do not use this type in
-// internal code! The only reason we have this struct is that we can't
-// bind `UnionType` to more than one PyObject, but we still need to
-// expose both `OptionalType` and `UnionType` to our users
-struct Pybind11_OptionalType;
-using Pybind11_OptionalTypePtr = std::shared_ptr<Pybind11_OptionalType>;
-struct TORCH_API Pybind11_OptionalType : public UnionType {
-  static Pybind11_OptionalTypePtr create(std::vector<TypePtr> types);
-
-  static const TypeKind Kind = TypeKind::Pybind11_OptionalType;
-
-  static UnionTypePtr legacy_OptionalOfTensor();
-
- protected:
-  explicit Pybind11_OptionalType(std::vector<TypePtr> types) : UnionType(std::move(types)) {}
 };
 
 template <typename T>

@@ -10,18 +10,26 @@
 
 namespace c10 {
 
-bool Type::isOptional() const {
+c10::optional<UnionTypePtr> Type::isOptional() const {
   if (auto as_union = this->cast<UnionType>()) {
     if (!as_union->canHoldType(NoneType::get())) {
-      return false;
+      return c10::nullopt;
     }
     if (as_union->canHoldType(NumberType::get())) {
-      return as_union->containedTypes().size() == 4;
+      if (as_union->containedTypes().size() != 4) {
+        return c10::nullopt;
+      } else {
+        return UnionType::create(as_union->containedTypes().vec());
+      }
     } else {
-      return as_union->containedTypes().size() == 2;
+      if (as_union->containedTypes().size() != 2) {
+        return c10::nullopt;
+      } else {
+        return UnionType::create(as_union->containedTypes().vec());;
+      }
     }
   }
-  return false;
+  return c10::nullopt;
 }
 
 TypeVerbosity type_verbosity() {
@@ -974,16 +982,6 @@ TypePtr UnionType::createOptionalOf(TypePtr type) {
   return UnionType::create({type, NoneType::get()});
 }
 
-Pybind11_OptionalTypePtr Pybind11_OptionalType::create(std::vector<TypePtr> types) {
-  auto opt_type = new Pybind11_OptionalType(std::move(types));
-  return Pybind11_OptionalTypePtr(std::move(opt_type));
-}
-
-UnionTypePtr Pybind11_OptionalType::legacy_OptionalOfTensor() {
-  static auto value = UnionType::createOptionalOf(TensorType::get())->expect<UnionType>();
-  return value;
-}
-
 TypePtr UnionType::getContainedElementIfOptional() const {
   TORCH_INTERNAL_ASSERT(this->isOptional(), "Cannot use "
                         "UnionType::getContainedElementIfOptional "
@@ -1094,7 +1092,7 @@ bool UnionType::canHoldType(TypePtr type) const {
   }
 }
 
-TypePtr UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
   std::vector<TypePtr> types;
 
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
@@ -1115,7 +1113,7 @@ TypePtr UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
               });
 
   if (types.size() == 0) {
-    return nullptr;
+    return c10::nullopt;
   } else if (types.size() == 1) {
     return types[0];
   } else {

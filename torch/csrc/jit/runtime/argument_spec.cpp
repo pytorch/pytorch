@@ -230,11 +230,14 @@ void ArgumentSpecCreator::specializeTypes(
       } break;
       case SPECIALIZE_OPTIONAL: {
         auto is_present = spec.isPresent(optional_arg_spec_offset++);
-        auto ot = (*input_stack.back()++)->expect<UnionType>();
+        auto ot = (*input_stack.back()++)->isOptional();
+        TORCH_INTERNAL_ASSERT(ot != c10::nullopt, "SPECIALIZE_OPTIONAL"
+                              " did not receive an argument of type "
+                              "Optional");
         if (!is_present) {
-          result_stack.back().emplace_back(ot);
+          result_stack.back().emplace_back(*ot);
         } else {
-          result_stack.back().emplace_back(ot->getContainedElementIfOptional());
+          result_stack.back().emplace_back((*ot)->getContainedElementIfOptional());
         }
       } break;
       case ENTER_TUPLE: {

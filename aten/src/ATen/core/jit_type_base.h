@@ -44,8 +44,7 @@ namespace c10 {
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
-  _(UnionType)              \
-  _(Pybind11_OptionalType)
+  _(UnionType)
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -58,6 +57,9 @@ TORCH_API const char* typeKindToString(TypeKind kind);
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
 using ConstTypePtr = std::shared_ptr<const Type>;
+
+struct UnionType;
+using UnionTypePtr = std::shared_ptr<UnionType>;
 
 // Use this to customize how a Type is printed using `annotation_str()`. If
 // c10::nullopt is returned, `annotation_str()` falls through to its default
@@ -140,7 +142,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // `OptionalType` has been deprecated and replaced by `UnionType`.
   // This is a convenience method so that we don't have to replace
   // all `== OptionalType::Kind` checks with a cast and another method
-  bool isOptional() const;
+  c10::optional<UnionTypePtr> isOptional() const;
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.

@@ -148,9 +148,6 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
-      // We should never reach here. We only have this case for builds
-      // with the `-Werror` (treat compiler warnings as errors) flag set
-      case Pybind11_OptionalType::Kind:
       default:
         TORCH_INTERNAL_ASSERT(
             false,
