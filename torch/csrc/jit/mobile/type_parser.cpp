@@ -263,14 +263,14 @@ class CustomTypeParser final {
     return difinition.toTuple()->elements()[0].toString()->string();
   }
 
-  std::unordered_map<std::string, std::function<TypePtr(IValue&)>>&
-  parserFunctions() const {
+  [[nodiscard]] std::
+      unordered_map<std::string, std::function<TypePtr(IValue&)>>&
+      parserFunctions() const {
     static std::unordered_map<std::string, std::function<TypePtr(IValue&)>>
         custom_type_parser_functions;
     return custom_type_parser_functions;
   }
 
-  // Registry of backport functions.
   void registerParserFunction(
       const std::string& custom_type,
       const std::function<TypePtr(IValue&)>& custom_type_parser_function) {
