@@ -9,6 +9,7 @@
 #include <THC/THCAtomics.cuh>
 #include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
 
 namespace at {
@@ -153,7 +154,7 @@ __global__ void nll_loss2d_backward_no_reduce_kernel(
   }
 }
 
-template <typename scalar_t, typename accscalar_t>
+template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_backward_kernel(
   scalar_t* grad_input,
@@ -226,7 +227,9 @@ void nll_loss2d_forward_out_cuda_template(
     int64_t ignore_index) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage
-  at::globalContext().alertNotDeterministic("nll_loss2d_forward_out_cuda_template");
+  if (reduction != at::Reduction::None) {
+    at::globalContext().alertNotDeterministic("nll_loss2d_forward_out_cuda_template");
+  }
 
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -242,7 +245,7 @@ void nll_loss2d_forward_out_cuda_template(
     int64_t W = input.size(3);
     int64_t count = batch_size * H * W;
 
-    output.resize_({batch_size, H, W});
+    resize_output(output, {batch_size, H, W});
     if (count == 0) {
       // This guards from unnecessary operations and launching CUDA kernel with
       // 0 blocks.
@@ -272,7 +275,7 @@ void nll_loss2d_forward_out_cuda_template(
   }
 
   // produce scalar outputs for the reduction case
-  output.resize_({});
+  resize_output(output, {});
 
   auto input_ = input.contiguous();
   auto weight_ = optional_contiguous(weight);
@@ -426,8 +429,7 @@ void nll_loss2d_backward_out_cuda_template(
         input.scalar_type(),
         "nll_loss2d_backward_kernel",
         [&] {
-          using accscalar_t = acc_type<scalar_t, true>;
-          nll_loss2d_backward_kernel<scalar_t, accscalar_t>
+          nll_loss2d_backward_kernel<scalar_t>
               <<<total_blocks,
                 CUDA_NUM_THREADS,
                 0,
@@ -440,7 +442,7 @@ void nll_loss2d_backward_out_cuda_template(
                   reduction == at::Reduction::Mean,
                   input.size(0),
                   input.size(1),
-                  input.size(2) * input.size(3),
+                  map_nelem,
                   blocks_per_sample,
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -504,7 +506,7 @@ Tensor nll_loss2d_backward_cuda(
     int64_t reduction,
     int64_t ignore_index,
     const Tensor& total_weight) {
-  auto grad_input = at::zeros_like(self);
+  auto grad_input = at::empty_like(self);
   nll_loss2d_backward_out_cuda_template(
       grad_input,
       grad_output,
