@@ -654,7 +654,7 @@ def _max_pool1d(
 
 max_pool1d = boolean_dispatch(
     arg_name="return_indices",
-    arg_index=5,
+    arg_index=6,
     default=False,
     if_true=max_pool1d_with_indices,
     if_false=_max_pool1d,
@@ -720,7 +720,7 @@ def _max_pool2d(
 
 max_pool2d = boolean_dispatch(
     arg_name="return_indices",
-    arg_index=5,
+    arg_index=6,
     default=False,
     if_true=max_pool2d_with_indices,
     if_false=_max_pool2d,
@@ -786,7 +786,7 @@ def _max_pool3d(
 
 max_pool3d = boolean_dispatch(
     arg_name="return_indices",
-    arg_index=5,
+    arg_index=6,
     default=False,
     if_true=max_pool3d_with_indices,
     if_false=_max_pool3d,
