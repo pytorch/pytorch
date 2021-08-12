@@ -226,7 +226,7 @@ void nll_loss2d_forward_out_cuda_template(
     int64_t reduction,
     int64_t ignore_index) {
   // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
+  // Nondeterministic because of atomicAdd usage in 'sum' or 'mean' reductions.
   if (reduction != at::Reduction::None) {
     at::globalContext().alertNotDeterministic("nll_loss2d_forward_out_cuda_template");
   }
