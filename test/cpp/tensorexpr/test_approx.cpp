@@ -39,7 +39,7 @@ TEST(Approx, log_vml) {
   te::LoopNest ln({B});
   ln.prepareForCodegen();
   vectorize(&ln, B, 8);
-  te::Stmt* s = ln.root_stmt();
+  te::StmtPtr s = ln.root_stmt();
   s = te::IRSimplifier::simplify(s);
   te::LLVMCodeGen cg(s, {A, B, N});
 

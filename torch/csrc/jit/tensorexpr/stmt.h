@@ -18,9 +18,9 @@ class TORCH_API Stmt : public KernelScopedObject {
  public:
   Stmt() = default;
   virtual void accept(IRVisitor* visitor) = 0;
-  virtual Stmt* accept_mutator(IRMutator* mutator) = 0;
+  virtual StmtPtr accept_mutator(IRMutator* mutator) = 0;
 
-  Stmt* get_parent() const {
+  StmtPtr get_parent() const {
     return parent_;
   }
 
@@ -31,15 +31,15 @@ class TORCH_API Stmt : public KernelScopedObject {
    * expressions and variables are not deep-copied: it is not necessary since
    * they are immutable.
    */
-  static Stmt* clone(Stmt* s);
+  static StmtPtr clone(StmtPtr s);
 
  protected:
-  static void set_parent(Stmt* s, Stmt* new_parent) {
+  static void set_parent(StmtPtr s, StmtPtr new_parent) {
     s->parent_ = new_parent;
   }
 
  private:
-  Stmt* parent_ = nullptr;
+  StmtPtr parent_ = nullptr;
 };
 
 template <class Op>
@@ -47,25 +47,23 @@ class StmtNode : public Stmt {
  public:
   using StmtNodeBase = StmtNode<Op>;
   void accept(IRVisitor* visitor) override {
-    visitor->visit(static_cast<Op*>(this));
+    visitor->visit(static_to<Op>(this));
   }
-  Stmt* accept_mutator(IRMutator* mutator) override;
+  StmtPtr accept_mutator(IRMutator* mutator) override;
   StmtNode() = default;
 };
 
 template <class Op>
-Stmt* StmtNode<Op>::accept_mutator(IRMutator* mutator) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  StmtNode* this_mutable = const_cast<StmtNode*>(this);
-  return mutator->mutate(static_cast<Op*>(this_mutable));
+StmtPtr StmtNode<Op>::accept_mutator(IRMutator* mutator) {
+  return mutator->mutate(static_to<Op>(this));
 }
 
 // Concrete Stmt classes
 class TORCH_API Block : public StmtNode<Block> {
  public:
-  static Block* make(const std::vector<Stmt*>& stmts) {
+  static BlockPtr make(const std::vector<StmtPtr>& stmts) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<Stmt*> valid_stmts;
+    std::vector<StmtPtr> valid_stmts;
     for (auto& stmt : stmts) {
       if (!stmt) {
         continue;
@@ -75,7 +73,7 @@ class TORCH_API Block : public StmtNode<Block> {
     if (valid_stmts.empty()) {
       return nullptr;
     }
-    return new Block(valid_stmts);
+    return alloc<Block>(valid_stmts);
   }
 
   int nstmts() const {
@@ -85,7 +83,7 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.empty();
   }
 
-  void prepend_stmt(Stmt* s) {
+  void prepend_stmt(StmtPtr s) {
     if (s->get_parent()) {
       throw malformed_input("Block prepend Stmt with existing parent", s);
     }
@@ -93,7 +91,7 @@ class TORCH_API Block : public StmtNode<Block> {
     stmts_.push_front(s);
     set_parent(s, this);
   }
-  void append_stmt(Stmt* s) {
+  void append_stmt(StmtPtr s) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -102,7 +100,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_before(Stmt* s, Stmt* before) {
+  void insert_stmt_before(StmtPtr s, StmtPtr before) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -117,7 +115,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_after(Stmt* s, Stmt* after) {
+  void insert_stmt_after(StmtPtr s, StmtPtr after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -134,7 +132,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  bool replace_stmt(Stmt* old_stmt, Stmt* new_stmt) {
+  bool replace_stmt(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
           "Block replace Stmt with existing parent", new_stmt);
@@ -154,16 +152,16 @@ class TORCH_API Block : public StmtNode<Block> {
   // Creates a new block by cloning `this` block and replacing the given
   // statement with a new statement. Note that `old_stmt` refers to a statement
   // in `this` block. If the `old_stmt` is not found, it will return `nullptr`.
-  Block* clone_and_replace(Stmt* old_stmt, Stmt* new_stmt) {
+  BlockPtr clone_and_replace(StmtPtr old_stmt, StmtPtr new_stmt) {
     if (new_stmt->get_parent()) {
       throw malformed_input(
           "Block replace Stmt with existing parent", new_stmt);
     }
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<Stmt*> stmts(stmts_.begin(), stmts_.end());
+    std::vector<StmtPtr> stmts(stmts_.begin(), stmts_.end());
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<Stmt*> cloned_stmts(stmts.size());
+    std::vector<StmtPtr> cloned_stmts(stmts.size());
     bool found = false;
     for (int i = 0; i < static_cast<int>(stmts.size()); ++i) {
       if (stmts[i] == old_stmt) {
@@ -176,10 +174,10 @@ class TORCH_API Block : public StmtNode<Block> {
     if (!found) {
       return nullptr;
     }
-    return new Block(cloned_stmts);
+    return alloc<Block>(cloned_stmts);
   }
 
-  bool remove_stmt(Stmt* stmt) {
+  bool remove_stmt(StmtPtr stmt) {
     auto pos = std::find(stmts_.begin(), stmts_.end(), stmt);
     if (pos == stmts_.end()) {
       return false;
@@ -190,7 +188,7 @@ class TORCH_API Block : public StmtNode<Block> {
     return true;
   }
 
-  std::list<Stmt*> stmts() const {
+  std::list<StmtPtr> stmts() const {
     return stmts_;
   }
 
@@ -202,8 +200,8 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit Block(const std::vector<Stmt*>& stmts) {
-    for (Stmt* s : stmts) {
+  explicit Block(const std::vector<StmtPtr>& stmts) {
+    for (StmtPtr s : stmts) {
       if (!s) {
         continue;
       }
@@ -217,8 +215,8 @@ class TORCH_API Block : public StmtNode<Block> {
     }
   }
 
-  typedef std::list<Stmt*>::iterator iterator;
-  typedef std::list<Stmt*>::const_iterator const_iterator;
+  typedef std::list<StmtPtr>::iterator iterator;
+  typedef std::list<StmtPtr>::const_iterator const_iterator;
 
   iterator begin() {
     return stmts_.begin();
@@ -236,37 +234,37 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.end();
   }
 
-  Stmt* front() {
+  StmtPtr front() {
     return stmts_.front();
   }
 
-  Stmt* front() const {
+  StmtPtr front() const {
     return stmts_.front();
   }
 
-  Stmt* back() {
+  StmtPtr back() {
     return stmts_.back();
   }
 
-  Stmt* back() const {
+  StmtPtr back() const {
     return stmts_.back();
   }
 
-  void splice(Block::iterator it, Block* other) {
-    for (Stmt* s : *other) {
+  void splice(Block::iterator it, BlockPtr other) {
+    for (StmtPtr s : *other) {
       set_parent(s, this);
     }
 
     stmts_.splice(it, other->stmts_);
   }
 
-  static Block* getSharedParent(Stmt* p1, Stmt* p2) {
+  static BlockPtr getSharedParent(StmtPtr p1, StmtPtr p2) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::unordered_set<Block*> enclosing;
+    std::unordered_set<BlockPtr> enclosing;
 
-    Stmt* p1_p = p1;
+    StmtPtr p1_p = p1;
     while (p1_p) {
-      if (Block* b = dynamic_cast<Block*>(p1_p)) {
+      if (BlockPtr b = to<Block>(p1_p)) {
         if (b) {
           enclosing.insert(b);
         }
@@ -274,9 +272,9 @@ class TORCH_API Block : public StmtNode<Block> {
       p1_p = p1_p->get_parent();
     }
 
-    Stmt* p2_p = p2;
+    StmtPtr p2_p = p2;
     while (p2_p) {
-      if (Block* b = dynamic_cast<Block*>(p2_p)) {
+      if (BlockPtr b = to<Block>(p2_p)) {
         if (enclosing.count(b) != 0) {
           return b;
         }
@@ -288,7 +286,7 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
   // returns the immediate child containing statement s.
-  Stmt* getEnclosedRoot(Stmt* s) const {
+  StmtPtr getEnclosedRoot(StmtPtr s) const {
     while (s && s->get_parent() != this) {
       s = s->get_parent();
     }
@@ -296,43 +294,43 @@ class TORCH_API Block : public StmtNode<Block> {
   }
 
  private:
-  std::list<Stmt*> stmts_;
+  std::list<StmtPtr> stmts_;
 };
 
 class TORCH_API Store : public StmtNode<Store> {
  public:
-  Var* base_handle() const {
+  VarPtr base_handle() const {
     return buf_->base_handle();
   }
-  std::vector<Expr*> indices() const {
+  std::vector<ExprPtr> indices() const {
     return indices_;
   }
-  Expr* flat_index() const {
+  ExprPtr flat_index() const {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }
-  Expr* value() const {
+  ExprPtr value() const {
     return value_;
   }
-  Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
-  static Store* make(
+  static StorePtr make(
       const BufHandle& buf,
       const std::vector<ExprHandle>& indices,
       const ExprHandle& value);
 
-  Store(Buf* buf, std::vector<Expr*> indices, Expr* value);
+  Store(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value);
 
-  void set_indices(std::vector<Expr*> indices) {
+  void set_indices(std::vector<ExprPtr> indices) {
     indices_ = indices;
   };
 
  private:
-  Buf* buf_;
-  std::vector<Expr*> indices_;
-  Expr* value_;
+  BufPtr buf_;
+  std::vector<ExprPtr> indices_;
+  ExprPtr value_;
 };
 
 // Allocate a buffer of given shapes and dtypes and bind it with the given
@@ -340,11 +338,11 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
-  static Allocate* make(const BufHandle& buf_handle) {
-    return new Allocate(buf_handle.node());
+  static AllocatePtr make(const BufHandle& buf_handle) {
+    return alloc<Allocate>(buf_handle.node());
   }
 
-  Var* buffer_var() const {
+  VarPtr buffer_var() const {
     return buf_->base_handle();
   }
 
@@ -352,121 +350,121 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_->dtype();
   }
 
-  const std::vector<Expr*> dims() const {
+  const std::vector<ExprPtr> dims() const {
     return buf_->dims();
   }
 
-  Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
-  explicit Allocate(Buf* buf) : buf_(buf) {}
+  explicit Allocate(BufPtr buf) : buf_(buf) {}
 
  private:
-  Buf* buf_;
+  BufPtr buf_;
   // TODO: add memory types.
 };
 
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
-  static Free* make(const BufHandle& buf_handle) {
-    return new Free(buf_handle.node());
+  static FreePtr make(const BufHandle& buf_handle) {
+    return alloc<Free>(buf_handle.node());
   }
 
-  Var* buffer_var() const {
+  VarPtr buffer_var() const {
     return buf_->base_handle();
   }
 
-  Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
-  explicit Free(Buf* buf) : buf_(buf) {}
+  explicit Free(BufPtr buf) : buf_(buf) {}
 
  private:
-  Buf* buf_;
+  BufPtr buf_;
 };
 
 class TORCH_API Let : public StmtNode<Let> {
  public:
-  static Let* make(const VarHandle& var, const ExprHandle& val) {
-    return new Let(var.node(), val.node());
+  static LetPtr make(const VarHandle& var, const ExprHandle& val) {
+    return alloc<Let>(var.node(), val.node());
   }
 
-  Let(Var* var, Expr* val) : dtype_(var->dtype()), var_(var), val_(val) {}
+  Let(VarPtr var, ExprPtr val) : dtype_(var->dtype()), var_(var), val_(val) {}
 
   Dtype dtype() const {
     return dtype_;
   }
 
-  Var* var() const {
+  VarPtr var() const {
     return var_;
   }
 
-  Expr* value() const {
+  ExprPtr value() const {
     return val_;
   }
 
  private:
   Dtype dtype_;
-  Var* var_;
-  Expr* val_;
+  VarPtr var_;
+  ExprPtr val_;
 };
 
 class TORCH_API Cond : public StmtNode<Cond> {
  public:
-  static Cond* make(
+  static CondPtr make(
       const ExprHandle& condition,
-      Stmt* true_stmt,
-      Stmt* false_stmt) {
-    return new Cond(condition.node(), true_stmt, false_stmt);
+      StmtPtr true_stmt,
+      StmtPtr false_stmt) {
+    return alloc<Cond>(condition.node(), true_stmt, false_stmt);
   }
 
-  Expr* condition() const {
+  ExprPtr condition() const {
     return condition_;
   }
 
-  Block* true_stmt() const {
+  BlockPtr true_stmt() const {
     return true_stmt_;
   }
 
-  Block* false_stmt() const {
+  BlockPtr false_stmt() const {
     return false_stmt_;
   }
 
-  Cond(Expr* condition, Stmt* true_stmt, Stmt* false_stmt)
+  Cond(ExprPtr condition, StmtPtr true_stmt, StmtPtr false_stmt)
       : condition_(condition) {
     if (true_stmt) {
-      Block* b = dynamic_cast<Block*>(true_stmt);
+      BlockPtr b = to<Block>(true_stmt);
       if (!b) {
-        b = new Block({true_stmt});
+        b = alloc<Block>(std::vector<StmtPtr>({true_stmt}));
       }
       true_stmt_ = b;
       set_parent(true_stmt_, this);
     }
     if (false_stmt) {
-      Block* b = dynamic_cast<Block*>(false_stmt);
+      BlockPtr b = to<Block>(false_stmt);
       if (!b) {
-        b = new Block({false_stmt});
+        b = alloc<Block>(std::vector<StmtPtr>({false_stmt}));
       }
       false_stmt_ = b;
       set_parent(false_stmt_, this);
     }
   }
 
-  Cond* cloneWithNewBodies(Stmt* true_stmt, Stmt* false_stmt) {
-    return new Cond(condition_, true_stmt, false_stmt);
+  CondPtr cloneWithNewBodies(StmtPtr true_stmt, StmtPtr false_stmt) {
+    return alloc<Cond>(condition_, true_stmt, false_stmt);
   }
 
-  Cond* cloneWithNewBody(Stmt* true_stmt) {
-    return new Cond(condition_, true_stmt, nullptr);
+  CondPtr cloneWithNewBody(StmtPtr true_stmt) {
+    return alloc<Cond>(condition_, true_stmt, nullptr);
   }
 
  private:
-  Expr* condition_;
-  Block* true_stmt_ = nullptr;
-  Block* false_stmt_ = nullptr;
+  ExprPtr condition_;
+  BlockPtr true_stmt_ = nullptr;
+  BlockPtr false_stmt_ = nullptr;
 };
 
 class TORCH_API LoopOptions {
@@ -585,11 +583,11 @@ class TORCH_API LoopOptions {
         !is_parallel_;
   }
 
-  void set_buffer_mapping(const std::unordered_map<std::string, Buf*>& map) {
+  void set_buffer_mapping(const std::unordered_map<std::string, BufPtr>& map) {
     map_input_to_tensor_bufs_ = map;
   }
 
-  std::unordered_map<std::string, Buf*> get_buffer_mapping() const {
+  std::unordered_map<std::string, BufPtr> get_buffer_mapping() const {
     return map_input_to_tensor_bufs_;
   }
 
@@ -597,59 +595,64 @@ class TORCH_API LoopOptions {
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
   bool is_parallel_{false};
-  std::unordered_map<std::string, Buf*> map_input_to_tensor_bufs_;
+  std::unordered_map<std::string, BufPtr> map_input_to_tensor_bufs_;
 };
 
 class TORCH_API For : public StmtNode<For> {
  public:
-  Var* var() const {
+  VarPtr var() const {
     return var_;
   }
-  Expr* start() const {
+  ExprPtr start() const {
     return start_;
   }
-  Expr* stop() const {
+  ExprPtr stop() const {
     return stop_;
   }
-  Block* body() const {
+  BlockPtr body() const {
     return body_;
   }
-  static For* make(
+  static ForPtr make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
-      Stmt* body) {
+      StmtPtr body) {
     if (!body) {
       return nullptr;
     }
-    return new For(var.node(), start.node(), stop.node(), body);
+    return alloc<For>(var.node(), start.node(), stop.node(), body);
   }
-  static For* make(
+  static ForPtr make(
       const VarHandle& var,
       const ExprHandle& start,
       const ExprHandle& stop,
-      Stmt* body,
+      StmtPtr body,
       const LoopOptions& loop_options) {
     if (!body) {
       return nullptr;
     }
-    return new For(var.node(), start.node(), stop.node(), body, loop_options);
+    return alloc<For>(
+        var.node(), start.node(), stop.node(), body, loop_options);
   }
   const LoopOptions loop_options() const {
     return loop_options_;
   }
 
-  For(Var* var, Expr* start, Expr* stop, Stmt* body)
+  For(VarPtr var, ExprPtr start, ExprPtr stop, StmtPtr body)
       : var_(var), start_(start), stop_(stop) {
-    Block* b = dynamic_cast<Block*>(body);
+    BlockPtr b = to<Block>(body);
     if (!b) {
-      b = new Block({body});
+      b = alloc<Block>(std::vector<StmtPtr>({body}));
     }
     body_ = b;
     set_parent(body_, this);
   }
 
-  For(Var* var, Expr* start, Expr* stop, Stmt* body, LoopOptions loop_options)
+  For(VarPtr var,
+      ExprPtr start,
+      ExprPtr stop,
+      StmtPtr body,
+      LoopOptions loop_options)
       : var_(var),
         start_(start),
         stop_(stop),
@@ -664,9 +667,9 @@ class TORCH_API For : public StmtNode<For> {
       throw malformed_input("invalid Body in For loop", body);
     }
 
-    Block* b = dynamic_cast<Block*>(body);
+    BlockPtr b = to<Block>(body);
     if (!b) {
-      b = new Block({body});
+      b = alloc<Block>(std::vector<StmtPtr>({body}));
     }
     body_ = b;
     set_parent(body_, this);
@@ -688,51 +691,51 @@ class TORCH_API For : public StmtNode<For> {
     return loop_options_.is_parallel();
   }
 
-  void set_buffer_map(const std::unordered_map<std::string, Buf*>& map) {
+  void set_buffer_map(const std::unordered_map<std::string, BufPtr>& map) {
     loop_options_.set_buffer_mapping(map);
   }
 
-  For* cloneWithNewBody(Stmt* body) const {
-    return new For(var_, start_, stop_, body, loop_options_);
+  ForPtr cloneWithNewBody(StmtPtr body) const {
+    return alloc<For>(var_, start_, stop_, body, loop_options_);
   }
 
-  Block* removeBody() {
+  BlockPtr removeBody() {
     auto res = body_;
     set_parent(res, nullptr);
     body_ = nullptr;
     return res;
   }
 
-  Block* setBody(Stmt* body) {
-    Block* b = dynamic_cast<Block*>(body);
+  BlockPtr setBody(StmtPtr body) {
+    BlockPtr b = to<Block>(body);
     if (!b) {
-      b = new Block({body});
+      b = alloc<Block>(std::vector<StmtPtr>({body}));
     }
     body_ = b;
     set_parent(body_, this);
     return body_;
   }
 
-  Expr* setStart(Expr* start) {
+  ExprPtr setStart(ExprPtr start) {
     start_ = start;
     return start_;
   }
 
-  Expr* setStop(Expr* stop) {
+  ExprPtr setStop(ExprPtr stop) {
     stop_ = stop;
     return stop_;
   }
 
-  Var* setVar(Var* var) {
+  VarPtr setVar(VarPtr var) {
     var_ = var;
     return var_;
   }
 
  private:
-  Var* var_;
-  Expr* start_;
-  Expr* stop_;
-  Block* body_;
+  VarPtr var_;
+  ExprPtr start_;
+  ExprPtr stop_;
+  BlockPtr body_;
   LoopOptions loop_options_;
 };
 
@@ -743,34 +746,34 @@ class TORCH_API For : public StmtNode<For> {
 class TORCH_API AtomicAdd : public StmtNode<AtomicAdd> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  AtomicAdd(Buf* buf, std::vector<Expr*> indices, Expr* value)
+  AtomicAdd(BufPtr buf, std::vector<ExprPtr> indices, ExprPtr value)
       : buf_(buf), indices_(std::move(indices)), value_(value) {}
 
-  Var* base_handle() const {
+  VarPtr base_handle() const {
     return buf_->base_handle();
   }
 
-  Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
-  Expr* flat_index() const {
+  ExprPtr flat_index() const {
     TORCH_CHECK(indices_.size() == 1, "Indices haven't been flattened.");
     return indices_[0];
   }
 
-  Expr* value() const {
+  ExprPtr value() const {
     return value_;
   }
 
-  const std::vector<Expr*>& indices() const {
+  const std::vector<ExprPtr>& indices() const {
     return indices_;
   }
 
  private:
-  Buf* buf_;
-  std::vector<Expr*> indices_;
-  Expr* value_;
+  BufPtr buf_;
+  std::vector<ExprPtr> indices_;
+  ExprPtr value_;
 };
 
 class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
@@ -799,13 +802,13 @@ class TORCH_API SyncThreads : public StmtNode<SyncThreads> {
  */
 class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
  public:
-  static ExternalCall* make(
+  static ExternalCallPtr make(
       BufHandle buf,
       const std::string& func_name,
       const std::vector<BufHandle>& buf_args,
       const std::vector<ExprHandle>& args);
 
-  Buf* buf() const {
+  BufPtr buf() const {
     return buf_;
   }
 
@@ -813,30 +816,30 @@ class TORCH_API ExternalCall : public StmtNode<ExternalCall> {
     return func_name_;
   }
 
-  std::vector<Buf*> buf_args() const {
+  std::vector<BufPtr> buf_args() const {
     return buf_args_;
   }
 
-  std::vector<Expr*> args() const {
+  std::vector<ExprPtr> args() const {
     return args_;
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   ExternalCall(
-      Buf* buf,
+      BufPtr buf,
       std::string func_name,
-      std::vector<Buf*> buf_args,
-      std::vector<Expr*> args)
+      std::vector<BufPtr> buf_args,
+      std::vector<ExprPtr> args)
       : buf_(buf),
         func_name_(std::move(func_name)),
         buf_args_(std::move(buf_args)),
         args_(std::move(args)) {}
 
  private:
-  Buf* buf_;
+  BufPtr buf_;
   std::string func_name_;
-  std::vector<Buf*> buf_args_;
-  std::vector<Expr*> args_;
+  std::vector<BufPtr> buf_args_;
+  std::vector<ExprPtr> args_;
 };
 
 } // namespace tensorexpr

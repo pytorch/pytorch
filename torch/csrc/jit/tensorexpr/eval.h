@@ -97,7 +97,7 @@ class SimpleIREvaluatorImpl;
 class TORCH_API SimpleIREvaluator : public CodeGen {
  public:
   SimpleIREvaluator(
-      Stmt* stmt,
+      StmtPtr stmt,
       const std::vector<BufferArg>& buffer_args,
       at::Device device = at::kCPU,
       const std::string& kernel_func_name = "func");
@@ -114,7 +114,7 @@ class TORCH_API SimpleIREvaluator : public CodeGen {
     call(args);
   }
 
-  void bindVar(Var* v, Expr* e);
+  void bindVar(VarPtr v, ExprPtr e);
   Value value() const;
 
  private:
@@ -145,15 +145,15 @@ class ExprEval {
     std::vector<BufferArg> buffer_args_extended = buffer_args;
     Placeholder ret_buf("ret_val", dtype_, {1});
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<Expr*> indices;
-    Expr* zero = new IntImm(0);
+    std::vector<ExprPtr> indices;
+    ExprPtr zero = alloc<IntImm>(0);
     for (size_t i = 0; i < ret_buf.data()->ndim(); i++) {
       indices.push_back(zero);
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Stmt* store_stmt =
+    StmtPtr store_stmt =
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-        new Store(ret_buf.data(), indices, expr.node());
+        alloc<Store>(ret_buf.data(), indices, expr.node());
     buffer_args_extended.emplace_back(ret_buf);
     codegen_.reset(new CodeGenType(store_stmt, buffer_args_extended));
   }
@@ -167,7 +167,7 @@ class ExprEval {
     call(call_args);
   }
 
-  void bindVar(Var* v, Expr* e) {
+  void bindVar(VarPtr v, ExprPtr e) {
     codegen_->bindVar(v, e);
   }
 
@@ -253,12 +253,12 @@ class ExprEval {
   Value ret_value_;
 };
 
-inline Expr* Substitute(Expr* expr, const VarMapping& var_mapping) {
+inline ExprPtr Substitute(ExprPtr expr, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return expr->accept_mutator(&var_sub);
 }
 
-inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
+inline StmtPtr Substitute(StmtPtr stmt, const VarMapping& var_mapping) {
   VarSubMutator var_sub(var_mapping);
   return stmt->accept_mutator(&var_sub);
 }

@@ -201,7 +201,7 @@ c10::optional<TensorInfo> getTensorInfoJit(torch::jit::Value* v) {
 c10::optional<TensorInfo> getTensorInfo(BufHandle b) {
   std::vector<int64_t> dims;
   for (auto dim : b.dims()) {
-    auto val = dynamic_cast<IntImm*>(dim.node());
+    auto val = to<IntImm>(dim.node());
     if (!val) {
       return c10::nullopt;
     }
@@ -503,20 +503,20 @@ ExprHandle demoteOutput(
 } // namespace jit
 } // namespace torch
 
-static at::ScalarType tensorType(Buf* b) {
+static at::ScalarType tensorType(BufPtr b) {
   return static_cast<at::ScalarType>(b->dtype().scalar_type());
 }
 
-std::vector<int64_t> bufferSizes(Buf* b) {
+std::vector<int64_t> bufferSizes(BufPtr b) {
   std::vector<int64_t> sizes;
   for (size_t i = 0; i < b->ndim(); i++) {
-    sizes.push_back(dynamic_cast<IntImm*>(b->dim(i))->value());
+    sizes.push_back(to<IntImm>(b->dim(i))->value());
   }
   return sizes;
 }
 
 ExprHandle TensorExprKernel::chunk(
-    Buf* b,
+    BufPtr b,
     size_t chunkIdx,
     int64_t dim,
     int64_t chunks,
@@ -1161,9 +1161,11 @@ Tensor* computeCatWoConditionals(
   //       output[i,j+l2,k] = inp3[i,j,k]
 
   auto output_sizes_expr = ExprHandleVectorToExprVector(outputShape);
-  auto output_buf = new Buf("aten_cat", output_sizes_expr, ToDtype(high_type));
+  auto output_buf =
+      alloc<Buf>("aten_cat", output_sizes_expr, ToDtype(high_type));
   if (non_empty_inputs.size() == 0) {
-    return new Tensor(output_buf, new tensorexpr::Block({}));
+    return new Tensor(
+        output_buf, alloc<tensorexpr::Block>(std::vector<StmtPtr>({})));
   }
 
   int64_t concat_dim = c10::get<int64_t>(arg_dim);
@@ -1172,43 +1174,44 @@ Tensor* computeCatWoConditionals(
 
   auto gen_code_for_input = [&](const BufHandle& inp,
                                 size_t inp_pos,
-                                Expr* concat_dim_size,
+                                ExprPtr concat_dim_size,
                                 const std::vector<ExprHandle>& dims) {
-    std::vector<Var*> for_vars(dims.size());
-    std::vector<Expr*> load_indices(dims.size());
-    std::vector<Expr*> store_indices(dims.size());
+    std::vector<VarPtr> for_vars(dims.size());
+    std::vector<ExprPtr> load_indices(dims.size());
+    std::vector<ExprPtr> store_indices(dims.size());
     for (size_t i = 0; i < dims.size(); ++i) {
-      for_vars[i] = new Var(
+      for_vars[i] = alloc<Var>(
           "i" + c10::to_string(inp_pos) + "_" + c10::to_string(i), kInt);
       load_indices[i] = for_vars[i];
       if (i == norm_concat_dim) {
-        store_indices[i] = new Add(for_vars[i], concat_dim_size);
+        store_indices[i] = alloc<Add>(for_vars[i], concat_dim_size);
       } else {
         store_indices[i] = for_vars[i];
       }
     }
     auto inp_buf = inp.node();
-    auto load_expr = new Load(inp_buf, load_indices);
+    auto load_expr = alloc<Load>(inp_buf, load_indices);
     auto load_promoted = promoteToDtype(ExprHandle(load_expr), high_type);
-    Stmt* st = new Store(output_buf, store_indices, load_promoted.node());
+    StmtPtr st = alloc<Store>(output_buf, store_indices, load_promoted.node());
     for (size_t i = dims.size(); i > 0; --i) {
-      st = new For(for_vars[i - 1], new IntImm(0), dims[i - 1].node(), st);
+      st =
+          alloc<For>(for_vars[i - 1], alloc<IntImm>(0), dims[i - 1].node(), st);
     }
     return st;
   };
 
-  Expr* concat_dim_size = nullptr;
-  auto block = new tensorexpr::Block({});
+  ExprPtr concat_dim_size = nullptr;
+  auto block = alloc<tensorexpr::Block>(std::vector<StmtPtr>({}));
   for (size_t i = 0; i < non_empty_inputs.size(); ++i) {
     auto input_dims =
         ExprVectorToExprHandleVector(non_empty_inputs[i].node()->dims());
     if (concat_dim_size == nullptr) {
-      concat_dim_size = new IntImm(0);
+      concat_dim_size = alloc<IntImm>(0);
     }
     block->append_stmt(gen_code_for_input(
         non_empty_inputs[i], i, concat_dim_size, input_dims));
     concat_dim_size =
-        new Add(concat_dim_size, input_dims[norm_concat_dim].node());
+        alloc<Add>(concat_dim_size, input_dims[norm_concat_dim].node());
   }
   return new Tensor(output_buf, IRSimplifier::simplify(block));
 }
@@ -1255,8 +1258,7 @@ Tensor* computeCat(
         std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
         ExprHandle load = promoteToDtype(
             tensorOrConstant(nonEmptyInputs[0], newAxes), highType);
-        size_t offset =
-            dynamic_cast<IntImm*>(nonEmptyInputs[0].node()->dim(dim))->value();
+        size_t offset = to<IntImm>(nonEmptyInputs[0].node()->dim(dim))->value();
         newAxes[dim] = newAxes[dim] - IntImm::make(offset);
 
         for (size_t ii = 1; ii < nonEmptyInputs.size(); ++ii) {
@@ -1266,7 +1268,7 @@ Tensor* computeCat(
               load,
               promoteToDtype(tensorOrConstant(input, newAxes), highType));
 
-          offset += dynamic_cast<IntImm*>(input.node()->dim(dim))->value();
+          offset += to<IntImm>(input.node()->dim(dim))->value();
           newAxes[dim] = axes[dim] - IntImm::make(offset);
         }
 
@@ -1306,7 +1308,7 @@ Tensor* computeConv2d(
 
   // Once we have a performant TE representation for conv2d, we could use it
   // here instead of the external call!
-  Stmt* s = ExternalCall::make(
+  StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_conv2d",
       {inp, w, b},
@@ -2315,9 +2317,9 @@ Tensor* tensorexpr::computeOperandValue(
             */
             // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
             ExprHandle cur_stride = 1;
-            std::vector<Expr*> dims, indices;
+            std::vector<ExprPtr> dims, indices;
             for (size_t idx = 0; idx < view_dims.size(); idx++) {
-              dims.push_back(new IntImm(view_dims[idx]));
+              dims.push_back(alloc<IntImm>(view_dims[idx]));
               indices.push_back(axes[idx].node());
             }
             ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
@@ -2429,7 +2431,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 // Return the (lower, upper) loop bounds if they are constants, else nullopt.
-c10::optional<std::pair<int64_t, int64_t>> loopBounds(For* loop) {
+c10::optional<std::pair<int64_t, int64_t>> loopBounds(ForPtr loop) {
   auto start = IRSimplifier::simplify(loop->start());
   auto stop = IRSimplifier::simplify(loop->stop());
   if (!start->isConstant() || !stop->isConstant()) {
@@ -2440,7 +2442,7 @@ c10::optional<std::pair<int64_t, int64_t>> loopBounds(For* loop) {
 }
 
 // True if all the loops in this vector have equal bounds.
-bool loopBoundsAllEqual(const std::vector<For*>& loops) {
+bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
   auto bounds = loopBounds(loops[0]);
   if (!bounds) {
     return false;
@@ -2462,11 +2464,11 @@ bool loopBoundsAllEqual(const std::vector<For*>& loops) {
 // on matching bounds exists to avoid inserting conditionals on the loop
 // indices where none would be needed, which would significantly complicate
 // vectorization.
-void fuseAllLoops(Stmt* st) {
-  if (auto block = dynamic_cast<tensorexpr::Block*>(st)) {
-    std::vector<For*> loopsToFuse;
+void fuseAllLoops(StmtPtr st) {
+  if (auto block = to<tensorexpr::Block>(st)) {
+    std::vector<ForPtr> loopsToFuse;
     for (auto stmt : *block) {
-      auto loop = dynamic_cast<For*>(stmt);
+      auto loop = to<For>(stmt);
       if (!loop) {
         // Block contains something that's not a loop.  Quit.
         return;
@@ -2477,7 +2479,7 @@ void fuseAllLoops(Stmt* st) {
       return;
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    For* fusedLoop;
+    ForPtr fusedLoop;
     if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
       return;
     }
@@ -2485,7 +2487,7 @@ void fuseAllLoops(Stmt* st) {
   }
 }
 
-Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
+StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
@@ -2530,12 +2532,12 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
   if (backendType == kCudaCodeGen) {
     for (auto buf : bufOutputs_) {
-      std::vector<For*> loops = l.getLoopStmtsFor(buf);
+      std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
       if (loops.empty()) {
         // This happens when Buf is 0-dim
         continue;
       }
-      For* flattened = nullptr;
+      ForPtr flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
 
@@ -2547,7 +2549,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
 
       if (loopLevels == 2) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* inner;
+        ForPtr inner;
         const int kDefaultBlockSize = 512;
         if (blockSize < 0) {
           blockSize = kDefaultBlockSize;
@@ -2557,9 +2559,9 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
         inner->set_gpu_thread_index(0);
       } else if (loopLevels == 3) {
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* inner;
+        ForPtr inner;
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-        For* inner1;
+        ForPtr inner1;
         // TODO: change the number of microprocessors
         const int kDefaultBlockCount = 1280;
         const int kDefaultBlockSize = 256;
@@ -2585,13 +2587,13 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
       if (buf->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-      std::vector<For*> loops = l.getLoopStmtsFor(buf);
+      std::vector<ForPtr> loops = l.getLoopStmtsFor(buf);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
-      For* flattened = nullptr;
+      ForPtr flattened = nullptr;
       LoopNest::flatten(loops, &flattened);
       assert(flattened);
 
-      For* inner = nullptr;
+      ForPtr inner = nullptr;
       LoopNest::splitWithMask(flattened, blockSize, &inner);
       flattened->set_gpu_block_index(0);
       inner->set_gpu_thread_index(0);
@@ -2605,7 +2607,7 @@ Stmt* TensorExprKernel::transformLoops(BackendType backendType, Stmt* st) {
     l.vectorizeInnerLoops();
   }
 
-  Stmt* stmt = l.root_stmt();
+  StmtPtr stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
   GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
@@ -2801,7 +2803,7 @@ bool denseAndNonOverlapping(
 Tensor* TensorExprKernel::convertOutputToCorrectStrides(torch::jit::Value* v) {
   const TensorTypePtr& tt = v->type()->expect<TensorType>();
   TORCH_INTERNAL_ASSERT(bufs_.count(v));
-  Buf* buf = bufs_.at(v);
+  BufPtr buf = bufs_.at(v);
 
   // No shape info is present in the graph
   if (!tt->sizes().concrete_sizes()) {
@@ -2892,7 +2894,7 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
     te_sizes.push_back(IntImm::make(s));
   }
 
-  Buf* buf = new Buf(
+  BufPtr buf = alloc<Buf>(
       "const_" + v->debugName(),
       ExprHandleVectorToExprVector(te_sizes),
       ToDtype(static_cast<ScalarType>(*tt->scalarType())));
@@ -2914,7 +2916,7 @@ void TensorExprKernel::compile() {
   OptimizeCat(graph_);
 
   // Block to collect the Stmts corresponding to all tensors.
-  auto block = new Block({});
+  auto block = alloc<Block>(std::vector<StmtPtr>({}));
 
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
@@ -2987,7 +2989,7 @@ void TensorExprKernel::compile() {
   }
 
   BackendType backendType = inferBackendTypeFromDevice(device_);
-  Stmt* stmt = transformLoops(backendType, block);
+  StmtPtr stmt = transformLoops(backendType, block);
 
   // Generate code.
   codegen_ = CreateCodeGen(
@@ -3073,7 +3075,7 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   return runArgs;
 }
 
-Stmt* TensorExprKernel::getCodeGenStmt() {
+StmtPtr TensorExprKernel::getCodeGenStmt() {
   return codegen_->stmt();
 }
 
