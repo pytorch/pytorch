@@ -2181,8 +2181,8 @@ new_module_tests = [
     ),
     dict(
         module_name='LPPool2d',
-        constructor_args=(1.5, 2),
-        cpp_constructor_args='torch::nn::LPPool2dOptions(1.5, 2)',
+        constructor_args=(2, 2),
+        cpp_constructor_args='torch::nn::LPPool2dOptions(2, 2)',
         input_size=(3, 7, 7),
         reference_fn=single_batch_reference_fn,
         desc='no_batch_dim',
