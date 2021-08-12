@@ -21,6 +21,15 @@ std::string getNcclVersion() {
       auto ncclMajor = version / 1000;
       auto ncclMinor = (version % 1000) / 100;
       auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+      // this condition is meant to mirror what is done in upstream NCCL
+      // e.g., 2.8.0 -> 2800, 2.9.0 -> 20900
+      // note that ncclMajor isn't expected to be 3 with the new format,
+      // but will be 30 until it is parsed correctly; 3 is used for clarity
+      if (ncclMajor >= 3 || (ncclMajor >= 2 && ncclMinor >= 9)) {
+        ncclMajor = version / 10000;
+        ncclMinor = (version % 10000) / 100;
+        ncclPatch = version % (ncclMajor * 10000 + ncclMinor * 100);
+      }
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
     }
