@@ -57,7 +57,7 @@ echo "cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/io
 cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # update pod version
-sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/LibTorch-Lite-Nightly/g" ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
+sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 cat ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # push the new LibTorch-Lite-Nightly.podspec to CocoaPods
