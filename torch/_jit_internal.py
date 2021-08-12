@@ -742,7 +742,14 @@ def get_overload_no_implementation_error_message(kind, obj):
     )
 
 def _check_overload_body(func):
-    parsed_def = parse_def(func)
+    try:
+        parsed_def = parse_def(func)
+    except OSError as e:
+        # Parsing the function definition can raise an OSError if source is unavailable.
+        # Since this is just an initial check, just raise a warning if this is the case.
+        warnings.warn(f"Unable to retrieve source for @torch.jit._overload function: {func}.")
+        return
+
     body = parsed_def.ast.body[0].body
 
     def is_pass(x):
