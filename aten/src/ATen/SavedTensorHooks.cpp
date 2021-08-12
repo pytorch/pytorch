@@ -1,4 +1,5 @@
 #include <ATen/SavedTensorHooks.h>
+#include <c10/util/Exception.h>
 
 namespace at {
 
@@ -21,6 +22,7 @@ void SavedTensorDefaultHooks::enable() {
 
 void SavedTensorDefaultHooks::set_hooks(PyObject* pack_hook, PyObject* unpack_hook) {
   if (!is_enabled) {
+    TORCH_INTERNAL_ASSERT(pack_hook == nullptr && unpack_hook == nullptr);
     return;
   }
   pack_hook_ = pack_hook;

@@ -9339,7 +9339,6 @@ class TestMultithreadAutograd(TestCase):
         def registers_hooks_for_each_thread():
             with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
                 x = torch.ones(5, 5, requires_grad=True)
-                warnings.simplefilter('always')
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
                     # should raise two warnings from x being saved twice
@@ -9352,16 +9351,18 @@ class TestMultithreadAutograd(TestCase):
             return x
 
         _self = self
-        warnings.simplefilter('always')
 
         class Model(torch.nn.Module):
             def forward(self, x):
                 with warnings.catch_warnings(record=True) as w:
                     y = x * x
                     if torch.cuda.device_count() >= 2:
-                        # hooks should not be called here
+                        # DataParallel is calling the forward in different threads
+                        # without progating TLS, so hooks should not be called here
                         _self.assertEqual(len(w), 0)
                     else:
+                        # DataParallel only uses one thread
+                        # so hooks should be called here
                         _self.assertEqual(len(w), 2)
 
         x = torch.ones(5, 5, requires_grad=True)
