@@ -1008,13 +1008,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     output = ddp_model_overlap(input)
                     loss = output.sum()
                     loss.backward()
-                    zero_optim.step()
                 for input in inputs:
                     zero_optim.zero_grad()
                     output = ddp_model_overlap(input)
                     loss = output.sum()
                     loss.backward()
-                    zero_optim.step()
 
                 # Run the DDP model with local optimizer
                 for input in inputs:
