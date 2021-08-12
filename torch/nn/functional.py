@@ -602,8 +602,8 @@ def max_pool1d_with_indices(
     stride: Optional[BroadcastingList1[int]] = None,
     padding: BroadcastingList1[int] = 0,
     dilation: BroadcastingList1[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
@@ -632,8 +632,8 @@ def _max_pool1d(
     stride: Optional[BroadcastingList1[int]] = None,
     padding: BroadcastingList1[int] = 0,
     dilation: BroadcastingList1[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -668,8 +668,8 @@ def max_pool2d_with_indices(
     stride: Optional[BroadcastingList2[int]] = None,
     padding: BroadcastingList2[int] = 0,
     dilation: BroadcastingList2[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
@@ -698,8 +698,8 @@ def _max_pool2d(
     stride: Optional[BroadcastingList2[int]] = None,
     padding: BroadcastingList2[int] = 0,
     dilation: BroadcastingList2[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(
@@ -734,8 +734,8 @@ def max_pool3d_with_indices(
     stride: Optional[BroadcastingList3[int]] = None,
     padding: BroadcastingList3[int] = 0,
     dilation: BroadcastingList3[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tuple[Tensor, Tensor]:
     r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
@@ -764,8 +764,8 @@ def _max_pool3d(
     stride: Optional[BroadcastingList3[int]] = None,
     padding: BroadcastingList3[int] = 0,
     dilation: BroadcastingList3[int] = 1,
-    return_indices: bool = False,
-    ceil_mode: bool = False
+    ceil_mode: bool = False,
+    return_indices: bool = False
 ) -> Tensor:
     if has_torch_function_unary(input):
         return handle_torch_function(

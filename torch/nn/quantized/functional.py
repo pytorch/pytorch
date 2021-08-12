@@ -363,7 +363,7 @@ def linear(
     return torch.ops.quantized.linear(input, _packed_params, scale, zero_point)
 
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
-               return_indices=False, ceil_mode=False):
+               ceil_mode=False, return_indices=False):
     r"""Applies a 1D max pooling over a quantized input signal composed of
     several quantized input planes.
 
@@ -376,10 +376,10 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool1d(input, kernel_size, stride, padding,
-                                          dilation, return_indices, ceil_mode)
+                                          dilation, ceil_mode, return_indices)
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
-               return_indices=False, ceil_mode=False):
+               ceil_mode=False, return_indices=False):
     r"""Applies a 2D max pooling over a quantized input signal composed of
     several quantized input planes.
 
@@ -392,7 +392,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     if stride is None:
         stride = torch.jit.annotate(List[int], [])
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
-                                          dilation, return_indices, ceil_mode)
+                                          dilation, ceil_mode, return_indices)
 
 def celu(input: Tensor, scale: float, zero_point: int, alpha: float = 1.) -> Tensor:
     r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
