@@ -6373,6 +6373,67 @@ Example::
     tensor([-1.3312, -0.5744, -1.7268, -1.6165])
 """.format(**multi_dim_common))
 
+add_docstr(torch.aminmax, r"""
+aminmax(input, *, dim=None, keepdim=False, out=None) -> (Tensor min, Tensor max)
+
+Computes the minimum and maximum values of the :attr:`input` tensor.
+
+Args:
+    input (Tensor):
+        The input tensor
+
+Keyword Args:
+    dim (Optional[int]):
+        The dimension along which to compute the values. If `None`,
+        computes the values over the entire :attr:`input` tensor.
+        Default is `None`.
+    keepdim (bool):
+        If `True`, the reduced dimensions will be kept in the output
+        tensor as dimensions with size 1 for broadcasting, otherwise
+        they will be removed, as if calling (:func:`torch.squeeze`).
+        Default is `False`.
+    out (Optional[Tuple[Tensor, Tensor]]):
+        Optional tensors on which to write the result. Must have the same
+        shape and dtype as the expected output.
+        Default is `None`.
+
+Returns:
+    A named tuple `(min, max)` containing the minimum and maximum values.
+
+Raises:
+    RuntimeError
+        If any of the dimensions to compute the values over has size 0.
+
+.. note::
+    NaN values are propagated to the output if at least one value is NaN.
+
+.. seealso::
+    :func:`torch.amin` computes just the minimum value
+    :func:`torch.amax` computes just the maximum value
+
+Example::
+
+    >>> torch.aminmax(torch.tensor([1, -3, 5]))
+    torch.return_types.aminmax(
+    min=tensor(-3),
+    max=tensor(5))
+
+    >>> # aminmax propagates NaNs
+    >>> torch.aminmax(torch.tensor([1, -3, 5, torch.nan]))
+    torch.return_types.aminmax(
+    min=tensor(nan),
+    max=tensor(nan))
+
+    >>> t = torch.arange(10).view(2, 5)
+    >>> t
+    tensor([[0, 1, 2, 3, 4],
+            [5, 6, 7, 8, 9]])
+    >>> t.aminmax(dim=0, keepdim=True)
+    torch.return_types.aminmax(
+    min=tensor([[0, 1, 2, 3, 4]]),
+    max=tensor([[5, 6, 7, 8, 9]]))
+""")
+
 add_docstr(torch.argmin,
            r"""
 argmin(input, dim=None, keepdim=False) -> LongTensor
@@ -10806,7 +10867,7 @@ add_docstr(torch.trapezoid,
            r"""
 trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
 
-Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>_ along
+Computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_ along
 :attr:`dim`. By default the spacing between elements is assumed to be 1, but
 :attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
 used to specify arbitrary spacing along :attr:`dim`.
@@ -10915,7 +10976,93 @@ add_docstr(torch.trapz,
 trapz(y, x, *, dim=-1) -> Tensor
 
 Alias for :func:`torch.trapezoid`.
+""")
 
+add_docstr(torch.cumulative_trapezoid,
+           r"""
+cumulative_trapezoid(y, x=None, *, dx=None, dim=-1) -> Tensor
+
+Cumulatively computes the `trapezoidal rule <https://en.wikipedia.org/wiki/Trapezoidal_rule>`_
+along :attr:`dim`. By default the spacing between elements is assumed to be 1, but
+:attr:`dx` can be used to specify a different constant spacing, and :attr:`x` can be
+used to specify arbitrary spacing along :attr:`dim`.
+
+For more details, please read :func:`torch.trapezoid`. The difference between :func:`torch.trapezoid`
+and this function is that, :func:`torch.trapezoid` returns a value for each integration,
+where as this function returns a cumulative value for every spacing within the integration. This
+is analogous to how `.sum` returns a value and `.cumsum` returns a cumulative sum.
+
+Arguments:
+    y (Tensor): Values to use when computing the trapezoidal rule.
+    x (Tensor): If specified, defines spacing between values as specified above.
+
+Keyword arguments:
+    dx (float): constant spacing between values. If neither :attr:`x` or :attr:`dx`
+        are specified then this defaults to 1. Effectively multiplies the result by its value.
+    dim (int): The dimension along which to compute the trapezoidal rule.
+        The last (inner-most) dimension by default.
+
+Examples::
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D, spacing is implicitly 1.
+    >>> y = torch.tensor([1, 5, 10])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([3., 10.5])
+
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> (1 + 5) / 2
+    3.0
+    >>> (1 + 10 + 10) / 2
+    10.5
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with constant spacing of 2
+    >>> # NOTE: the result is the same as before, but multiplied by 2
+    >>> torch.cumulative_trapezoid(y, dx=2)
+    tensor([6., 21.])
+
+    >>> # Cumulatively computes the trapezoidal rule in 1D with arbitrary spacing
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([6., 28.5])
+
+    >>> # Computes the same trapezoidal rule directly up to each element to verify
+    >>> ((3 - 1) * (1 + 5)) / 2
+    6.0
+    >>> ((3 - 1) * (1 + 5) + (6 - 3) * (5 + 10)) / 2
+    28.5
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 matrix
+    >>> y = torch.arange(9).reshape(3, 3)
+    tensor([[0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8]])
+    >>> torch.cumulative_trapezoid(y)
+    tensor([[ 0.5,  2.],
+            [ 3.5,  8.],
+            [ 6.5, 14.]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each column of the matrix
+    >>> torch.cumulative_trapezoid(y, dim=0)
+    tensor([[ 1.5,  2.5,  3.5],
+            [ 6.0,  8.0, 10.0]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with the same arbitrary spacing
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([1, 3, 6])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([[2., 5.],
+            [2., 5.],
+            [2., 5.]])
+
+    >>> # Cumulatively computes the trapezoidal rule for each row of a 3x3 ones matrix
+    >>> #   with different arbitrary spacing per row
+    >>> y = torch.ones(3, 3)
+    >>> x = torch.tensor([[1, 2, 3], [1, 3, 5], [1, 4, 7]])
+    >>> torch.cumulative_trapezoid(y, x)
+    tensor([[1., 2.],
+            [2., 4.],
+            [3., 6.]])
 """)
 
 add_docstr(torch.repeat_interleave,

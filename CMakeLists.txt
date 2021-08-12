@@ -241,6 +241,11 @@ option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCL "Use OpenCL" OFF)
 option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
+option(USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF)
+if(USE_PRECOMPILED_HEADERS AND (CMAKE_VERSION VERSION_LESS "3.16"))
+  message(FATAL_ERROR "Precompiled headers require cmake >= 3.16")
+endif()
+
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
 option(USE_PYTORCH_QNNPACK "Use ATen/QNNPACK (quantized 8-bit operators)" ON)
@@ -420,6 +425,7 @@ if(LINUX)
 endif()
 
 if(MSVC)
+  set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
       CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO

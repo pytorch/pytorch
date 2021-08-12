@@ -25,7 +25,7 @@ from torch._C import parse_schema
 # ]
 #
 # NB: function name DOES NOT include overload name!
-allow_list = [
+ALLOW_LIST = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # Internal
     ("static", datetime.date(9999, 1, 1)),
@@ -42,6 +42,9 @@ allow_list = [
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
     ("aten::linalg_svd", datetime.date(2021, 5, 15)),
+    ("aten::linalg_cholesky.out", datetime.date(2021, 8, 30)),
+    ("aten::linalg_cholesky_ex", datetime.date(2021, 8, 30)),
+    ("aten::linalg_cholesky_ex.L", datetime.date(2021, 8, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::linalg_lstsq", datetime.date(2021, 5, 1)),
@@ -110,18 +113,24 @@ allow_list = [
     ("aten::_bmm", datetime.date(2021, 8, 14)),
     ("aten::_bmm.out", datetime.date(2021, 8, 14)),
     ("aten::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams", datetime.date(2021, 8, 15)),
+    ("aten::_cumsum", datetime.date(2021, 8, 31)),
+    ("aten::_cumprod", datetime.date(2021, 8, 31)),
 ]
 
-def allow_listed(schema, allow_list):
-    for item in allow_list:
-        if item[1] < datetime.date.today():
-            continue
-        regexp = re.compile(item[0])
-        if regexp.search(schema.name):
-            if len(item) > 2:
+ALLOW_LIST_COMPILED = [
+    (
+        re.compile(item[0]),
+        item[1],
+        re.compile(item[2]) if len(item) > 2 else None,
+    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+]
+
+def allow_listed(schema):
+    for item in ALLOW_LIST_COMPILED:
+        if item[0].search(str(schema)):
+            if len(item) > 2 and item[2] is not None:
                 # if arguments regex is present, use it
-                regexp_args = re.compile(item[2])
-                return bool(regexp_args.search(str(schema)))
+                return bool(item[2].search(str(schema)))
             return True
     return False
 
@@ -155,7 +164,7 @@ def check_bc(existing_schemas):
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if allow_listed(existing_schema, allow_list):
+        if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))
