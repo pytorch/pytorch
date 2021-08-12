@@ -21,7 +21,7 @@ if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = object  # noqa: F811
 
-if (SM60OrLater and torch.cuda.nccl.version() >= 3003) or TEST_WITH_ROCM:
+if (SM60OrLater and torch.cuda.nccl.version() >= (2, 10, 3)) or TEST_WITH_ROCM:
     datatypes = [torch.float, torch.bfloat16]
 else:
     datatypes = [torch.float]
