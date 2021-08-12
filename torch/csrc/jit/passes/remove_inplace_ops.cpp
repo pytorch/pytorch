@@ -113,17 +113,19 @@ void ImplicitCastForBinaryInplaceOps(Block* b) {
         continue;
       }
 
-      // Introduce warning for special case where shape values are obtained from tensor.shape
-      // In eager mode these values are python int, so there are treated as different values.
-      // However in tracing both are traced as tensors, and then they share same memory. 
-      // This causes a mismatch in final outputs
+      // Introduce warning for special case where shape values are obtained from
+      // tensor.shape In eager mode these values are python int, so there are
+      // treated as different values. However in tracing both are traced as
+      // tensors, and then they share same memory. This causes a mismatch in
+      // final outputs
       auto shape_node = originalInputs.at(0)->node();
       if ((shape_node->kind() == prim::NumToTensor) &&
-          (shape_node->inputs().at(0)->node()->kind() == aten::size)){
+          (shape_node->inputs().at(0)->node()->kind() == aten::size)) {
         std::cerr
-          << "In tracing mode, shape values obtained from tensor.shape are traced as tensors, "
-          << "and share the same memory. This might causes a mismatch in final outputs. " 
-          << "As a workaround, avoid use of inplace operations in these scenarios. " << std::endl;
+            << "In tracing mode, shape values obtained from tensor.shape are traced as tensors, "
+            << "and share the same memory. This might causes a mismatch in final outputs. "
+            << "As a workaround, avoid use of inplace operations in these scenarios. "
+            << std::endl;
       }
 
       TensorTypePtr firstInp_tensor =
