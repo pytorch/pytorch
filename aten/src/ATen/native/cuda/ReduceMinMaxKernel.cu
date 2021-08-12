@@ -125,7 +125,7 @@ static void aminmax_kernel_impl(
     Tensor& max_result) {
   at::TensorIterator iter = make_reduction("aminmax_cuda", min_result,
     max_result, self, dim, keepdim, self.scalar_type());
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "aminmax_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "aminmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
@@ -167,7 +167,7 @@ void aminmax_allreduce_kernel_impl(const Tensor& input, Tensor& min_result, Tens
   auto iter = make_reduction("aminmax_cuda", min_result, max_result, input,
                              std::vector<int64_t>{}, false, dtype);
   TORCH_CHECK(iter.numel() > 0, "min_max on a tensor with no elements is not defined.");
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, dtype, "aminmax_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, dtype, "aminmax_all_cuda", [&] {
     _min_max_values_kernel_cuda_impl<scalar_t>(iter);
   });
 }
