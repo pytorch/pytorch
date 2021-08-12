@@ -439,6 +439,10 @@ void BytecodeDeserializer::parseMethods(
           function->append_type(c10::parseType(t.toStringRef()));
         }
       } else {
+        TORCH_CHECK(
+            t.isTuple(),
+            "Custom type should be tuple, but recieve ",
+            t.tagKind());
         auto tt = c10::parseCustomType(t);
         function->append_type(tt);
       }
