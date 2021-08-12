@@ -1,11 +1,11 @@
+import contextlib
+import itertools
+import logging
+from typing import Iterator, List
+
 import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.utils._pytree import tree_map
-
-from typing import Iterator, List
-import logging
-import contextlib
-import itertools
 
 # TODO: move this into library proper
 @contextlib.contextmanager
@@ -27,14 +27,14 @@ def no_dispatch() -> Iterator[None]:
 class LoggingTensor(torch.Tensor):
     elem: torch.Tensor
 
-    __slots__ = ['elem']
+    __slots__ = ["elem"]
 
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
         # The wrapping tensor (LoggingTensor) is just a meta tensor, so it
         # doesn't hold any memory (meta tensor is generally the preferred type
         # of tensor you want to make a subclass from)...
-        r = torch.Tensor._make_subclass(cls, elem.to('meta'), elem.requires_grad)
+        r = torch.Tensor._make_subclass(cls, elem.to("meta"), elem.requires_grad)
         # ...the real tensor is held as an element on the tensor.
         r.elem = elem
         return r
@@ -51,8 +51,11 @@ class LoggingTensor(torch.Tensor):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
         rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+        logging.getLogger("LoggingTensor").info(
+            f"{func.__module__}.{func.__name__}", args, kwargs, rs
+        )
         return rs
+
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
@@ -67,25 +70,32 @@ class LoggingTensorHandler(logging.Handler):
     # WARNING: not deterministic over multiple threads, this matters for
     # autograd
     def _shortid(self, o: object) -> int:
-        if not hasattr(o, '_shortid'):
+        if not hasattr(o, "_shortid"):
             o._shortid = self.next_shortid
             self.next_shortid += 1
         return o._shortid
 
     def _fmt(self, a: object) -> str:
-        return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
+        return f"${self._shortid(a)}" if isinstance(a, LoggingTensor) else repr(a)
 
     def emit(self, record):
-        fmt_args = ", ".join(itertools.chain(
-            (self._fmt(a) for a in record.args[0]),
-            (f"{k}={self._fmt(v)}" for k, v in record.args[1].items())
-        ))
-        fmt_rets = ", ".join(self._fmt(a) for a in record.args[2]) \
-            if isinstance(record.args[2], (list, tuple)) else self._fmt(record.args[2])
-        self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
+        fmt_args = ", ".join(
+            itertools.chain(
+                (self._fmt(a) for a in record.args[0]),
+                (f"{k}={self._fmt(v)}" for k, v in record.args[1].items()),
+            )
+        )
+        fmt_rets = (
+            ", ".join(self._fmt(a) for a in record.args[2])
+            if isinstance(record.args[2], (list, tuple))
+            else self._fmt(record.args[2])
+        )
+        self.log_list.append(f"{fmt_rets} = {record.msg}({fmt_args})")
+
 
 def log_input(name: str, var: object):
     logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
+
 
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
@@ -99,6 +109,7 @@ def capture_logs() -> Iterator[List[str]]:
     finally:
         logger.removeHandler(handler)
 
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -108,7 +119,7 @@ class TestPythonDispatch(TestCase):
             saved_x = y.grad_fn._saved_self
             grad_y = LoggingTensor(torch.tensor([1.0]))
             log_input("grad_y", grad_y)
-            g, = torch.autograd.grad((y,), (x,), (grad_y,))
+            (g,) = torch.autograd.grad((y,), (x,), (grad_y,))
 
         self.assertEqual(g.elem, torch.tensor([6.0]))
         with torch.no_grad():
@@ -118,13 +129,16 @@ class TestPythonDispatch(TestCase):
             self.assertEqual(saved_x, x)
             # TODO: figure out why broken
             # self.assertEqual(saved_x._version, x._version)
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0 = input('x')
 $1 = torch._ops.aten.mul($0, $0)
 $2 = input('grad_y')
 $3 = torch._ops.aten.mul($2, $0)
 $4 = torch._ops.aten.mul($2, $0)
-$5 = torch._ops.aten.add($4, $3)''')
+$5 = torch._ops.aten.add($4, $3)""",
+        )
 
     def test_out(self) -> None:
         with capture_logs() as logs:
@@ -137,11 +151,13 @@ $5 = torch._ops.aten.add($4, $3)''')
         self.assertEqual(y.elem, torch.ones(1))
         # TODO: arguably this shouldn't pass and we should complain
         # that out isn't a kwarg
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.abs($0, out=$1)''')
-
+$2 = torch._ops.aten.abs($0, out=$1)""",
+        )
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -159,7 +175,9 @@ $2 = torch._ops.aten.abs($0, out=$1)''')
 
         # The expectation is that beta/alpha don't show up when they're
         # defaulted.  This is even if the user explicitly specified it.
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0 = input('x')
 $1 = input('y')
 $2 = input('z')
@@ -167,7 +185,8 @@ $3 = torch._ops.aten.addmv($0, $1, $2)
 $4 = torch._ops.aten.addmv($0, $1, $2)
 $5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
 $6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
-$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)""",
+        )
 
     def test_kwarg_only_and_positional_default(self) -> None:
         with capture_logs() as logs:
@@ -182,17 +201,21 @@ $7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
 
         # What we are testing here is that we omit reduction
         # if it is defaulted, even if a kwarg is set
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0 = input('x')
 $1 = input('y')
 $2 = torch._ops.aten.kl_div($0, $1)
 $3 = torch._ops.aten.kl_div($0, $1, 2)
 $4 = torch._ops.aten.kl_div($0, $1, log_target=True)
-$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
+$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)""",
+        )
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
         for list_type in (list, tuple):
+
             class A(torch._C._TensorBase):
                 @staticmethod
                 def __new__(cls, elem):
@@ -208,7 +231,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
             self.assertEqual(
                 torch.split(A(torch.tensor([0, 1])), 2),
-                torch.split(torch.tensor([0, 1]), 2)
+                torch.split(torch.tensor([0, 1]), 2),
             )
 
     def test_invalid_ret(self) -> None:
@@ -224,11 +247,14 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
         # Wobbles depending on NDEBUG mode of pybind11
         self.assertRaisesRegexp(
-            RuntimeError, "Unable to cast", lambda: A(torch.zeros(1)).neg(),
+            RuntimeError,
+            "Unable to cast",
+            lambda: A(torch.zeros(1)).neg(),
         )
         self.assertExpectedRaisesInline(
-            RuntimeError, lambda: A(torch.zeros(1)).detach(),
-            """detach returned invalid type str, expected Tensor"""
+            RuntimeError,
+            lambda: A(torch.zeros(1)).detach(),
+            """detach returned invalid type str, expected Tensor""",
         )
 
     def test_metadata_change_not_allowed(self) -> None:
@@ -268,7 +294,7 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
             @staticmethod
             def backward(ctx, grad_output):
                 assert isinstance(grad_output, LoggingTensor)
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 assert isinstance(x, LoggingTensor)
                 escape[0] = x
                 return grad_output * 2 * x
@@ -293,15 +319,18 @@ $5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
             # TODO: figure out why this is broken
             # self.assertEqual(escape[0]._version, x._version)
 
-        self.assertExpectedInline('\n'.join(logs), '''\
+        self.assertExpectedInline(
+            "\n".join(logs),
+            """\
 $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow($0, 2)
 $3 = input('grad_output')
 $4 = torch._ops.aten.mul($3, tensor(2))
 $5 = torch._ops.aten.mul($4, $0)
-$6 = torch._ops.aten.add_($1, $5)''')
+$6 = torch._ops.aten.add_($1, $5)""",
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
