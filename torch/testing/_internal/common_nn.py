@@ -97,6 +97,7 @@ def get_weight(m):
 # - `test_cpp_api_parity`: if `False`, skips the C++ parity test for this test dict. Default: True.
 # - `has_parity`: if `False`, expects this test dict to fail the C++ parity test. Default: True.
 
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -1257,6 +1258,7 @@ def single_batch_reference_fn(input, parameters, module):
     single_batch_input = input.unsqueeze(0)
     with freeze_rng_state():
         return module(single_batch_input).squeeze(0)
+
 
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
