@@ -46,6 +46,8 @@ _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
+_EXTRA_STATE_KEY_SUFFIX = '_extra_state'
+
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Registers a forward pre-hook common to all modules.
@@ -527,6 +529,12 @@ class Module:
             raise AttributeError("`" + buffer_name + "` is not a buffer")
 
         return buffer
+
+    def get_extra_state(self) -> Dict[str, Any]:
+        raise NotImplementedError()
+
+    def set_extra_state(self, state: Dict[str, Any]):
+        raise NotImplementedError()
 
     def _apply(self, fn):
         for module in self.children():
@@ -1228,11 +1236,11 @@ class Module:
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
                 destination[prefix + name] = buf if keep_vars else buf.detach()
-        if hasattr(self, 'get_extra_state'):
-            EXTRA_STATE_KEY = prefix + '_extra_state'
-            destination[EXTRA_STATE_KEY] = OrderedDict()
+        extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
+        if getattr(self.__class__, "get_extra_state", Module.get_extra_state) is not Module.get_extra_state:
+            destination[extra_state_key] = OrderedDict()
             for name, obj in self.get_extra_state().items():
-                destination[EXTRA_STATE_KEY][name] = obj
+                destination[extra_state_key][name] = obj
 
     # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
     # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
@@ -1370,18 +1378,18 @@ class Module:
             elif strict:
                 missing_keys.append(key)
 
-        EXTRA_STATE_KEY = prefix + '_extra_state'
-        if hasattr(self, 'set_extra_state'):
-            if EXTRA_STATE_KEY in state_dict:
-                self.set_extra_state(state_dict[EXTRA_STATE_KEY])
+        extra_state_key = prefix + _EXTRA_STATE_KEY_SUFFIX
+        if getattr(self.__class__, "set_extra_state", Module.set_extra_state) is not Module.set_extra_state:
+            if extra_state_key in state_dict:
+                self.set_extra_state(state_dict[extra_state_key])
             elif strict:
-                missing_keys.append(EXTRA_STATE_KEY)
-        elif strict and (EXTRA_STATE_KEY in state_dict):
-            unexpected_keys.append(EXTRA_STATE_KEY)
+                missing_keys.append(extra_state_key)
+        elif strict and (extra_state_key in state_dict):
+            unexpected_keys.append(extra_state_key)
 
         if strict:
             for key in state_dict.keys():
-                if key.startswith(prefix) and key != EXTRA_STATE_KEY:
+                if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix):]
                     input_name = input_name.split('.', 1)[0]  # get the name of param/buffer/child
                     if input_name not in self._modules and input_name not in local_state:
