@@ -1,1 +1,1 @@
-from ._special import *
+from ._special import *  # noqa: F403
