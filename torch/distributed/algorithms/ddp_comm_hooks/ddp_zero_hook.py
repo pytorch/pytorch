@@ -114,7 +114,7 @@ def _save_ddp_bucket_info(
 
     # Save the parameters in the bucket
     overlap_info.params_per_bucket.append(bucket_params)
-    if overlap_info.uniform_bucket_assignment:
+    if overlap_info.shard_buckets:
         # Additionally save the bucket size for the assignment heuristic to use
         bucket_size = 0
         for param in bucket_params:
@@ -127,7 +127,7 @@ def hook_with_zero_step(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
-    uniform_bucket_assignment: bool = False,
+    shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
@@ -151,8 +151,8 @@ def hook_with_zero_step(
             instance to use.
         zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
             instance to use.
-        uniform_bucket_assignment (bool): if ``True``, then the assignment of
-            each :class:`DistributedDataParallel` bucket is partitioned across
+        shard_buckets (bool): if ``True``, then the assignment of each
+            :class:`DistributedDataParallel` bucket is partitioned across
             possibly multiple :class:`ZeroRedundancyOptimizer` instances (i.e.
             across possibly multiple ranks) to approximate uniformity; if
             ``False``, then each bucket is wholly assigned to a single
@@ -189,8 +189,8 @@ def hook_with_zero_step(
             "NCCL backend to avoid hangs"
         )
 
-    if uniform_bucket_assignment:
-        zero._overlap_info.uniform_bucket_assignment = True
+    if shard_buckets:
+        zero._overlap_info.shard_buckets = True
         zero._overlap_info.total_size = 0
 
     def hook_with_zero_fn(
@@ -292,7 +292,7 @@ def hook_with_zero_step_interleaved(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future],
     ddp: DistributedDataParallel,
     zero: ZeroRedundancyOptimizer,
-    uniform_bucket_assignment: bool = False,
+    shard_buckets: bool = False,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Modifies the given ``hook`` to overlap the :class:`ZeroRedundancyOptimizer`
@@ -317,8 +317,8 @@ def hook_with_zero_step_interleaved(
             instance to use.
         zero (ZeroRedundancyOptimizer): the :class:`ZeroRedundancyOptimizer`
             instance to use.
-        uniform_bucket_assignment (bool): if ``True``, then the assignment of
-            each :class:`DistributedDataParallel` bucket is partitioned across
+        shard_buckets (bool): if ``True``, then the assignment of each
+            :class:`DistributedDataParallel` bucket is partitioned across
             possibly multiple :class:`ZeroRedundancyOptimizer` instances (i.e.
             across possibly multiple ranks) to approximate uniformity; if
             ``False``, then each bucket is wholly assigned to a single
@@ -355,8 +355,8 @@ def hook_with_zero_step_interleaved(
             "NCCL backend to avoid hangs"
         )
 
-    if uniform_bucket_assignment:
-        zero._overlap_info.uniform_bucket_assignment = True
+    if shard_buckets:
+        zero._overlap_info.shard_buckets = True
         zero._overlap_info.total_size = 0
 
     def hook_with_zero_interleaved_fn(
