@@ -1,5 +1,5 @@
 Pod::Spec.new do |s|
-    s.name             = 'IOS_NIGHTLY_POD_NAME'
+    s.name             = 'LibTorch-Lite-Nightly'
     s.version          = 'IOS_NIGHTLY_BUILD_VERSION'
     s.authors          = 'PyTorch Team'
     s.license          = { :type => 'BSD' }

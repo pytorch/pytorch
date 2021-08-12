@@ -28,9 +28,8 @@ cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
-export IOS_NIGHTLY_BUILD_VERSION="1.10.0.dev${DATE}"
-export IOS_NIGHTLY_POD_NAME="LibTorch-Lite-Nightly"
-# libtorch_lite_ios_nightly_1.10.0.dev20210810.zip
+export IOS_NIGHTLY_BUILD_VERSION="1.10.0.${DATE}"
+# libtorch_lite_ios_nightly_1.10.0.20210810.zip
 ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"
 cd ${ZIP_DIR}
 #for testing
@@ -54,13 +53,12 @@ set +x
 aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
 
 # create a new LibTorch-Lite-Nightly.podspec from the template
-echo "cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec"
-cp ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec.template ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+echo "cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec"
+cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
-# update pod info
-sed -i '' -e "s/IOS_NIGHTLY_POD_NAME/${IOS_NIGHTLY_POD_NAME}/g" ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
-sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/${IOS_NIGHTLY_BUILD_VERSION}/g" ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
-cat ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+# update pod version
+sed -i '' -e "s/IOS_NIGHTLY_BUILD_VERSION/LibTorch-Lite-Nightly/g" ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
+cat ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
 
 # push the new LibTorch-Lite-Nightly.podspec to CocoaPods
-pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation ${PROJ_ROOT}/ios/${IOS_NIGHTLY_POD_NAME}.podspec
+pod trunk push --verbose --allow-warnings --use-libraries --skip-import-validation ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
