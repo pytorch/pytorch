@@ -8840,8 +8840,8 @@ Keyword args:
 
 add_docstr(
     torch.randint,
-    """
-randint(low=0, high, size, \\*, generator=None, out=None, \
+    r"""
+randint(low=0, high, size, *, generator=None, out=None, \
 dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random integers generated uniformly
