@@ -28,12 +28,6 @@ class PerDeviceLoader(object):
         return self
 
     def __next__(self):
-        return self.next()
-
-    def __len__(self):
-        return self._loader.per_device_samples()
-
-    def next(self):
         if xp.get_tracer_marked_step():
             xp.set_tracer_marked_step(False)
             self._batches_yielded += 1
@@ -49,6 +43,12 @@ class PerDeviceLoader(object):
             ltm.mark_step()
             raise StopIteration
         return item
+
+    def __len__(self):
+        return self._loader.per_device_samples()
+
+    def next(self):
+        return self.__next__()
 
 
 class ParallelLoader(object):
