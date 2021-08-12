@@ -308,6 +308,20 @@ class TestIterableDataPipeBasic(TestCase):
         n = n1.mux(n2, n3)
         self.assertEqual(list(range(10)), list(n))
 
+    def test_slice(self):
+        numbers = NumbersDataset(2).map(lambda x: (x, x + 1, x + 2, x + 3, x + 4))
+        sliced = numbers.slice[2:]
+        expected = [(2, 3, 4), (3, 4, 5)]
+        self.assertEqual(expected, list(sliced))
+
+        sliced = numbers.slice[2:4]
+        expected = [(2, 3), (3, 4)]
+        self.assertEqual(expected, list(sliced))
+
+        sliced = numbers.slice[:2]
+        expected = [(0, 1), (1, 2)]
+        self.assertEqual(expected, list(sliced))
+
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, logfile=None, **kwargs):

@@ -235,6 +235,25 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             raise Exception("Attempt to override existing reduce_ex_hook")
         IterableDataset.reduce_ex_hook = hook_fn
 
+    @property
+    def slice(self):
+        return _DataPipeSlice(self)
+
+class SliceIterDataPipe(IterableDataset):
+    def __init__(self, source_dp, slice):
+        self.source_dp = source_dp
+        self._slice = slice
+
+    def __iter__(self):
+        for data in self.source_dp:
+            yield data[self._slice]
+
+class _DataPipeSlice:
+    def __init__(self, source_datapipe):
+        self.source_datapipe = source_datapipe
+
+    def __getitem__(self, slice):
+        return SliceIterDataPipe(self.source_datapipe, slice)
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
     r"""Dataset wrapping tensors.
