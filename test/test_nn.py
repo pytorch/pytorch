@@ -12388,7 +12388,7 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_module_empty_input(self, module, inp, check_size=True):
         inp.requires_grad_(True)
-        out = module(*inp)
+        out = module(inp)
         gO = torch.rand_like(out)
         out.backward(gO)
         if check_size:
