@@ -7,12 +7,10 @@ from torch.optim import SGD, Adam
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 
 if not IS_WINDOWS:
-    from torch.distributed.optim.functional_sgd import _FunctionalSGD
     from torch.distributed.optim.functional_adam import _FunctionalAdam
-    _SUPPORTED_OPTIM_MAPPING = {
-        SGD: _FunctionalSGD,
-        Adam: _FunctionalAdam
-    }
+    from torch.distributed.optim.functional_sgd import _FunctionalSGD
+
+    _SUPPORTED_OPTIM_MAPPING = {SGD: _FunctionalSGD, Adam: _FunctionalAdam}
 
 
 class MyModule(torch.nn.Module):
