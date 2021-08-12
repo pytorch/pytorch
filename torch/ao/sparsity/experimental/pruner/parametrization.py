@@ -30,6 +30,7 @@ class ActivationReconstruction:
         indices = []
         for size in output.shape:
             indices.append(slice(0, size, 1))
+        assert type(valid_columns) == list  # for mypy
         indices[1] = valid_columns
 
         reconstructed_tensor = torch.zeros(sizes)
