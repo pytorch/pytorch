@@ -187,6 +187,114 @@ TEST(BackendTest, TestComposite) {
   AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
 }
 
+Module getCompositeModuleWithSameNameSubModules() {
+  // Two submodules with same module name but different forward and other
+  // functions should be serialized and loaded correctly.
+
+  c10::Dict<IValue, IValue> compile_spec(StringType::get(), AnyType::get());
+  c10::Dict<IValue, IValue> fake_dict(StringType::get(), AnyType::get());
+  fake_dict.insert("", "");
+  compile_spec.insert("forward", fake_dict);
+  auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
+
+  Module sub1("m_add");
+  sub1.define(R"(
+    def forward(self, x, y):
+      return x + y
+  )");
+  auto lowered_sub1 = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", sub1, compile_spec, any_dict_ty);
+
+  Module sub2("m_add");
+  sub2.define(R"(
+    def forward(self, x, y):
+      return x - y
+  )");
+  auto lowered_sub2 = torch::jit::detail::codegen_backend_module(
+      "backend_with_compiler_demo", sub2, compile_spec, any_dict_ty);
+
+  Module c("C");
+  c.register_module("Add", lowered_sub1);
+  c.register_module("Sub", lowered_sub2);
+  c.define(R"(
+    def forward(self, a, b, s:int):
+      c = self.Add.forward(a, b)
+      d = self.Sub.forward(a, b)
+      y = s * (c * d)
+      return y
+  )");
+
+  return c;
+}
+
+TEST(BackendTest, TestCompositeWithSetStates) {
+  Module c = getCompositeModuleWithSameNameSubModules();
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::ones({}));
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(3);
+  auto res_jit = c.forward(inputs);
+
+  std::stringstream ss;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+  AT_ASSERT(res_jit.toTensor().equal(res_mobile.toTensor()));
+}
+
+TEST(BackendTest, TestConsistencyOfCompositeWithSetStates) {
+  Module c = getCompositeModuleWithSameNameSubModules();
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::ones({}));
+  inputs.emplace_back(3.0 * torch::ones({}));
+  inputs.emplace_back(3);
+
+  std::stringstream ss, ss_resave;
+  c._save_for_mobile(ss);
+  auto mc = _load_for_mobile(ss);
+  auto res_mobile = mc.forward(inputs);
+
+  // check if the methods names are always the same
+  // by reloading the script module and saving it back as mobile
+  // The below checks ensure that the names of Methods
+  // and numerical outputs of mobile and reloaded mobile
+  // modules are same.
+  auto script_module_load = torch::jit::load(ss);
+  script_module_load._save_for_mobile(ss_resave);
+  auto mc_reload = _load_for_mobile(ss_resave);
+  auto res_mobile_reload = mc_reload.forward(inputs);
+
+  AT_ASSERT(res_mobile_reload.toTensor().equal(res_mobile.toTensor()));
+
+  auto mc_methods = mc.get_methods();
+  auto mc_reload_methods = mc_reload.get_methods();
+
+  std::vector<std::string> mc_method_qns, mc_reload_method_qns;
+
+  auto get_qual_name = [](mobile::Method method) -> std::string {
+    return method.function().qualname().qualifiedName();
+  };
+
+  std::transform(
+      mc_methods.begin(),
+      mc_methods.end(),
+      std::back_inserter(mc_method_qns),
+      get_qual_name);
+
+  std::transform(
+      mc_reload_methods.begin(),
+      mc_reload_methods.end(),
+      std::back_inserter(mc_reload_method_qns),
+      get_qual_name);
+
+  AT_ASSERT(std::equal(
+      mc_method_qns.begin(),
+      mc_method_qns.end(),
+      mc_reload_method_qns.begin()));
+}
+
 TEST(BackendTest, TestCompilerNotSupport) {
   Module m("m");
   m.define(R"(

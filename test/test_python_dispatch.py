@@ -5,6 +5,7 @@ from torch.utils._pytree import tree_map
 from typing import Iterator, List
 import logging
 import contextlib
+import itertools
 
 # TODO: move this into library proper
 @contextlib.contextmanager
@@ -49,10 +50,8 @@ class LoggingTensor(torch.Tensor):
         def wrap(e):
             return LoggingTensor(e) if isinstance(e, torch.Tensor) else e
 
-        # TODO: handle kwargs
-        assert not kwargs
-        rs = tree_map(wrap, func(*tree_map(unwrap, args)))
-        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, rs)
+        rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
@@ -77,13 +76,16 @@ class LoggingTensorHandler(logging.Handler):
         return f'${self._shortid(a)}' if isinstance(a, LoggingTensor) else repr(a)
 
     def emit(self, record):
-        fmt_args = "(" + ", ".join(self._fmt(a) for a in record.args[0]) + ")"
-        fmt_rets = ", ".join(self._fmt(a) for a in record.args[1]) \
-            if isinstance(record.args[1], (list, tuple)) else self._fmt(record.args[1])
-        self.log_list.append(f'{fmt_rets} = {record.msg}{fmt_args}')
+        fmt_args = ", ".join(itertools.chain(
+            (self._fmt(a) for a in record.args[0]),
+            (f"{k}={self._fmt(v)}" for k, v in record.args[1].items())
+        ))
+        fmt_rets = ", ".join(self._fmt(a) for a in record.args[2]) \
+            if isinstance(record.args[2], (list, tuple)) else self._fmt(record.args[2])
+        self.log_list.append(f'{fmt_rets} = {record.msg}({fmt_args})')
 
 def log_input(name: str, var: object):
-    logging.getLogger("LoggingTensor").info("input", (name,), (var,))
+    logging.getLogger("LoggingTensor").info("input", (name,), {}, (var,))
 
 @contextlib.contextmanager
 def capture_logs() -> Iterator[List[str]]:
@@ -138,7 +140,55 @@ $5 = torch._ops.aten.add($4, $3)''')
         self.assertExpectedInline('\n'.join(logs), '''\
 $0 = input('x')
 $1 = input('y')
-$2 = torch._ops.aten.abs($0, $1)''')
+$2 = torch._ops.aten.abs($0, out=$1)''')
+
+
+    def test_kwarg_only(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1, 1))
+            z = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            log_input("z", z)
+            torch.addmv(x, y, z)
+            torch.addmv(x, y, z, beta=1)
+            torch.addmv(x, y, z, beta=2)
+            torch.addmv(x, y, z, alpha=2)
+            torch.addmv(x, y, z, beta=2, alpha=2)
+
+        # The expectation is that beta/alpha don't show up when they're
+        # defaulted.  This is even if the user explicitly specified it.
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = input('z')
+$3 = torch._ops.aten.addmv($0, $1, $2)
+$4 = torch._ops.aten.addmv($0, $1, $2)
+$5 = torch._ops.aten.addmv($0, $1, $2, beta=2)
+$6 = torch._ops.aten.addmv($0, $1, $2, alpha=2)
+$7 = torch._ops.aten.addmv($0, $1, $2, beta=2, alpha=2)''')
+
+    def test_kwarg_only_and_positional_default(self) -> None:
+        with capture_logs() as logs:
+            x = LoggingTensor(torch.ones(1))
+            y = LoggingTensor(torch.ones(1))
+            log_input("x", x)
+            log_input("y", y)
+            torch.ops.aten.kl_div(x, y)
+            torch.ops.aten.kl_div(x, y, 2)
+            torch.ops.aten.kl_div(x, y, log_target=True)
+            torch.ops.aten.kl_div(x, y, 2, log_target=True)
+
+        # What we are testing here is that we omit reduction
+        # if it is defaulted, even if a kwarg is set
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = input('y')
+$2 = torch._ops.aten.kl_div($0, $1)
+$3 = torch._ops.aten.kl_div($0, $1, 2)
+$4 = torch._ops.aten.kl_div($0, $1, log_target=True)
+$5 = torch._ops.aten.kl_div($0, $1, 2, log_target=True)''')
 
     def test_list_ret(self) -> None:
         # test all sequence types are permissible returns
