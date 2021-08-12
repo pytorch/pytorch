@@ -1,12 +1,9 @@
 import torch
 
-
 class _LU(torch.autograd.Function):
     @staticmethod
     def forward(ctx, self, pivot=True, get_infos=False):
-        LU, pivots, infos = torch._lu_with_info(
-            self, pivot=pivot, check_errors=(not get_infos)
-        )
+        LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         ctx.save_for_backward(LU, pivots)
         ctx.mark_non_differentiable(pivots, infos)
         return LU, pivots, infos
@@ -90,12 +87,7 @@ class _LU(torch.autograd.Function):
         # A_grad = (U^{-1} X^H P^T)^H, or
         # A_grad = torch.triangular_solve(X^H P^T, U)^H
         X = torch.triangular_solve(phi, L.transpose(-1, -2).conj(), upper=True).solution
-        A_grad = (
-            torch.triangular_solve(
-                X.transpose(-1, -2).conj() @ P.transpose(-1, -2), U, upper=True
-            )
-            .solution.transpose(-1, -2)
-            .conj()
-        )
+        A_grad = torch.triangular_solve(X.transpose(-1, -2).conj() @ P.transpose(-1, -2), U, upper=True) \
+            .solution.transpose(-1, -2).conj()
 
         return A_grad, None, None

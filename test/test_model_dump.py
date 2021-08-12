@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-import functools
-import io
-import os
 import sys
+import os
+import io
+import functools
 import tempfile
-import unittest
 import urllib
+import unittest
 
 import torch
-import torch.utils.mobile_optimizer
 import torch.utils.model_dump
-from torch.testing._internal.common_quantized import supported_qengines
+import torch.utils.mobile_optimizer
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_quantized import supported_qengines
 
 
 class SimpleModel(torch.nn.Module):
@@ -69,8 +69,8 @@ def webdriver_test(testfunc):
         from selenium import webdriver
 
         for driver in [
-            "Firefox",
-            "Chrome",
+                "Firefox",
+                "Chrome",
         ]:
             with self.subTest(driver=driver):
                 wd = getattr(webdriver, driver)()
@@ -138,9 +138,8 @@ class TestModelDump(TestCase):
                     "--style=json",
                     tf.name,
                 ],
-                stdout=stdout,
-            )
-            self.assertRegex(stdout.getvalue(), r"\A{.*SimpleModel")
+                stdout=stdout)
+            self.assertRegex(stdout.getvalue(), r'\A{.*SimpleModel')
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(
@@ -149,22 +148,17 @@ class TestModelDump(TestCase):
                     "--style=html",
                     tf.name,
                 ],
-                stdout=stdout,
-            )
+                stdout=stdout)
             self.assertRegex(
                 stdout.getvalue().replace("\n", " "),
-                r"\A<!DOCTYPE.*SimpleModel.*componentDidMount",
-            )
+                r'\A<!DOCTYPE.*SimpleModel.*componentDidMount')
 
     def get_quant_model(self):
         fmodel = QuantModel().eval()
-        fmodel = torch.quantization.fuse_modules(
-            fmodel,
-            [
-                ["core.layer1", "core.relu1"],
-                ["core.layer2", "core.relu2"],
-            ],
-        )
+        fmodel = torch.quantization.fuse_modules(fmodel, [
+            ["core.layer1", "core.relu1"],
+            ["core.layer2", "core.relu2"],
+        ])
         fmodel.qconfig = torch.quantization.get_default_qconfig("qnnpack")
         prepped = torch.quantization.prepare(fmodel)
         prepped(torch.randn(2, 16))
@@ -196,19 +190,14 @@ class TestModelDump(TestCase):
         def check_memory(model, expected):
             self.open_html_model(wd, model)
             memory_table = self.open_section_and_get_body(wd, "Tensor Memory")
-            device = memory_table.find_element_by_xpath(
-                "//table/tbody/tr[1]/td[1]"
-            ).text
+            device = memory_table.find_element_by_xpath("//table/tbody/tr[1]/td[1]").text
             self.assertEqual("cpu", device)
-            memory_usage_str = memory_table.find_element_by_xpath(
-                "//table/tbody/tr[1]/td[2]"
-            ).text
+            memory_usage_str = memory_table.find_element_by_xpath("//table/tbody/tr[1]/td[2]").text
             self.assertEqual(expected, int(memory_usage_str))
 
         simple_model_memory = (
             # First layer, including bias.
-            64 * (16 + 1)
-            +
+            64 * (16 + 1) +
             # Second layer, including bias.
             8 * (64 + 1)
             # 32-bit float
@@ -220,17 +209,16 @@ class TestModelDump(TestCase):
         # The tensors will be shared, so ensure no double-counting.
         a_simple_model = SimpleModel()
         check_memory(
-            torch.jit.script(torch.nn.Sequential(a_simple_model, a_simple_model)),
-            simple_model_memory,
-        )
+            torch.jit.script(
+                torch.nn.Sequential(a_simple_model, a_simple_model)),
+            simple_model_memory)
 
         # The freezing process will move the weight and bias
         # from data to constants.  Ensure they are still counted.
         check_memory(
             torch.jit.freeze(torch.jit.script(SimpleModel()).eval()),
-            simple_model_memory,
-        )
+            simple_model_memory)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()
