@@ -299,7 +299,7 @@ ModelCompatCheckResult is_compatible(
     result.errors.emplace_back(s.str());
   }
 
-  SupportedType supported_type = _get_supported_types();
+  SupportedType supported_type = runtime_info.supported_types;
   std::unordered_set<std::string> all_primitive_types;
   std::unordered_set<std::string> all_custom_types;
 
