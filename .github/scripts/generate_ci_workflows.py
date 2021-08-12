@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Set
 
-import glob
 import jinja2
 import json
 import os
@@ -448,7 +447,7 @@ if __name__ == "__main__":
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
-    existing_workflows = glob.glob(str(GITHUB_DIR / "workflows/generated-*"))
+    existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
     for w in existing_workflows:
         try:
             os.remove(w)
