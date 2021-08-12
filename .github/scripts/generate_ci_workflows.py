@@ -4,8 +4,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Set
 
+import glob
 import jinja2
 import json
+import os
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -445,6 +447,14 @@ if __name__ == "__main__":
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
+    # Delete the existing generated files first, this should align with .gitattributes file description.
+    existing_workflows = glob.glob(str(GITHUB_DIR / "workflows/generated-*"))
+    for w in existing_workflows:
+        try:
+            os.remove(w)
+        except Exception as e:
+            print(f"Error occurred when deleting file {w}: {e}")
+
     ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
         for workflow in workflows:
