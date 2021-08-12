@@ -12,7 +12,7 @@ class ClosureHandler(abc.ABC):
   @abc.abstractmethod
   def run(self, closure):
     """Run closure function
-    
+
     Args:
       closure: callable function to run
     """

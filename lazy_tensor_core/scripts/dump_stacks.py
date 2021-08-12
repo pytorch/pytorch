@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # The following command is needed (as root) in order to enable GDB to attach
 # existing user processes:

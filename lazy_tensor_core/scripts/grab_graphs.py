@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Parses the output of LTC_SAVE_TENSORS_FILE and produces statistics about graph
 # types and Python frames.
 
