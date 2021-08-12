@@ -274,6 +274,9 @@ class SliceIterDataPipe(IterableDataset):
             for data in self.source_dp:
                 yield data[self._slice]
 
+    def __len__(self):
+        return len(self.source_dp)
+
 
 class _DataPipeSlice:
     def __init__(self, source_datapipe):
