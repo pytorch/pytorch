@@ -1,4 +1,3 @@
-
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
@@ -9,83 +8,140 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import os
-import sys
-import platform
-import textwrap
 import ctypes
+import os
+import platform
+import sys
+import textwrap
 import warnings
 
+from .autocast_mode import autocast
+
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    raise Exception(
+        "Python 2 has reached end-of-life and is no longer supported by PyTorch."
+    )
 
 from ._utils import _import_dotted_name
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+from ._utils_internal import (
+    get_file_path,
+    prepare_multiprocessing_environment,
+    USE_RTLD_GLOBAL_WITH_LIBTORCH,
+    USE_GLOBAL_DEPS,
+)
+
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if sys.executable == 'torch_deploy':
+if sys.executable == "torch_deploy":
     __version__ = "torch-deploy-1.8"
 else:
     from .torch_version import __version__ as __version__
 
-from ._six import string_classes as _string_classes
-
 from typing import Set, Type, TYPE_CHECKING
 
+from ._six import string_classes as _string_classes
+
 __all__ = [
-    'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
-    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
-    'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
-    'are_deterministic_algorithms_enabled', 'is_deterministic',
-    'set_warn_always', 'is_warn_always_enabled',
+    "typename",
+    "is_tensor",
+    "is_storage",
+    "set_default_tensor_type",
+    "set_rng_state",
+    "get_rng_state",
+    "manual_seed",
+    "initial_seed",
+    "seed",
+    "save",
+    "load",
+    "set_printoptions",
+    "chunk",
+    "split",
+    "stack",
+    "matmul",
+    "no_grad",
+    "enable_grad",
+    "rand",
+    "randn",
+    "inference_mode",
+    "DoubleStorage",
+    "FloatStorage",
+    "LongStorage",
+    "IntStorage",
+    "ShortStorage",
+    "CharStorage",
+    "ByteStorage",
+    "BoolStorage",
+    "DoubleTensor",
+    "FloatTensor",
+    "LongTensor",
+    "IntTensor",
+    "ShortTensor",
+    "CharTensor",
+    "ByteTensor",
+    "BoolTensor",
+    "Tensor",
+    "lobpcg",
+    "use_deterministic_algorithms",
+    "are_deterministic_algorithms_enabled",
+    "set_warn_always",
+    "is_warn_always_enabled",
 ]
 
 ################################################################################
 # Load the extension module
 ################################################################################
 
-if sys.platform == 'win32':
-    pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
-    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
-    th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
+if sys.platform == "win32":
+    pfiles_path = os.getenv("ProgramFiles", "C:\\Program Files")
+    py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
+    th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
 
     # When users create a virtualenv that inherits the base environment,
     # we will need to add the corresponding library directory into
     # DLL search directories. Otherwise, it will rely on `PATH` which
     # is dependent on user settings.
     if sys.exec_prefix != sys.base_exec_prefix:
-        base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
+        base_py_dll_path = os.path.join(sys.base_exec_prefix, "Library", "bin")
     else:
-        base_py_dll_path = ''
+        base_py_dll_path = ""
 
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
+    dll_paths = list(
+        filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path])
+    )
 
-    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
+    if all(
+        [not os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths]
+    ):
         nvtoolsext_dll_path = os.path.join(
-            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+            os.getenv(
+                "NVTOOLSEXT_PATH",
+                os.path.join(pfiles_path, "NVIDIA Corporation", "NvToolsExt"),
+            ),
+            "bin",
+            "x64",
+        )
     else:
-        nvtoolsext_dll_path = ''
+        nvtoolsext_dll_path = ""
+
+    import glob
 
     from .version import cuda as cuda_version
-    import glob
-    if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
-        cuda_version_1 = cuda_version.replace('.', '_')
-        cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
-        default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
-        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+
+    if cuda_version and all(
+        [not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths]
+    ):
+        cuda_version_1 = cuda_version.replace(".", "_")
+        cuda_path_var = "CUDA_PATH_V" + cuda_version_1
+        default_path = os.path.join(
+            pfiles_path, "NVIDIA GPU Computing Toolkit", "CUDA", "v" + cuda_version
+        )
+        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), "bin")
     else:
-        cuda_path = ''
+        cuda_path = ""
 
     dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
 
-    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
-    with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+    kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+    with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
     prev_error_mode = kernel32.SetErrorMode(0x0001)
 
     kernel32.LoadLibraryW.restype = ctypes.c_void_p
@@ -104,15 +160,17 @@ if sys.platform == 'win32':
                 raise err
 
     try:
-        ctypes.CDLL('vcruntime140.dll')
-        ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
+        ctypes.CDLL("vcruntime140.dll")
+        ctypes.CDLL("msvcp140.dll")
+        if cuda_version not in ("9.2", "10.0"):
+            ctypes.CDLL("vcruntime140_1.dll")
     except OSError:
-        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+        print(
+            """Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe"""
+        )
 
-    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
     path_patched = False
     for dll in dlls:
         is_loaded = False
@@ -127,7 +185,7 @@ if sys.platform == 'win32':
                 is_loaded = True
         if not is_loaded:
             if not path_patched:
-                os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
                 path_patched = True
             res = kernel32.LoadLibraryW(dll)
             if res is None:
@@ -140,18 +198,21 @@ if sys.platform == 'win32':
 
 # See Note [Global dependencies]
 def _load_global_deps():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if platform.system() == "Windows" or sys.executable == "torch_deploy":
         return
 
-    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    lib_name = "libtorch_global_deps" + (
+        ".dylib" if platform.system() == "Darwin" else ".so"
+    )
     here = os.path.abspath(__file__)
-    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+    lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
     ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
-if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        platform.system() != 'Windows':
+if (
+    USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")
+) and platform.system() != "Windows":
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -169,7 +230,8 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     # mysterious segfaults.
     #
     import os as _dl_flags
-    if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_LAZY'):
+
+    if not hasattr(_dl_flags, "RTLD_GLOBAL") or not hasattr(_dl_flags, "RTLD_LAZY"):
         try:
             # next try if DLFCN exists
             import DLFCN as _dl_flags  # type: ignore[import, no-redef]
@@ -179,6 +241,7 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(_dl_flags.RTLD_GLOBAL | _dl_flags.RTLD_LAZY)
     from torch._C import *  # noqa: F403
+
     sys.setdlopenflags(old_flags)
     del old_flags
     del _dl_flags
@@ -212,7 +275,9 @@ except ImportError:
 
     # The __file__ check only works for Python 3.7 and above.
     if sys.version_info >= (3, 7) and _C_for_compiled_check.__file__ is None:
-        raise ImportError(textwrap.dedent('''
+        raise ImportError(
+            textwrap.dedent(
+                """
             Failed to load PyTorch C extensions:
                 It appears that PyTorch has loaded the `torch/_C` folder
                 of the PyTorch repository rather than the C extensions which
@@ -223,13 +288,13 @@ except ImportError:
                 This error can generally be solved using the `develop` workflow
                     $ python setup.py develop && python -c "import torch"  # This should succeed
                 or by running Python from a different directory.
-            ''').strip()) from None
+            """
+            ).strip()
+        ) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
 
-__all__ += [name for name in dir(_C)
-            if name[0] != '_' and
-            not name.endswith('Base')]
+__all__ += [name for name in dir(_C) if name[0] != "_" and not name.endswith("Base")]
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
@@ -240,8 +305,8 @@ if not TYPE_CHECKING:
         candidate = getattr(_C, attr)
         if type(candidate) is type(_C):
             # submodule
-            if f'torch._C.{attr}' not in sys.modules:
-                sys.modules[f'torch._C.{attr}'] = candidate
+            if f"torch._C.{attr}" not in sys.modules:
+                sys.modules[f"torch._C.{attr}"] = candidate
 
 
 ################################################################################
@@ -253,15 +318,19 @@ def typename(o):
     if isinstance(o, torch.Tensor):
         return o.type()
 
-    module = ''
-    class_name = ''
-    if hasattr(o, '__module__') and o.__module__ != 'builtins' \
-            and o.__module__ != '__builtin__' and o.__module__ is not None:
-        module = o.__module__ + '.'
+    module = ""
+    class_name = ""
+    if (
+        hasattr(o, "__module__")
+        and o.__module__ != "builtins"
+        and o.__module__ != "__builtin__"
+        and o.__module__ is not None
+    ):
+        module = o.__module__ + "."
 
-    if hasattr(o, '__qualname__'):
+    if hasattr(o, "__qualname__"):
         class_name = o.__qualname__
-    elif hasattr(o, '__name__'):
+    elif hasattr(o, "__name__"):
         class_name = o.__name__
     else:
         class_name = o.__class__.__name__
@@ -352,8 +421,9 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
+
 def use_deterministic_algorithms(mode):
-    r""" Sets whether PyTorch operations must use "deterministic"
+    r"""Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
     When enabled, operations will use deterministic algorithms when available,
@@ -469,30 +539,12 @@ def use_deterministic_algorithms(mode):
     """
     _C._set_deterministic_algorithms(mode)
 
-def set_deterministic(d):
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.use_deterministic_algorithms` instead.
-    """
-    warnings.warn((
-        "torch.set_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.use_deterministic_algorithms instead"))
-
-    use_deterministic_algorithms(d)
 
 def are_deterministic_algorithms_enabled():
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
-
-def is_deterministic():
-    r"""This function is deprecated and will be removed in a future release.
-    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
-    """
-    warnings.warn((
-        "torch.is_deterministic is deprecated and will be removed in a future "
-        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
-    return are_deterministic_algorithms_enabled()
 
 
 def set_warn_always(b):
@@ -507,11 +559,13 @@ def set_warn_always(b):
     """
     _C._set_warnAlways(b)
 
+
 def is_warn_always_enabled():
     r"""Returns True if the global warn_always flag is turned on. Refer to
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
 
 ################################################################################
 # Define numeric constants
@@ -519,8 +573,9 @@ def is_warn_always_enabled():
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+from math import e, nan, inf, pi
+
+__all__.extend(["e", "pi", "nan", "inf"])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -569,50 +624,72 @@ class BoolStorage(_C.BoolStorageBase, _StorageBase):
 class BFloat16Storage(_C.BFloat16StorageBase, _StorageBase):
     pass
 
+
 class ComplexDoubleStorage(_C.ComplexDoubleStorageBase, _StorageBase):
     pass
+
 
 class ComplexFloatStorage(_C.ComplexFloatStorageBase, _StorageBase):
     pass
 
+
 class QUInt8Storage(_C.QUInt8StorageBase, _StorageBase):
     pass
+
 
 class QInt8Storage(_C.QInt8StorageBase, _StorageBase):
     pass
 
+
 class QInt32Storage(_C.QInt32StorageBase, _StorageBase):
     pass
+
 
 class QUInt4x2Storage(_C.QUInt4x2StorageBase, _StorageBase):
     pass
 
+
 _storage_classes = {
-    DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
-    CharStorage, ByteStorage, HalfStorage, BoolStorage, QUInt8Storage, QInt8Storage,
-    QInt32Storage, BFloat16Storage, ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage
+    DoubleStorage,
+    FloatStorage,
+    LongStorage,
+    IntStorage,
+    ShortStorage,
+    CharStorage,
+    ByteStorage,
+    HalfStorage,
+    BoolStorage,
+    QUInt8Storage,
+    QInt8Storage,
+    QInt32Storage,
+    BFloat16Storage,
+    ComplexFloatStorage,
+    ComplexDoubleStorage,
+    QUInt4x2Storage,
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes: Set[Type] = set()
 
+from ._tensor_str import set_printoptions
+
 # If you edit these imports, please update torch/__init__.py.in as well
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
 from .serialization import save, load
-from ._tensor_str import set_printoptions
 
 ################################################################################
 # Initialize extension
 ################################################################################
 
+
 def manager_path():
-    if platform.system() == 'Windows' or sys.executable == 'torch_deploy':
+    if platform.system() == "Windows" or sys.executable == "torch_deploy":
         return b""
-    path = get_file_path('torch', 'bin', 'torch_shm_manager')
-    prepare_multiprocessing_environment(get_file_path('torch'))
+    path = get_file_path("torch", "bin", "torch_shm_manager")
+    prepare_multiprocessing_environment(get_file_path("torch"))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
-    return path.encode('utf-8')
+    return path.encode("utf-8")
 
 
 # Shared memory manager needs to know the exact location of manager executable
@@ -630,7 +707,7 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore[misc] # noqa: F403
 
 for name in dir(_C._VariableFunctions):
-    if name.startswith('__'):
+    if name.startswith("__"):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
@@ -667,13 +744,32 @@ del QUInt4x2StorageBase
 
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition, message):
-    r"""A wrapper around Python's assert which is symbolically traceable.
-    """
+    r"""A wrapper around Python's assert which is symbolically traceable."""
     from .overrides import has_torch_function, handle_torch_function
 
     if type(condition) is not torch.Tensor and has_torch_function((condition,)):
         return handle_torch_function(_assert, (condition,), condition, message)
     assert condition, message
+
+
+import torch.backends.cuda
+import torch.backends.mkl
+import torch.backends.mkldnn
+import torch.backends.openmp
+import torch.backends.quantized
+import torch.nn.intrinsic
+import torch.nn.quantizable
+import torch.nn.quantized
+import torch.optim._multi_tensor
+import torch.utils.backcompat
+import torch.utils.data
+from torch import __config__ as __config__
+from torch import __future__ as __future__
+
+# AO depends on nn, as well as quantized stuff -- so should be after those.
+from torch import ao as ao
+from torch import autograd as autograd
+from torch import cpu as cpu
 
 ################################################################################
 # Import most common subpackages
@@ -683,50 +779,34 @@ def _assert(condition, message):
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
 from torch import cuda as cuda
-from torch import cpu as cpu
-from torch import autograd as autograd
+from torch import distributions as distributions
+from torch import fft as fft
+from torch import futures as futures
+from torch import hub as hub
+from torch import jit as jit
+from torch import linalg as linalg
+from torch import multiprocessing as multiprocessing
+from torch import nn as nn
+from torch import onnx as onnx
+from torch import optim as optim
+from torch import profiler as profiler
+from torch import quantization as quantization
+from torch import random as random
+from torch import sparse as sparse
+from torch import special as special
+from torch import testing as testing
 from torch.autograd import (
     no_grad as no_grad,
     enable_grad as enable_grad,
     set_grad_enabled as set_grad_enabled,
     inference_mode as inference_mode,
 )
-from torch import fft as fft
-from torch import futures as futures
-from torch import nn as nn
-import torch.nn.intrinsic
-import torch.nn.quantizable
-import torch.nn.quantized
-# AO depends on nn, as well as quantized stuff -- so should be after those.
-from torch import ao as ao
-from torch import optim as optim
-import torch.optim._multi_tensor
-from torch import multiprocessing as multiprocessing
-from torch import sparse as sparse
-from torch import special as special
-import torch.utils.backcompat
-from torch import onnx as onnx
-from torch import jit as jit
-from torch import linalg as linalg
-from torch import hub as hub
-from torch import random as random
-from torch import distributions as distributions
-from torch import testing as testing
-import torch.backends.cuda
-import torch.backends.mkl
-import torch.backends.mkldnn
-import torch.backends.openmp
-import torch.backends.quantized
-from torch import quantization as quantization
-import torch.utils.data
-from torch import __config__ as __config__
-from torch import __future__ as __future__
-from torch import profiler as profiler
 
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
+
 del _torch_docs, _tensor_docs, _storage_docs
 
 
@@ -735,12 +815,12 @@ def compiled_with_cxx11_abi():
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-# Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
-
 # Import the quasi random sampler
 from torch import quasirandom as quasirandom
+from torch._classes import classes
+
+# Import the ops "namespace"
+from torch._ops import ops
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -749,13 +829,13 @@ legacy_contiguous_format = contiguous_format
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
+
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from ._lobpcg import lobpcg as lobpcg
-
 from ._vmap_internals import vmap as vmap
 
 # These were previously defined in native_functions.yaml and appeared on the
@@ -776,6 +856,8 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError("The runtime module of '{}' has already "
-                           "been registered with '{}'".format(device_type, getattr(m, device_type)))
+        raise RuntimeError(
+            "The runtime module of '{}' has already "
+            "been registered with '{}'".format(device_type, getattr(m, device_type))
+        )
     setattr(m, device_type, module)

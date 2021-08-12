@@ -834,6 +834,7 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
   for (const auto i : c10::irange(num_unsqueezed)) {
+    (void)i; // Suppress unused variable warning
     grad = grad.sum(0, false);
   }
 
@@ -2601,6 +2602,99 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
   }
 }
 
+Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
+  if (self.numel() == 0) {
+    return at::empty_like(self);
+  }
+
+  auto det_backward_nonsingular = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
+    // Derived from Jacobi's formula for partial derivative, which can be found
+    // at https://en.wikipedia.org/wiki/Jacobi%27s_formula
+    // i.e. if A is the input matrix, then
+    // A_grad = A^{-H} (grad * det.conj()) I, where
+    // A^{-H} = (A^{-1}).T.conj()
+
+    // create a matrix d := (grad * det.conj())  I
+    auto d = at::zeros_like(self);
+    d.diagonal(0, -2, -1).copy_((grad * det.conj()).unsqueeze(-1));
+    return at::linalg_solve(self.transpose(-2, -1).conj(), d);
+  };
+
+  auto det_backward_singular = [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
+    // Derived from the gradient formula that would be used if `self`'s
+    // determinant is calculated using SVD, like so:
+    //    u, s, vh = svd(self)
+    //    det(self) = det(u) * prod(s) * det(vh)
+    //
+    // This formula should be correct even if `self` is nonsingular.
+    Tensor u, s, vh;
+    std::tie(u, s, vh) = at::linalg_svd(self);
+    auto u_det = at::linalg_det(u);
+    auto s_prod = s.prod(-1);
+    auto vh_det = at::linalg_det(vh);
+
+    auto u_det_grad = grad * (vh_det * s_prod).conj();
+    auto u_grad = det_backward_nonsingular(u_det_grad, u, u_det);
+
+    auto s_prod_grad = handle_r_to_c(s_prod.scalar_type(), grad * (u_det * vh_det).conj());
+    auto s_grad = prod_backward(s_prod_grad, s, s_prod, -1, false);
+
+    auto vh_det_grad = grad * (u_det * s_prod).conj();
+    auto vh_grad = det_backward_nonsingular(vh_det_grad, vh, vh_det);
+    auto v = vh.transpose(-2, -1).conj();
+    auto v_grad = vh_grad.transpose(-2, -1).conj();
+
+    // svd_backward is written for a function
+    // svd: self -> (U, S, V), which is different
+    // from torch.linalg.svd which is a map self -> (U, S, Vh), where
+    // Vh = V.transpose(-2, -1).conj()
+    return svd_backward({u_grad, s_grad, v_grad}, self, true, true, u, s, v);
+  };
+
+  auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
+  auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
+
+  if (self.dim() == 2) {
+    if (det.abs().lt(singular_det_cutoff).item<bool>()) {
+      return det_backward_singular(grad, self, det);
+    } else {
+      return det_backward_nonsingular(grad, self, det);
+    }
+  } else {
+    auto nonzero_det_mask = det.abs().ge(singular_det_cutoff);
+    if (nonzero_det_mask.all().item<bool>()) {
+      return det_backward_nonsingular(grad, self, det);
+    }
+
+    auto zero_det_mask = nonzero_det_mask.logical_not();
+    if (zero_det_mask.all().item<bool>()) {
+      return det_backward_singular(grad, self, det);
+    }
+
+    Tensor self_grad = self.new_empty(self.sizes(), self.options());
+
+    auto nonzero_det_list = at::native::toListOfOptionalTensors(nonzero_det_mask);
+    self_grad.index_put_(
+      /*indices=*/nonzero_det_list,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*value=*/det_backward_nonsingular(
+        grad.index(nonzero_det_list),
+        self.index(nonzero_det_list),
+        det.index(nonzero_det_list)));
+
+    auto zero_det_list = at::native::toListOfOptionalTensors(zero_det_mask);
+    self_grad.index_put_(
+      /*indices=*/zero_det_list,
+      // NOLINTNEXTLINE(bugprone-argument-comment)
+      /*value=*/det_backward_singular(
+        grad.index(zero_det_list),
+        self.index(zero_det_list),
+        det.index(zero_det_list)));
+
+    return self_grad;
+  }
+}
+
 // The backward for this function is just a specialized version of
 // lu.backward, which is implemented in /torch/_autograd_functions.py
 Tensor _det_lu_based_helper_backward(
@@ -2617,15 +2711,19 @@ Tensor _det_lu_based_helper_backward(
     return Tensor();
   }
 
-  // lu_solve does not support double backward yet.
-  // Hence, if double backward, we use the eigendecomposition.
+
+  // run det_backward only if backward is run on _det_lu_based_helper_backward.
+  // _det_lu_based_helper_backward is more stable for forward det computing functions,
+  // but it fails with double backward gradient checks (gradgradcheck).
+  // det_backward, on the other hand, is less stable (due to restrictions on svd_backward,
+  // namely, svd_backward requries distinct singular values which are sufficiently different
+  // from each other), yet, if its computation is stable, so is its double backward.
+  // Hence, if only single backward is run, we use _det_lu_based_helper_backward,
+  // for the double backward case we use det_backward. The latter approach could produce
+  // unstable gradients, therefore we DO NOT recommend double backpropagation through
+  // det computing functions.
   if (at::GradMode::is_enabled()) {
-    Tensor l, v;
-    std::tie(l, v) = at::linalg_eig(self);
-
-    auto l_grad = prod_backward(det_grad, l, l.prod(-1), -1, false);
-
-    return linalg_eig_backward({l_grad, {}}, self, l, v);
+    return det_backward(det_grad, self, det);
   }
 
   // we use a sequence of kernels to avoid memory copies and checks,
@@ -3027,109 +3125,138 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
-std::tuple<Tensor, Tensor, Tensor>
-infinitely_differentiable_native_layer_norm_backward(
-    const Tensor& dY,
-    const Tensor& dmean,
-    const Tensor& drstd,
-    const Tensor& X,
-    const Tensor& mean,
-    const Tensor& rstd,
+std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
+    const Tensor& input_t,
     const c10::optional<Tensor>& gamma,
+    const Tensor& ggI,
+    const Tensor& ggG,
+    const Tensor& ggB,
+    const Tensor& gO_t,
+    const Tensor& save_mean_t,
+    const Tensor& save_invstd_t,
     IntArrayRef normalized_shape,
-    double eps,
-    std::array<bool, 3> grad_input_mask) {
+    std::array<bool, 3> output_mask) {
 
   const int normalized_ndim = normalized_shape.size();
-  const auto input_shape = X.sizes();
-  const auto input_ndim = X.dim();
+  const auto input_shape = input_t.sizes();
+  const auto input_ndim = input_t.dim();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
   const int64_t M =
       c10::multiply_integers(input_shape.cbegin(), input_shape.cbegin() + axis);
   const int64_t N =
       c10::multiply_integers(input_shape.cbegin() + axis, input_shape.cend());
+  //printf("M: %ld, N: %ld", M, N);
 
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
+  auto input = input_t.reshape({M, N});
+  auto gO = gO_t.reshape({M, N});
+  auto save_mean = save_mean_t.reshape({M, 1});
+  auto save_invstd = save_invstd_t.reshape({M, 1});
 
-  const Tensor X_tensor = X.reshape({M, N});
-  const Tensor mean_tensor = mean.reshape({M, 1});
-  const Tensor rstd_tensor = rstd.reshape({M, 1});
-  const double s = 1.0 / static_cast<double>(N);
-
-  Tensor dY_tensor;
-  if (dY.defined()) {
-    dY_tensor = dY.reshape({M, N});
-  }
-
-  if (grad_input_mask[0]) {
-    Tensor gamma_tensor;
-    if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, N});
+  bool affine = isDefined(gamma);
+  Tensor gamma_expanded;
+  Tensor ggG_expanded, ggB_expanded;
+  if (affine) {
+    gamma_expanded = gamma->reshape({1, N});
+    if (ggG.defined()) {
+      ggG_expanded = ggG.reshape({1, N});
     }
-    Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
-    Tensor var;
-    Tensor dvar;
-    if (drstd.defined()) {
-      var = ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
-      dvar = -0.5 * rstd_cube * drstd.view({M, 1});
+    if (ggB.defined()) {
+      ggB_expanded = ggB.reshape({1, N});
     }
-    Tensor ds;
-    Tensor db;
-    if (dY.defined()) {
-      ds = (isDefined(gamma) ? dY_tensor * X_tensor * gamma_tensor
-                            : dY_tensor * X_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      db = (isDefined(gamma) ? dY_tensor * gamma_tensor : dY_tensor)
-               .sum(1)
-               .unsqueeze_(-1);
-      const Tensor& a = rstd_tensor;
-      const Tensor b = (db * mean_tensor - ds) * rstd_cube * s;
-      const Tensor c = -b * mean_tensor - db * rstd_tensor * s;
-      if (isDefined(gamma)) {
-        dX = a * dY_tensor * gamma_tensor + b * X_tensor + c;
-      } else {
-        dX = a * dY_tensor + b * X_tensor + c;
-      }
-      if (dmean.defined() && drstd.defined()) {
-        dX += var_std_mean_backward(
-            {dvar, dmean.view({M, 1})},
-            X_tensor,
-            var,
-            mean_tensor,
-            /*dim=*/IntArrayRef{1},
-            /*correction=*/0,
-            /*keepdim=*/true,
-            /*is_std=*/false);
-      }
-      dX = dX.reshape_as(X);
-    } else if (dmean.defined() && drstd.defined()) {
-      dX = var_std_mean_backward(
-               {dvar, dmean.view({M, 1})},
-               X_tensor,
-               var,
-               mean_tensor,
-               /*dim=*/IntArrayRef{1},
-               /*correction=*/0,
-               /*keepdim=*/true,
-               /*is_std=*/false)
-               .reshape_as(X);
-    }
+  } else {
+    gamma_expanded = at::ones({1}, input.options());
   }
 
-  if (grad_input_mask[1] && dY.defined()) {
-    dgamma = (dY_tensor * (X_tensor - mean_tensor) * rstd_tensor)
-                 .sum(0)
-                 .reshape_as(toNonOptTensor(gamma));
-  }
-  if (grad_input_mask[2] && dY.defined()) {
-    dbeta = dY_tensor.sum(0).reshape_as(toNonOptTensor(gamma));
+  Tensor ggI_expanded;
+  if (ggI.defined()) {
+    ggI_expanded = ggI.reshape({M, N});
   }
 
-  return std::make_tuple(dX, dgamma, dbeta);
+  // for half inputs, save_mean, save_invstd are float
+  // (ideally, we would cast everything else, but not now)
+  auto mu = save_mean.to(input.scalar_type());
+  auto input_sub_mu = input - mu;
+  auto sigma2_eps_neg_1_2 = save_invstd.to(input.scalar_type());
+  auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
+  auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
+
+  Tensor gI;
+  // calculate gI
+  auto input_mu_sigma2_neg_3_2 = input_sub_mu * sigma2_eps_neg_3_2;
+
+  if (ggI.defined()) {
+
+    auto gxhat = gO * gamma_expanded;
+    auto gxhat_mu_sum = (gxhat * input_sub_mu).sum(1, true);
+    auto gxhat_sum = gxhat.sum(1, true);
+
+    auto ggI_sum = ggI_expanded.sum(1, true);
+    auto ggI_mu_sum = (ggI_expanded * input_sub_mu).sum(1, true);
+
+    auto all_sub = ((ggI_sum * gxhat_sum).div_(N)).sub_((ggI_expanded * gxhat).sum(1, true)).add_(
+                    (sigma2_eps_neg_1 * gxhat_mu_sum * ggI_mu_sum).mul_(3. / N));
+    auto gI_0t = (input_mu_sigma2_neg_3_2 * all_sub).div_(N);
+    auto gI_1t = (ggI_mu_sum * sigma2_eps_neg_3_2).div_(N) * (gxhat_sum.div(N) - gxhat);
+    auto gI_2t = (gxhat_mu_sum * sigma2_eps_neg_3_2).div_(N) * (ggI_sum.div(N) - ggI_expanded);
+
+    gI = (gI_0t.add_(gI_1t).add_(gI_2t));
+  }
+
+  // add contribution of gamma term to gI
+  if (affine && ggG.defined()) {
+    auto t0 = gO * ggG_expanded * sigma2_eps_neg_1_2;
+    auto t1 = (sigma2_eps_neg_1_2 * (gO * ggG_expanded).sum(1, true)).div_(-N);
+    auto t2 = (input_mu_sigma2_neg_3_2 * (gO * ggG_expanded * input_sub_mu).sum(1,true)).div_(-N);
+    auto gI_G_term = t0.add_(t1).add_(t2);
+    gI = gI.defined() ? gI.add_(gI_G_term) : gI_G_term;
+  }
+
+
+  if (gI.defined()) {
+    //printf("=== computing gI\n");
+    gI = gI.reshape_as(input_t);
+  }
+
+  // this is the grad_input for the first backward function
+  auto first_bwd_fn_grad_input = [&](const Tensor& gO_local, const Tensor& gamma_local) -> Tensor {
+    auto h0 = (gamma_local * sigma2_eps_neg_1_2).div_(N);
+    auto h1 = (N * gO_local).sub_(gO_local.sum(1,true)).sub_(
+                input_sub_mu.mul(sigma2_eps_neg_1) * (gO_local * input_sub_mu).sum(1,true));
+    return h0 * h1;
+  };
+
+  // calculate gG
+  Tensor gG;
+  if (affine && ggI.defined()) {
+    gG = first_bwd_fn_grad_input(ggI_expanded, at::ones({}, sigma2_eps_neg_1_2.options()));
+    gG = (gO * gG).sum(0);
+    gG = gG.reshape_as(*gamma);
+  }
+
+  // calculate ggO
+  Tensor ggO;
+  // contribution of input term
+  if (ggI.defined()) {
+    ggO = first_bwd_fn_grad_input(ggI_expanded, gamma_expanded);
+  }
+  if (ggG.defined()) {
+    auto ggO_G_term = ggG_expanded * input_sub_mu * sigma2_eps_neg_1_2;
+    ggO = ggO.defined() ? ggO.add_(ggO_G_term) : ggO_G_term;
+  }
+  if (ggB.defined()) {
+    auto ggO_B_term = ggB_expanded;
+    ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
+  }
+  if (ggO.defined()) {
+    ggO = ggO.expand({M, N}).reshape_as(input_t);
+  }
+
+  if (output_mask[1] && !gG.defined()) {
+    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+  }
+
+  return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 }
 
 std::tuple<Tensor, Tensor, Tensor>

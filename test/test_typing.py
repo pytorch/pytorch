@@ -121,12 +121,12 @@ def test_fail(path):
         )
         if match is None:
             raise ValueError(f"Unexpected error line format: {error_line}")
-        lineno = int(match.group('lineno'))
-        errors[lineno] += f'{error_line}\n'
+        lineno = int(match.group("lineno"))
+        errors[lineno] += f"{error_line}\n"
 
     for i, line in enumerate(lines):
         lineno = i + 1
-        if line.startswith('#') or (" E:" not in line and lineno not in errors):
+        if line.startswith("#") or (" E:" not in line and lineno not in errors):
             continue
 
         target_line = lines[lineno - 1]
@@ -148,7 +148,9 @@ Observed error: {!r}
 """
 
 
-def _test_fail(path: str, error: str, expected_error: Optional[str], lineno: int) -> None:
+def _test_fail(
+    path: str, error: str, expected_error: Optional[str], lineno: int
+) -> None:
     if expected_error is None:
         raise AssertionError(_FAIL_MSG1.format(lineno, error))
     elif error not in expected_error:
@@ -157,12 +159,12 @@ def _test_fail(path: str, error: str, expected_error: Optional[str], lineno: int
 
 def _construct_format_dict():
     dct = {
-        'ModuleList': 'torch.nn.modules.container.ModuleList',
-        'AdaptiveAvgPool2d': 'torch.nn.modules.pooling.AdaptiveAvgPool2d',
-        'AdaptiveMaxPool2d': 'torch.nn.modules.pooling.AdaptiveMaxPool2d',
-        'Tensor': 'torch._tensor.Tensor',
-        'Adagrad': 'torch.optim.adagrad.Adagrad',
-        'Adam': 'torch.optim.adam.Adam',
+        "ModuleList": "torch.nn.modules.container.ModuleList",
+        "AdaptiveAvgPool2d": "torch.nn.modules.pooling.AdaptiveAvgPool2d",
+        "AdaptiveMaxPool2d": "torch.nn.modules.pooling.AdaptiveMaxPool2d",
+        "Tensor": "torch._tensor.Tensor",
+        "Adagrad": "torch.optim.adagrad.Adagrad",
+        "Adam": "torch.optim.adam.Adam",
     }
     return dct
 
@@ -181,7 +183,9 @@ def _parse_reveals(file: IO[str]) -> List[str]:
     string = file.read().replace("*", "")
 
     # Grab all `# E:`-based comments
-    comments_array = list(map(lambda str: str.partition("  # E: ")[2], string.split("\n")))
+    comments_array = list(
+        map(lambda str: str.partition("  # E: ")[2], string.split("\n"))
+    )
     comments = "/n".join(comments_array)
 
     # Only search for the `{*}` pattern within comments,
@@ -231,5 +235,5 @@ def _test_reveal(path: str, reveal: str, expected_reveal: str, lineno: int) -> N
         raise AssertionError(_REVEAL_MSG.format(lineno, expected_reveal, reveal))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     pytest.main([__file__])

@@ -440,8 +440,8 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   {
     TLSLegacyProfilerGuard g(
         profilingConfig, c10::nullopt, requestThreadOptions);
-    TORCH_INTERNAL_ASSERT(profilerEnabled(),
-        "Expected profiler to be enabled!");
+    TORCH_INTERNAL_ASSERT(
+        profilerEnabled(), "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
     // wrappedRpcResponseFuture
     auto wrappedRpcResponseFuture = processRpc(
@@ -457,8 +457,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
           // completed (such as async UDF)
 
           TORCH_INTERNAL_ASSERT(
-              profilerEnabled(),
-              "Expected profiler to be enabled!");
+              profilerEnabled(), "Expected profiler to be enabled!");
 
           // On continuation thread, don't clean up profiler states, since
           // they will be cleaned up by main thread, and consolidate all

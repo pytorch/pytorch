@@ -5143,13 +5143,12 @@ regression_criterion_no_batch = [
     'L1Loss', 'MSELoss', 'PoissonNLLLoss', 'KLDivLoss', 'HuberLoss', 'SmoothL1Loss'
 ]
 reductions = ['none', 'mean', 'sum']
-for regression_criterion, reduction in product(regression_criterion_no_batch,
-                                               reductions):
+for name, reduction in product(regression_criterion_no_batch, reductions):
     regression_test_info = dict(
-        fullname="{}_no_batch_dim_{}".format(regression_criterion, reduction),
-        constructor=lambda *args: getattr(nn, regression_criterion)(reduction=reduction),
+        fullname="{}_no_batch_dim_{}".format(name, reduction),
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
         input_size=(3, ),
-        target_fn=lambda: torch.randn(3),
+        target_size=(3, ),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
@@ -5173,9 +5172,9 @@ for (name, input_fn, target_fn), reduction in product(classification_criterion_n
                                                       reductions):
     classification_test_info = dict(
         fullname="{}_no_batch_dim_{}".format(name, reduction),
-        constructor=lambda *args: getattr(nn, name)(reduction=reduction),
-        input_fn=input_fn,
-        target_fn=target_fn,
+        constructor=lambda *args, name=name: getattr(nn, name)(reduction=reduction),
+        input_fn=lambda f=input_fn: f(),
+        target_fn=lambda f=target_fn: f(),
         reference_fn=single_batch_reference_criterion_fn,
         test_cpp_api_parity=False,
     )
