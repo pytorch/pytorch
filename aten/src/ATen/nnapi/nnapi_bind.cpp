@@ -177,15 +177,6 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   CAFFE_THROW("Bad dtype");
 }
 
-// Registers
-void register_nnapi(torch::Library& m) {
-  m.class_<NnapiCompilation>("Compilation")
-    .def(torch::jit::init<>())
-    .def("init", &NnapiCompilation::init)
-    .def("run", &NnapiCompilation::run)
-    ;
-}
-
 } // namespace bind
 } // namespace nnapi
 } // namespace torch
