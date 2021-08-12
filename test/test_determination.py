@@ -31,9 +31,7 @@ class DeterminationTest(unittest.TestCase):
         return [
             test
             for test in cls.TESTS
-            if run_test.determine_target(
-                run_test.TARGET_DET_LIST, test, changed_files, DummyOptions()
-            )
+            if run_test.determine_target(run_test.TARGET_DET_LIST, test, changed_files, DummyOptions())
         ]
 
     def test_config_change_only(self):
@@ -64,17 +62,14 @@ class DeterminationTest(unittest.TestCase):
     def test_test_file(self):
         """Test files trigger themselves and dependent tests"""
         self.assertEqual(
-            self.determined_tests(["test/test_jit.py"]),
-            ["test_jit_profiling", "test_jit"],
+            self.determined_tests(["test/test_jit.py"]), ["test_jit_profiling", "test_jit"]
         )
         self.assertEqual(
             self.determined_tests(["test/jit/test_custom_operators.py"]),
             ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
-            self.determined_tests(
-                ["test/quantization/eager/test_quantize_eager_ptq.py"]
-            ),
+            self.determined_tests(["test/quantization/eager/test_quantize_eager_ptq.py"]),
             ["test_quantization"],
         )
 

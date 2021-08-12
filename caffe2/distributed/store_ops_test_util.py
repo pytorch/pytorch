@@ -2,9 +2,13 @@
 # Module caffe2.distributed.store_ops_test_util
 
 
+
+
+
 from multiprocessing import Process, Queue
 
 import numpy as np
+
 from caffe2.python import core, workspace
 
 
@@ -21,16 +25,18 @@ class StoreOpsTests(object):
             workspace.FeedBlob(blob, value)
             workspace.RunOperatorOnce(
                 core.CreateOperator(
-                    "StoreSet", [store_handler, blob], [], blob_name=blob
-                )
-            )
+                    "StoreSet",
+                    [store_handler, blob],
+                    [],
+                    blob_name=blob))
 
         output_blob = "output_blob"
         workspace.RunOperatorOnce(
             core.CreateOperator(
-                "StoreGet", [store_handler], [output_blob], blob_name=blob
-            )
-        )
+                "StoreGet",
+                [store_handler],
+                [output_blob],
+                blob_name=blob))
 
         try:
             np.testing.assert_array_equal(workspace.FetchBlob(output_blob), 1)
@@ -50,13 +56,7 @@ class StoreOpsTests(object):
         for index in range(num_procs):
             proc = Process(
                 target=cls._test_set_get,
-                args=(
-                    queue,
-                    create_store_handler_fn,
-                    index,
-                    num_procs,
-                ),
-            )
+                args=(queue, create_store_handler_fn, index, num_procs, ))
             proc.start()
             procs.append(proc)
 
@@ -71,6 +71,6 @@ class StoreOpsTests(object):
     @classmethod
     def test_get_timeout(cls, create_store_handler_fn):
         store_handler = create_store_handler_fn()
-        net = core.Net("get_missing_blob")
-        net.StoreGet([store_handler], 1, blob_name="blob")
+        net = core.Net('get_missing_blob')
+        net.StoreGet([store_handler], 1, blob_name='blob')
         workspace.RunNetOnce(net)
