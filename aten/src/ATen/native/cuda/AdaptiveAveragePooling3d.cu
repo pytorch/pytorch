@@ -343,7 +343,7 @@ void adaptive_avg_pool3d_out_cuda_template(
 
   TORCH_CHECK(
       (input_.ndimension() == 4 || input_.ndimension() == 5),
-      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor, but got", input_.sizes());
+      "adaptive_avg_pool3d_cuda(): Expected 4D or 5D tensor, but got ", input_.sizes());
 
   // the jit sometimes passes output_size.size() == 1
   TORCH_CHECK(

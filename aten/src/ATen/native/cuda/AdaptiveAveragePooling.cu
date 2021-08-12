@@ -446,7 +446,7 @@ namespace {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
         TORCH_CHECK(input.ndimension() == 4,
-                    "adaptive_avg_pool2d(): Expected 4D tensor, but got",
+                    "adaptive_avg_pool2d(): Expected 4D tensor, but got ",
                     input.sizes());
 
         int sizeB = input_.size(0);
@@ -531,7 +531,7 @@ namespace {
       }
       case at::MemoryFormat::Contiguous: {
         TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
-                    "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got",
+                    "adaptive_avg_pool2d(): Expected 3D or 4D tensor, but got ",
                     input.sizes());
         int64_t grid_x = input.size(-3);
         if (input.ndimension() == 4) {
@@ -598,7 +598,7 @@ namespace {
       case at::MemoryFormat::ChannelsLast: {
         // special case for tensor memory format in channels_last
         TORCH_CHECK(input.ndimension() == 4,
-                    "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got", input.ndimension());
+                    "adaptive_avg_pool2d_backward_cuda(): Expected 4D tensor, but got ", input.ndimension());
 
         int sizeB = input.size(0);
         int sizeC = input.size(1);
