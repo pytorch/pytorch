@@ -632,7 +632,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
                 qp.BatchNormQuantizeHandler,
                 qp.EmbeddingQuantizeHandler,
                 qp.RNNDynamicQuantizeHandler,
-                qp.ELUQuantizeHandler,
             ]
 
             qhandler_cls_quant_op_same_signature = [
@@ -1549,7 +1548,6 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
                     qp.LinearReLUQuantizeHandler,
                     qp.BatchNormQuantizeHandler,
                     qp.DefaultNodeQuantizeHandler,
-                    qp.ELUQuantizeHandler,
                 )
             ):
                 self.assertTrue(
