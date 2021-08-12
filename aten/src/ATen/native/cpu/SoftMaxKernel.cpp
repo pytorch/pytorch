@@ -421,7 +421,7 @@ struct vec_softmax {
 template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_backward_lastdim {
   static void
-  apply(Tensor& grad_input, const Tensor& grad, const Tensor& output) {
+  apply(const Tensor& grad_input, const Tensor& grad, const Tensor& output) {
     int64_t outer_size = 1;
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)
@@ -463,7 +463,7 @@ static void log_softmax_lastdim_kernel_impl(
 }
 
 static void softmax_backward_lastdim_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES_AND(
@@ -475,7 +475,7 @@ static void softmax_backward_lastdim_kernel_impl(
 }
 
 static void log_softmax_backward_lastdim_kernel_impl(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad,
     const Tensor& output) {
   AT_DISPATCH_FLOATING_TYPES_AND(
