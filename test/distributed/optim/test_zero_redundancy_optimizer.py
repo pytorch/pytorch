@@ -912,7 +912,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         device,
         hook_constructor,
         gradient_as_bucket_view,
-        static_graph
+        static_graph,
+        **kwargs,
     ):
         SGD_LR = 0.01
         SGD_MOMENTUM = 0.9
@@ -966,7 +967,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 )
                 ddp_model_overlap.register_comm_hook(
                     None,
-                    hook_constructor(allreduce_hook, ddp_model_overlap, zero_optim)
+                    hook_constructor(allreduce_hook, ddp_model_overlap, zero_optim, **kwargs)
                 )
 
                 # Set up the DDP model with local optimizer
@@ -1090,6 +1091,62 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
     # TODO: Add `test_ddp_with_zero_step_interleaved_parity_cpu()` once the
     # Gloo synchronization issue causing hangs is fixed.
+
+    @common_distributed.skip_if_win32()
+    @common_distributed.requires_nccl()
+    @common_distributed.skip_if_no_gpu
+    @common_distributed.skip_if_rocm
+    def test_ddp_with_zero_step_uniform_parity_gpu(self):
+        r"""
+        Check that overlapping DDP with ZeRO using
+        ``hook_with_zero_step()`` with ``uniform_bucket_assignment=True``
+        achieves parity with DDP using a local optimizer when running on GPU.
+
+        NOTE: The test is skipped if using Windows since functional optimizers
+        are not currently supported.
+        """
+        self.dist_init(self.rank, self.world_size, dist.Backend.NCCL)
+        for gradient_as_bucket_view, static_graph in itertools.product(
+            [True, False],
+            [True, False]
+        ):
+            self._test_ddp_zero_overlap(
+                torch.device(self.rank),
+                hook_with_zero_step,
+                gradient_as_bucket_view,
+                static_graph,
+                uniform_bucket_assignment=True,
+            )
+    # TODO: Add `test_ddp_with_zero_step_uniform_parity_cpu()` once the Gloo
+    # synchronization issue causing hangs is fixed.
+
+    @common_distributed.skip_if_win32()
+    @common_distributed.requires_nccl()
+    @common_distributed.skip_if_no_gpu
+    @common_distributed.skip_if_rocm
+    def test_ddp_with_zero_step_interleaved_uniform_parity_gpu(self):
+        r"""
+        Check that overlapping DDP with ZeRO using
+        ``hook_with_zero_step()`` with ``uniform_bucket_assignment=True``
+        achieves parity with DDP using a local optimizer when running on GPU.
+
+        NOTE: The test is skipped if using Windows since functional optimizers
+        are not currently supported.
+        """
+        self.dist_init(self.rank, self.world_size, dist.Backend.NCCL)
+        for gradient_as_bucket_view, static_graph in itertools.product(
+            [True, False],
+            [True, False]
+        ):
+            self._test_ddp_zero_overlap(
+                torch.device(self.rank),
+                hook_with_zero_step_interleaved,
+                gradient_as_bucket_view,
+                static_graph,
+                uniform_bucket_assignment=True,
+            )
+    # TODO: Add `test_ddp_with_zero_step_interleaved_uniform_parity_cpu()` once
+    # the Gloo synchronization issue causing hangs is fixed.
 
 if __name__ == "__main__":
     # ! unittest should not be used here, else the tests are not properly registered
