@@ -934,7 +934,7 @@ void glu_backward_kernel(TensorIterator& iter) {
         return  (float_one_val - float(a)) * float(a) * float(b) * float(c);
       },
       [float_one_vec](Vectorized<BFloat16> a, Vectorized<BFloat16> b, Vectorized<BFloat16> c) -> Vectorized<BFloat16> {
-        Vectorized<float> a0, a1, b0, b1, c0, c1; 
+        Vectorized<float> a0, a1, b0, b1, c0, c1;
         std::tie(a0, a1) = convert_bfloat16_float(a);
         std::tie(b0, b1) = convert_bfloat16_float(b);
         std::tie(c0, c1) = convert_bfloat16_float(c);

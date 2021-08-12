@@ -14465,18 +14465,25 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCPU
     def test_glu_bfloat16(self, device):
-        input = torch.randn(5, 2, 8, 8, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
-        glu = torch.nn.GLU(dim=-1).to(device)
-        input2 = input.detach().clone().float().requires_grad_(True)
-        out = glu(input)
-        out.sum().backward()
-        out2 = glu(input2)
-        out2.sum().backward()
+        def test_dtype(fn, input, dtype):
+            input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
+            input2 = input.detach().clone().float().requires_grad_(True)
+            out = fn(input)
+            out.sum().backward()
+            out2 = fn(input2)
+            out2.sum().backward()
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2, exact_dtype=False)
+            self.assertEqual(input.grad, input2.grad, atol=1e-2, rtol=0, exact_dtype=False)
 
-        self.assertEqual(out.dtype, torch.bfloat16)
-        self.assertEqual(input.grad.dtype, torch.bfloat16)
-        self.assertEqual(out, out2.bfloat16())
-        self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0.01, rtol=0)
+        def func(device):
+            return torch.nn.GLU(dim=-1).to(device)
+
+        shapes = [[1, 3, 1, 6], [1, 3, 1, 128], [1, 3, 256, 256]]
+        for shape in shapes:
+            x = torch.randn(shape, device=device)
+            test_dtype(func(device), x, torch.bfloat16)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_general(self, device):
