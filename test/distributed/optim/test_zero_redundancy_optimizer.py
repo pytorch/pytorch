@@ -31,13 +31,23 @@ from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD
 from torch.testing._internal import common_distributed, common_utils
+from torch.testing._internal.common_utils import IS_WINDOWS
+
+if IS_WINDOWS:
+    print("Test fails on windows, see https://github.com/pytorch/pytorch/issues/63086")
+    sys.exit(0)
 
 try:
     import torchvision
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
-BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
+
+# Use GLOO on GPU when running CUDA + Windows
+BACKEND = (
+    dist.Backend.NCCL if not IS_WINDOWS and torch.cuda.is_available()
+    else dist.Backend.GLOO
+)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -956,7 +966,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     lr=SGD_LR,
                     momentum=SGD_MOMENTUM,
                     weight_decay=SGD_WEIGHT_DECAY,
-                    allow_empty_param_list=True
+                    _allow_empty_param_list=True
                 )
                 ddp_model_overlap.register_comm_hook(
                     None,

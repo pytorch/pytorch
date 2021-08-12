@@ -1,6 +1,6 @@
 import torch
 import warnings
-from typing import Any, Iterable, List, Tuple
+from typing import Any, Iterable, List, Tuple, Union
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -278,7 +278,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
 
 
 class Checkpoint(torch.nn.Module):
-    """Checkpoitining without re-entrant autograd
+    """Checkpointining without re-entrant autograd
 
     Args:
         function: describes what to run in the forward pass of the model or
@@ -309,25 +309,21 @@ class Checkpoint(torch.nn.Module):
                 self.had_cuda_in_fwd = True
                 self.fwd_gpu_devices, self.fwd_gpu_states = get_device_states(*args)
 
-        storage = []
+        storage: List[Union[torch.Tensor, None]] = []
         counter = 0
 
         def pack(x):
-            nonlocal counter, storage
-            # we could store something else than an int here, but not None because that's a valid saved tensor value
-            storage.append(counter)
+            nonlocal counter
             counter += 1
+            # TODO(varal7): Instead of returning indices, we can return things metadata (such as
+            # size, device, ...) to catch certain cases of undeterministic behavior of the forward
             return counter - 1
 
         def unpack(x):
-            nonlocal counter, storage
-            if isinstance(storage[x], int):
-                counter_inner = 0
+            if len(storage) == 0:
 
                 def inner_pack(inner):
-                    nonlocal counter, storage, counter_inner
-                    storage[counter_inner] = inner
-                    counter_inner += 1
+                    storage.append(inner)
                     return None
 
                 def inner_unpack(packed):
@@ -346,17 +342,12 @@ class Checkpoint(torch.nn.Module):
                             set_device_states(self.fwd_gpu_devices, self.fwd_gpu_states)
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
-                        try:
-                            torch.autograd.graph.set_saved_tensors_default_hooks(inner_pack, inner_unpack)
+                        with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
                             _unused = self.function(*args)
-                        finally:
-                            torch.autograd.graph.reset_saved_tensors_default_hooks()
 
-            assert not isinstance(storage[x], int)
             return storage[x]
 
-        try:
-            torch.autograd.graph.set_saved_tensors_default_hooks(pack, unpack)
+        with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
             output = self.function(*args)
             if torch.cuda._initialized and not self.had_cuda_in_fwd:
                 # Cuda was not initialized before running the forward, so we didn't
@@ -365,6 +356,5 @@ class Checkpoint(torch.nn.Module):
                     "PyTorch's CUDA state was initialized in the forward pass "
                     "of a Checkpoint, which is not allowed. Please open an issue "
                     "if you need this feature.")
-        finally:
-            torch.autograd.graph.reset_saved_tensors_default_hooks()
+
         return output
