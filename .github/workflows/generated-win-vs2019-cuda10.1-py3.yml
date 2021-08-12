@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/windows_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: win-vs2019-cpu-py3
+name: win-vs2019-cuda10.1-py3
 
 on:
   pull_request:
@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: win-vs2019-cpu-py3
+  BUILD_ENVIRONMENT: win-vs2019-cuda10.1-py3
   BUILD_WHEEL: 1
-  CUDA_VERSION: "cpu"
+  CUDA_VERSION: "10.1"
   IN_CI: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
@@ -25,9 +25,11 @@ env:
   VC_YEAR: "2019"
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   no_proxy: localhost,127.0.0.1,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock
+  TORCH_CUDA_ARCH_LIST: "7.0"
+  USE_CUDA: 1
 
 concurrency:
-  group: win-vs2019-cpu-py3-${{ github.event.pull_request.number || github.sha }}
+  group: win-vs2019-cuda10.1-py3-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -38,7 +40,7 @@ jobs:
       run:
         working-directory: pytorch-${{ github.run_id }}
     env:
-      JOB_BASE_NAME: win-vs2019-cpu-py3-build
+      JOB_BASE_NAME: win-vs2019-cuda10.1-py3-build
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
     steps:
@@ -53,6 +55,14 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
       - name: Build
         shell: bash
         env:
@@ -92,9 +102,9 @@ jobs:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-18.04
     env:
-      TEST_RUNNER_TYPE: windows.4xlarge
+      TEST_RUNNER_TYPE: windows.8xlarge.nvidia.gpu
       NUM_TEST_SHARDS: 2
-      NUM_TEST_SHARDS_ON_PULL_REQUEST: 2
+      NUM_TEST_SHARDS_ON_PULL_REQUEST: 1
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -113,13 +123,13 @@ jobs:
 
   test:
     env:
-      JOB_BASE_NAME: win-vs2019-cpu-py3-test
+      JOB_BASE_NAME: win-vs2019-cuda10.1-py3-test
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       TEST_CONFIG: ${{ matrix.config }}
       http_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
       https_proxy: "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128"
-      RUN_SMOKE_TESTS_ONLY_ON_PR: False
+      RUN_SMOKE_TESTS_ONLY_ON_PR: True
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     needs: [build, generate-test-matrix, ]
     strategy:
@@ -141,6 +151,14 @@ jobs:
         shell: powershell
         run: |
           .\.circleci\scripts\vs_install.ps1
+      - name: Install Cuda
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cuda_install.sh
+      - name: Install Cudnn
+        shell: bash
+        run: |
+          .circleci/scripts/windows_cudnn_install.sh
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -248,7 +266,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: win-vs2019-cpu-py3-test
+          JOB_BASE_NAME: win-vs2019-cuda10.1-py3-test
           CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
           CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
