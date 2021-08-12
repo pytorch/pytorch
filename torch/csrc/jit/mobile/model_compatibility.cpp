@@ -320,7 +320,7 @@ ModelCompatCheckResult is_compatible(
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Primitive type: '" << primitive_type
-        << "' is not support in current runtime";
+        << "' is not supported in current runtime";
       result.errors.push_back(s.str());
     }
   }
@@ -330,7 +330,7 @@ ModelCompatCheckResult is_compatible(
       result.status = ModelCompatibilityStatus::ERROR;
       std::ostringstream s;
       s << "Custom type: '" << custom_type
-        << "' is not support in current runtime";
+        << "' is not supported in current runtime";
       result.errors.push_back(s.str());
     }
   }
