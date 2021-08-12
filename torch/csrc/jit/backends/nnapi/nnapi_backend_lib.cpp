@@ -83,8 +83,8 @@ class NnapiBackend : public PyTorchBackendInterface {
       if (fmt == 0) {
         fixed_inputs.push_back(tensorInp.get(i).contiguous());
       } else if (fmt == 1) {
-        c10::IntArrayRef order = {0, 2, 3, 1};
-        fixed_inputs.push_back(tensorInp.get(i).permute(order).contiguous());
+        fixed_inputs.push_back(
+            tensorInp.get(i).permute({0, 2, 3, 1}).contiguous());
       } else {
         throw std::exception();
         std::cerr << "Invalid mem_fmt" << std::endl;
@@ -102,8 +102,7 @@ class NnapiBackend : public PyTorchBackendInterface {
       // 0: NCHW, 1: NHWC
       // TODO: See if it's possible to use those directly.
       if (fmt == 1) {
-        c10::IntArrayRef order = {0, 3, 1, 2};
-        outputs.set(i, outputs.get(i).permute(order));
+        outputs.set(i, outputs.get(i).permute({0, 3, 1, 2}));
       } else if (fmt != 0) {
         throw std::exception();
         std::cerr << "Invalid mem_fmt" << std::endl;

@@ -2,9 +2,11 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Set
+from typing import Dict, Set
 
 import jinja2
+import json
+import os
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -83,6 +85,32 @@ class CIFlowConfig:
 
 
 @dataclass
+class CIFlowRuleset:
+    version = 'v1'
+    output_file = f'{GITHUB_DIR}/generated-ciflow-ruleset.json'
+    label_rules: Dict[str, Set[str]] = field(default_factory=dict)
+
+    def add_label_rule(self, labels: Set[str], workflow_name: str) -> None:
+        for label in labels:
+            if label in self.label_rules:
+                self.label_rules[label].add(workflow_name)
+            else:
+                self.label_rules[label] = {workflow_name}
+
+    def generate_json(self) -> None:
+        output = {
+            "version": self.version,
+            "label_rules": {
+                label: sorted(list(workflows))
+                for label, workflows in self.label_rules.items()
+            }
+        }
+        with open(self.output_file, 'w') as outfile:
+            json.dump(output, outfile, indent=2, sort_keys=True)
+            outfile.write('\n')
+
+
+@dataclass
 class CIWorkflow:
     # Required fields
     arch: Arch
@@ -157,7 +185,7 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10-cudnn7-py3",
+        build_environment="win-vs2019-cuda10.1-py3",
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
@@ -166,14 +194,14 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda11-cudnn8-py3",
+        build_environment="win-vs2019-cuda11.1-py3",
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="periodic-win-vs2019-cuda11-cudnn8-py3",
+        build_environment="periodic-win-vs2019-cuda11.3-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -235,14 +263,14 @@ LINUX_WORKFLOWS = [
     # ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
+        build_environment="linux-xenial-cuda10.2-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         enable_jit_legacy_test=1,
@@ -260,28 +288,28 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
+        build_environment="libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
+        build_environment="linux-xenial-cuda11.1-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
+        build_environment="libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="periodic-linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -295,7 +323,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
@@ -418,6 +446,25 @@ if __name__ == "__main__":
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
+    # Delete the existing generated files first, this should align with .gitattributes file description.
+    existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
+    for w in existing_workflows:
+        try:
+            os.remove(w)
+        except Exception as e:
+            print(f"Error occurred when deleting file {w}: {e}")
+
+    ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
         for workflow in workflows:
             workflow.generate_workflow_file(workflow_template=template)
+
+            if workflow.ciflow_config.enabled:
+                ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+            elif workflow.on_pull_request:
+                # If ciflow is disabled but still on_pull_request, we can denote
+                # it as a special label 'ciflow/default' in the ruleset, which will be later
+                # turned into an actual 'ciflow/default' label in the workflow.
+                # During the rollout phase, it has the same effect as 'ciflow/default'
+                ciflow_ruleset.add_label_rule({'ciflow/default'}, workflow.build_environment)
+    ciflow_ruleset.generate_json()
