@@ -239,14 +239,37 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
     def slice(self):
         return _DataPipeSlice(self)
 
+
 class SliceIterDataPipe(IterableDataset):
-    def __init__(self, source_dp, slice):
+    def __init__(self, source_dp, apply_slice):
         self.source_dp = source_dp
-        self._slice = slice
+        if isinstance(apply_slice, slice) or isinstance(apply_slice, int):
+            self._slice = apply_slice
+            self._slice_is_tuple = False
+        elif isinstance(apply_slice, tuple):
+            is_valid = True
+            for sub_slice in apply_slice:
+                is_valid = is_valid and (isinstance(sub_slice, slice) or isinstance(sub_slice, int))
+            if not is_valid:
+                raise ValueError('Invalid slicing argument given {}'.format(apply_slice))
+            self._slice_is_tuple = True
+        else:
+            raise ValueError('Invalid slicing argument given {}'.format(apply_slice))
+        self._slice = apply_slice
 
     def __iter__(self):
-        for data in self.source_dp:
-            yield data[self._slice]
+        if self._slice_is_tuple:
+            for data in self.source_dp:
+                result = []
+                for slice_param in self._slice:
+                    if isinstance(slice_param, int):
+                        result.append(data[slice_param])
+                    elif isinstance(slice_param, slice):
+                        result += data[slice_param]
+                yield tuple(result)
+        else:
+            for data in self.source_dp:
+                yield data[self._slice]
 
 class _DataPipeSlice:
     def __init__(self, source_datapipe):

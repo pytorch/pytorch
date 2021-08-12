@@ -113,7 +113,7 @@ class TestDataChunk(TestCase):
 
     def test_as_string(self):
         elements = list(range(10))
-        chunk : DataChunk[int] = DataChunk(elements)
+        chunk: DataChunk[int] = DataChunk(elements)
         self.assertEquals(str(chunk), str(elements))
 
 
@@ -315,12 +315,16 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(expected, list(sliced))
 
         sliced = numbers.slice[2:4]
-        expected = [(2, 3), (3, 4)]
-        self.assertEqual(expected, list(sliced))
+        expected_1 = [(2, 3), (3, 4)]
+        self.assertEqual(expected_1, list(sliced))
 
         sliced = numbers.slice[:2]
-        expected = [(0, 1), (1, 2)]
-        self.assertEqual(expected, list(sliced))
+        expected_2 = [(0, 1), (1, 2)]
+        self.assertEqual(expected_2, list(sliced))
+
+        sliced = numbers.slice[0, 2:4]
+        expected_3 = [(0, 2, 3), (1, 3, 4)]
+        self.assertEqual(expected_3, list(sliced))
 
 
 class FileLoggerSimpleHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
