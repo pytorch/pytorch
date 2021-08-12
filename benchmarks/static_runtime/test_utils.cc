@@ -7,7 +7,6 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <torch/csrc/jit/runtime/static/ops.h>
 #include <memory>
 #include <unordered_map>
 
@@ -121,17 +120,6 @@ void compareTensorLists(
   }
 }
 
-void checkNoInterpreterOp(const StaticModule& smodule) {
-  static const std::unordered_set<std::string> fb_only_ops{"aten::add"};
-  for (const auto& pnode : smodule.nodes()) {
-    auto op_name = pnode.node()->kind().toQualString();
-    if (disableUnsafeMathOp(op_name) || fb_only_ops.count(op_name) > 0) {
-      continue;
-    }
-    EXPECT_TRUE(pnode.has_out_variant() || pnode.has_native_op());
-  }
-}
-
 void compareResults(
     const IValue& expect,
     const IValue& actual,
@@ -191,8 +179,7 @@ void testStaticRuntime(
     const std::vector<IValue>& args,
     const std::vector<IValue>& args2,
     const bool use_allclose,
-    const bool use_equalnan,
-    const bool expect_fallback) {
+    const bool use_equalnan) {
   auto test_context = makeTestContext(source);
 
   std::vector<IValue> args_tensors, args_copy;
@@ -209,9 +196,6 @@ void testStaticRuntime(
   for (bool enable_out_variant : {true, false}) {
     auto smodule = test_context->makeStaticModule(
         {true, enable_out_variant, enable_out_variant});
-    if (enable_out_variant && !expect_fallback) {
-      checkNoInterpreterOp(smodule);
-    }
     auto actual = smodule(args, {});
     if (actual.isTensor()) {
       EXPECT_GE(smodule.nodes().size(), 2)
