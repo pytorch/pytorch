@@ -764,7 +764,7 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
   Intrinsics(
       IntrinsicsOp op_type,
       Dtype dtype,
-      const std::vector<Expr*>& params)
+      const std::vector<ExprPtr>& params)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
         params_(params),
         op_type_(op_type) {

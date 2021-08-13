@@ -193,14 +193,14 @@ void IRVisitor::visit(CondPtr v) {
 
 void IRVisitor::visit(TermPtr v) {
   v->scalar()->accept(this);
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     t->accept(this);
   }
 }
 
 void IRVisitor::visit(PolynomialPtr v) {
   v->scalar()->accept(this);
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     t->accept(this);
   }
 }
@@ -214,7 +214,7 @@ void IRVisitor::visit(MaxTermPtr v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     t->accept(this);
   }
 }
@@ -223,7 +223,7 @@ void IRVisitor::visit(MinTermPtr v) {
   if (v->scalar()) {
     v->scalar()->accept(this);
   }
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     t->accept(this);
   }
 }
@@ -231,7 +231,7 @@ void IRVisitor::visit(MinTermPtr v) {
 void IRVisitor::visit(ReduceOpPtr v) {
   v->body()->accept(this);
 
-  for (auto* r : v->reduce_args()) {
+  for (auto r : v->reduce_args()) {
     r->accept(this);
   }
 }

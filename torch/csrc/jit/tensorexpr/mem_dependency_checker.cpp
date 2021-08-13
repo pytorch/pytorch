@@ -63,11 +63,11 @@ std::vector<ExprPtr> AccessInfo::getIndices() const {
   std::vector<ExprPtr> indices;
 
   if (expr_) {
-    if (auto* load = to<Load>(expr_)) {
+    if (auto load = to<Load>(expr_)) {
       indices = load->indices();
     }
   } else {
-    if (auto* store = to<Store>(stmt_)) {
+    if (auto store = to<Store>(stmt_)) {
       indices = store->indices();
     }
   }
@@ -259,10 +259,10 @@ MemDependencyChecker::MemDependencyChecker() {
 MemDependencyChecker::MemDependencyChecker(
     const std::unordered_set<BufPtr>& inputs,
     const std::unordered_set<BufPtr>& outputs) {
-  for (auto* s : inputs) {
+  for (auto s : inputs) {
     inputs_[s] = nullptr;
   }
-  for (auto* s : outputs) {
+  for (auto s : outputs) {
     outputs_[s] = nullptr;
   }
 
@@ -1035,7 +1035,7 @@ void MemDependencyChecker::insertBuffers(
     BufPtr b = pair.first;
     VarPtr var = b->base_handle();
     IndexBounds bounds;
-    for (auto* d : b->dims()) {
+    for (auto d : b->dims()) {
       bounds.push_back(
           {alloc<IntImm>(0),
            IRSimplifier::simplify(alloc<Sub>(d, alloc<IntImm>(1)))});
@@ -1063,11 +1063,11 @@ void MemDependencyChecker::visit(BlockPtr v) {
     currentScope_ = std::make_shared<Scope>((BlockPtr)v, prev_scope);
   }
 
-  for (auto* s : *v) {
+  for (auto s : *v) {
     s->accept(this);
   }
 
-  for (auto* v : currentScope_->localVars) {
+  for (auto v : currentScope_->localVars) {
     knownVarBounds_.erase(v);
   }
   for (auto& pair : currentScope_->shadowedVarBounds) {
@@ -1301,7 +1301,7 @@ std::vector<Bound> MemDependencyChecker::getIndicesBounds(
   std::vector<Bound> bounds;
   bounds.reserve(indices.size());
   VarBoundBinder binder(knownVarBounds_);
-  for (auto* s : indices) {
+  for (auto s : indices) {
     bounds.push_back(binder.getBounds(s));
   }
   return bounds;

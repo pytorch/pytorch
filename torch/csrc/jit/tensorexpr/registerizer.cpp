@@ -46,10 +46,10 @@ void AccessInfo::merge(const std::shared_ptr<AccessInfo>& other) {
   TORCH_INTERNAL_ASSERT(indices_.size() == other->indices().size());
 
   last_usage_ = other->last_usage();
-  for (auto* s : other->stores()) {
+  for (auto s : other->stores()) {
     stores_.push_back(s);
   }
-  for (auto* l : other->loads()) {
+  for (auto l : other->loads()) {
     loads_.push_back(l);
   }
 
@@ -89,7 +89,7 @@ bool AccessInfo::overlaps(const std::shared_ptr<AccessInfo>& other) {
 
 bool AccessInfo::dependsOnVar(VarPtr v) {
   VarFinder vf;
-  for (auto* i : indices_) {
+  for (auto i : indices_) {
     i->accept(&vf);
   }
 
@@ -107,10 +107,10 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
   newInfo->firstUsageOverlapped_ = orig->firstUsageOverlapped_;
   newInfo->store_cost_ = orig->store_cost_;
   newInfo->load_cost_ = orig->load_cost_;
-  for (auto* s : orig->stores_) {
+  for (auto s : orig->stores_) {
     newInfo->stores_.push_back(s);
   }
-  for (auto* s : orig->loads_) {
+  for (auto s : orig->loads_) {
     newInfo->loads_.push_back(s);
   }
 
@@ -121,7 +121,7 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
 
 void AccessInfo::print() const {
   std::cout << "Access: " << *buf_ << "{";
-  for (auto* i : indices_) {
+  for (auto i : indices_) {
     std::cout << *i << " ";
   }
   std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
@@ -227,7 +227,7 @@ void RegisterizerAnalysis::visit(ForPtr v) {
       bool closed = false;
       // If this access depends on a locally scoped variable, it cannot be
       // hosted out of the loop.
-      for (auto* v : currentScope_->localVars()) {
+      for (auto v : currentScope_->localVars()) {
         if (candidate->dependsOnVar(v)) {
           closeAccessIntoScope(candidate, currentScope_);
           closed = true;
@@ -354,7 +354,7 @@ void RegisterizerAnalysis::visit(BlockPtr v) {
 
   stmtStack_.push_front(v);
 
-  for (auto* s : *v) {
+  for (auto s : *v) {
     s->accept(this);
     if (currentScope_->block() != v) {
       // merge the inner block's accesses into this Block's accesses.
@@ -386,7 +386,7 @@ void RegisterizerAnalysis::visit(StorePtr v) {
 
   // hash the Store:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
-  for (auto* i : v->indices()) {
+  for (auto i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
 
@@ -435,7 +435,7 @@ void RegisterizerAnalysis::visit(LoadPtr v) {
   }
   // hash the Load:
   SimplifierHashType accessHash = hasher_.hash(v->buf());
-  for (auto* i : v->indices()) {
+  for (auto i : v->indices()) {
     accessHash = hasher_.hash_combine(accessHash, i);
   }
 
@@ -607,7 +607,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
 
       // If this access depends on a locally scoped variable, it cannot be
       // lifted out of the loop.
-      for (auto* v : currentScope_->localVars()) {
+      for (auto v : currentScope_->localVars()) {
         if (candidate->dependsOnVar(v)) {
           closeAccessIntoScope(candidate, parent);
           handled = true;
@@ -731,7 +731,7 @@ void RegisterizerReplacer::buildReplacements() {
         alloc<Buf>(v, std::vector<ExprPtr>({}), info->buf()->dtype());
 
     bool first = true;
-    for (auto* s : info->stores()) {
+    for (auto s : info->stores()) {
       if (first && info->first_usage() == s && !info->firstUsageOverlapped()) {
         info->replacement().initializer = alloc<Let>(v, s->value());
         eliminatedIntializers_.insert(s);
@@ -742,7 +742,7 @@ void RegisterizerReplacer::buildReplacements() {
       first = false;
     }
 
-    for (auto* s : info->loads()) {
+    for (auto s : info->loads()) {
       loadToAccess_[s] = info;
     }
 

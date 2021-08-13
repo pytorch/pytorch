@@ -1502,7 +1502,7 @@ TEST(LLVM, RFactorReduction) {
   loops = loop.getLoopStmtsFor(b);
   loop_m = loops.at(2);
   loop_n = loops.at(1);
-  auto b_body = const_cast<StmtPtr>(loop.getAllWritesToBuf(b->buf())[1]);
+  auto b_body = loop.getAllWritesToBuf(b->buf())[1];
   ASSERT_TRUE(loop.rfactor(b_body, loop_n));
 
   loop.prepareForCodegen();
@@ -1543,7 +1543,7 @@ TEST(LLVM, RFactorVectorizedReduction) {
   std::vector<ForPtr> loops = loopnest.getLoopStmtsFor(b);
   // Reorder n and m loops
   loopnest.reorderAxis(loops.at(1), loops.at(2));
-  auto b_body = const_cast<StmtPtr>(loopnest.getAllWritesToBuf(b->buf()).at(1));
+  auto b_body = loopnest.getAllWritesToBuf(b->buf()).at(1);
   auto all_loops = loopnest.getAllLoopNestsWritingToBuf(b->buf());
   ASSERT_TRUE(all_loops.size() == 2 && all_loops[1].size() == 3);
   ASSERT_TRUE(loopnest.rfactor(b_body, all_loops[1][1]));

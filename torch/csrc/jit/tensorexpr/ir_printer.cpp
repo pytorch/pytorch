@@ -278,7 +278,7 @@ void IRPrinter::visit(IntrinsicsPtr v) {
 void IRPrinter::visit(TermPtr v) {
   os() << "Term(";
   v->scalar()->accept(this);
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     os() << ",";
     t->accept(this);
   }
@@ -288,7 +288,7 @@ void IRPrinter::visit(TermPtr v) {
 void IRPrinter::visit(PolynomialPtr v) {
   bool first = true;
   os() << "Polynomial(";
-  for (auto* t : v->variables()) {
+  for (auto t : v->variables()) {
     if (!first) {
       os() << " + ";
     }
@@ -347,7 +347,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
   bool first = true;
   os() << "reduce_args={";
-  for (auto* d : v->reduce_args()) {
+  for (auto d : v->reduce_args()) {
     if (!first) {
       os() << ", ";
     }
@@ -547,9 +547,8 @@ std::ostream& operator<<(std::ostream& stream, const Tensor& t) {
 
 void print(ExprPtr expr) {
   if (expr) {
-    ExprPtr mutable_expr = const_cast<ExprPtr>(expr);
     IRPrinter p(std::cout);
-    p.print(*mutable_expr);
+    p.print(*expr);
   } else {
     std::cout << "(null expr)";
   }
@@ -558,9 +557,8 @@ void print(ExprPtr expr) {
 
 void print(StmtPtr stmt) {
   if (stmt) {
-    StmtPtr mutable_stmt = const_cast<StmtPtr>(stmt);
     IRPrinter p(std::cout);
-    p.print(*mutable_stmt);
+    p.print(*stmt);
   } else {
     std::cout << "(null stmt)\n";
   }
