@@ -805,7 +805,7 @@ class BuildExtension(build_ext, object):
                     min_compiler_version, max_compiler_version = cuda_compiler_bounds[cuda_str_version]
                     major_compiler_version = int(compiler_version[0])
                     if isinstance(min_compiler_version, float) or isinstance(max_compiler_version, float):
-                        major_compiler_version = float(''.join(compiler_version[:2]))
+                        major_compiler_version = float('.'.join(compiler_version[:2]))
                     version_str = '.'.join(compiler_version)
 
                     version_bound_str = ''
