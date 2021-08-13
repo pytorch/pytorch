@@ -30,6 +30,7 @@ _DEVICE_CONTEXTS_LOCK = threading.Lock()
 
 
 class DeviceContext(object):
+    __slot__ = ['device']
 
     def __init__(self, device):
         self.device = device
@@ -732,13 +733,15 @@ def mark_step():
     devctx.all_reduce_token = None
 
 
-def wait_device_ops(devices=[]):
+def wait_device_ops(devices=None):
     """Waits for all the async operations on the given devices to complete.
 
     Args:
       devices (string..., optional): The devices whose async ops need to be waited
         for. If empty, all the local devices will be waited for.
     """
+    if devices is None:
+        devices = []
     lazy_tensor_core._LAZYC._ltc_wait_device_ops(devices=devices)
 
 
@@ -762,7 +765,7 @@ def reduce_gradients(optimizer, groups=None):
             REDUCE_SUM, gradients, scale=1.0 / count, groups=groups, cctx=cctx)
 
 
-def optimizer_step(optimizer, barrier=False, optimizer_args={}, groups=None):
+def optimizer_step(optimizer, barrier=False, optimizer_args=None, groups=None):
     """Run the provided optimizer step and issue the device step computation.
 
     Args:
@@ -785,6 +788,8 @@ def optimizer_step(optimizer, barrier=False, optimizer_args={}, groups=None):
     Returns:
       The same value returned by the `optimizer.step()` call.
     """
+    if optimizer_args is None:
+        optimizer_args = {}
     reduce_gradients(optimizer, groups=groups)
     loss = optimizer.step(**optimizer_args)
     if barrier:
@@ -854,7 +859,7 @@ def send_cpu_data_to_device(data, device):
     return ToLazyTensorArena(convert_fn, select_fn).transform(data)
 
 
-def rendezvous(tag, payload=b'', replicas=[]):
+def rendezvous(tag, payload=b'', replicas=None):
     """Waits for all the mesh clients to reach the named rendezvous.
 
     Args:
@@ -868,6 +873,8 @@ def rendezvous(tag, payload=b'', replicas=[]):
       The payloads exchanged by all the other cores, with the payload of core
       ordinal `i` at position `i` in the returned tuple.
     """
+    if replicas is None:
+        replicas = []
     return lazy_tensor_core._LAZYC._lazy_rendezvous(get_ordinal(), tag, payload, replicas)
 
 

@@ -44,7 +44,7 @@ def _get_device_spec(device):
 
 def write_to_summary(summary_writer,
                      global_step=None,
-                     dict_to_write={},
+                     dict_to_write=None,
                      write_ltc_metrics=False):
     """Writes scalars to a Tensorboard SummaryWriter.
 
@@ -62,6 +62,8 @@ def write_to_summary(summary_writer,
     """
     if summary_writer is None:
         return
+    if dict_to_write is None:
+        dict_to_write = {}
     for k, v in dict_to_write.items():
         summary_writer.add_scalar(k, v, global_step)
 
