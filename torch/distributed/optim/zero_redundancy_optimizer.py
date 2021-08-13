@@ -336,14 +336,14 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         If you pass ``overlap_with_ddp=True``, be wary of the following: Given
         the way that overlapping :class:`DistributedDataParallel` with
         :class:`ZeroRedundancyOptimizer` is currently implemented, the first
-        two training iterations do not perform parameter updates in the
-        optimizer step. This is because it needs information about the gradient
-        bucketing strategy used by :class:`DistributedDataParallel`, which is
-        not finalized until the second forward pass if ``static_graph=False``
-        or until the third forward pass if ``static_graph=True``. To adjust
-        for this, one option is to prepend dummy inputs. Note, however, that it
-        is important to still include ``ZeroRedundancyOptimizer.step()`` in the
-        training loop.
+        two or three training iterations do not perform parameter updates in
+        the optimizer step, depending on if ``static_graph=False`` or
+        ``static_graph=True``, respectively. This is because it needs
+        information about the gradient bucketing strategy used by
+        :class:`DistributedDataParallel`, which is not finalized until the
+        second forward pass if ``static_graph=False`` or until the third
+        forward pass if ``static_graph=True``. To adjust for this, one option
+        is to prepend dummy inputs.
 
     .. warning:: ZeroRedundancyOptimizer is experimental and subject to change.
 
@@ -1038,17 +1038,10 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         .. note: Any extra parameters are passed to the base optimizer as-is.
         """
         if self._overlap_with_ddp:
-            # If DDP buckets have been rebuilt, calling `step()` indicates that
-            # the backward pass has fully completed and all information has
-            # been collected; hence, this ZeRO instance can be initialized
-            if self._overlap_info.status == _OverlapStatus.DDP_HAS_REBUILT_BUCKETS:
-                self._overlap_info.status = _OverlapStatus.INITIALIZED
-                # Since all information has been collected, perform the delayed
-                # initialization of the local optimizer and supporting state
-                self._init_zero_for_overlap()
-
-            # `step()` does not actually perform any parameter updates and is
-            # only used for bookkeeping when `overlap_with_ddp=True`
+            logging.warning(
+                "`step()` should not be included in the training loop when "
+                "`overlap_with_ddp=True`"
+            )
             return None
 
         # Perform the local optimizer step
@@ -1426,6 +1419,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         assert self._overlap_with_ddp, \
             "`_init_zero_for_overlap()` should only be called when " \
             "`overlap_with_ddp=True`"
+        self._overlap_info.status = _OverlapStatus.INITIALIZED
         self._clear_cache()
         self._partition_parameters(self._overlap_info.params_per_rank)
         self._build_ddp_param_buckets()
