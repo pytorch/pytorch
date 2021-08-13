@@ -1600,10 +1600,6 @@
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, result, 0)
 
-# NB: `output` instead of `self` saves memory. It avoids saving a copy of self.
-- name: relu_(Tensor(a!) self) -> Tensor(a!)
-  self: threshold_backward(grad, result, 0)
-
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
 
@@ -1642,10 +1638,6 @@
 
 - name: leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor
   self: leaky_relu_backward(grad, result, negative_slope, false)
-  result: auto_element_wise
-
-- name: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
-  self: leaky_relu_backward(grad, result, negative_slope, true)
   result: auto_element_wise
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
