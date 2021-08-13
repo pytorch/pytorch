@@ -3944,6 +3944,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Flatten',
+        cpp_constructor_args='torch::nn::FlattenOptions().start_dim(-3).end_dim(-1)',
         constructor_args=(-3, -1),
         input_size=(3, 4, 5),
         reference_fn=single_batch_reference_fn,
@@ -3951,6 +3952,7 @@ new_module_tests = [
     ),
     dict(
         module_name='Unflatten',
+        cpp_constructor_args='torch::nn::UnflattenOptions(-2, {2, 2})',
         constructor_args=(-2, torch.Size([2, 2])),
         input_size=(3, 4, 5),
         reference_fn=single_batch_reference_fn,
