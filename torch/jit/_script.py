@@ -1263,7 +1263,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 "Please directly inherit from 'object'."
             )
         if _rcb is None:
-            #_rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
