@@ -1069,20 +1069,29 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
 def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    # Ordered as: input, running_mean, running_var, weight=None, bias=None, training=False, momentum=0.1, eps=1e-5
-    # bs, n_feat, size_feat = 4, 5, 6
-    #     input = torch.arange(bs * n_feat * size_feat, device=device,
-    #                          requires_grad=True, dtype=dtype).view(bs, n_feat, size_feat)
-    #     weight = torch.arange(1, n_feat + 1, device=device, requires_grad=True, dtype=dtype)
-    #     bias = torch.arange(n_feat, device=device, requires_grad=True, dtype=dtype)
-    #     running_mean = 1 - torch.arange(n_feat, device=device, dtype=dtype)
-    #     running_var = 2 * torch.arange(n_feat, device=device, dtype=dtype)
-    #     for training in [False, True]:
-    #         _assertGradAndGradgradChecks(self, F.batch_norm, (input, running_mean, running_var, weight, bias,
-                                                              # training, 0.1, 0.0001))
+    # Ordered as: input shape, kwargs for training, momentum, eps
     cases = (
-        ( (S, S, S), )
+        ((S, S, S), {'training': False, 'momentum': 0.5, 'eps': 0.6}),
+        ((3, 2, 4), {'training': True, 'momentum': -1.2}),
+        ((3, 1), {'training': True, 'momentum': 0.0}),
+        ((2, 1), {'training': True, 'momentum': 0.2}),
+        ((1, 1, 2), {'training': False, 'momentum': 0.5}),
+        ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5})
     )
+
+    def generator():
+        for input_shape, kwargs in cases:
+            # args: running mean, running var, weight and bias should necessarily be of shape: (C,)
+            channels = input_shape[1]
+            yield SampleInput(
+                make_arg(input_shape),
+                args = (
+                    make_arg(channels), make_arg(channels), make_arg(channels), make_arg(channels)
+                ),
+                kwargs = kwargs
+            )
+
+    return list(generator())
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -6708,8 +6717,14 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_out'),
            )),
     OpInfo('nn.functional.batch_norm',
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           sample_inputs_func=sample_inputs_batch_norm)
+           aten_name='batch_norm',
+           dtypes=floating_types(),
+           supports_out=False,
+           supports_autograd=False,
+           skips=(
+               SkipInfo('TestJit', 'test_variant_consistency_jit'),
+           ),
+           sample_inputs_func=sample_inputs_batch_norm),
     OpInfo('nn.functional.hardshrink',
            aten_name="hardshrink",
            dtypes=floating_types(),
