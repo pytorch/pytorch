@@ -156,7 +156,7 @@ void IRVisitor::visit(IfThenElse* v) {
 }
 
 void IRVisitor::visit(Intrinsics* v) {
-  for (auto i : c10::irange(v->nparams())) {
+  for (const auto i : c10::irange(v->nparams())) {
     v->param(i)->accept(this);
   }
 }
