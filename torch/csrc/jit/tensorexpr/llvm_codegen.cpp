@@ -1134,9 +1134,9 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
   bool unmasked_load = true;
 
   // Handle the case where the load is contiguous and unmasked efficiently
-  auto* idx_ramp = to<Ramp>(v->flat_index());
+  auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto* stride_imm = to<IntImm>(idx_ramp->stride());
+    auto stride_imm = to<IntImm>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       v->base_handle()->accept(this);
       auto base = this->value_;
@@ -1419,9 +1419,9 @@ void LLVMCodeGenImpl::visit(StorePtr v) {
   auto val = this->value_;
 
   // Handle the case where the store is contiguous and unmasked efficiently
-  auto* idx_ramp = to<Ramp>(v->flat_index());
+  auto idx_ramp = to<Ramp>(v->flat_index());
   if (idx_ramp) {
-    auto* stride_imm = to<IntImm>(idx_ramp->stride());
+    auto stride_imm = to<IntImm>(idx_ramp->stride());
     if (stride_imm && stride_imm->value() == 1) {
       idx_ramp->base()->accept(this);
       auto first_idx = value_;

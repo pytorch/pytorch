@@ -2628,7 +2628,7 @@ void LoopNestReorderTestHelper(
 
   auto loops = l.getAllLoopNestsWritingToBuf(c->buf()).at(0);
   int j = 0;
-  for (auto* l : loops) {
+  for (auto l : loops) {
     // Add an increment at each layer of the loop which counts the number of
     // times the loop executes.
     LoadPtr load =
@@ -2765,7 +2765,7 @@ TEST(LoopNest, LoopNestReorderInternalLoopNest) {
   ForPtr a = nullptr;
   ForPtr b = nullptr;
   auto fors = NodeFinder<For>::find(l.root_stmt());
-  for (auto* f : fors) {
+  for (auto f : fors) {
     if (f->var()->name_hint() == "m2") {
       a = f;
     } else if (f->var()->name_hint() == "k2") {

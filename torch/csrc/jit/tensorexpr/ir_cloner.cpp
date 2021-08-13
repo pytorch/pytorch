@@ -199,7 +199,7 @@ ExprPtr IRCloner::mutate(PolynomialPtr v) {
   std::vector<TermPtr> variables_new;
   variables_new.reserve(v->variables().size());
   for (auto t : v->variables()) {
-    variables_new.push_back(static_cast<TermPtr>(t->accept_mutator(this)));
+    variables_new.push_back(static_to<Term>(t->accept_mutator(this)));
   }
   return alloc<Polynomial>(v->hasher(), scalar_new, variables_new);
 }
@@ -241,7 +241,7 @@ ExprPtr IRCloner::mutate(ReduceOpPtr v) {
   std::vector<VarPtr> reduce_args_new;
   reduce_args_new.reserve(v->reduce_args().size());
   for (auto r : v->reduce_args()) {
-    reduce_args_new.push_back(static_cast<VarPtr>(r->accept_mutator(this)));
+    reduce_args_new.push_back(static_to<Var>(r->accept_mutator(this)));
   }
 
   return alloc<ReduceOp>(body_new, reduce_args_new, v->reducer());
