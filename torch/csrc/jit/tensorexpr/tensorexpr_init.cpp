@@ -466,7 +466,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "split_with_tail",
           [](ForPtr f, int factor) {
-            For *inner = nullptr, *tail = nullptr;
+            ForPtr inner = nullptr, tail = nullptr;
             LoopNest::splitWithTail(f, factor, &inner, &tail);
             return std::make_tuple(inner, tail);
           },
@@ -482,7 +482,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "slice_head",
           [](ForPtr f, int factor) {
-            For *head = nullptr, *tail = nullptr;
+            ForPtr head = nullptr, tail = nullptr;
             LoopNest::sliceHead(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
@@ -490,7 +490,7 @@ void initTensorExprBindings(PyObject* module) {
       .def(
           "slice_tail",
           [](ForPtr f, int factor) {
-            For *head = nullptr, *tail = nullptr;
+            ForPtr head = nullptr, tail = nullptr;
             LoopNest::sliceTail(f, factor, &head, &tail);
             return std::make_tuple(head, tail);
           },
