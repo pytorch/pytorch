@@ -163,9 +163,9 @@ IValue UserRRef::toHere(const float timeoutSeconds) const {
   c10::intrusive_ptr<OutgoingMessage> msgToSend;
 
   if (isPyObj()) {
-    msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = PythonRRefFetchCall(ownerId_, rrefId()).toMessage("PythonRRefFetchCall meta");
   } else {
-    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
+    msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage("PythonRRefFetchCall meta");
   }
 
   // toHere is profiled as a blocking call, and does not execute operations on

@@ -53,7 +53,7 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
   auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
   auto jitFuture = rpcAgent->send(
       rpcAgent->getWorkerInfo(fromWorkerId_),
-      std::move(gradCall).toMessage(),
+      std::move(gradCall).toMessage("PropagateGradientsReq meta"),
       rpc::kUnsetRpcTimeout,
       deviceMap_);
 

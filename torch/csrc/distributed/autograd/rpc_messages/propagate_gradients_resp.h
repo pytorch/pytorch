@@ -14,7 +14,7 @@ namespace autograd {
 class TORCH_API PropagateGradientsResp : public rpc::RpcCommandBase {
  public:
   PropagateGradientsResp() = default;
-  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl(const std::string& meta) && override;
   static std::unique_ptr<PropagateGradientsResp> fromMessage(
       const rpc::Message& message);
 };

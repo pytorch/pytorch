@@ -22,11 +22,11 @@ const at::IValue& ScriptResp::value() {
   return value_;
 }
 
-c10::intrusive_ptr<OutgoingMessage> ScriptResp::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> ScriptResp::toMessageImpl(const std::string& meta) && {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(value_, &tensor_table);
   return c10::make_intrusive<OutgoingMessage>(
-      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET);
+      std::move(payload), std::move(tensor_table), MessageType::SCRIPT_RET, meta);
 }
 
 std::unique_ptr<ScriptResp> ScriptResp::fromMessage(const Message& message) {

@@ -47,7 +47,7 @@ c10::intrusive_ptr<JitFuture> rpcTorchscript(
   auto jitFuture = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
-      std::move(*scriptCall).toMessage(),
+      std::move(*scriptCall).toMessage(meta),
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
@@ -112,13 +112,12 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         userRRefPtr->rrefId(),
         userRRefPtr->forkId(),
-        meta,
         isAsyncExecution);
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
-        std::move(*scriptRemoteCall).toMessage(),
+        std::move(*scriptRemoteCall).toMessage(meta),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
@@ -140,13 +139,12 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         std::move(stack),
         ownerRRefPtr->rrefId(),
         ownerRRefPtr->rrefId(),
-        meta,
         isAsyncExecution);
 
     auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
-        std::move(*scriptRemoteCall).toMessage(),
+        std::move(*scriptRemoteCall).toMessage(meta),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 

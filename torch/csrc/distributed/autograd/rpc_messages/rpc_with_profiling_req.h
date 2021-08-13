@@ -30,7 +30,7 @@ class TORCH_API RpcWithProfilingReq : public rpc::RpcCommandBase {
       rpc::ProfilingId profilingKeyId);
 
   // Convert this RPC Command to a Message that can be sent over the wire.
-  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl() && override;
+  c10::intrusive_ptr<rpc::OutgoingMessage> toMessageImpl(const std::string& meta) && override;
   static std::unique_ptr<RpcWithProfilingReq> fromMessage(
       const rpc::Message& message);
 

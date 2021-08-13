@@ -211,6 +211,8 @@ class TORCH_API OutgoingMessage final : public torch::CustomClassHolder {
 
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> getStorages() const;
 
+  const std::string& meta() { return meta_; }
+
  private:
   c10::intrusive_ptr<Message> message_;
   std::string meta_;

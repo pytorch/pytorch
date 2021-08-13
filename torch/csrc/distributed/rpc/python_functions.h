@@ -24,9 +24,9 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
 c10::intrusive_ptr<JitFuture> pyRpcBuiltin(
     const WorkerInfo& dst,
     const std::string& opName,
-    const std::string& meta,
     const py::args& args,
     const py::kwargs& kwargs,
+    const std::string& meta,
     const float rpcTimeoutSeconds);
 
 c10::intrusive_ptr<JitFuture> pyRpcPythonUdf(

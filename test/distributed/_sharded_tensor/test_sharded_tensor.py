@@ -19,6 +19,7 @@ from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
     skip_if_lt_x_gpu,
+    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -106,6 +107,8 @@ class ShardedTensorTestBase(object):
 def with_comms(func):
     @wraps(func)
     def wrapper(self):
+        if torch.cuda.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.init_comms()
         func(self)
         self.destroy_comms()

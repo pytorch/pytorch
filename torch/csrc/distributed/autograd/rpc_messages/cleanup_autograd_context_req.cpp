@@ -13,7 +13,7 @@ int64_t CleanupAutogradContextReq::getContextId() {
   return context_id_;
 }
 
-c10::intrusive_ptr<rpc::OutgoingMessage> CleanupAutogradContextReq::toMessageImpl() && {
+c10::intrusive_ptr<rpc::OutgoingMessage> CleanupAutogradContextReq::toMessageImpl(const std::string& meta) && {
   // pickle context_id using JIT pickler.
   std::vector<torch::Tensor> tensorTable;
   std::vector<char> payload =
@@ -21,7 +21,8 @@ c10::intrusive_ptr<rpc::OutgoingMessage> CleanupAutogradContextReq::toMessageImp
   return c10::make_intrusive<rpc::OutgoingMessage>(
       std::move(payload),
       std::move(tensorTable),
-      rpc::MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ);
+      rpc::MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ,
+      meta);
 }
 
 std::unique_ptr<CleanupAutogradContextReq> CleanupAutogradContextReq::

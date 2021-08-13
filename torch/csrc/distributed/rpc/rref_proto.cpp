@@ -30,7 +30,8 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
 
 c10::intrusive_ptr<OutgoingMessage> fromIValues(
     std::vector<IValue> ivalues,
-    MessageType type) {
+    MessageType type,
+    const std::string& meta) {
   std::vector<torch::Tensor> tensor_table;
   auto payload = jit::pickle(
       c10::ivalue::Tuple::create(std::move(ivalues)), &tensor_table);
@@ -46,8 +47,8 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-c10::intrusive_ptr<OutgoingMessage> RRefMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue()}, type_);
+c10::intrusive_ptr<OutgoingMessage> RRefMessageBase::toMessageImpl(const std::string& meta) && {
+  return fromIValues({rrefId_.toIValue()}, type_, meta);
 }
 
 at::IValue RRefMessageBase::fromMessage(
@@ -66,8 +67,8 @@ const ForkId& ForkMessageBase::forkId() {
   return forkId_;
 }
 
-c10::intrusive_ptr<OutgoingMessage> ForkMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_);
+c10::intrusive_ptr<OutgoingMessage> ForkMessageBase::toMessageImpl(const std::string& meta) && {
+  return fromIValues({rrefId_.toIValue(), forkId_.toIValue()}, type_, meta);
 }
 
 std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
@@ -84,12 +85,12 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
 
 /////////////////////////// RRef Protocol //////////////////////////////////
 
-c10::intrusive_ptr<OutgoingMessage> ScriptRRefFetchCall::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> ScriptRRefFetchCall::toMessageImpl(const std::string& meta) && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
-  return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL);
+  return fromIValues(std::move(ivalues), MessageType::SCRIPT_RREF_FETCH_CALL, meta);
 }
 
 std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
@@ -106,12 +107,12 @@ std::unique_ptr<ScriptRRefFetchCall> ScriptRRefFetchCall::fromMessage(
       worker_id_t(id), RRefId::fromIValue(values[0]));
 }
 
-c10::intrusive_ptr<OutgoingMessage> PythonRRefFetchCall::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> PythonRRefFetchCall::toMessageImpl(const std::string& meta) && {
   std::vector<at::IValue> ivalues;
   ivalues.reserve(2);
   ivalues.emplace_back(rrefId_.toIValue());
   ivalues.emplace_back(fromWorkerId_);
-  return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL);
+  return fromIValues(std::move(ivalues), MessageType::PYTHON_RREF_FETCH_CALL, meta);
 }
 
 std::unique_ptr<PythonRRefFetchCall> PythonRRefFetchCall::fromMessage(
@@ -132,8 +133,8 @@ const std::vector<at::IValue>& RRefFetchRet::values() {
   return values_;
 }
 
-c10::intrusive_ptr<OutgoingMessage> RRefFetchRet::toMessageImpl() && {
-  return fromIValues(values_, type_);
+c10::intrusive_ptr<OutgoingMessage> RRefFetchRet::toMessageImpl(const std::string& meta) && {
+  return fromIValues(values_, type_, meta);
 }
 
 std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
@@ -169,8 +170,8 @@ const ForkId& RRefChildAccept::forkId() const {
   return forkId_;
 }
 
-c10::intrusive_ptr<OutgoingMessage> RRefChildAccept::toMessageImpl() && {
-  return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT);
+c10::intrusive_ptr<OutgoingMessage> RRefChildAccept::toMessageImpl(const std::string& meta) && {
+  return fromIValues({forkId_.toIValue()}, MessageType::RREF_CHILD_ACCEPT, meta);
 }
 
 std::unique_ptr<RRefChildAccept> RRefChildAccept::fromMessage(
@@ -188,9 +189,9 @@ std::unique_ptr<RRefForkRequest> RRefForkRequest::fromMessage(
   return std::make_unique<RRefForkRequest>(pair.first, pair.second);
 }
 
-c10::intrusive_ptr<OutgoingMessage> RRefAck::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> RRefAck::toMessageImpl(const std::string& meta) && {
   return c10::make_intrusive<OutgoingMessage>(
-      std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK);
+      std::vector<char>{}, std::vector<torch::Tensor>{}, MessageType::RREF_ACK, meta);
 }
 
 std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {

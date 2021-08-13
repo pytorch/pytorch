@@ -21,7 +21,7 @@ PropagateGradientsReq::PropagateGradientsReq(
       grads_(std::move(grads)),
       retainGraph_(retainGraph) {}
 
-c10::intrusive_ptr<OutgoingMessage> PropagateGradientsReq::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> PropagateGradientsReq::toMessageImpl(const std::string& meta) && {
   std::vector<at::IValue> ivalues;
   // Add all the grad tensors.
   for (const auto& grad : grads_) {
@@ -43,7 +43,8 @@ c10::intrusive_ptr<OutgoingMessage> PropagateGradientsReq::toMessageImpl() && {
   return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::move(tensorTable),
-      MessageType::BACKWARD_AUTOGRAD_REQ);
+      MessageType::BACKWARD_AUTOGRAD_REQ,
+      meta);
 }
 
 std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(

@@ -66,7 +66,7 @@ void RpcWithProfilingResp::setWrappedRpc(
   wrappedRpc_ = std::move(wrappedRpc);
 }
 
-c10::intrusive_ptr<rpc::OutgoingMessage> RpcWithProfilingResp::toMessageImpl() && {
+c10::intrusive_ptr<rpc::OutgoingMessage> RpcWithProfilingResp::toMessageImpl(const std::string& meta) && {
   auto wrappedMsgId = wrappedMessage_->id();
   auto wrappedMsgType = wrappedMessage_->type();
   auto wrappedPayload = std::move(*wrappedMessage_).movePayload();
@@ -90,7 +90,8 @@ c10::intrusive_ptr<rpc::OutgoingMessage> RpcWithProfilingResp::toMessageImpl() &
       std::move(wrappedPayload),
       std::move(tensors_),
       messageType_,
-      wrappedMsgId);
+      wrappedMsgId,
+      meta);
   return returnMsg;
 }
 

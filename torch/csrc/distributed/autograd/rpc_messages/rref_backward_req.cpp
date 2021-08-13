@@ -18,7 +18,7 @@ RRefBackwardReq::RRefBackwardReq(
       autogradContextId_(autogradContextId),
       retainGraph_(retainGraph) {}
 
-c10::intrusive_ptr<OutgoingMessage> RRefBackwardReq::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> RRefBackwardReq::toMessageImpl(const std::string& meta) && {
   std::vector<at::IValue> ivalues;
 
   // Add all the fields.
@@ -34,7 +34,8 @@ c10::intrusive_ptr<OutgoingMessage> RRefBackwardReq::toMessageImpl() && {
   return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::move(tensorTable),
-      MessageType::RREF_BACKWARD_REQ);
+      MessageType::RREF_BACKWARD_REQ,
+      meta);
 }
 
 std::unique_ptr<RRefBackwardReq> RRefBackwardReq::fromMessage(

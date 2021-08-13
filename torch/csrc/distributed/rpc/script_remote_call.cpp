@@ -12,24 +12,20 @@ ScriptRemoteCall::ScriptRemoteCall(
     std::shared_ptr<Operator> op,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
-    const ForkId& retForkId,
-    const std::string& meta)
+    const ForkId& retForkId)
     : ScriptCall(std::move(op), std::move(stack)),
       retRRefId_(retRRefId),
-      retForkId_(retForkId),
-      meta_(meta) {}
+      retForkId_(retForkId) {}
 
 ScriptRemoteCall::ScriptRemoteCall(
     const c10::QualifiedName& qualifiedName,
     std::vector<at::IValue>&& stack,
     const RRefId& retRRefId,
     const ForkId& retForkId,
-    const std::string& meta,
     const bool isAsyncExecution)
     : ScriptCall(qualifiedName, std::move(stack), isAsyncExecution),
       retRRefId_(retRRefId),
-      retForkId_(retForkId),
-      meta_(meta) {}
+      retForkId_(retForkId) {}
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
     std::vector<at::IValue>& ivalues) {
@@ -43,19 +39,18 @@ std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromIValues(
 
   if (scriptCallPtr->hasOp()) {
     return std::make_unique<ScriptRemoteCall>(
-        scriptCallPtr->op(), std::move(ivalues), retRRefId, retForkId, "fromMessage");
+        scriptCallPtr->op(), std::move(ivalues), retRRefId, retForkId);
   } else {
     return std::make_unique<ScriptRemoteCall>(
         scriptCallPtr->qualifiedName(),
         std::move(ivalues),
         retRRefId,
         retForkId,
-        "fromMessage",
         scriptCallPtr->isAsyncExecution());
   }
 }
 
-c10::intrusive_ptr<OutgoingMessage> ScriptRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> ScriptRemoteCall::toMessageImpl(const std::string& meta) && {
   std::vector<IValue> ivalues;
   ScriptCall::toIValues(ivalues);
   ivalues.emplace_back(retRRefId_.toIValue());
@@ -69,7 +64,7 @@ c10::intrusive_ptr<OutgoingMessage> ScriptRemoteCall::toMessageImpl() && {
       std::move(payload),
       std::move(tensor_table),
       MessageType::SCRIPT_REMOTE_CALL,
-      meta_);
+      meta);
 }
 
 std::unique_ptr<ScriptRemoteCall> ScriptRemoteCall::fromMessage(

@@ -97,7 +97,7 @@ c10::intrusive_ptr<rpc::OutgoingMessage> getMessageWithProfiling(
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
-  return std::move(wrappedProfilingMsg).toMessage();
+  return std::move(wrappedProfilingMsg).toMessage(wrappedRpcMessage->meta());
 }
 
 c10::intrusive_ptr<rpc::OutgoingMessage> getMessageWithAutograd(
@@ -139,7 +139,7 @@ c10::intrusive_ptr<rpc::OutgoingMessage> getMessageWithAutograd(
   // Record the workerID
   autogradContext->addKnownWorkerId(dstId);
 
-  return std::move(*rpcWithAutograd).toMessage();
+  return std::move(*rpcWithAutograd).toMessage(wrappedRpcMsg->meta());
 }
 
 c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(

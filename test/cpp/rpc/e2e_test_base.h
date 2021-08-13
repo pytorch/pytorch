@@ -77,11 +77,11 @@ class TestE2EBase : public ::testing::Test {
     ctx.addSelfAsFork(ownerRRef);
 
     ScriptRemoteCall scriptRemoteCall(
-        op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId(), "fromMessage");
+        op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId());
     auto jitFuture = autograd::sendMessageWithAutograd(
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
-        std::move(scriptRemoteCall).toMessage(),
+        std::move(scriptRemoteCall).toMessage("test meta"),
         false);
 
     ownerRRef->registerOwnerCreationFuture(jitFuture);
@@ -104,7 +104,7 @@ class TestE2EBase : public ::testing::Test {
     auto response = autograd::sendMessageWithAutograd(
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
-        std::move(scriptCall).toMessage());
+        std::move(scriptCall).toMessage("test meta"));
     response->waitAndThrow();
 
     MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;

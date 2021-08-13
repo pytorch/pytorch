@@ -23,8 +23,7 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
       std::shared_ptr<Operator> op,
       std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
-      const ForkId& retForkId,
-      const std::string& meta);
+      const ForkId& retForkId);
 
   // Constructor for TorchScript function call.
   ScriptRemoteCall(
@@ -32,7 +31,6 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
       std::vector<at::IValue>&& stack,
       const RRefId& retRRefId,
       const ForkId& retForkId,
-      const std::string& meta,
       const bool isAsyncExecution);
 
   inline const RRefId& retRRefId() const {
@@ -46,13 +44,12 @@ class TORCH_API ScriptRemoteCall final : public ScriptCall {
   static std::unique_ptr<ScriptRemoteCall> fromIValues(
       std::vector<at::IValue>& ivalues);
 
-  c10::intrusive_ptr<OutgoingMessage> toMessageImpl() && override;
+  c10::intrusive_ptr<OutgoingMessage> toMessageImpl(const std::string& meta) && override;
   static std::unique_ptr<ScriptRemoteCall> fromMessage(const Message& message);
 
  private:
   const RRefId retRRefId_;
   const ForkId retForkId_;
-  std::string meta_;
 };
 
 } // namespace rpc

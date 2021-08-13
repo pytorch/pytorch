@@ -355,7 +355,7 @@ void PyRRef::backward(
     rpcAgent
         ->send(
             rpcAgent->getWorkerInfo(rref->owner()),
-            std::move(rrefBackwardReq).toMessage())
+            std::move(rrefBackwardReq).toMessage("RRefBackwardReq meta"))
         ->waitAndThrow();
   }
 }

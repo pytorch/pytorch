@@ -481,6 +481,10 @@ for method_name, method in inspect.getmembers(PyRRef):
     setattr(RRef, method_name, new_method)
 
 
+def processMeta(func, args, kwargs):
+    return func, args, kwargs, "meta"
+
+
 @_require_initialized
 def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
     r"""
@@ -633,9 +637,6 @@ def remote(to, func, args=None, kwargs=None, timeout=UNSET_RPC_TIMEOUT):
             rref._set_profiling_future(fut)
 
     return rref
-
-def processMeta(func, args, kwargs):
-    return func, args, kwargs, "meta"
 
 def _invoke_rpc(to, func, rpc_type, args=None, kwargs=None, rpc_timeout=UNSET_RPC_TIMEOUT):
     func, args, kwargs, meta = processMeta(func, args, kwargs)

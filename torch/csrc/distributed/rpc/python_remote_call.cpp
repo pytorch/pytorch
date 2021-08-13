@@ -16,7 +16,7 @@ PythonRemoteCall::PythonRemoteCall(
       retForkId_(std::move(retForkId)),
       isAsyncExecution_(isAsyncExecution) {}
 
-c10::intrusive_ptr<OutgoingMessage> PythonRemoteCall::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> PythonRemoteCall::toMessageImpl(const std::string& meta) && {
   std::vector<IValue> ivalues = std::move(serializedPyObj_).toIValues();
   ivalues.emplace_back(retRRefId_);
   ivalues.emplace_back(retForkId_);
@@ -29,7 +29,8 @@ c10::intrusive_ptr<OutgoingMessage> PythonRemoteCall::toMessageImpl() && {
   return c10::make_intrusive<OutgoingMessage>(
       std::move(payload),
       std::move(tensor_table),
-      MessageType::PYTHON_REMOTE_CALL);
+      MessageType::PYTHON_REMOTE_CALL,
+      meta);
 }
 
 std::unique_ptr<PythonRemoteCall> PythonRemoteCall::fromMessage(

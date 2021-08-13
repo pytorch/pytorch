@@ -146,7 +146,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processScriptCall(
 
   return future->then(
       [](JitFuture& future) {
-        return withStorages(ScriptResp(future.value()).toMessage());
+        return withStorages(ScriptResp(future.value()).toMessage("ScriptResp meta"));
       },
       c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
@@ -196,7 +196,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::assignOwnerRRef(
         } else {
           ownerRRef->setValue(future.value());
         }
-        return withStorages(RemoteRet(rrefId, forkId).toMessage());
+        return withStorages(RemoteRet(rrefId, forkId).toMessage("RemoteRet meta"));
       },
       c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
@@ -242,7 +242,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
 
   return future->then(
       [](JitFuture& future) {
-        return withStorages(ScriptRRefFetchRet({future.value()}).toMessage());
+        return withStorages(ScriptRRefFetchRet({future.value()}).toMessage("ScriptRRefFetchRet meta"));
       },
       c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
 }
@@ -258,7 +258,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefUserDelete(
   auto& ctx = RRefContext::getInstance();
   auto deletedRRef = ctx.delForkOfOwner(rud.rrefId(), rud.forkId());
   handleRRefDelete(deletedRRef);
-  return asFuture(RRefAck().toMessage());
+  return asFuture(RRefAck().toMessage("RRefAck meta"));
 }
 
 void RequestCallbackNoPython::handleRRefDelete(
@@ -271,7 +271,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefChildAccept(
   auto& rca = static_cast<RRefChildAccept&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.delPendingChild(rca.forkId());
-  return asFuture(RRefAck().toMessage());
+  return asFuture(RRefAck().toMessage("RRefAck meta"));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefForkRequest(
@@ -279,7 +279,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::processRRefForkRequest(
   auto& rfr = static_cast<RRefForkRequest&>(rpc);
   auto& ctx = RRefContext::getInstance();
   ctx.addForkOfOwnerIfNotPresent(rfr.rrefId(), rfr.forkId());
-  return asFuture(RRefAck().toMessage());
+  return asFuture(RRefAck().toMessage("RRefAck meta"));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
@@ -382,7 +382,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
         if (execFuture.hasError()) {
           std::rethrow_exception(execFuture.exception_ptr());
         } else {
-          return withStorages(PropagateGradientsResp().toMessage());
+          return withStorages(PropagateGradientsResp().toMessage("PropagateGradientsResp meta"));
         }
       },
       c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());
@@ -398,7 +398,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
   // notified to clean up their context.
   DistAutogradContainer::getInstance().releaseContextIfPresent(
       cleanupContextId);
-  return asFuture(CleanupAutogradContextResp().toMessage());
+  return asFuture(CleanupAutogradContextResp().toMessage("CleanupAutogradContextResp meta"));
 }
 
 c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
@@ -476,7 +476,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
                 wrappedRpcResponseFuture.value().toCustomClass<OutgoingMessage>(),
                 profiledEvents,
                 profilingKeyId);
-            return withStorages(std::move(*rpcWithProfilingResp).toMessage());
+            return withStorages(std::move(*rpcWithProfilingResp).toMessage("RpcWithProfilingResp meta"));
           }
         }),
         c10::getCustomClassType<c10::intrusive_ptr<OutgoingMessage>>());

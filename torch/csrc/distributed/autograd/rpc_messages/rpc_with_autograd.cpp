@@ -54,7 +54,7 @@ RpcWithAutograd::RpcWithAutograd(
       messageType_ == MessageType::FORWARD_AUTOGRAD_RESP);
 }
 
-c10::intrusive_ptr<OutgoingMessage> RpcWithAutograd::toMessageImpl() && {
+c10::intrusive_ptr<OutgoingMessage> RpcWithAutograd::toMessageImpl(const std::string& meta) && {
   auto messageId = wrappedMessage_->id();
   auto wrappedMessageType = wrappedMessage_->type();
 
@@ -86,7 +86,7 @@ c10::intrusive_ptr<OutgoingMessage> RpcWithAutograd::toMessageImpl() && {
   rpc::writeWrappedPayload(payload, additionalPayload);
 
   return c10::make_intrusive<OutgoingMessage>(
-      std::move(payload), std::move(tensors_), messageType_, messageId);
+      std::move(payload), std::move(tensors_), messageType_, messageId, meta);
 }
 
 std::unique_ptr<RpcWithAutograd> RpcWithAutograd::fromMessage(
