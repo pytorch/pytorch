@@ -174,10 +174,6 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
-    pass
-
-
-def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases: List[Tuple[str, dict]] = [
@@ -218,11 +214,21 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
 def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
     """Reference function for criterion supporting no batch dimensions."""
     output = no_batch_dim_reference_fn(m, *args, **kwargs)
-    reduciton = get_reduction(m)
-    if reduciton == 'none':
+    reduction = get_reduction(m)
+    if reduction == 'none':
         return output.squeeze(0)
     # reduction is 'sum' or 'mean' which results in a 0D tensor
     return output
+
+
+def generate_regression_criterion_inputs(make_input):
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(reduction=reduction),
+            forward_input=FunctionInput(make_input(size=(4, )), make_input(size=4,)),
+            reference_fn=no_batch_dim_reference_criterion_fn,
+            desc='no_batch_dim_{}'.format(reduction)
+        ) for reduction in ['none', 'mean', 'sum']]
 
 
 def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, **kwargs):
@@ -266,16 +272,6 @@ def module_inputs_torch_nn_CELU(module_info, device, dtype, requires_grad, **kwa
                     forward_input=FunctionInput(make_input(size=(3,))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
-
-
-def generate_regression_criterion_inputs(make_input):
-    return [
-        ModuleInput(
-            constructor_input=FunctionInput(reduction=reduction),
-            forward_input=FunctionInput(make_input(size=(4, )), make_input(size=4,)),
-            reference_fn=no_batch_dim_reference_criterion_fn,
-            desc='no_batch_dim_{}'.format(reduction)
-        ) for reduction in ['none', 'mean', 'sum']]
 
 
 def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, **kwargs):
