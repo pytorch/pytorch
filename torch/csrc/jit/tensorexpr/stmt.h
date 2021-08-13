@@ -27,9 +27,9 @@ class TORCH_API Stmt : public KernelScopedObject {
   /*
    * Make a deep copy of the given statement.
    *
-   * All statements used in children of the statement are cloned. Note that
-   * expressions and variables are not deep-copied: it is not necessary since
-   * they are immutable.
+   * All statements and expressions used in children of the statement are
+   * cloned. Note that the variables are not deep-copied since they are
+   * immutable.
    */
   static Stmt* clone(Stmt* s);
 

@@ -57,6 +57,12 @@ class TORCH_API Expr : public KernelScopedObject {
     dtype_ = dtype;
   }
 
+  /*
+   * Make a deep copy of the given expression.
+   *
+   * All sub-expressions inside the given expressions are also cloned. Note
+   * that the variables are not deep-copied since they are immutable.
+   */
   static Expr* clone(Expr* s);
 
  private:

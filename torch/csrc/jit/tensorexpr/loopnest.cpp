@@ -2897,7 +2897,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   Stmt* bd = new Store(
       temp_buf,
       temp_indices,
-      Substitute(Expr::clone(st->value()), rewrite_indices_map));
+      SubstituteInClone(st->value(), rewrite_indices_map));
 
   // Construct the loop nest for the temp computation
   for (const auto i : c10::irange(dims.size())) {
