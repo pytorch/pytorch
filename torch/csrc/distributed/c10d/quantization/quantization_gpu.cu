@@ -1,6 +1,11 @@
-
 #include <caffe2/operators/segment_reduction_op_gpu.cuh>
-#include <torch/csrc/distributed/c10d/quantization_gpu.h>
+#include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
+#include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
+
+namespace torch {
+namespace distributed {
+namespace c10d {
+namespace quantization {
 
 // FP32 -> BF16 kernel
 __global__ inline void _float_to_bfloat16_cuda_kernel(
@@ -48,6 +53,9 @@ __global__ inline void _bfloat16_to_float_cuda_kernel(
 #define CUDA_1D_THREAD_BLOCK_LOOP(i, n) \
   for (size_t i = threadIdx.x; i < (n); i += blockDim.x)
 at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
+  TENSOR_ON_CUDA_GPU(input);
+  // Currently it supports 2D inputs
+  TENSOR_NDIM_EQUALS(input, 2);
 
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(input.get_device());
@@ -91,6 +99,9 @@ at::Tensor _float_to_bfloat16_gpu(const at::Tensor& input) {
 }
 
 at::Tensor _bfloat16_to_float_gpu(const at::Tensor& input) {
+  TENSOR_ON_CUDA_GPU(input);
+  // Currently it supports 2D inputs
+  TENSOR_NDIM_EQUALS(input, 2);
 
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(input.get_device());
@@ -130,3 +141,8 @@ at::Tensor _bfloat16_to_float_gpu(const at::Tensor& input) {
 
   return output;
 }
+
+} // namespace quantization
+} // namespace c10d
+} // namespace distributed
+} // namespace torch
