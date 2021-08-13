@@ -26,7 +26,7 @@ class TestShardingSpec(TestCase):
             DevicePlacementSpec("foo:0")
         with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cuda:foo")
-        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
+        with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
             DevicePlacementSpec("rank:0/cpu2")
 
     def test_chunked_sharding_spec(self):

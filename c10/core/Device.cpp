@@ -49,48 +49,82 @@ DeviceType parse_type(const std::string& device_string) {
       "Expected one of cpu, cuda, xpu, mkldnn, opengl, opencl, ideep, hip, ve, msnpu, mlc, xla, lazy, vulkan, meta, hpu device type at start of device string: ",
       device_string);
 }
+enum DeviceStringParsingState { START, INDEX_START, INDEX_REST, ERROR };
+
 } // namespace
 
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
   TORCH_CHECK(!device_string.empty(), "Device string must not be empty");
 
-  const size_t colon_pos = device_string.find(':');
-  const bool has_device_index = colon_pos != std::string::npos;
-  std::string device_name;
+  std::string device_name, device_index_str;
+  DeviceStringParsingState pstate = DeviceStringParsingState::START;
 
-  if (has_device_index) {
-    const size_t colon_pos_last = device_string.find_last_of(':');
+  // The code below tries to match the string in the variable
+  // device_string against thr regular expression:
+  // ([a-zA-Z_]+)(?::([1-9]\\d*|0))?
+  for (size_t i = 0;
+       pstate != DeviceStringParsingState::ERROR && i < device_string.size();
+       ++i) {
+    const char ch = device_string.at(i);
+    switch (pstate) {
+      case DeviceStringParsingState::START:
+        if (ch != ':') {
+          if (isalpha(ch) || ch == '_') {
+            device_name.push_back(ch);
+          } else {
+            pstate = DeviceStringParsingState::ERROR;
+          }
+        } else {
+          pstate = DeviceStringParsingState::INDEX_START;
+        }
+        break;
+
+      case DeviceStringParsingState::INDEX_START:
+        if (isdigit(ch)) {
+          device_index_str.push_back(ch);
+          pstate = DeviceStringParsingState::INDEX_REST;
+        } else {
+          pstate = DeviceStringParsingState::ERROR;
+        }
+        break;
+
+      case DeviceStringParsingState::INDEX_REST:
+        if (device_index_str.at(0) == '0') {
+          pstate = DeviceStringParsingState::ERROR;
+          break;
+        }
+        if (isdigit(ch)) {
+          device_index_str.push_back(ch);
+        } else {
+          pstate = DeviceStringParsingState::ERROR;
+        }
+        break;
+
+      case DeviceStringParsingState::ERROR:
+        // Execution won't reach here.
+        break;
+    }
+  }
+
+  const bool has_error = device_name.empty() ||
+      pstate == DeviceStringParsingState::ERROR ||
+      (pstate == DeviceStringParsingState::INDEX_START &&
+       device_index_str.empty());
+
+  TORCH_CHECK(!has_error, "Invalid device string: '", device_string, "'");
+
+  try {
+    if (!device_index_str.empty()) {
+      index_ = c10::stoi(device_index_str);
+    }
+  } catch (const std::exception&) {
     TORCH_CHECK(
-        colon_pos == colon_pos_last,
-        "Invalid device string: '",
+        false,
+        "Could not parse device index '",
+        device_index_str,
+        "' in device string '",
         device_string,
         "'");
-    device_name = device_string.substr(0, colon_pos);
-    const std::string device_index_str = device_string.substr(colon_pos + 1);
-    try {
-      size_t next_valid_pos = 0;
-      index_ = c10::stoi(device_index_str, &next_valid_pos);
-
-      // Ensure that the entire string was consumed.
-      TORCH_CHECK(
-          next_valid_pos == device_index_str.size(),
-          "Invalid device string: '",
-          device_string,
-          "' which has additional characters after the device index");
-    } catch (const std::exception&) {
-      TORCH_CHECK(
-          false,
-          "Invalid device string: '",
-          device_string,
-          "' which has an invalid device index");
-    }
-    TORCH_CHECK(
-        index_ >= 0,
-        "Invalid device string: '",
-        device_string,
-        "' which has a negative device index");
-  } else {
-    device_name = device_string;
   }
   type_ = parse_type(device_name);
   validate();
