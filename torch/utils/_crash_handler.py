@@ -9,9 +9,6 @@ if sys.platform == "win32":
     DEFAULT_MINIDUMP_DIR = str(pathlib.Path.home() / "AppData" / "pytorch_crashes")
 
 def enable_minidumps(directory=DEFAULT_MINIDUMP_DIR):
-    # if sys.platform != "linux" and sys.platform != "darwin":
-    #     raise RuntimeError("Minidump collection is currently only implemented for Linux/MacOS platforms")
-    print(DEFAULT_MINIDUMP_DIR)
     if directory == DEFAULT_MINIDUMP_DIR:
         pathlib.Path(directory).mkdir(parents=True, exist_ok=True)
     elif not os.path.exists(directory):
