@@ -713,7 +713,7 @@ TEST(BoundsInference, GetPotentialHazardsLoopSplit) {
 
   LoopNest l({A});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *inner, *tail;
+  ForPtr inner, tail;
 
   // Splitting with tail by something offset creates a tail which also writes to
   // A.
