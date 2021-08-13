@@ -53,6 +53,12 @@ class TORCH_API Expr : public KernelScopedObject {
     return false;
   }
 
+  void set_dtype(Dtype dtype) {
+    dtype_ = dtype;
+  }
+
+  static Expr* clone(Expr* s);
+
  private:
   Dtype dtype_;
   IRNodeType expr_type_;

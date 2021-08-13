@@ -263,6 +263,16 @@ inline Stmt* Substitute(Stmt* stmt, const VarMapping& var_mapping) {
   return stmt->accept_mutator(&var_sub);
 }
 
+inline Expr* SubstituteInClone(Expr* expr, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Expr::clone(expr)->accept_mutator(&var_sub);
+}
+
+inline Stmt* SubstituteInClone(Stmt* stmt, const VarMapping& var_mapping) {
+  VarSubMutator var_sub(var_mapping);
+  return Stmt::clone(stmt)->accept_mutator(&var_sub);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
