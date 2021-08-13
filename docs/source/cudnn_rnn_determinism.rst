@@ -1,4 +1,4 @@
-.. warning::
+.. note::
     There are known non-determinism issues for RNN functions on some versions of cuDNN and CUDA.
     You can enforce deterministic behavior by setting the following environment variables:
 
