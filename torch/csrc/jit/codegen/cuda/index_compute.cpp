@@ -696,7 +696,9 @@ void IndexCompute::run() {
 }
 
 kir::Val* IndexCompute::getExtent(kir::IterDomain* id) {
-  if (extent_map_.find(id) != extent_map_.end()) {
+  if (isParallelTypeThread(id->parallelType())) {
+    return kir::NamedScalar::getParallelDim(id->parallelType());
+  } else if (extent_map_.find(id) != extent_map_.end()) {
     return extent_map_.at(id);
   } else {
     return id->extent();

@@ -229,12 +229,12 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
               gpu_lower->caIndexMap().areMapped(id, loop_id)) {
             concrete_leaf_ids.erase(id);
             auto replayed_id = concrete_to_id_.at(id);
-            if (loop_id->getParallelType() == ParallelType::Vectorize) {
-              replayed_id->parallelize(ParallelType::Vectorize);
-            }
-            if (loop_id->getParallelType() ==
-                ParallelType::MisalignedVectorize) {
-              replayed_id->parallelize(ParallelType::MisalignedVectorize);
+            // Propagate parallelization and vectorization. Necessary
+            // for indexing. IndexCompute::getExtent depends on the
+            // propagated parallelization.
+            if (isParallelTypeVectorize(loop_id->getParallelType()) ||
+                isParallelTypeThread(loop_id->getParallelType())) {
+              replayed_id->parallelize(loop_id->getParallelType());
             }
             return replayed_id;
           }
