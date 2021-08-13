@@ -56,10 +56,9 @@ class modules(_TestParametrizer):
             # TODO: Factor some of this out since it's similar to OpInfo.
             for dtype in floating_types():
                 # Construct the test name.
-                test_name = '{}_{}_{}{}'.format(test.__name__,
-                                                module_info.name.replace('.', '_'),
-                                                device_cls.device_type,
-                                                _dtype_test_suffix(dtype))
+                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
+                                             device_cls.device_type,
+                                             _dtype_test_suffix(dtype))
 
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'module_info': module_info}
