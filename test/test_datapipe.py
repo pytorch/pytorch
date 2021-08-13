@@ -73,7 +73,7 @@ except ImportError:
     HAS_DILL = False
 skipIfNoDill = skipIf(not HAS_DILL, "no dill")
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
 
 def create_temp_dir_and_files():
@@ -110,10 +110,9 @@ def create_temp_dir_and_files():
 
 
 class TestDataChunk(TestCase):
-
     def test_as_string(self):
         elements = list(range(10))
-        chunk : DataChunk[int] = DataChunk(elements)
+        chunk: DataChunk[int] = DataChunk(elements)
         self.assertEqual(str(chunk), str(elements))
 
         batch = [elements] * 3
@@ -122,7 +121,6 @@ class TestDataChunk(TestCase):
 
 
 class TestIterableDataPipeBasic(TestCase):
-
     def setUp(self):
         ret = create_temp_dir_and_files()
         self.temp_dir = ret[0][0]
@@ -711,10 +709,10 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_bucket_batch_datapipe(self):
         input_dp = IDP(range(20))
         with self.assertRaises(AssertionError):
-            dp.iter.BucketBatch(input_dp, batch_size=0)
+            dp.iter.BucketBatcher(input_dp, batch_size=0)
 
         input_dp_nl = IDP_NoLen(range(20))
-        bucket_dp_nl = dp.iter.BucketBatch(input_dp_nl, batch_size=7)
+        bucket_dp_nl = dp.iter.BucketBatcher(input_dp_nl, batch_size=7)
         with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
             len(bucket_dp_nl)
 
@@ -723,7 +721,7 @@ class TestFunctionalIterDataPipe(TestCase):
             arrs = list(range(data_len))
             random.shuffle(arrs)
             input_dp = IDP(arrs)
-            bucket_dp = dp.iter.BucketBatch(input_dp, **kwargs)
+            bucket_dp = dp.iter.BucketBatcher(input_dp, **kwargs)
 
             self.assertEqual(len(bucket_dp), data_len // 3 if kwargs['drop_last'] else data_len // 3 + 1)
 
@@ -749,9 +747,9 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # In-batch shuffle
         _helper(batch_size=3, drop_last=False, batch_num=5, sort_key=_sort_fn)
-        #  _helper(batch_size=3, drop_last=False, batch_num=2, bucket_num=2, sort_key=_sort_fn)
-        #  _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
-        #  _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=False, batch_num=2, bucket_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
+        _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
 
 
     def test_filter_datapipe(self):
