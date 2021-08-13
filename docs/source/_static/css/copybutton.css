@@ -6,7 +6,7 @@ button.copybtn {
     right: .5em;
     width: 1.7em;
     height: 1.7em;
-    opacity: 0;
+    opacity: 1;
     transition: opacity 0.3s, border .3s, background-color .3s;
     user-select: none;
     padding: 0;
@@ -55,7 +55,7 @@ div.highlight  {
  }
 
  .o-tooltip--left:after {
-    opacity: 0;
+    opacity: 1;
     visibility: visible;
     position: absolute;
     content: attr(data-tooltip);
