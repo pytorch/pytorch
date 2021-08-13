@@ -6,6 +6,7 @@ from typing import Dict, Set
 
 import jinja2
 import json
+import os
 from typing_extensions import Literal
 
 YamlShellBool = Literal["''", 1]
@@ -184,7 +185,7 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda10-cudnn7-py3",
+        build_environment="win-vs2019-cuda10.1-py3",
         cuda_version="10.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         on_pull_request=True,
@@ -193,14 +194,14 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda11-cudnn8-py3",
+        build_environment="win-vs2019-cuda11.1-py3",
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="periodic-win-vs2019-cuda11-cudnn8-py3",
+        build_environment="periodic-win-vs2019-cuda11.3-py3",
         cuda_version="11.3",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -262,14 +263,14 @@ LINUX_WORKFLOWS = [
     # ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
+        build_environment="linux-bionic-cuda10.2-py3.9-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
+        build_environment="linux-xenial-cuda10.2-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         enable_jit_legacy_test=1,
@@ -287,28 +288,28 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-xenial-cuda10.2-cudnn7-py3.6-gcc7",
+        build_environment="libtorch-linux-xenial-cuda10.2-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
+        build_environment="linux-xenial-cuda11.1-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-xenial-cuda11.1-cudnn8-py3.6-gcc7",
+        build_environment="libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="periodic-linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
@@ -322,7 +323,7 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-libtorch-linux-xenial-cuda11.3-cudnn8-py3.6-gcc7",
+        build_environment="periodic-libtorch-linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         is_libtorch=True,
@@ -445,6 +446,14 @@ if __name__ == "__main__":
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
     ]
+    # Delete the existing generated files first, this should align with .gitattributes file description.
+    existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
+    for w in existing_workflows:
+        try:
+            os.remove(w)
+        except Exception as e:
+            print(f"Error occurred when deleting file {w}: {e}")
+
     ciflow_ruleset = CIFlowRuleset()
     for template, workflows in template_and_workflows:
         for workflow in workflows:
