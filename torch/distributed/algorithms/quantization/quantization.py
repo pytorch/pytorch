@@ -101,8 +101,10 @@ def auto_quantize(func, qtype, quant_loss=None):
     pass other necessary arguments and then dequantizes the output.
 
     Currently it only supports:
-        . FP16 quantization method
-        . all_gather, all_to_all collective ops
+        . FP16 and BFP16 quantization method
+        . all_gather, all_to_all, and all_to_all_single collective ops
+
+    Note: BFP16 only supports 2D tensors.
 
     Args:
         func (callable): A function representing collective operations.
