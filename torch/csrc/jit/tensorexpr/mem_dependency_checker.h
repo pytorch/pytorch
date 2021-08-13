@@ -295,8 +295,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   VarBoundMap knownVarBounds_;
 
   // Finds all accesses that are reads within the scope of v.
-  template <typename StmtOrExpr>
-  DependencySet getAllReadsWithin(StmtOrExpr* v) {
+  template <typename StmtOrExprPtr>
+  DependencySet getAllReadsWithin(StmtOrExprPtr v) {
     DependencySet reads;
     auto insertAllReads = [&](const auto& nodes) {
       for (auto* l : nodes) {
@@ -336,8 +336,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   }
 
   // Templated helpers to work on either Exprs or Stmts.
-  template <typename StmtOrExpr>
-  bool dependsDirectlyHelper(StmtOrExpr* A, StmtPtr B) {
+  template <typename StmtOrExprPtr>
+  bool dependsDirectlyHelper(StmtOrExprPtr A, StmtPtr B) {
     auto aReads = getAllReadsWithin(A);
     auto bWrites = getAllWritesWithin(B);
 
@@ -352,8 +352,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     return false;
   }
 
-  template <typename StmtOrExpr>
-  bool dependsIndirectlyHelper(StmtOrExpr* A, StmtPtr B) {
+  template <typename StmtOrExprPtr>
+  bool dependsIndirectlyHelper(StmtOrExprPtr A, StmtPtr B) {
     auto aReads = getAllReadsWithin(A);
     auto bWrites = getAllWritesWithin(B);
 

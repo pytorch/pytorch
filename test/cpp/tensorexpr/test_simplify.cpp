@@ -3876,7 +3876,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
     StmtPtr simplified = IRSimplifier::simplify(outer);
     BlockPtr block = to<Block>(simplified);
@@ -3891,7 +3891,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 1, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 2, body);
     StmtPtr simplified = IRSimplifier::simplify(outer);
     ForPtr for__ = static_to<For>(simplified);
@@ -3912,7 +3912,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
     BufHandle c("C", {4}, kInt);
     VarHandle i("i", kInt);
     VarHandle j("j", kInt);
-    auto* body = For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i})));
+    auto body = For::make(i, 0, 2, Store::make(c, {i}, Load::make(a, {i})));
     auto outer = For::make(j, 0, 1, body);
     StmtPtr simplified = IRSimplifier::simplify(outer);
     BlockPtr block = to<Block>(simplified);
@@ -4483,21 +4483,11 @@ TEST(Simplify, SimplifyFuseConditions) {
     // TODO for later.
     auto body = Block::make(
         {Cond::make(
-             CompareSelect::make(
-                 i,
-                 10,
-                 alloc<IntImm>(1),
-                 alloc<IntImm>(0),
-                 CompareSelectOperation::kLT),
+             CompareSelect::make(i, 10, 1, 0, CompareSelectOperation::kLT),
              Store::make(a, {0}, i),
              nullptr),
          Cond::make(
-             CompareSelect::make(
-                 j,
-                 10,
-                 alloc<IntImm>(2),
-                 alloc<IntImm>(0),
-                 CompareSelectOperation::kLT),
+             CompareSelect::make(j, 10, 2, 0, CompareSelectOperation::kLT),
              Store::make(a, {1}, i),
              nullptr)});
 

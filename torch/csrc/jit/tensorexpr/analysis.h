@@ -30,28 +30,28 @@ class HasRand : public IRVisitor {
   bool has_rand_ = false;
 };
 
-template <typename Node>
+template <typename Op>
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class NodeFinder : public IRVisitor {
  public:
-  void visit(Node* v) override {
-    nodes.push_back((Node*)v);
+  void visit(NodePtr<Op> v) override {
+    nodes.push_back((NodePtr<Op>)v);
     IRVisitor::visit(v);
   }
 
-  static std::vector<Node*> find(StmtPtr s) {
-    NodeFinder<Node> nf;
+  static std::vector<NodePtr<Op>> find(StmtPtr s) {
+    NodeFinder<Op> nf;
     s->accept(&nf);
     return nf.nodes;
   }
 
-  static std::vector<Node*> find(ExprPtr e) {
-    NodeFinder<Node> nf;
+  static std::vector<NodePtr<Op>> find(ExprPtr e) {
+    NodeFinder<Op> nf;
     e->accept(&nf);
     return nf.nodes;
   }
 
-  std::vector<Node*> nodes;
+  std::vector<NodePtr<Op>> nodes;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)

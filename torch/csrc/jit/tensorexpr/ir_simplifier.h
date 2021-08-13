@@ -25,11 +25,11 @@ namespace tensorexpr {
 // A bunch of helpers for determine the Dtype of the output of a multi argument
 // Term or Polynomial.
 template <class ExprType>
-Dtype promoteTypesVec(ExprPtr s, std::vector<ExprType*>& v) {
+Dtype promoteTypesVec(ExprPtr s, std::vector<ExprType>& v) {
   Dtype t = s->dtype();
   bool first = true;
 
-  for (auto* e : v) {
+  for (auto e : v) {
     if (first) {
       t = Dtype(t.scalar_type(), e->dtype().lanes());
       first = false;
@@ -40,13 +40,13 @@ Dtype promoteTypesVec(ExprPtr s, std::vector<ExprType*>& v) {
 }
 
 template <class ExprType>
-Dtype promoteTypesVec(std::vector<ExprType*>& v) {
+Dtype promoteTypesVec(std::vector<ExprType>& v) {
   if (v.empty()) {
     throw malformed_input("empty list of types");
   }
 
   Dtype t = v[0]->dtype();
-  for (auto* e : v) {
+  for (auto e : v) {
     t = promoteTypes(t, e->dtype());
   }
   return t;
@@ -84,7 +84,7 @@ Dtype promoteTypesVar(ExprType* e, Args... es) {
   return promoteTypes(lhs, rhs);
 }
 
-// Creates a alloc<Expr> of the given type with the provided lhs and rhs.
+// Creates a new Expr of the given type with the provided lhs and rhs.
 inline ExprPtr newBinaryOpOfType(
     IRNodeType expr_type,
     ExprPtr lhs,
@@ -461,7 +461,7 @@ class TORCH_API PolynomialTransformer : public PolynomialBase {
   // variables.
   ExprPtr addPolynomials(PolynomialPtr lhs, PolynomialPtr rhs);
 
-  // Insert a alloc<Term> into the provided polynomial. If the new term has
+  // Insert a new Term into the provided polynomial. If the new term has
   // common variables to an existing term it is combined.
   ExprPtr insertTerm(PolynomialPtr poly, TermPtr term);
 

@@ -590,7 +590,7 @@ TEST(MemDependency, MemDependencyCheckerLoopReduce) {
   // Find loads within the reduction:
   auto reduceLoads = NodeFinder<Load>::find(reduce.node());
   // Pull out the access for the load inside the loop.
-  for (auto* load : reduceLoads) {
+  for (auto load : reduceLoads) {
     auto loopLoad = analyzer.accessFor(load);
     // It should have 10 element long bounds.
     ASSERT_TRUE(indexBoundsEquals(
@@ -2750,8 +2750,8 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
   ASSERT_TRUE(analyzer.dependsIndirectly(d->buf(), b_buf.data()));
 
   // Second loop depends on first loop.
-  auto* c_loop = l.getLoopStmtsFor(c)[0];
-  auto* d_loop = l.getLoopStmtsFor(d)[0];
+  auto c_loop = l.getLoopStmtsFor(c)[0];
+  auto d_loop = l.getLoopStmtsFor(d)[0];
   ASSERT_TRUE(analyzer.dependsDirectly(d_loop, c_loop));
 }
 
@@ -2946,8 +2946,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   ASSERT_TRUE(analyzer.dependsIndirectly(d->buf(), b.data()));
 
   // Second loop depends on first loop.
-  auto* c_loop = l.getLoopStmtsFor(c)[0];
-  auto* d_loop = l.getLoopStmtsFor(d)[0];
+  auto c_loop = l.getLoopStmtsFor(c)[0];
+  auto d_loop = l.getLoopStmtsFor(d)[0];
   ASSERT_TRUE(analyzer.dependsDirectly(d_loop, c_loop));
 
   // Reduction depends on both inputs.

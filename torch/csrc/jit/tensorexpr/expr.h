@@ -78,9 +78,7 @@ class ExprNode : public Base {
 class TORCH_API ExprHandle {
  public:
   ExprHandle() = default;
-  explicit ExprHandle(ExprPtr node)
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      : base_expr_node_(const_cast<ExprPtr>(node)) {}
+  explicit ExprHandle(ExprPtr node) : base_expr_node_(node) {}
 
   ExprPtr node() {
     return base_expr_node_;
