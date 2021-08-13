@@ -1291,7 +1291,7 @@ void LoopNest::sliceHead(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 }
 void LoopNest::sliceHead(ForPtr f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *head, *tail;
+  ForPtr head, tail;
   sliceHead(f, factor, &head, &tail);
 }
 
@@ -1336,13 +1336,13 @@ void LoopNest::sliceTail(ForPtr f, int factor, ForPtr* head, ForPtr* tail) {
 }
 void LoopNest::sliceTail(ForPtr f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *head, *tail;
+  ForPtr head, tail;
   sliceTail(f, factor, &head, &tail);
 }
 
 void LoopNest::splitWithTail(ForPtr f, int factor) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *inner, *tail;
+  ForPtr inner, tail;
   splitWithTail(f, factor, &inner, &tail);
 }
 
@@ -2048,10 +2048,10 @@ ForPtr LoopNest::tile(ForPtr x, ForPtr y, int x_factor, int y_factor) {
 
   // Split x, y axes by x_factor and y_factor
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *yi, *ytail;
+  ForPtr yi, ytail;
   splitWithTail(y, y_factor, &yi, &ytail);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *xi, *xtail;
+  ForPtr xi, xtail;
   splitWithTail(x, x_factor, &xi, &xtail);
 
   // Distribute xi over yo and ytail so we can manipulate the loop order of {xo,
