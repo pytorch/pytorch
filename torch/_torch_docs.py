@@ -11289,10 +11289,7 @@ Returns:
 
 Example::
 
-    >>> qx
-    tensor([[0.0000, 0.0000],
-            [0.0000, 1.5000]], size=(2, 2), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool1d(qx, [2])
     tensor([[0.0000],
             [1.5000]], size=(2, 1), dtype=torch.quint8,
@@ -11321,20 +11318,7 @@ Returns:
 
 Example::
 
-    >>> qx
-    tensor([[[[1.5000, 0.0000],
-            [1.5000, 0.0000]],
-
-            [[1.5000, 1.5000],
-            [0.0000, 0.0000]]],
-
-
-            [[[0.0000, 0.0000],
-            [0.0000, 0.0000]],
-
-            [[0.0000, 0.0000],
-            [0.0000, 0.0000]]]], size=(2, 2, 2, 2), dtype=torch.quint8,
-        quantization_scheme=torch.per_tensor_affine, scale=1.5, zero_point=3)
+    >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool2d(qx, [2,2])
     tensor([[[[1.5000]],
 
