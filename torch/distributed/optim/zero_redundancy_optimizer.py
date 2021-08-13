@@ -6,6 +6,7 @@
 import collections
 import copy
 import enum
+import inspect
 import io
 import logging
 from itertools import chain
@@ -1375,7 +1376,16 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             assert len(param_groups) == 1, "Initializing the local " \
                 "functional optimizer with more than one parameter group"
             params = param_groups[0]["params"]
-            self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
+            # Try to pass `_allow_empty_param_list=True` to avoid erroring
+            if "_allow_empty_param_list" in inspect.signature(self._optim_constructor).parameters:
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults, _allow_empty_param_list=True)
+            else:
+                logging.warning(
+                    f"{self._optim_constructor} does not support the argument "
+                    "`_allow_empty_param_list`; ZeroRedundancyOptimizer may "
+                    "error due to an empty parameter list"
+                )
+                self.optim: Any = self._optim_constructor(params, **self._optim_defaults)
 
             # Log information about the DDP and ZeRO bucketing
             if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
