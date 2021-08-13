@@ -19,10 +19,6 @@
 #include <c10d/ProcessGroupNCCLWithUCC.hpp>
 #endif
 
-#ifdef USE_C10D_NCCL
-#include <c10d/ProcessGroupNCCL.hpp>
-#endif
-
 #ifdef USE_C10D_MPI
 #include <c10d/ProcessGroupMPI.hpp>
 #endif
