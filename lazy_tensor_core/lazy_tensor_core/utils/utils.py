@@ -290,7 +290,7 @@ def parallel_work(num_workers, fn, *args):
     """
     with futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
         results = executor.map(fn, *args)
-        return [res for res in results]  # Iterating to re-raise any exceptions
+        return list(results)  # Iterating to re-raise any exceptions
 
 
 class TimedScope(object):
