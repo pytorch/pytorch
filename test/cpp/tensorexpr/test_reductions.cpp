@@ -1141,7 +1141,7 @@ TEST(Reductions, ReduceOverSplitRfactor) {
   LoopNest loop({c});
   std::vector<ForPtr> loops = loop.getLoopStmtsFor(c);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  For *i, *t;
+  ForPtr i, t;
   LoopNest::splitWithTail(loops[1], SPLIT_FACTOR, &i, &t);
   LoopNest::reorderAxis(loops[0], i);
 

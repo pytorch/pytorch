@@ -13,7 +13,7 @@ namespace te = torch::jit::tensorexpr;
 
 static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  te::For *inner, *tail;
+  te::ForPtr inner, tail;
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ASSERT_TRUE(te::LoopNest::vectorize(inner));
 }
