@@ -13326,24 +13326,19 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.float, torch.double)
-    def test_adaptive_pooling_zero_batch(self, dtype):
+    def test_adaptive_pooling_zero_batch(self, dtype, device):
         # The device parameter does not accept device objects.
-        device_list = ['cpu']
-        if TEST_CUDA:
-            device_list.append('cuda')
+        inp = torch.ones(0, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
 
-        for device in device_list:
-            inp = torch.ones(0, 10, dtype=dtype, device=device)
-            mod = torch.nn.AdaptiveAvgPool1d(5).to(device)
-            self._test_module_empty_input(mod, inp, check_size=False)
+        inp = torch.ones(0, 10, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool2d((5, 5)).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
 
-            inp = torch.ones(0, 10, 10, dtype=dtype, device=device)
-            mod = torch.nn.AdaptiveAvgPool2d((5, 5)).to(device)
-            self._test_module_empty_input(mod, inp, check_size=False)
-
-            inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
-            mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
-            self._test_module_empty_input(mod, inp, check_size=False)
+        inp = torch.ones(0, 10, 10, 10, dtype=dtype, device=device)
+        mod = torch.nn.AdaptiveAvgPool3d((5, 5, 5)).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
 
     @onlyOnCPUAndCUDA
     def test_FractionalMaxPool2d_zero_batch(self, device):
