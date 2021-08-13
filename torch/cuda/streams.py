@@ -8,8 +8,6 @@ if not hasattr(torch._C, '_CudaStreamBase'):
     # Define dummy base classes
     torch._C.__dict__['_CudaStreamBase'] = _dummy_type('_CudaStreamBase')
     torch._C.__dict__['_CudaEventBase'] = _dummy_type('_CudaEventBase')
-    torch._C.__dict__['_CudaGraphBase'] = _dummy_type('_CudaGraphBase')
-    torch._C.__dict__['_graph_pool_handle'] = _dummy_type('_graph_pool_handle')
 
 class Stream(torch._C._CudaStreamBase):
     r"""Wrapper around a CUDA stream.
@@ -226,6 +224,3 @@ class Event(torch._C._CudaEventBase):
             return '<torch.cuda.Event {0:#x}>'.format(self._as_parameter_.value)
         else:
             return '<torch.cuda.Event uninitialized>'
-
-_Graph = torch._C._CudaGraphBase
-_graph_pool_handle = torch._C._graph_pool_handle

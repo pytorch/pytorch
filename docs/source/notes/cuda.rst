@@ -513,3 +513,77 @@ by GIL of Python interpreter.
 
 If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.
+
+.. _cuda-graph-semantics:
+
+CUDA Graphs
+-----------
+
+`Getting Started with CUDA Graphs`_
+and the `CUDA Graphs section`_ of the CUDA C Programming Guide.
+
+.. _Getting Started with CUDA Graphs:
+    https://developer.nvidia.com/blog/cuda-graphs/
+.. _CUDA Graphs section:
+   https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#cuda-graphs
+
+Pytorch API
+^^^^^^^^^^^
+
+.. warning::
+    The API presented here is a prototype and may change in future releases.
+
+Constraints
+~~~~~~~~~~~
+
+* Within a process, only one capture may be underway at a time.
+* No non-captured CUDA work may run in this process (on any thread) while capture is underway.
+* CPU work is not captured. If the capture sequence contains CPU work, that work will be elided during replay.
+* The capture should not contain control flow that depends on computed values or tensor
+* CUDA RNG ops are permitted, but must use default generators. For example, explicitly constructing a new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function is not permitted.
+* Within capture, the user may expose parallelism by issuing calls to different streams,
+  but the overall stream dependency structure must form a DAG that branches out from the single
+  initial ambient stream after capture begins and rejoins the single ambient stream
+  before capture ends.
+
+Non-constraints
+~~~~~~~~~~~~~~~
+
+* Once captured, the graph may be replayed on any stream.
+
+Basic capture and replay
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Full-iteration capture
+^^^^^^^^^^^^^^^^^^^^^^
+
+.. _partial-network-capture:
+
+Partial-network capture
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If some of your network is unsafe to capture (e.g., due to dynamic control flow,
+dynamic shapes, CPU syncs, or essential CPU-side logic), you can run the unsafe
+parts eagerly and use :func:`torch.cuda.make_graphed_callables` to graph only
+the capture-safe parts.
+
+By default, callables returned by :func:`~torch.cuda.make_graphed_callables`
+are autograd-aware, and can be used in the training loop as direct replacements
+for the functions or :class:`nn.Module<torch.nn.Module>`\ s you passed.
+
+Usage with torch.cuda.amp
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For typical optimizers, :meth:`GradScaler.step<torch.cuda.amp.GradScaler.step>` syncs
+the CPU with the GPU, which is illegal during capture. To avoid errors, either use
+:ref:`partial-network capture<partial-network-capture>`, or (if forward, loss,
+and backward are capture-safe) capture forward, loss, and backward but not the
+optimizer step::
+
+    desoto
+
+Usage with DistributedDataParallel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Graph memory management, and sharing memory across graphs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
