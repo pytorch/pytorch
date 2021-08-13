@@ -31,11 +31,8 @@ class TorchVersion(str):
             TorchVersion('1.10.0a') > '1.2'
             TorchVersion('1.10.0a') > '1.2.1'
     """
-
     # fully qualified type names here to appease mypy
-    def _convert_to_version(
-        self, inp: Union[packaging.version.Version, str, Iterable]
-    ) -> packaging.version.Version:
+    def _convert_to_version(self, inp: Union[packaging.version.Version, str, Iterable]) -> packaging.version.Version:
         if isinstance(inp, Version):
             return inp
         elif isinstance(inp, str):
@@ -47,7 +44,7 @@ class TorchVersion(str):
             #   * (1)         -> Version("1")
             #   * (1, 20)     -> Version("1.20")
             #   * (1, 20, 1)  -> Version("1.20.1")
-            return Version(".".join((str(item) for item in inp)))
+            return Version('.'.join((str(item) for item in inp)))
         else:
             raise InvalidVersion(inp)
 
@@ -59,6 +56,7 @@ class TorchVersion(str):
             # version like 'parrot'
             return super().__gt__(cmp)
 
+
     def __eq__(self, cmp):
         try:
             return Version(self).__eq__(self._convert_to_version(cmp))
@@ -66,6 +64,5 @@ class TorchVersion(str):
             # Fall back to regular string comparison if dealing with an invalid
             # version like 'parrot'
             return super().__eq__(cmp)
-
 
 __version__ = TorchVersion(internal_version)

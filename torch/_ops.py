@@ -1,14 +1,15 @@
+import torch._C
+
 import contextlib
 import ctypes
 import sys
 import types
 
-import torch._C
-import torch._utils_internal
 import torch.jit
+import torch._utils_internal
 
 # Query `hasattr` only once.
-_SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
+_SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
 
 @contextlib.contextmanager
@@ -48,18 +49,17 @@ class _OpNamespace(types.ModuleType):
         and subsequent accesses will incur no further lookup (the namespace and
         operation will already exist).
     """
-
     def __init__(self, name):
-        super(_OpNamespace, self).__init__("torch.ops." + name)
+        super(_OpNamespace, self).__init__('torch.ops.' + name)
         self.name = name
 
     def __getattr__(self, op_name):
         # It is not a valid op_name when __file__ is passed in
-        if op_name == "__file__":
-            return "torch.ops"
+        if op_name == '__file__':
+            return 'torch.ops'
         # Get the op `my_namespace::my_op` if available. This will also check
         # for overloads and raise an exception if there are more than one.
-        qualified_op_name = "{}::{}".format(self.name, op_name)
+        qualified_op_name = '{}::{}'.format(self.name, op_name)
         op = torch._C._jit_get_operation(qualified_op_name)
         # let the script frontend know that op is identical to the builtin op
         # with qualified_op_name
@@ -68,12 +68,11 @@ class _OpNamespace(types.ModuleType):
         op.__module__ = self.__module__ + "." + self.name
         return op
 
-
 class _Ops(types.ModuleType):
-    __file__ = "_ops.py"
+    __file__ = '_ops.py'
 
     def __init__(self):
-        super(_Ops, self).__init__("torch.ops")
+        super(_Ops, self).__init__('torch.ops')
         self.loaded_libraries = set()
 
     def __getattr__(self, name):
@@ -110,7 +109,6 @@ class _Ops(types.ModuleType):
             # operators with the JIT.
             ctypes.CDLL(path)
         self.loaded_libraries.add(path)
-
 
 # The ops "namespace"
 ops = _Ops()
