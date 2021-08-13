@@ -353,6 +353,7 @@ Pointwise Ops
     positive
     pow
     quantized_batch_norm
+    quantized_lstm
     quantized_max_pool1d
     quantized_max_pool2d
     rad2deg
