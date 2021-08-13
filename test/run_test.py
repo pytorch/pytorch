@@ -77,6 +77,7 @@ TESTS = [
     'test_mkldnn',
     'test_model_dump',
     'test_module_init',
+    'test_modules',
     'test_multiprocessing',
     'test_multiprocessing_spawn',
     'distributed/test_nccl',
@@ -85,6 +86,7 @@ TESTS = [
     'test_nn',
     'test_ops',
     'test_optim',
+    'test_functional_optim',
     'test_pytree',
     'test_mobile_optimizer',
     'test_set_default_mobile_cpu_allocator',
@@ -231,7 +233,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
-    'distributed/optim/test_zero_redundancy_optimizer',
     "distributed/elastic/agent/server/test/api_test",
     'distributed/elastic/multiprocessing/api_test',
 ]

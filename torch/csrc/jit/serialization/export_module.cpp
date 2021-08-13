@@ -60,7 +60,9 @@ static IValue Table(
 std::pair<IValue, IValue> getFunctionTuple(
     const Module& module,
     const Function& func,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    const std::basic_string<char>& qn,
+    TypeNameUniquer& type_name_uniquer_) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -214,6 +216,14 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // schema
   const auto& schema = func.getSchema();
+  auto type_printer =
+      [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
+    auto namedType = t->cast<c10::NamedType>();
+    if (namedType && namedType->name()) {
+      return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+    }
+    return c10::nullopt;
+  };
   TORCH_CHECK(
       schema.overload_name().empty(), // @TODO: is this check correct?
       "Overloads are not supported in mobile modules.");
@@ -222,7 +232,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   TORCH_CHECK(
       !schema.is_varret(),
       "A variable number of return values is not supported in mobile modules.");
-  auto makeArgTuple = [](const std::vector<Argument>& args) {
+  auto makeArgTuple = [&](const std::vector<Argument>& args) {
     std::vector<IValue> argTables;
     for (auto&& arg : args) {
       TORCH_CHECK(
@@ -231,9 +241,20 @@ std::pair<IValue, IValue> getFunctionTuple(
       TORCH_CHECK(
           !arg.kwarg_only(),
           "Keyword-only arguments are not supported in mobile modules.");
+      /*
+        This part adds the argument's name, type and default_value in
+        `bytecode.pkl` This has to be consistent with the `code/` directory
+        which has annotated py code of the entire module. `type_printer` uses
+        `TypeNameUniquer` to get the managled name of the argument. This helps
+        in having the right object reference when a class method is called using
+        the `self` argument.
+
+        arg.type()->annotation_str(type_printer) => mangled unique name of the
+        module/submodule
+      */
       argTables.emplace_back(Table({
           {"name", arg.name()},
-          {"type", arg.type()->annotation_str()},
+          {"type", arg.type()->annotation_str(type_printer)},
           {"default_value", arg.default_value()},
       }));
     }
@@ -245,8 +266,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   });
 
   // function tuple
-  auto bytecode_vals =
-      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
+  auto bytecode_vals = Tup({qn, codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   // module debug info
@@ -258,7 +278,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   IValue module_debug_tuple = c10::ivalue::Tuple::create(op_debug_handles);
   auto function_debug_info =
       Table({{"function_debug_handles", module_debug_tuple}});
-  debug_info_vals = Tup({func.qualname().qualifiedName(), function_debug_info});
+  debug_info_vals = Tup({qn, function_debug_info});
   return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
@@ -268,19 +288,23 @@ void setstateTuple(
     std::vector<c10::IValue>& elements,
     std::unordered_set<std::string>& qn_cache,
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
   auto type = obj->type();
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
-    const auto qn = setstate.qualname().qualifiedName();
+    const auto qn =
+        type_name_uniquer_.getUniqueName(obj->type()).qualifiedName() + "." +
+        setstate.name();
     if (qn_cache.find(qn) != qn_cache.end()) {
       return;
     }
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(module, setstate, debug_info_recorder);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, debug_info_recorder, qn, type_name_uniquer_);
       elements.push_back(func_tuple.first);
       qn_cache.emplace(qn);
       debug_info_elements.push_back(func_tuple.second);
@@ -293,7 +317,8 @@ void setstateTuple(
           elements,
           qn_cache,
           debug_info_elements,
-          debug_info_recorder);
+          debug_info_recorder,
+          type_name_uniquer_);
     }
   }
 }
@@ -377,7 +402,8 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements, // note: appended to in-place
     std::vector<c10::IValue>& debug_info_elements,
-    BackendDebugInfoRecorder& debug_info_recorder) {
+    BackendDebugInfoRecorder& debug_info_recorder,
+    TypeNameUniquer& type_name_uniquer_) {
   auto methods = module.get_methods();
   std::unordered_set<std::string> qn_cache;
   // top level methods
@@ -386,8 +412,8 @@ void moduleMethodsTuple(
     if (qn_cache.find(qn) != qn_cache.end()) {
       continue;
     }
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), debug_info_recorder);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), debug_info_recorder, qn, type_name_uniquer_);
     elements.push_back(func_tuple.first);
     qn_cache.emplace(qn);
     debug_info_elements.push_back(func_tuple.second);
@@ -400,7 +426,8 @@ void moduleMethodsTuple(
       elements,
       qn_cache,
       debug_info_elements,
-      debug_info_recorder);
+      debug_info_recorder,
+      type_name_uniquer_);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -616,7 +643,11 @@ void ScriptModuleSerializer::writeByteCode(
   debug_info_elements.emplace_back(static_cast<int64_t>(version_to_write));
 
   moduleMethodsTuple(
-      module, elements, debug_info_elements, debug_info_recorder);
+      module,
+      elements,
+      debug_info_elements,
+      debug_info_recorder,
+      type_name_uniquer_);
   auto telements = Tup(std::move(elements));
   writeArchive(
       telements,
@@ -800,7 +831,8 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   std::vector<c10::IValue> debug_info_elements;
   BackendDebugInfoRecorder dummy;
-  moduleMethodsTuple(m, elements, debug_info_elements, dummy);
+  TypeNameUniquer dummy_uniquer = TypeNameUniquer();
+  moduleMethodsTuple(m, elements, debug_info_elements, dummy, dummy_uniquer);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =

@@ -16,6 +16,7 @@ import warnings
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer   # noqa: F401
 
 
 # Mapping of builtins to their `typing` equivalent.
@@ -282,7 +283,7 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self, owning_module: Optional["GraphModule"] = None):
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional["Tracer"] = None):
         """
         Construct an empty Graph.
         """
@@ -293,6 +294,7 @@ class Graph:
         self._graph_namespace = _Namespace()
         self._owners = 0
         self._owning_module = owning_module
+        self._tracer_cls = tracer_cls
         self._pytree_info: Optional[_PyTreeInfo] = None
 
     @property

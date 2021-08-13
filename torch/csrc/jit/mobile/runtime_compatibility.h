@@ -15,10 +15,17 @@ struct OperatorInfo {
   c10::optional<int> num_schema_args;
 };
 
+struct RuntimeCompatibilityInfo {
+  uint64_t bytecode_version;
+  std::unordered_map<std::string, OperatorInfo> operator_info;
+};
+
 TORCH_API uint64_t _get_runtime_bytecode_version();
 
 TORCH_API std::unordered_map<std::string, OperatorInfo>
 _get_runtime_ops_and_info();
+
+TORCH_API RuntimeCompatibilityInfo get_runtime_compatibility_info();
 
 } // namespace jit
 } // namespace torch

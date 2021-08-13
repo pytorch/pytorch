@@ -38,6 +38,7 @@
 #endif
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -706,7 +707,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isList()) {
     auto list = std::move(ivalue).toList();
     py::list t{list.size()};
-    for (size_t i = 0; i < list.size(); ++i) {
+    for (const auto i : c10::irange(list.size())) {
       t[i] = toPyObject(IValue{list.get(i)});
     }
     return std::move(t);
@@ -715,7 +716,7 @@ inline py::object toPyObject(IValue ivalue) {
     const auto& elements = tuple->elements();
 
     py::tuple t{elements.size()};
-    for (size_t i = 0; i < elements.size(); ++i) {
+    for (const auto i : c10::irange(elements.size())) {
       t[i] = toPyObject(IValue{elements.at(i)});
     }
 
@@ -783,7 +784,7 @@ inline py::object toPyObject(IValue ivalue) {
 
     const auto numAttrs = classType->numAttributes();
 
-    for (size_t slot = 0; slot < numAttrs; slot++) {
+    for (const auto slot : c10::irange(numAttrs)) {
       const auto& attrName = classType->getAttributeName(slot);
       IValue v = obj->getSlot(slot);
       py::setattr(pyObj, attrName.c_str(), toPyObject(std::move(v)));
@@ -916,7 +917,7 @@ inline py::object createPyObjectForStack(Stack&& stack) {
 
   // If there is more than one return value, pop them into a py::tuple.
   py::tuple return_values(stack.size());
-  for (size_t ret = 0; ret < return_values.size(); ++ret) {
+  for (const auto ret : c10::irange(return_values.size())) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
@@ -935,7 +936,7 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
   }
   Stack result;
   result.reserve(tuple.size() + reserve_extra_space);
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     result.push_back(toIValue(std::move(tuple[i]), inputs[i]->type()));
   }
   return result;

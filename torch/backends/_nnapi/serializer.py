@@ -418,6 +418,8 @@ class _NnapiSerializer(object):
             buf_num,
             offset,
             tsize))
+        if dim_order == DimOrder.CHANNELS_LAST:
+            tensor = tensor.permute(0, 2, 3, 1)
         self.used_weights.append(tensor)
         return operand_id
 
@@ -476,9 +478,6 @@ class _NnapiSerializer(object):
         operand_id = self.jitval_operand_map.get(jitval)
         if operand_id is None:
             _, value = self.get_constant_value(jitval, "TensorType")
-            # assume constants are contiguous
-            if dim_order == DimOrder.CHANNELS_LAST:
-                value = value.permute(0, 2, 3, 1).flatten().reshape(value.shape)
             operand_id = self.add_tensor_operand_for_weight(value, dim_order)
         return (operand_id, self.operands[operand_id])
 
@@ -1246,7 +1245,7 @@ class _NnapiSerializer(object):
             in1_id, in1_oper = self.get_tensor_operand_by_jitval(node.inputsAt(1))
             in0_id, in0_oper = self.get_tensor_operand_or_constant(node.inputsAt(0), in1_oper.dim_order)
         else:
-            raise Exception("Can't add two constants")
+            raise Exception(f"Can't do a NNAPI binary op: {opcode} on two constants")
 
         assert in0_oper.op_type == in1_oper.op_type
         in0_id, in0_oper, in1_id, in1_oper = self.transpose_for_broadcast(

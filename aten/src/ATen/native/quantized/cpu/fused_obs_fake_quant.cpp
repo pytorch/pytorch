@@ -59,7 +59,6 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
   if (per_row_fake_quant) {
     float* x_min_data = inp_running_min.data_ptr<float>();
     float* x_max_data = inp_running_max.data_ptr<float>();
-
     for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
       fbgemm::TensorQuantizationParams x_qparams{};
@@ -146,6 +145,17 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     bool symmetric_quant) {
   // Calculate min/max
   auto observe = observer_on.item().toInt();
+  // Calculate the size of the dimension we need to quantize over,
+  // For per-channel quant we default to axis 0, since it is only for
+  // weight quantization currently.
+  int64_t size = per_row_fake_quant ? self.size(0) : 1;
+  if (per_row_fake_quant && running_min.numel() == 0) {
+    float inf = std::numeric_limits<float>::infinity();
+    running_min.resize_(size).fill_(inf);
+    running_max.resize_(size).fill_(-inf);
+    scale.resize_(size);
+    zero_point.resize_(size);
+  }
   if (observe) {
     calculate_moving_average(
         self,
