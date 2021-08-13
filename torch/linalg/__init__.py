@@ -1286,8 +1286,10 @@ Examples::
 
 
 matmul = _add_docstr(_linalg.linalg_matmul, r"""
-Alias for `torch.matmul`
-"""
+linalg.matmul(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.matmul`
+""")
 
 
 multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
