@@ -26,31 +26,12 @@ static void setupBatchNorm(Fusion* fusion, DataType dtype) {
   const float kEps = 1e-5;
 
   // setup fusion
-  auto input = TensorViewBuilder()
-                   .ndims(4)
-                   .dtype(dtype)
-                   .contiguity(std::vector<bool>(4, true))
-                   .build();
-  auto weight = TensorViewBuilder()
-                    .ndims(1)
-                    .dtype(dtype)
-                    .contiguity(std::vector<bool>(1, true))
-                    .build();
-  auto bias = TensorViewBuilder()
-                  .ndims(1)
-                  .dtype(dtype)
-                  .contiguity(std::vector<bool>(1, true))
-                  .build();
-  auto running_mean = TensorViewBuilder()
-                          .ndims(1)
-                          .dtype(DataType::Float)
-                          .contiguity(std::vector<bool>(1, true))
-                          .build();
-  auto running_var = TensorViewBuilder()
-                         .ndims(1)
-                         .dtype(DataType::Float)
-                         .contiguity(std::vector<bool>(1, true))
-                         .build();
+  auto input = makeContigTensor(4, dtype);
+  auto weight = makeContigTensor(1, dtype);
+  auto bias = makeContigTensor(1, dtype);
+  auto running_mean = makeContigTensor(1, DataType::Float);
+  auto running_var = makeContigTensor(1, DataType::Float);
+
   fusion->addInput(input);
   fusion->addInput(weight);
   fusion->addInput(bias);
@@ -96,10 +77,10 @@ static void NvFuserScheduler_BatchNorm(
   const float kEps = 1e-5;
 
   std::vector<int64_t> input_shape{
-      32,
       benchmark_state.range(0),
       benchmark_state.range(1),
-      benchmark_state.range(1)};
+      benchmark_state.range(2),
+      benchmark_state.range(2)};
 
   // inputs
   at::manual_seed(0);
@@ -135,10 +116,10 @@ static void Baseline_BatchNorm(
   const float kMomentum = 0.1;
   const float kEps = 1e-5;
   std::vector<int64_t> input_shape{
-      32,
       benchmark_state.range(0),
       benchmark_state.range(1),
-      benchmark_state.range(1)};
+      benchmark_state.range(2),
+      benchmark_state.range(2)};
 
   // inputs
   at::manual_seed(0);
@@ -157,6 +138,16 @@ static void Baseline_BatchNorm(
   auto ato_running_mean = c10::optional<at::Tensor>(at_running_mean);
   auto ato_running_var = c10::optional<at::Tensor>(at_running_var);
 
+  auto output = at::batch_norm(
+      at_x,
+      ato_weight,
+      ato_bias,
+      ato_running_mean,
+      ato_running_var,
+      true,
+      kMomentum,
+      kEps,
+      true);
   cudaDeviceSynchronize();
 
   for (auto _ : benchmark_state) {
@@ -170,7 +161,7 @@ static void Baseline_BatchNorm(
         true,
         kMomentum,
         kEps,
-        false);
+        true);
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
     cudaDeviceSynchronize();
   }
@@ -195,39 +186,111 @@ static void Baseline_BatchNorm_fp16(benchmark::State& benchmark_state) {
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp32_BatchNorm,
+    NvFuserScheduler_BatchNorm_fp32,
     setupBatchNorm,
     NvFuserScheduler_BatchNorm,
     DataType::Float);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp32_BatchNorm)
-    ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {8, 32}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp16_BatchNorm,
+    NvFuserScheduler_BatchNorm_fp16,
     setupBatchNorm,
     NvFuserScheduler_BatchNorm,
     DataType::Half);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp16_BatchNorm)
-    ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {8, 32}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_BatchNorm_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {8, 32}})
+    ->RangeMultiplier(4)
+    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp32)
+    ->RangeMultiplier(4)
+    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_BatchNorm_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{64, 512}, {8, 32}})
+    ->RangeMultiplier(4)
+    ->Ranges({{32, 32}, {64, 512}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{64, 128}, {64, 128}, {8, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{128, 128}, {128, 512}, {8, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_BatchNorm_fp16)
+    ->RangeMultiplier(4)
+    ->Ranges({{16, 64}, {2, 4}, {128, 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

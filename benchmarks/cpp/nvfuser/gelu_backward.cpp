@@ -23,19 +23,19 @@ static void setupFusion(Fusion* fusion) {
   const float k_010 = 0.1070322243;
 
   // gradient tensor
-  auto t0 = TensorViewBuilder().ndims(3).dtype(DataType::Half).build();
+  auto t0 = makeContigTensor(3, DataType::Half);
   fusion->addInput(t0);
 
   auto t1 = castOp(DataType::Float, t0);
 
   // bias tensor
-  auto t2 = TensorViewBuilder().ndims(1).dtype(DataType::Half).build();
+  auto t2 = makeContigTensor(1, DataType::Half);
   fusion->addInput(t2);
 
   auto t3 = castOp(DataType::Float, t2);
 
   // input tensor
-  auto t4 = TensorViewBuilder().ndims(3).dtype(DataType::Half).build();
+  auto t4 = makeContigTensor(3, DataType::Half);
   fusion->addInput(t4);
 
   auto t5 = castOp(DataType::Float, t4);

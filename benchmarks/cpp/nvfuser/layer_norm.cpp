@@ -27,9 +27,10 @@ static void setupLayerNorm(Fusion* fusion, DataType dtype) {
   Double* eps_ptr = new Double(kEps);
 
   // setup fusion
-  auto input = TensorViewBuilder().ndims(2).dtype(dtype).build();
-  auto weight = TensorViewBuilder().ndims(1).dtype(dtype).build();
-  auto bias = TensorViewBuilder().ndims(1).dtype(dtype).build();
+  auto input = makeContigTensor(2, dtype);
+  auto weight = makeContigTensor(1, dtype);
+  auto bias = makeContigTensor(1, dtype);
+
   fusion->addInput(input);
   fusion->addInput(weight);
   fusion->addInput(bias);

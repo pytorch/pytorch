@@ -12,61 +12,80 @@
 
 using namespace torch::jit::fuser::cuda;
 
-static void setupFusion(
-    Fusion* fusion,
-    const size_t kNumberOfDims,
-    TensorView* x_half,
-    TensorView* scale_half,
-    TensorView* bias_half) {
+static void setupSBR(Fusion* fusion, DataType dtype) {
+  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
+
   FusionGuard fg(fusion);
 
-  fusion->addInput(x_half);
-  fusion->addInput(scale_half);
-  fusion->addInput(bias_half);
+  const size_t kNumberOfDims = 4;
 
-  std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
-    broadcast_mask[axis] = true;
+  std::vector<int64_t> bcast_shape(kNumberOfDims, 1);
+  bcast_shape[bcast_shape.size() - 1] = -1;
+
+  std::vector<bool> bcast_contig(kNumberOfDims, false);
+  bcast_contig[bcast_contig.size() - 1] = true;
+
+  auto x = makeContigTensor(kNumberOfDims, dtype);
+
+  auto scale = TensorViewBuilder()
+                   .contiguity(bcast_contig)
+                   .shape(bcast_shape)
+                   .dtype(dtype)
+                   .build();
+
+  auto bias = TensorViewBuilder()
+                  .contiguity(bcast_contig)
+                  .shape(bcast_shape)
+                  .dtype(dtype)
+                  .build();
+
+  fusion->addInput(x);
+  fusion->addInput(scale);
+  fusion->addInput(bias);
+
+  if (dtype == DataType::Half) {
+    x = castOp(DataType::Float, x);
+    scale = castOp(DataType::Float, scale);
+    bias = castOp(DataType::Float, bias);
   }
-
-  auto x = castOp(DataType::Float, x_half);
-  auto scale = castOp(DataType::Float, scale_half);
-  auto bias = castOp(DataType::Float, bias_half);
 
   auto scale_bias = add(mul(x, scale), bias);
   auto scale_bias_relu = unaryOp(UnaryOpType::Relu, scale_bias);
 
-  auto scale_bias_relu_half = castOp(DataType::Half, scale_bias_relu);
-
-  fusion->addOutput(scale_bias_relu_half);
+  if (dtype == DataType::Half) {
+    scale_bias_relu = castOp(DataType::Half, scale_bias_relu);
+  }
+  fusion->addOutput(scale_bias_relu);
 }
 
-static void setupFusion(
-    Fusion* fusion,
-    const size_t kNumberOfDims,
-    TensorView* x_half,
-    TensorView* weight_half,
-    TensorView* bias_half,
-    TensorView* mean_half,
-    TensorView* var_half) {
+static void setupSBRNorm(Fusion* fusion, DataType dtype) {
+  TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
   FusionGuard fg(fusion);
 
-  fusion->addInput(x_half);
-  fusion->addInput(weight_half);
-  fusion->addInput(bias_half);
-  fusion->addInput(mean_half);
-  fusion->addInput(var_half);
+  const size_t kNumberOfDims = 4;
 
-  std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  for (size_t axis = 0; axis < kNumberOfDims - 1; ++axis) {
-    broadcast_mask[axis] = true;
+  auto x = makeContigTensor(kNumberOfDims, dtype);
+  auto weight = makeContigTensor(1, dtype);
+  auto bias = makeContigTensor(1, dtype);
+  auto mean = makeContigTensor(1, dtype);
+  auto var = makeContigTensor(1, dtype);
+
+  fusion->addInput(x);
+  fusion->addInput(weight);
+  fusion->addInput(bias);
+  fusion->addInput(mean);
+  fusion->addInput(var);
+
+  std::vector<bool> broadcast_mask(kNumberOfDims, true);
+  broadcast_mask[broadcast_mask.size() - 1] = false;
+
+  if (dtype == DataType::Half) {
+    x = castOp(DataType::Float, x);
+    weight = castOp(DataType::Float, weight);
+    bias = castOp(DataType::Float, bias);
+    mean = castOp(DataType::Float, mean);
+    var = castOp(DataType::Float, var);
   }
-
-  auto x = castOp(DataType::Float, x_half);
-  auto weight = castOp(DataType::Float, weight_half);
-  auto bias = castOp(DataType::Float, bias_half);
-  auto mean = castOp(DataType::Float, mean_half);
-  auto var = castOp(DataType::Float, var_half);
 
   auto rsqrt = unaryOp(UnaryOpType::Rsqrt, var);
   auto this_scale = mul(weight, rsqrt);
@@ -78,14 +97,19 @@ static void setupFusion(
   auto scale_bias = add(mul(x, bcast_scale), bcast_bias);
   auto scale_bias_relu = unaryOp(UnaryOpType::Relu, scale_bias);
 
-  auto scale_bias_relu_half = castOp(DataType::Half, scale_bias_relu);
+  if (dtype == DataType::Half) {
+    scale_bias_relu = castOp(DataType::Half, scale_bias_relu);
+  }
 
-  fusion->addOutput(scale_bias_relu_half);
+  fusion->addOutput(scale_bias_relu);
 }
 
 //------------------------------------------------------------------------------
 
-static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
+static void NvFuserScheduler_SBR(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    DataType dtype) {
   // N, H, W, C format
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
@@ -94,59 +118,55 @@ static void SBR_NvFuser_Multiple(benchmark::State& benchmark_state) {
       benchmark_state.range(2)};
   std::vector<int64_t> bcast_shape{1, 1, 1, -1};
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto x = TensorViewBuilder()
-               .ndims(input_shape.size())
-               .dtype(DataType::Half)
-               .build();
-  auto scale =
-      TensorViewBuilder().shape(bcast_shape).dtype(DataType::Half).build();
-  auto bias =
-      TensorViewBuilder().shape(bcast_shape).dtype(DataType::Half).build();
-
-  // setup fusion
-  setupFusion(&fusion, input_shape.size(), x, scale, bias);
-
   // inputs
   at::manual_seed(0);
   std::vector<int64_t> static_bcast_shape{1, 1, 1, benchmark_state.range(2)};
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_scale = at::ones(static_bcast_shape, options);
   at::Tensor at_bias = at::zeros(static_bcast_shape, options);
 
   // inputs
-  std::vector<c10::IValue> inputs = {at_x, at_scale, at_bias};
+  std::vector<c10::IValue> aten_inputs = {at_x, at_scale, at_bias};
 
-  // outputs
-  std::vector<at::Tensor> outputs;
+  fusion_executor_cache->profile(true);
+  fusion_executor_cache->runFusionWithInputs(aten_inputs);
 
-  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
+  auto executor_instance = compile_log.fusion_executor;
+  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
+  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
+  auto params = toString(compile_log.pointwise_params.value());
+  auto lparams = toString(compile_log.launch_constraints.value());
 
-  FusionExecutor executor;
-  executor.setMeasureKernelTimeFlag(true);
-  executor.compileFusion(&fusion);
+  benchmark_state.SetLabel(params + lparams);
+  benchmark_state.SetLabel(lparams);
 
+  fusion_executor_cache->profile(false);
+  executor_instance->setMeasureKernelTimeFlag(true);
+  // Sync everything up before we start
   cudaDeviceSynchronize();
-
   for (auto _ : benchmark_state) {
-    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
-    benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
-    cudaDeviceSynchronize();
+    auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
+    benchmark_state.SetIterationTime(
+        executor_instance->kernelTimeMs() / 1000.0);
     clearL2Cache();
   }
+
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
-      int64_t(dataTypeSize(DataType::Half)));
+      int64_t(dataTypeSize(dtype)));
 }
 
-static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
+static void Baseline_SBR(benchmark::State& benchmark_state, DataType dtype) {
   // N, H, W, C format
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
@@ -157,7 +177,8 @@ static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_y = at::randn(input_shape, options);
   at::Tensor at_scale = at::ones(bcast_shape, options);
@@ -182,12 +203,15 @@ static void SBR_Baseline_Multiple(benchmark::State& benchmark_state) {
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
-      int64_t(dataTypeSize(DataType::Half)));
+      int64_t(dataTypeSize(dtype)));
 }
 
 //------------------------------------------------------------------------------
 
-static void SBR_NvFuser(benchmark::State& benchmark_state) {
+static void NvFuserScheduler_SBR_Norm(
+    benchmark::State& benchmark_state,
+    FusionExecutorCache* fusion_executor_cache,
+    DataType dtype) {
   // N, H, W, C format
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
@@ -196,36 +220,10 @@ static void SBR_NvFuser(benchmark::State& benchmark_state) {
       benchmark_state.range(2)};
   std::vector<int64_t> bcast_shape{benchmark_state.range(2)};
 
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  auto x = TensorViewBuilder()
-               .ndims(input_shape.size())
-               .dtype(DataType::Half)
-               .build();
-  auto weight = TensorViewBuilder()
-                    .ndims(bcast_shape.size())
-                    .dtype(DataType::Half)
-                    .build();
-  auto bias = TensorViewBuilder()
-                  .ndims(bcast_shape.size())
-                  .dtype(DataType::Half)
-                  .build();
-  auto mean = TensorViewBuilder()
-                  .ndims(bcast_shape.size())
-                  .dtype(DataType::Half)
-                  .build();
-  auto var = TensorViewBuilder()
-                 .ndims(bcast_shape.size())
-                 .dtype(DataType::Half)
-                 .build();
-
-  // setup fusion
-  setupFusion(&fusion, input_shape.size(), x, weight, bias, mean, var);
-
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones(bcast_shape, options);
   at::Tensor at_bias = at::zeros(bcast_shape, options);
@@ -233,38 +231,47 @@ static void SBR_NvFuser(benchmark::State& benchmark_state) {
   at::Tensor at_var = at::ones(bcast_shape, options);
 
   // inputs
-  std::vector<c10::IValue> inputs = {at_x, at_weight, at_bias, at_mean, at_var};
+  std::vector<c10::IValue> aten_inputs = {
+      at_x, at_weight, at_bias, at_mean, at_var};
 
-  // outputs
-  std::vector<at::Tensor> outputs;
+  fusion_executor_cache->profile(true);
+  fusion_executor_cache->runFusionWithInputs(aten_inputs);
 
-  schedulePointwise(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+  auto compile_log = fusion_executor_cache->getMostRecentExecutorInfo();
+  auto executor_instance = compile_log.fusion_executor;
+  TORCH_INTERNAL_ASSERT(compile_log.pointwise_params.has_value());
+  TORCH_INTERNAL_ASSERT(compile_log.launch_constraints.has_value());
+  auto params = toString(compile_log.pointwise_params.value());
+  auto lparams = toString(compile_log.launch_constraints.value());
 
-  // fusion.printMath();
-  // fusion.printKernel();
-  // TORCH_INTERNAL_ASSERT(false);
+  benchmark_state.SetLabel(params + lparams);
 
-  FusionExecutor executor;
-  executor.setMeasureKernelTimeFlag(true);
-  executor.compileFusion(&fusion);
-
+  fusion_executor_cache->profile(false);
+  executor_instance->setMeasureKernelTimeFlag(true);
+  // Sync everything up before we start
   cudaDeviceSynchronize();
-
   for (auto _ : benchmark_state) {
-    outputs = executor.runFusion(c10::ArrayRef<c10::IValue>(inputs));
-    benchmark_state.SetIterationTime(executor.kernelTimeMs() / 1000.0);
-    cudaDeviceSynchronize();
+    auto cg_outputs = fusion_executor_cache->runFusionWithInputs(aten_inputs);
+    benchmark_state.SetIterationTime(
+        executor_instance->kernelTimeMs() / 1000.0);
+    clearL2Cache();
   }
+
+  // Sync everything up before we're finished, don't want to run ahead on the
+  // cpu while benchmarking.
+  cudaDeviceSynchronize();
 
   const size_t size =
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
-      int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 4 + size * 2) *
+      int64_t(dataTypeSize(dtype)));
 }
 
-static void SBR_Baseline(benchmark::State& benchmark_state) {
+static void Baseline_SBR_Norm(
+    benchmark::State& benchmark_state,
+    DataType dtype) {
   // N, H, W, C format
   std::vector<int64_t> input_shape{
       benchmark_state.range(0),
@@ -275,9 +282,9 @@ static void SBR_Baseline(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  auto options =
+      at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
-  at::Tensor at_y = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones(bcast_shape, options);
   at::Tensor at_bias = at::zeros(bcast_shape, options);
   at::Tensor at_mean = at::zeros(bcast_shape, options);
@@ -302,34 +309,102 @@ static void SBR_Baseline(benchmark::State& benchmark_state) {
       input_shape[0] * input_shape[1] * input_shape[2] * input_shape[3];
   const size_t channels = input_shape[3];
   benchmark_state.SetBytesProcessed(
-      int64_t(benchmark_state.iterations()) * (channels * 2 + size * 2) *
-      int64_t(dataTypeSize(DataType::Half)));
+      int64_t(benchmark_state.iterations()) * (channels * 4 + size * 2) *
+      int64_t(dataTypeSize(dtype)));
 }
 
 //------------------------------------------------------------------------------
 
-BENCHMARK(SBR_NvFuser_Multiple)
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_SBR_fp32,
+    setupSBR,
+    NvFuserScheduler_SBR,
+    DataType::Float);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp32)
     ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
-BENCHMARK(SBR_Baseline_Multiple)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_SBR_fp16,
+    setupSBR,
+    NvFuserScheduler_SBR,
+    DataType::Half);
 
-BENCHMARK(SBR_NvFuser)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
-    ->Unit(benchmark::kMicrosecond)
-    ->UseManualTime();
-
-BENCHMARK(SBR_Baseline)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_fp16)
     ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_SBR_Norm_fp32,
+    setupSBRNorm,
+    NvFuserScheduler_SBR_Norm,
+    DataType::Float);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_DEFINE(
+    NvFuserScheduler_SBR_Norm_fp16,
+    setupSBRNorm,
+    NvFuserScheduler_SBR_Norm,
+    DataType::Half);
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_SBR_Norm_fp16)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
+static void Baseline_SBR_fp32(benchmark::State& benchmark_state) {
+  Baseline_SBR(benchmark_state, DataType::Float);
+}
+
+BENCHMARK(Baseline_SBR_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+static void Baseline_SBR_fp16(benchmark::State& benchmark_state) {
+  Baseline_SBR(benchmark_state, DataType::Half);
+}
+
+BENCHMARK(Baseline_SBR_fp16)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+//------------------------------------------------------------------------------
+
+static void Baseline_SBR_Norm_fp32(benchmark::State& benchmark_state) {
+  Baseline_SBR_Norm(benchmark_state, DataType::Float);
+}
+
+BENCHMARK(Baseline_SBR_Norm_fp32)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+static void Baseline_SBR_Norm_fp16(benchmark::State& benchmark_state) {
+  Baseline_SBR_Norm(benchmark_state, DataType::Half);
+}
+
+BENCHMARK(Baseline_SBR_Norm_fp16)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();

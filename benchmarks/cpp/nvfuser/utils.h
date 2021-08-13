@@ -19,7 +19,7 @@
 using namespace torch::jit::fuser::cuda;
 
 std::string toString(ReductionParams rparams);
-
+std::string toString(PointwiseParams params);
 std::string toString(LaunchParams lparams);
 
 // Run benchmark iterations with provided inputs. If not segmented, report
@@ -31,6 +31,10 @@ void runBenchmarkIterations(
     std::vector<c10::IValue>& aten_inputs);
 
 void clearL2Cache();
+
+// Make a tensor that is known to be fully contiguous of dimensionality=ndims,
+// but unknown sizes. Taken from test_gpu.cpp
+TensorView* makeContigTensor(size_t ndims, DataType dtype = DataType::Float);
 
 class CudaKernelTimer {
  public:

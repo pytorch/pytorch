@@ -27,16 +27,12 @@ static void setupDivMaxSoftmaxDropoutForward(Fusion* fusion, DataType dtype) {
   TensorView* tv0 = TensorViewBuilder()
                         .ndims(4)
                         .dtype(dtype)
-                        .contiguity({true, true, true, true})
+                        .contiguity({true, false, false, true})
                         .shape({-1, 1, 1, -1})
                         .build();
-  fusion->addInput(tv0);
+  TensorView* tv1 = makeContigTensor(4, dtype);
 
-  TensorView* tv1 = TensorViewBuilder()
-                        .ndims(4)
-                        .dtype(dtype)
-                        .contiguity({true, true, true, true})
-                        .build();
+  fusion->addInput(tv0);
   fusion->addInput(tv1);
 
   // TODO: should be input
@@ -68,30 +64,15 @@ static void setupDivMaxSoftmaxDropoutForward(Fusion* fusion, DataType dtype) {
 }
 
 static void setupDivMaxSoftmaxDropoutBackward(Fusion* fusion, DataType dtype) {
-  TensorView* tv0 = TensorViewBuilder()
-                        .ndims(4)
-                        .dtype(dtype)
-                        .contiguity({true, true, true, true})
-                        .build();
-  fusion->addInput(tv0);
+  TensorView* tv0 = makeContigTensor(4, dtype);
   // Strangely tv1 isn't used anywhere, need to come back to that...
-  TensorView* tv1 = TensorViewBuilder()
-                        .ndims(4)
-                        .dtype(dtype)
-                        .contiguity({true, true, true, true})
-                        .build();
+  TensorView* tv1 = makeContigTensor(4, dtype);
+  TensorView* tv2 = makeContigTensor(4, dtype);
+  TensorView* tv3 = makeContigTensor(4, DataType::Bool);
+
+  fusion->addInput(tv0);
   fusion->addInput(tv1);
-  TensorView* tv2 = TensorViewBuilder()
-                        .ndims(4)
-                        .dtype(dtype)
-                        .contiguity({true, true, true, true})
-                        .build();
   fusion->addInput(tv2);
-  TensorView* tv3 = TensorViewBuilder()
-                        .ndims(4)
-                        .dtype(DataType::Bool)
-                        .contiguity({true, true, true, true})
-                        .build();
   fusion->addInput(tv3);
 
   bool is_fp16 = dtype == DataType::Half;
@@ -249,44 +230,16 @@ static void setupBiasDropoutAddLayernormFwd(Fusion* fusion, DataType dtype) {
 
   bool is_fp16 = dtype == DataType::Half;
 
-  TensorView* tv0 = TensorViewBuilder()
-                        .ndims(1)
-                        .dtype(dtype)
-                        .contiguity({true})
-                        .shape({-1})
-                        .build();
+  TensorView* tv0 = makeContigTensor(1, dtype);
+  TensorView* tv1 = makeContigTensor(1, dtype);
+  TensorView* tv2 = makeContigTensor(3, dtype);
+  TensorView* tv3 = makeContigTensor(3, dtype);
+  TensorView* tv4 = makeContigTensor(1, dtype);
+
   fusion->addInput(tv0);
-
-  TensorView* tv1 = TensorViewBuilder()
-                        .ndims(1)
-                        .dtype(dtype)
-                        .contiguity({true})
-                        .shape({-1})
-                        .build();
   fusion->addInput(tv1);
-
-  TensorView* tv2 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
   fusion->addInput(tv2);
-
-  TensorView* tv3 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
   fusion->addInput(tv3);
-
-  TensorView* tv4 = TensorViewBuilder()
-                        .ndims(1)
-                        .dtype(dtype)
-                        .contiguity({true})
-                        .shape({-1})
-                        .build();
   fusion->addInput(tv4);
 
   if (is_fp16) {
@@ -397,36 +350,24 @@ static void setupBiasDropoutAddLayernormBwd1(Fusion* fusion, DataType dtype) {
 
   bool is_fp16 = dtype == DataType::Half;
 
-  TensorView* tv1 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
-  fusion->addInput(tv1);
-
-  TensorView* tv2 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
-  fusion->addInput(tv2);
-
+  TensorView* tv1 = makeContigTensor(3, dtype);
+  TensorView* tv2 = makeContigTensor(3, dtype);
   TensorView* tv3 = TensorViewBuilder()
                         .ndims(3)
                         .dtype(dtype)
                         .contiguity({true, true, true})
                         .shape({-1, -1, 1})
                         .build();
-  fusion->addInput(tv3);
-
   TensorView* tv4 = TensorViewBuilder()
                         .ndims(3)
                         .dtype(dtype)
                         .contiguity({true, true, true})
                         .shape({-1, -1, 1})
                         .build();
+
+  fusion->addInput(tv1);
+  fusion->addInput(tv2);
+  fusion->addInput(tv3);
   fusion->addInput(tv4);
 
   if (is_fp16) {
@@ -525,30 +466,13 @@ static void setupBiasDropoutAddLayernormBwd2(Fusion* fusion, DataType dtype) {
                         .contiguity({true, true, true})
                         .shape({-1, -1, 1})
                         .build();
+  TensorView* tv5 = makeContigTensor(1, dtype);
+  TensorView* tv1 = makeContigTensor(3, dtype);
+  TensorView* tv8 = makeContigTensor(3, dtype);
+
   fusion->addInput(tv4);
-
-  TensorView* tv5 = TensorViewBuilder()
-                        .ndims(1)
-                        .dtype(dtype)
-                        .contiguity({true})
-                        .shape({-1})
-                        .build();
   fusion->addInput(tv5);
-
-  TensorView* tv1 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
   fusion->addInput(tv1);
-
-  TensorView* tv8 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
   fusion->addInput(tv8);
 
   if (is_fp16) {
@@ -647,20 +571,10 @@ static void setupBiasDropoutAddLayernormBwd3(Fusion* fusion, DataType dtype) {
 
   bool is_fp16 = dtype == DataType::Half;
 
-  TensorView* tv0 = TensorViewBuilder()
-                        .ndims(3)
-                        .dtype(dtype)
-                        .contiguity({true, true, true})
-                        .shape({-1, -1, -1})
-                        .build();
-  fusion->addInput(tv0);
+  TensorView* tv0 = makeContigTensor(3, dtype);
+  TensorView* tv21 = makeContigTensor(3, dtype);
 
-  TensorView* tv21 = TensorViewBuilder()
-                         .ndims(3)
-                         .dtype(dtype)
-                         .contiguity({true, true, true})
-                         .shape({-1, -1, -1})
-                         .build();
+  fusion->addInput(tv0);
   fusion->addInput(tv21);
 
   if (is_fp16) {

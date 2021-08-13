@@ -40,6 +40,18 @@ std::string toString(ReductionParams rparams) {
   return ss.str();
 }
 
+std::string toString(PointwiseParams params) {
+  std::stringstream ss;
+  if (params.inner_factor > 1) {
+    if (params.vectorize) {
+      ss << "Vectorize, Factor: " << params.inner_factor;
+    } else {
+      ss << "Unroll, Factor: " << params.inner_factor;
+    }
+  }
+  return ss.str();
+}
+
 std::string toString(LaunchParams lparams) {
   std::stringstream ss;
   lparams.toString();
@@ -61,6 +73,14 @@ void clearL2Cache() {
   torch::Tensor t0 = torch::empty(l2_elems, options);
   torch::Tensor t1 = torch::clone(t0);
 };
+
+TensorView* makeContigTensor(size_t ndims, DataType dtype) {
+  return TensorViewBuilder()
+      .ndims(ndims)
+      .dtype(dtype)
+      .contiguity(std::vector<bool>(ndims, true))
+      .build();
+}
 
 void runBenchmarkIterations(
     benchmark::State& benchmark_state,

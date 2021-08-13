@@ -2,6 +2,7 @@
 add_executable(nvfuser_bench
   batch_norm.cpp
   bert.cpp
+  broadcast.cpp
   gelu_backward.cpp
   heuristic_lookup.cpp
   instance_norm.cpp

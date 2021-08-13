@@ -25,7 +25,7 @@ static void setupSoftmax(
 
   FusionGuard fg(fusion);
   // setup fusion
-  auto input = TensorViewBuilder().ndims(2).dtype(dtype).build();
+  auto input = makeContigTensor(2, dtype);
   fusion->addInput(input);
 
   if (dtype == DataType::Half) {
@@ -120,17 +120,11 @@ static void setupSoftmaxDropout(
   constexpr float kScale = 1.0f / kDropoutProbability;
 
   // setup fusion
-  auto attention_scores = TensorViewBuilder()
-                              .ndims(4)
-                              .dtype(dtype)
-                              .contiguity(std::vector<bool>(4, true))
-                              .build();
-  auto attention_mask = TensorViewBuilder()
-                            .ndims(4)
-                            .dtype(dtype)
-                            .contiguity(std::vector<bool>(4, true))
-                            .build();
+  auto attention_scores = makeContigTensor(4, dtype);
+  auto attention_mask = makeContigTensor(4, dtype);
+
   Double* divisor = new Double();
+
   fusion->addInput(attention_scores);
   fusion->addInput(attention_mask);
   fusion->addInput(divisor);

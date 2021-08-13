@@ -18,13 +18,11 @@ static void setupInstanceNorm(Fusion* fusion, DataType dtype) {
 
   FusionGuard fg(fusion);
 
-  auto input = TensorViewBuilder().ndims(4).dtype(dtype).build();
-  auto weight = TensorViewBuilder().ndims(1).dtype(dtype).build();
-  auto bias = TensorViewBuilder().ndims(1).dtype(dtype).build();
-  auto running_mean =
-      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
-  auto running_var =
-      TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto input = makeContigTensor(4, dtype);
+  auto weight = makeContigTensor(1, dtype);
+  auto bias = makeContigTensor(1, dtype);
+  auto running_mean = makeContigTensor(1, DataType::Float);
+  auto running_var = makeContigTensor(1, DataType::Float);
 
   fusion->addInput(input);
   fusion->addInput(weight);

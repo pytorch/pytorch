@@ -20,15 +20,11 @@ static void setupFusion(Fusion* fusion) {
 
   TensorView* tvs[16];
   for (size_t i = 0; i < 16; i++) {
-    tvs[i] = TensorViewBuilder().ndims(2).dtype(DataType::Float).build();
+    tvs[i] = makeContigTensor(2, DataType::Float);
     fusion->addInput(tvs[i]);
   }
 
-  const auto cx = TensorViewBuilder()
-                      .ndims(2)
-                      .dtype(DataType::Float)
-                      .contiguity(std::vector<bool>(2, true))
-                      .build();
+  const auto cx = makeContigTensor(2, DataType::Float);
   fusion->addInput(cx);
 
   const auto in_x = add(add(add(tvs[0], tvs[1]), tvs[2]), tvs[3]);
