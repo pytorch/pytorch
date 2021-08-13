@@ -607,7 +607,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 # I didn't do it for this version
                 sig_body.append(f"at::{api_name}({out_exprs});")
             elif self.backend_index.dispatch_key != DispatchKey.Meta:
-                impl_exprs_gen = (e.expr for e in translate(context, structured.impl_arguments(self.g), method=False))
+                impl_exprs_gen = [e.expr for e in translate(context, structured.impl_arguments(self.g), method=False)]
 
                 if self.g.out.precomputed:
                     # A list of arguments for the impl function with

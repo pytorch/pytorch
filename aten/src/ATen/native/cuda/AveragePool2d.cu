@@ -234,12 +234,12 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
 
 TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 (const Tensor& input_,
- int kH,
- int kW,
- int dH,
- int dW,
- int padH,
- int padW,
+ int64_t kH_,
+ int64_t kW_,
+ int64_t dH_,
+ int64_t dW_,
+ int64_t padH_,
+ int64_t padW_,
  bool ceil_mode,
  bool count_include_pad,
  c10::optional<int64_t> divisor_override,
@@ -249,16 +249,23 @@ TORCH_IMPL_FUNC(avg_pool2d_out_cuda)
 
   checkAllSameGPU("avg_pool2d_out_cuda", {output_arg, input_arg});
 
-  /* sizes */
-  nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  nInputPlane = input_.size(-3);
-  inputHeight = input_.size(-2);
-  inputWidth = input_.size(-1);
+  const int kH = safe_downcast<int, int64_t>(kH_);
+  const int kW = safe_downcast<int, int64_t>(kW_);
 
-  int64_t outputWidth =
-      pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
-  int64_t outputHeight = pooling_output_shape<int64_t>(
-      inputHeight, kH, padH, dH, 1, ceil_mode);
+  const int dH = safe_downcast<int, int64_t>(dH_);
+  const int dW = safe_downcast<int, int64_t>(dW_);
+
+  const int padH = safe_downcast<int, int64_t>(padH_);
+  const int padW = safe_downcast<int, int64_t>(padW_);
+
+  /* sizes */
+  const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
+  const int64_t nInputPlane = input_.size(-3);
+  const int64_t inputHeight = input_.size(-2);
+  const int64_t inputWidth = input_.size(-1);
+
+  int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
+  int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
   const auto memory_format = input_.suggest_memory_format();
 
   Tensor input = input_.contiguous(memory_format);

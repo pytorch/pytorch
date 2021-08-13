@@ -1510,31 +1510,9 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
 
-# A PrecomputedElement consists of the name of such an element and its C++ type.
-# Together with `Precompute` below, it helps capture all information about
-# precomputed elements needed to properly generate code for a kernel that has them.
-@dataclass(frozen=True)
-class PrecomputedElement:
-    # The name of the precomputed element.
-    name: str
-    # The C++ type of the precomputed element.
-    cpp_ty: str
-
-    @staticmethod
-    def parse(src: str) -> 'PrecomputedElement':
-        cpp_ty, name = src.split(" ")
-        r = PrecomputedElement(name=name, cpp_ty=cpp_ty)
-        assert str(r) == src, f"{str(r)} != {src}"
-        return r
-
-    def decl(self) -> str:
-        return f"{self.cpp_ty} {self.name}"
-
-    def __str__(self) -> str:
-        return self.decl()
 
 # A Precompute instance consists of a map from kernel argument name
-# to the list of PrecomputedElement instances that should replace that
+# to the list of Argument instances that should replace that
 # kernel argument in the impl function.
 @dataclass(frozen=True)
 class Precompute:
@@ -1543,32 +1521,26 @@ class Precompute:
     replace: Dict[str, List[Argument]]
 
     @staticmethod
-    def parse(src: Dict[str, Any]) -> 'Precompute':
-        assert "elements" in src
-        assert "replace" in src
-
-        # Parse the "elements" field to get the names and types of all precomputed elements.
-        raw_elements = src["elements"].split(",")
-        elements = [Argument.parse(element.lstrip()) for element in raw_elements]
-        # Create a set out of elements just to sanity check below that all elements are
-        # mentioned in the "replace" field.
-        elements_set = set(elements)
-
-        # Parse the "replace" field to get the names of which precomputed elements
+    def parse(src: List[str]) -> 'Precompute':
+        # src is a list of strings of the format:
+        #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
+        # Parse this list to get the names of which precomputed elements
         # should replace which kernel arguments.
-        name_to_element = {element.name: element for element in elements}
         replace = {}
-        for raw_replace_item in src["replace"]:
-            arg, with_list = raw_replace_item.split(" -> ")
-            with_list = with_list.split(",")
-            with_list = [name_to_element[name.strip()] for name in with_list]
+        for raw_replace_item in src:
+            arg, with_list = raw_replace_item.split(' -> ')
+            with_list = with_list.split(',')
+            with_list = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list
 
-            for item in with_list:
-                elements_set.remove(item)
+        r = Precompute(replace=replace)
+        assert r.to_list() == src, 'r.to_list() != src'
+        return r
 
-        # All precomputed elements should be mentioned at least once on the RHS
-        # of an entry in the "replace" field.
-        assert not elements_set
+    def to_list(self) -> List[str]:
+        replace_list = []
+        for kernel_param, replacement_params in self.replace.items():
+            replacements = ', '.join(str(param) for param in replacement_params)
+            replace_list.append(f'{kernel_param} -> {replacements}')
 
-        return Precompute(replace=replace)
+        return replace_list
