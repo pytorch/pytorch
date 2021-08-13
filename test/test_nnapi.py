@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-import ctypes
 import os
-from typing import Tuple
-
+import ctypes
 import torch
+from typing import Tuple
 from torch.backends._nnapi.prepare import convert_model_to_nnapi
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -20,9 +19,10 @@ def nhwc(t):
 
 
 class TestNNAPI(TestCase):
+
     def setUp(self):
         # Avoid saturation in fbgemm
-        torch.backends.quantized.engine = "qnnpack"
+        torch.backends.quantized.engine = 'qnnpack'
 
         libneuralnetworks_path = os.environ.get("LIBNEURALNETWORKS_PATH")
         if libneuralnetworks_path:
@@ -69,9 +69,9 @@ class TestNNAPI(TestCase):
                 kwargs["rtol"] = atol_rtol[1]
             self.assertEqual(eager_output, nnapi_output, **kwargs)
             if limit is not None:
-                mismatches = eager_output.int_repr().to(
-                    torch.int32
-                ) - nnapi_output.int_repr().to(torch.int32)
+                mismatches = \
+                    eager_output.int_repr().to(torch.int32) - \
+                    nnapi_output.int_repr().to(torch.int32)
                 if mismatches.count_nonzero() > limit:
                     # Too many mismatches.  Re-run the check with no tolerance
                     # to get a nice message.
@@ -93,7 +93,7 @@ class TestNNAPI(TestCase):
         self.check(single_a, arg)
         multi_a = torch.nn.PReLU(4)
         with torch.no_grad():
-            multi_a.weight.copy_(torch.tensor([0.1, 0.2, 0.3, 0.4]))
+            multi_a.weight.copy_(torch.tensor([.1, .2, .3, .4]))
         self.check(multi_a, nhwc(arg))
 
         # Test flexible size
@@ -107,13 +107,12 @@ class TestNNAPI(TestCase):
     def test_quantize(self):
         self.check(
             torch.nn.quantized.Quantize(0.25, 2, torch.quint8),
-            nhwc(torch.tensor([[[[1.0]], [[2.0]]]])),
-        )
+            nhwc(torch.tensor([[[[1.0]], [[2.0]]]])))
 
     def test_dequantize(self):
         self.check(
-            torch.nn.quantized.DeQuantize(), nhwc(qpt([[[[1.0]], [[2.0]]]], 0.25, 2))
-        )
+            torch.nn.quantized.DeQuantize(),
+            nhwc(qpt([[[[1.0]], [[2.0]]]], 0.25, 2)))
 
     def test_unsqueeze(self):
         class UnsqueezeModule(torch.nn.Module):
@@ -139,12 +138,18 @@ class TestNNAPI(TestCase):
             def forward(self, arg):
                 return arg.reshape(self.shape)
 
-        self.check(ReshapeModule((2, 4)), torch.randn(4, 2, 1, 1))
+        self.check(
+            ReshapeModule((2, 4)),
+            torch.randn(4, 2, 1, 1))
 
-        self.check(ReshapeModule((8, -1)), nhwc(torch.randn(4, 2, 1, 1)))
+        self.check(
+            ReshapeModule((8, -1)),
+            nhwc(torch.randn(4, 2, 1, 1)))
 
         with self.assertRaisesRegex(Exception, "target size"):
-            self.check(ReshapeModule((2, 4)), nhwc(torch.randn(4, 2, 1, 1)))
+            self.check(
+                ReshapeModule((2, 4)),
+                nhwc(torch.randn(4, 2, 1, 1)))
 
     def test_flatten(self):
         for mod in [
@@ -152,7 +157,8 @@ class TestNNAPI(TestCase):
             torch.nn.Flatten(start_dim=2, end_dim=3),
             torch.nn.Flatten(start_dim=2, end_dim=4),
             torch.nn.Flatten(start_dim=0, end_dim=-2),
-            torch.nn.Flatten(start_dim=0, end_dim=4),
+            torch.nn.Flatten(start_dim=0, end_dim=4)
+
         ]:
             self.check(mod, torch.randn(4, 2, 1, 3, 7))
 
@@ -160,24 +166,31 @@ class TestNNAPI(TestCase):
         self.check(
             torch.nn.Flatten(),
             torch.randn(4, 2, 1, 3, 7),
-            convert_args=[torch.zeros(0, 2, 1, 3, 7)],
+            convert_args=[torch.zeros(0, 2, 1, 3, 7)]
         )
 
         # channels last
-        self.check(torch.nn.Flatten(), nhwc(torch.randn(2, 1, 4, 7)))
-        self.check(torch.nn.Flatten(), nhwc(torch.randn(2, 3, 1, 1)))
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 1, 4, 7))
+        )
+        self.check(
+            torch.nn.Flatten(),
+            nhwc(torch.randn(2, 3, 1, 1))
+        )
 
         # Exceptions
         with self.assertRaisesRegex(Exception, "not supported on NHWC"):
-            self.check(torch.nn.Flatten(), nhwc(torch.randn(1, 3, 4, 4)))
-        with self.assertRaisesRegex(
-            Exception, "Flattening flexible dims is not supported yet"
-        ):
+            self.check(
+                torch.nn.Flatten(),
+                nhwc(torch.randn(1, 3, 4, 4))
+            )
+        with self.assertRaisesRegex(Exception, "Flattening flexible dims is not supported yet"):
             self.check(torch.nn.Flatten(), torch.randn(4, 2, 0, 0, 7))
         with self.assertRaisesRegex(Exception, "Only 1 dim"):
             self.check(
-                torch.nn.Flatten(start_dim=1, end_dim=-2), torch.randn(0, 2, 1, 3, 0)
-            )
+                torch.nn.Flatten(start_dim=1, end_dim=-2),
+                torch.randn(0, 2, 1, 3, 0))
 
     def test_slice(self):
         class SliceModule(torch.nn.Module):
@@ -188,26 +201,32 @@ class TestNNAPI(TestCase):
                 self.step = step
 
             def forward(self, t):
-                return t[1:, self.start : self.stop : self.step, :]
+                return t[1:, self.start:self.stop:self.step, :]
 
         class SliceModule2(torch.nn.Module):
             def forward(self, t):
                 return t[3:]
 
-        self.check(SliceModule(1, 5, 2), torch.randn(4, 6, 2))
-        self.check(SliceModule2(), torch.randn(5))
+        self.check(
+            SliceModule(1, 5, 2),
+            torch.randn(4, 6, 2)
+        )
+        self.check(
+            SliceModule2(),
+            torch.randn(5)
+        )
 
         # flex inputs
         self.check(
             SliceModule(1, 5, 2),
             torch.randn(4, 6, 2),
-            convert_args=[torch.zeros(4, 6, 0)],
+            convert_args=[torch.zeros(4, 6, 0)]
         )
         with self.assertRaisesRegex(Exception, "slice with flexible shape"):
             self.check(
                 SliceModule(1, 5, 2),
                 torch.randn(4, 6, 2),
-                convert_args=[torch.zeros(0, 0, 0)],
+                convert_args=[torch.zeros(0, 0, 0)]
             )
 
     def test_cat(self):
@@ -224,24 +243,21 @@ class TestNNAPI(TestCase):
             [
                 torch.randn(1, 2, 3, 3),
                 torch.randn(2, 2, 3, 3),
-            ],
-        )
+            ])
 
         self.check(
             CatModule(1),
             [
                 torch.randn(1, 2, 3, 3),
                 torch.randn(1, 4, 3, 3),
-            ],
-        )
+            ])
 
         self.check(
             CatModule(1),
             [
                 nhwc(torch.randn(1, 2, 3, 3)),
                 nhwc(torch.randn(1, 4, 3, 3)),
-            ],
-        )
+            ])
 
         self.check(
             CatModule(1),
@@ -249,13 +265,14 @@ class TestNNAPI(TestCase):
                 torch.randn(1, 2, 3, 3),
                 torch.randn(1, 4, 3, 3),
             ],
-            convert_args=[torch.zeros(0, 0, 0, 0), torch.zeros(0, 0, 0, 0)],
-        )
+            convert_args=[
+                torch.zeros(0, 0, 0, 0),
+                torch.zeros(0, 0, 0, 0)
+            ])
 
     def test_pointwise_unary(self):
         for op in ["relu", "sigmoid"]:
             with self.subTest(op):
-
                 class UnaryModule(torch.nn.Module):
                     def forward(self, arg):
                         if op == "relu":
@@ -263,13 +280,11 @@ class TestNNAPI(TestCase):
                         if op == "sigmoid":
                             return torch.sigmoid(arg)
                         raise Exception("Bad op")
-
                 self.check(UnaryModule(), torch.tensor([-1.0, 1.0]))
 
     def test_pointwise_binary(self):
         for op in ["add", "sub", "mul", "div"]:
             with self.subTest(op):
-
                 class BinaryModule(torch.nn.Module):
                     def forward(self, lhs, rhs):
                         if op == "add":
@@ -287,16 +302,14 @@ class TestNNAPI(TestCase):
                     [
                         torch.tensor([1.0, 2.0]),
                         torch.tensor([3.0, 4.0]),
-                    ],
-                )
+                    ])
 
                 self.check(
                     BinaryModule(),
                     [
                         torch.tensor([[1.0, 2.0]]),
                         torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
-                    ],
-                )
+                    ])
 
                 with self.assertRaisesRegex(Exception, "Non-equal-rank broadcast"):
                     self.check(
@@ -304,8 +317,7 @@ class TestNNAPI(TestCase):
                         [
                             torch.tensor([1.0, 2.0]),
                             torch.tensor([[3.0, 4.0], [5.0, 6.0]]),
-                        ],
-                    )
+                        ])
 
     def test_hardtanh(self):
         inp = torch.tensor([-2.0, -0.5, 0.5, 2.0, 7.0])
@@ -356,10 +368,8 @@ class TestNNAPI(TestCase):
 
         self.check(DetachModule(), torch.randn(1, 2, 3, 3))
         self.check(
-            DetachModule(),
-            torch.randn(1, 2, 3, 3),
-            convert_args=[torch.zeros(1, 2, 0, 0)],
-        )
+            DetachModule(), torch.randn(1, 2, 3, 3),
+            convert_args=[torch.zeros(1, 2, 0, 0)])
 
     def test_log_softmax(self):
         inp = torch.randn(3, 10)
@@ -384,18 +394,14 @@ class TestNNAPI(TestCase):
         self.check(MeanModule([-1, -2], keep=True), nhwc(torch.randn(2, 3, 6, 6)))
 
     def test_max_pool2d(self):
-        for (name, inp) in self.float_and_quant_and_nhwc(
-            torch.randn(2, 3, 12, 16), 0.3, 128
-        ):
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.MaxPool2d(2), inp)
                 self.check(torch.nn.MaxPool2d((3, 4)), inp)
                 self.check(torch.nn.MaxPool2d((3, 4), (1, 2)), inp)
 
     def test_avg_pool2d(self):
-        for (name, inp) in self.float_and_quant_and_nhwc(
-            torch.randn(2, 3, 12, 16), 0.3, 128
-        ):
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 atol_rtol = None
                 limit = None
@@ -403,10 +409,9 @@ class TestNNAPI(TestCase):
                 convert_arg = torch.zeros(*convert_dims)
 
                 for model in (
-                    torch.nn.AvgPool2d(2),
-                    torch.nn.AvgPool2d((3, 4)),
-                    torch.nn.AvgPool2d((3, 4), (1, 2)),
-                ):
+                        torch.nn.AvgPool2d(2),
+                        torch.nn.AvgPool2d((3, 4)),
+                        torch.nn.AvgPool2d((3, 4), (1, 2))):
                     if "quant" in name:
                         atol_rtol = (1, 0)
                         limit = model(inp).numel()
@@ -420,25 +425,19 @@ class TestNNAPI(TestCase):
                         inp,
                         convert_args=[convert_arg],
                         atol_rtol=atol_rtol,
-                        limit=limit,
+                        limit=limit
                     )
 
     def test_adaptive_avg_pool2d(self):
-        for (name, inp) in self.float_and_quant_and_nhwc(
-            torch.randn(2, 3, 12, 16), 0.3, 128
-        ):
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.AdaptiveAvgPool2d((1, 1)), inp)
                 with self.assertRaisesRegex(Exception, "with output size"):
                     self.check(torch.nn.AdaptiveAvgPool2d((2, 2)), inp)
 
     def test_upsample_nearest2d(self):
-        convert_args = dict(
-            self.float_and_quant_and_nhwc(torch.randn(2, 3, 0, 0), 0.3, 128)
-        )
-        for (name, inp) in self.float_and_quant_and_nhwc(
-            torch.randn(2, 3, 12, 16), 0.3, 128
-        ):
+        convert_args = dict(self.float_and_quant_and_nhwc(torch.randn(2, 3, 0, 0), 0.3, 128))
+        for (name, inp) in self.float_and_quant_and_nhwc(torch.randn(2, 3, 12, 16), 0.3, 128):
             with self.subTest(name):
                 self.check(torch.nn.UpsamplingNearest2d(size=(16, 20)), inp)
                 self.check(torch.nn.UpsamplingNearest2d(size=(24, 32)), inp)
@@ -448,61 +447,39 @@ class TestNNAPI(TestCase):
                 self.check(torch.nn.UpsamplingNearest2d(scale_factor=(3.0, 3.0)), inp)
 
                 self.check(
-                    torch.nn.UpsamplingNearest2d(size=(24, 32)),
-                    inp,
-                    convert_args=[convert_args[name]],
+                    torch.nn.UpsamplingNearest2d(size=(24, 32)), inp,
+                    convert_args=[convert_args[name]]
                 )
                 self.check(
-                    torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)),
-                    inp,
-                    convert_args=[convert_args[name]],
+                    torch.nn.UpsamplingNearest2d(scale_factor=(2.0, 2.0)), inp,
+                    convert_args=[convert_args[name]]
                 )
 
     def test_linear(self):
         torch.manual_seed(29)
         self.check(torch.nn.Linear(16, 32), torch.randn(2, 16))
         self.check(
-            torch.nn.Linear(16, 32),
-            torch.randn(2, 16),
-            convert_args=[torch.zeros(0, 16)],
-        )
+            torch.nn.Linear(16, 32), torch.randn(2, 16),
+            convert_args=[torch.zeros(0, 16)])
 
     def test_conv2d(self):
         cases = [
             # in_ch, out_ch, kernel, stride, padding, groups, bias, input_dim,      name
-            (4, 8, (3, 3), 1, 0, 1, 1, (2, 4, 16, 16), "3x3"),  # noqa: E201,E241
-            (4, 8, (3, 3), 1, 0, 1, 0, (2, 4, 16, 16), "3x3nobias"),  # noqa: E201,E241
-            (4, 16, (3, 3), 1, 1, 1, 1, (2, 4, 16, 16), "3x3p1"),  # noqa: E201,E241
-            (8, 8, (3, 3), 2, 0, 1, 1, (2, 8, 16, 16), "3x3s2"),  # noqa: E201,E241
-            (4, 8, (5, 5), 1, 0, 1, 1, (2, 4, 16, 16), "5x5"),  # noqa: E201,E241
-            (4, 4, (3, 3), 1, 0, 4, 1, (2, 4, 16, 16), "3x3dw"),  # noqa: E201,E241
-            (8, 4, (1, 1), 1, 0, 1, 1, (2, 8, 16, 16), "1x1"),  # noqa: E201,E241
+            ( 4,     8,      (3, 3), 1,      0,       1,      1,    (2, 4, 16, 16), "3x3"),        # noqa: E201,E241
+            ( 4,     8,      (3, 3), 1,      0,       1,      0,    (2, 4, 16, 16), "3x3nobias"),  # noqa: E201,E241
+            ( 4,     16,     (3, 3), 1,      1,       1,      1,    (2, 4, 16, 16), "3x3p1"),      # noqa: E201,E241
+            ( 8,     8,      (3, 3), 2,      0,       1,      1,    (2, 8, 16, 16), "3x3s2"),      # noqa: E201,E241
+            ( 4,     8,      (5, 5), 1,      0,       1,      1,    (2, 4, 16, 16), "5x5"),        # noqa: E201,E241
+            ( 4,     4,      (3, 3), 1,      0,       4,      1,    (2, 4, 16, 16), "3x3dw"),      # noqa: E201,E241
+            ( 8,     4,      (1, 1), 1,      0,       1,      1,    (2, 8, 16, 16), "1x1"),        # noqa: E201,E241
         ]
 
         for kind in ["float", "float-nhwc", "quant", "quant-nhwc"]:
             for case in cases:
-                (
-                    in_ch,
-                    out_ch,
-                    kernel,
-                    stride,
-                    padding,
-                    groups,
-                    bias,
-                    input_dim,
-                    name,
-                ) = case
+                in_ch, out_ch, kernel, stride, padding, groups, bias, input_dim, name = case
                 with self.subTest("{}-{}".format(kind, name)):
                     inp = torch.randn(input_dim)
-                    model = torch.nn.Conv2d(
-                        in_ch,
-                        out_ch,
-                        kernel,
-                        stride,
-                        padding,
-                        groups=groups,
-                        bias=bool(bias),
-                    )
+                    model = torch.nn.Conv2d(in_ch, out_ch, kernel, stride, padding, groups=groups, bias=bool(bias))
                     output_size = model(inp).numel()
                     atol_rtol = None
                     limit = None
@@ -512,9 +489,7 @@ class TestNNAPI(TestCase):
                     if "quant" in kind:
                         model = torch.nn.Sequential(model)
                         model.eval()
-                        model.qconfig = torch.quantization.get_default_qconfig(
-                            "qnnpack"
-                        )
+                        model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
                         model = torch.quantization.prepare(model)
                         model(inp)
                         model = torch.quantization.convert(model)
@@ -536,7 +511,7 @@ class TestNNAPI(TestCase):
                         inp,
                         convert_args=[convert_arg],
                         atol_rtol=atol_rtol,
-                        limit=limit,
+                        limit=limit
                     )
 
     def test_conv2d_transpose(self):
@@ -558,7 +533,7 @@ class TestNNAPI(TestCase):
                     continue
                     model = torch.nn.Sequential(model)
                     model.eval()
-                    model.qconfig = torch.quantization.get_default_qconfig("qnnpack")
+                    model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
                     model = torch.quantization.prepare(model)
                     model(inp)
                     model = torch.quantization.convert(model)
@@ -580,8 +555,9 @@ class TestNNAPI(TestCase):
                     inp,
                     convert_args=[convert_arg],
                     atol_rtol=atol_rtol,
-                    limit=limit,
+                    limit=limit
                 )
+
 
     def test_qadd(self):
         func = torch.nn.quantized.QFunctional()
@@ -603,8 +579,7 @@ class TestNNAPI(TestCase):
                     [
                         qpt([1.0, 2.0], 0.25, 128),
                         qpt([3.0, 4.0], 0.25, 128),
-                    ],
-                )
+                    ])
                 self.check(
                     mod(),
                     [
@@ -614,7 +589,7 @@ class TestNNAPI(TestCase):
                     convert_args=[
                         qpt([[1.0, 2.0]], 0.25, 128),
                         qpt(torch.zeros((1, 2)), 0.25, 128),
-                    ],
+                    ]
                 )
                 self.check(
                     mod(),
@@ -625,7 +600,7 @@ class TestNNAPI(TestCase):
                     convert_args=[
                         qpt(torch.zeros((1, 2)), 0.25, 128),
                         qpt([[3.0, 4.0]], 0.25, 128),
-                    ],
+                    ]
                 )
                 self.check(
                     mod(),
@@ -636,7 +611,7 @@ class TestNNAPI(TestCase):
                     convert_args=[
                         qpt(torch.zeros((1, 2)), 0.25, 128),
                         qpt(torch.zeros((1, 2)), 0.25, 128),
-                    ],
+                    ]
                 )
                 # NOTE: NNAPI qadd supports broadcast, but PT does not.
 
@@ -659,8 +634,7 @@ class TestNNAPI(TestCase):
             [
                 nhwc(torch.randn(2, 3, 4, 4)),
                 torch.randn(1, 3, 1, 1),
-            ],
-        )
+            ])
 
     def test_multi_output(self):
         class MultiModel(torch.nn.Module):
@@ -672,5 +646,5 @@ class TestNNAPI(TestCase):
         self.check(MultiModel(), [torch.tensor([1.0, 2.0]), torch.tensor([1.0, 3.0])])
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

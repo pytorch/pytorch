@@ -10,15 +10,11 @@ if not PY37:
     # Workaround for https://github.com/python/typing/issues/449 in Python 3.6
     from typing import GenericMeta
 
-    class _PyFutureMeta(type(torch._C.Future), GenericMeta):  # type: ignore[misc]
+    class _PyFutureMeta(type(torch._C.Future), GenericMeta):   # type: ignore[misc]
         pass
-
-
 else:
-
     class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
         pass
-
 
 class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     r"""
@@ -29,9 +25,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
     .. warning:: GPU support is a beta feature, subject to changes.
     """
 
-    def __init__(
-        self, *, devices: Optional[List[Union[int, str, torch.device]]] = None
-    ):
+    def __init__(self, *, devices: Optional[List[Union[int, str, torch.device]]] = None):
         r"""
         Create an empty unset ``Future``. If the future is intended to hold
         values containing CUDA tensors, (a superset of) their CUDA devices must
@@ -169,9 +163,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         return cast(Future[S], super().then(callback))
 
     # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def add_done_callback(
-        self, callback
-    ):  # type: (Callable[[Future[T]], None]) -> None
+    def add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
@@ -270,9 +262,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
             ...
             ValueError: foo
         """
-        assert isinstance(
-            result, Exception
-        ), f"{result} is of type {type(result)}, not an Exception."
+        assert isinstance(result, Exception), f"{result} is of type {type(result)}, not an Exception."
 
         def raise_error(fut_result):
             raise fut_result
@@ -306,10 +296,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
         >>> print(f"fut1 result = {fut_list[1].wait()}")
         fut1 result = 1
     """
-    return cast(
-        Future[List[Future]],
-        torch._C._collect_all(cast(List[torch._C.Future], futures)),
-    )
+    return cast(Future[List[Future]], torch._C._collect_all(cast(List[torch._C.Future], futures)))
 
 
 def wait_all(futures: List[Future]) -> List:
@@ -327,7 +314,4 @@ def wait_all(futures: List[Future]) -> List:
         method will throw an error if ``wait`` on any
         :class:`~torch.futures.Future` throws.
     """
-    return [
-        fut.wait()
-        for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()
-    ]
+    return [fut.wait() for fut in torch._C._collect_all(cast(List[torch._C.Future], futures)).wait()]
