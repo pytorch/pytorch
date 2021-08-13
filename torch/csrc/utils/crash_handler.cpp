@@ -11,6 +11,12 @@
 #include <csignal>
 #elif __APPLE__
 #include <breakpad/src/client/mac/handler/exception_handler.h>
+#elif _WIN32
+#include <breakpad/src/client/windows/handler/exception_handler.h>
+
+#include <locale>
+#include <codecvt>
+#include <string>
 #else
 #error unsupported platform
 #endif
@@ -25,7 +31,7 @@ namespace crash_handler {
 #ifdef ADD_BREAKPAD_SIGNAL_HANDLER
 
 static std::unique_ptr<google_breakpad::ExceptionHandler> handler; // NOLINT
-static std::string minidump_directory; // NOLINT
+static STRING_TYPE minidump_directory; // NOLINT
 static bool enabled_for_exceptions = false; // NOLINT
 
 #if __linux__
@@ -51,12 +57,28 @@ bool dump_callback(
   }
   return succeeded;
 }
+#elif _WIN32
+bool dump_callback(const wchar_t* dump_path,
+                                   const wchar_t* minidump_id,
+                                   void* context,
+                                   EXCEPTION_POINTERS* exinfo,
+                                   MDRawAssertionInfo* assertion,
+                                   bool succeeded) {
+                                       if (succeeded) {
+    std::wcerr << "Wrote windows minidump to " << dump_path << "\\" << minidump_id
+              << ".dmp" << std::endl;
+  }
+  return succeeded;
+}
 
+// std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+// std::string narrow = converter.to_bytes(wide_utf16_source_string);
+// std::wstring wide = converter.from_bytes(narrow_utf8_source_string);
 #else
 #error unsupported platform
 #endif
 
-void enable_minidumps(const std::string& dir) {
+void enable_minidumps(const STRING_TYPE& dir) {
   minidump_directory = dir;
 // The constructor here registers the actual signal handler
 #ifdef __linux__
@@ -75,6 +97,13 @@ void enable_minidumps(const std::string& dir) {
       /*callback_context=*/nullptr,
       /*install_handler=*/true,
       /*port_name=*/nullptr);
+#elif _WIN32
+  handler = std::make_unique<google_breakpad::ExceptionHandler>(
+      /*dump_path=*/minidump_directory.c_str(),
+      /*filter=*/nullptr,
+      /*callback=*/dump_callback,
+      /*callback_context=*/nullptr,
+      /*handler_types=*/google_breakpad::ExceptionHandler::HandlerType::HANDLER_ALL);
 #else
 #error unsupported platform
 #endif
@@ -84,7 +113,7 @@ void disable_minidumps() {
   handler.reset();
 }
 
-const std::string& get_minidump_directory() {
+const STRING_TYPE& get_minidump_directory() {
   if (handler == nullptr) {
     AT_ERROR(
         "Minidump handler is uninintialized, make sure to call enable_minidumps first");
@@ -117,7 +146,7 @@ void enable_minidumps_on_exceptions() {
 
 #else
 // On unspported systems we can't do anything, so stub out everything.
-void enable_minidumps(const std::string& dir) {
+void enable_minidumps(const STRING_TYPE& dir) {
   AT_ERROR(
       "Minidump collection is currently only implemented for Linux/MacOS");
 }
@@ -126,7 +155,7 @@ void disable_minidumps() {
   // Purposefully do nothing
 }
 
-const std::string& get_minidump_directory() {
+const STRING_TYPE& get_minidump_directory() {
   AT_ERROR(
       "Minidump collection is currently only implemented for Linux/MacOS");
 }
