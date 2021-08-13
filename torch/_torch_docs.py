@@ -1886,7 +1886,7 @@ add_docstr(torch.concat,
 concat(tensors, dim=0, *, out=None) -> Tensor
 
 Alias of :func:`torch.cat`.
-""".format(**common_args))
+""")
 
 add_docstr(torch.ceil,
            r"""
