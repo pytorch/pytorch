@@ -1302,7 +1302,7 @@ std::pair<LivenessMap, LiveRangesMap> GetLiveness(
     auto idxs = item.second;
 
     live_ranges[value] = {
-        value_creation_idx[value], *max_element(begin(idxs), end(idxs))};
+        value_creation_idx[value], *std::max_element(begin(idxs), end(idxs))};
   }
 
   return std::make_pair(liveness_map, live_ranges);

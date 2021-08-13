@@ -3,10 +3,10 @@
 #include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
-#include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/profiling_record.h>
 
 #include <test/cpp/jit/test_utils.h>
 
@@ -35,7 +35,7 @@ TEST(MemoryPlannerTest, Basic) {
   // plan
   ProfilingRecord::removeProfileCounter(pr->profiled_graph_->block());
   jit::RemoveProfileNodesAndSpecializeTypes(pr->profiled_graph_);
-  jit::planMemory(pr->profiled_graph_);
+  jit::planMemory(pr->profiled_graph_, Strategy::LINEAR_SCAN);
 
   // run again to test
   Code cd2(pr->profiled_graph_, "");

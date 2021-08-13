@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/passes/memory_planning.h>
+#include <torch/csrc/jit/passes/memory_planning/greedy_by_size.h>
+#include <torch/csrc/jit/passes/memory_planning/linear_scan.h>
 
-#include <c10/core/ScalarType.h>
 #include <jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
@@ -57,189 +57,18 @@ std::pair<std::vector<int64_t>, std::vector<int64_t>> getSizesStrides(
   return std::make_pair(sizes, strides);
 }
 
-c10::optional<size_t> computeStorageSize(const c10::TensorTypePtr& ttp) {
-  // TODO: when does this fail? answer: in place mutation
-  auto numel = ttp->numel();
-  if (!numel.has_value()) {
-    return c10::nullopt;
-  }
+c10::optional<uint64_t> computeStorageSize(const c10::TensorTypePtr& ttp) {
   auto scalar_type = ttp->scalarType();
   if (!scalar_type.has_value()) {
     return c10::nullopt;
   }
   auto element_size = c10::elementSize(scalar_type.value());
-
+  // TODO: when does this fail? answer: in place mutation
+  auto numel = ttp->numel();
+  if (!numel.has_value()) {
+    return c10::nullopt;
+  }
   return numel.value() * element_size;
-}
-
-typedef struct Region {
-  uint64_t offset;
-  uint64_t size;
-} Region;
-
-bool operator==(const LiveRange& lhs, const LiveRange& rhs) {
-  return lhs.begin == rhs.begin && lhs.end == rhs.end;
-}
-bool operator!=(const LiveRange& lhs, const LiveRange& rhs) {
-  return !(lhs == rhs);
-}
-
-struct live_range_start_comp {
-  std::uint64_t operator()(LiveRange const& range1, LiveRange const& range2)
-      const {
-    return range1.begin < range2.begin;
-  }
-};
-
-struct live_range_end_comp {
-  std::uint64_t operator()(LiveRange const& range1, LiveRange const& range2)
-      const {
-    return range1.end < range2.end;
-  }
-};
-
-struct region_size_cmp {
-  std::uint64_t operator()(Region const& reg1, Region const& reg2) const {
-    return reg1.size < reg2.size;
-  }
-};
-
-void coalesce_avail(std::set<Region, region_size_cmp>& avail_regions) {
-  std::vector<Region> offset_sorted_avail_regions(
-      avail_regions.begin(), avail_regions.end());
-  std::sort(
-      offset_sorted_avail_regions.begin(),
-      offset_sorted_avail_regions.end(),
-      [](Region const& reg1, Region const& reg2) {
-        return reg1.offset < reg2.offset;
-      });
-
-  std::vector<Region> coalesced;
-  for (auto& offset_sorted_avail_region : offset_sorted_avail_regions) {
-    if (!coalesced.empty() &&
-        coalesced.back().offset + coalesced.back().size ==
-            offset_sorted_avail_region.offset) {
-      coalesced.back().size += offset_sorted_avail_region.size;
-    } else {
-      coalesced.emplace_back(offset_sorted_avail_region);
-    }
-  }
-  avail_regions.clear();
-  for (const auto& reg : coalesced) {
-    avail_regions.insert(reg);
-  }
-};
-
-// https://www.usenix.org/legacy/events/vee05/full_papers/p132-wimmer.pdf
-std::map<const Value*, Region> linearScanHeuristicAllocations(
-    std::map<const Value*, c10::TensorTypePtr> managed_tensor_values,
-    LiveRangesMap live_ranges) {
-  // WARNING: duplicate ranges not supported
-  std::map<LiveRange, const Value*, live_range_start_comp>
-      sorted_start_live_ranges_map;
-  for (const auto& item : live_ranges) {
-    if (managed_tensor_values.count(item.first)) {
-      sorted_start_live_ranges_map.insert({item.second, item.first});
-    }
-  }
-  std::vector<LiveRange> sorted_end_live_ranges;
-  sorted_end_live_ranges.reserve(sorted_start_live_ranges_map.size());
-  for (const auto& item : sorted_start_live_ranges_map) {
-    sorted_end_live_ranges.emplace_back(item.first);
-  }
-
-  int curr_end_reg = 0;
-  std::set<LiveRange, live_range_end_comp> active;
-  std::map<LiveRange, Region, live_range_start_comp> alloced_regions;
-  std::map<LiveRange, Region, live_range_start_comp> currently_alloced_regions;
-  std::set<Region, region_size_cmp> avail_regions;
-
-  for (auto& curr_live_range : sorted_start_live_ranges_map) {
-    auto curr_range = curr_live_range.first;
-
-    // expire old intervals
-    for (auto& dead_range : sorted_end_live_ranges) {
-      if (dead_range.end >= curr_range.begin) {
-        break;
-      }
-      active.erase(dead_range);
-      alloced_regions[dead_range] = currently_alloced_regions[dead_range];
-      avail_regions.insert(currently_alloced_regions[dead_range]);
-      currently_alloced_regions.erase(dead_range);
-    }
-
-    auto curr_size = computeStorageSize(
-        managed_tensor_values[sorted_start_live_ranges_map[curr_range]]);
-    if (!curr_size.has_value()) {
-      continue;
-    }
-    auto aligned_curr_size =
-        MemoryPlanner::compute_aligned_tensor_size(curr_size.value());
-
-    // check avail regions
-    const Region* reg = nullptr;
-    coalesce_avail(avail_regions);
-    for (auto& avail_reg : avail_regions) {
-      if (avail_reg.size >= aligned_curr_size) {
-        reg = &avail_reg;
-        break;
-      }
-    }
-
-    if (reg != nullptr) {
-      avail_regions.erase(*reg);
-      currently_alloced_regions[curr_range] = {reg->offset, aligned_curr_size};
-      // split region (potentially)
-      if (reg->size - aligned_curr_size > 0) {
-        avail_regions.insert(
-            {reg->offset + aligned_curr_size, reg->size - aligned_curr_size});
-      }
-    } else {
-      // if possible spill smallest farthest out alloc
-      const LiveRange* swap_lvr = nullptr;
-      if (!active.empty()) {
-        for (auto lv = active.end(); *lv != curr_range; lv--) {
-          auto alloced_reg = currently_alloced_regions[*lv];
-          if (alloced_reg.size >= aligned_curr_size) {
-            reg = &alloced_reg;
-            swap_lvr = &*lv;
-          } else {
-            break;
-          }
-        }
-      }
-
-      // swap i.e. put new alloc in old spot and malloc old alloc
-      if (reg != nullptr) {
-        // put new alloc at base of old region
-        currently_alloced_regions[curr_range] = {
-            reg->offset, aligned_curr_size};
-        // split region (potentially)
-        if (reg->size - aligned_curr_size > 0) {
-          avail_regions.insert(
-              {reg->offset + aligned_curr_size, reg->size - aligned_curr_size});
-        }
-        auto spill_size = currently_alloced_regions[*swap_lvr].size;
-        currently_alloced_regions[*swap_lvr] = {curr_end_reg, spill_size};
-        curr_end_reg += spill_size;
-      } else {
-        // create new alloc
-        currently_alloced_regions[curr_range] = {
-            curr_end_reg, aligned_curr_size};
-        curr_end_reg += aligned_curr_size;
-      }
-    }
-
-    active.insert(curr_range);
-  }
-
-  std::map<const Value*, Region> allocations;
-  for (auto& item : alloced_regions) {
-    auto lvr = item.first;
-    Region reg = item.second;
-    allocations[sorted_start_live_ranges_map[lvr]] = reg;
-  }
-  return allocations;
 }
 
 Node* insertAllocStorageNode(
@@ -261,7 +90,7 @@ Node* insertAllocStorageNode(
 void insertAllocTensorNodes(
     std::shared_ptr<Graph>& graph,
     Node* storage,
-    std::map<const Value*, Region> allocations) {
+    std::unordered_map<const Value*, Region> allocations) {
   uint64_t total_size = storage->i(attr::total_size);
   for (auto& allocation : allocations) {
     // const_cast fishy?
@@ -311,11 +140,10 @@ bool hasOutVariant(Node* node) {
   return false;
 }
 
-std::pair<std::vector<const Node*>, std::map<const Value*, c10::TensorTypePtr>>
-findManagedValues(
+std::unordered_map<const Value*, uint64_t> findManagedValues(
     const std::shared_ptr<Graph>& graph,
     std::unordered_set<const Value*> always_alive_values) {
-  std::map<const Value*, c10::TensorTypePtr> managed_tensor_values;
+  std::unordered_map<const Value*, uint64_t> managed_tensor_values;
   std::unordered_set<const Value*> leaked_values;
   std::vector<const Node*> out_nodes;
 
@@ -329,8 +157,9 @@ findManagedValues(
         continue;
       }
       auto ttp = checkIsSupported(*out_v);
-      if (ttp) {
-        managed_tensor_values.insert({out_v, ttp});
+      auto size = computeStorageSize(ttp);
+      if (ttp && size.has_value() && size.value() > 0) {
+        managed_tensor_values.insert({out_v, size.value()});
       } else if (isOptimizableContainerType(node)) {
         leaked_values.insert(out_v);
       } else {
@@ -343,27 +172,77 @@ findManagedValues(
       }
     }
   }
-  return std::make_pair(out_nodes, managed_tensor_values);
+  return managed_tensor_values;
 }
 
-void planMemory(std::shared_ptr<Graph>& graph) {
-  // find liveness with aliasing
+std::pair<
+    std::unordered_map<const Value*, uint64_t>,
+    std::unordered_map<const Value*, LiveRange>>
+getManagedStuff(std::shared_ptr<Graph>& graph) {
   AliasDb alias_db(graph);
   auto always_alive = jit::GetAlwaysAliveValues(graph, alias_db);
   auto live_ranges = jit::GetLiveness(graph, always_alive, alias_db).second;
+  auto managed_values = findManagedValues(graph, always_alive);
+  std::unordered_map<const Value*, LiveRange> managed_ranges;
+  for (const auto& lvr : live_ranges) {
+    if (managed_values.count(lvr.first) > 0) {
+      managed_ranges.insert(lvr);
+    }
+  }
+  return std::make_pair(managed_values, managed_ranges);
+}
 
-  // find out nodes and values that can be managed
-  std::vector<const Node*> out_nodes;
-  std::map<const Value*, c10::TensorTypePtr> managed_values;
-  std::tie(out_nodes, managed_values) = findManagedValues(graph, always_alive);
-
-  auto allocations =
-      linearScanHeuristicAllocations(managed_values, live_ranges);
-
+uint64_t getTotalAllocationSize(
+    std::unordered_map<const Value*, Region> allocations) {
   uint64_t total_size = 0;
   for (const auto& item : allocations) {
     total_size = std::max(total_size, item.second.offset + item.second.size);
   }
+  return total_size;
+}
+
+void printAllocation(
+    std::unordered_map<const Value*, Region> allocations,
+    std::unordered_map<const Value*, LiveRange> managed_ranges) {
+  std::map<LiveRange, const Value*, live_range_start_comp>
+  sorted_start_live_ranges_map;
+  for (const auto& item : managed_ranges) {
+    sorted_start_live_ranges_map.insert({item.second, item.first});
+  }
+
+  for (const auto &item : sorted_start_live_ranges_map) {
+    auto lvr = item.first;
+    auto val = item.second;
+    auto alloced_reg = allocations[val];
+    std::cout << val->debugName() << ": " <<  lvr << " " << alloced_reg << "\n";
+  }
+}
+
+void planMemory(std::shared_ptr<Graph>& graph, Strategy strat) {
+  std::unordered_map<const Value*, uint64_t> managed_values;
+  std::unordered_map<const Value*, LiveRange> managed_ranges;
+  std::tie(managed_values, managed_ranges) = getManagedStuff(graph);
+  std::unordered_map<const Value*, Region> allocations;
+
+  switch (strat) {
+    case Strategy::NAIVE: {
+      return;
+    }
+    case Strategy::GREEDY_BY_SIZE: {
+      allocations = greedyBySize(managed_values, managed_ranges);
+      break;
+    }
+    case Strategy::LINEAR_SCAN: {
+      allocations = linearScanHeuristic(managed_values, managed_ranges);
+      break;
+    };
+    default:
+      return;
+  }
+  auto total_size = getTotalAllocationSize(allocations);
+
+  printAllocation(allocations, managed_ranges);
+
   GRAPH_DEBUG("\ngraph before inserting storage node\n", *graph);
 
   auto storage_node = insertAllocStorageNode(graph, total_size);
@@ -372,6 +251,5 @@ void planMemory(std::shared_ptr<Graph>& graph) {
   insertAllocTensorNodes(graph, storage_node, allocations);
   GRAPH_DEBUG("\ngraph after inserting alloc nodes\n", *graph);
 }
-
 } // namespace jit
 } // namespace torch
