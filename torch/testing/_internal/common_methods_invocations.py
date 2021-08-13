@@ -1076,7 +1076,8 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
         ((3, 1), {'training': True, 'momentum': 0.0}),
         ((2, 1), {'training': True, 'momentum': 0.2}),
         ((1, 1, 2), {'training': False, 'momentum': 0.5}),
-        ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5})
+        ((3, 2, 3, 4), {'training': True, 'momentum': -1.0, 'eps': 0.5}),
+        ((1, 2, 2), {})
     )
 
     def generator():
