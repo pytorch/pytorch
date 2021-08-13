@@ -261,13 +261,6 @@ struct TORCH_API {name} {{
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
 STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
-
-// aten::{f.func}
-static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
-  return c10::Dispatcher::singleton()
-      .findSchemaOrThrow({name}::name, {name}::overload_name)
-      .typed<{name}::schema>();
-}}
 """
 
             for is_redispatching_fn in [False, True]:
@@ -283,7 +276,9 @@ static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed
                 defns += f"""
 // aten::{f.func}
 {sig.defn(name=method_name, is_redispatching_fn=is_redispatching_fn)} {{
-    static auto op = create_{name}_typed_handle();
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow({name}::name, {name}::overload_name)
+        .typed<{name}::schema>();
     return op.{dispatcher_call}({dispatcher_exprs_str});
 }}
 """
