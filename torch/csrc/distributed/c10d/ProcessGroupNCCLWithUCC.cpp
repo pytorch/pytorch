@@ -37,7 +37,7 @@ ProcessGroupNCCLWithUCC::ProcessGroupNCCLWithUCC(
   int rank,
   int size,
   c10::intrusive_ptr<Options> options):
-  ProcessGroup(rank, size), libucc("libtorch_ucc.so", nullptr, true)
+  ProcessGroup(rank, size), options_(options), libucc("libtorch_ucc.so", nullptr, true)
 {
 #ifdef USE_C10D_NCCL
   pg_nccl = c10::make_intrusive<ProcessGroupNCCL>(store, rank, size, options);
@@ -50,6 +50,8 @@ ProcessGroupNCCLWithUCC::ProcessGroupNCCLWithUCC(
   }
 #endif
 }
+
+ProcessGroupNCCLWithUCC::~ProcessGroupNCCLWithUCC() {}
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCLWithUCC::broadcast(
   std::vector<at::Tensor>& tensors,

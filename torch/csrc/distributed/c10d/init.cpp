@@ -1392,7 +1392,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 auto options = ::c10d::ProcessGroupNCCL::Options::create();
                 options->is_high_priority_stream = false;
                 options->timeout = timeout;
-                return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
+                return c10::make_intrusive<::c10d::ProcessGroupNCCLWithUCC>(
                     store, rank, size, options);
               }),
               py::arg("store"),
@@ -1401,7 +1401,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
-              "options", &::c10d::ProcessGroupNCCL::getOptions);
+              "options", &::c10d::ProcessGroupNCCLWithUCC::getOptions);
 
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,

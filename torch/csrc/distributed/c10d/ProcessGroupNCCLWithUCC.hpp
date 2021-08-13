@@ -8,10 +8,10 @@
 
 namespace c10d {
 
-constexpr const char* NCCL_BACKEND_NAME = "nccl";
+constexpr const char* BACKEND_NAME = "nccl";
 
 class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
-
+public:
   ProcessGroupNCCLWithUCC(
       const c10::intrusive_ptr<Store>& store,
       int rank,
@@ -20,8 +20,12 @@ class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
 
   virtual ~ProcessGroupNCCLWithUCC();
 
+  c10::intrusive_ptr<Options> getOptions() {
+    return options_;
+  }
+
   const std::string getBackendName() const override {
-      return std::string(NCCL_BACKEND_NAME);
+      return std::string(BACKEND_NAME);
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
@@ -110,6 +114,7 @@ class TORCH_API ProcessGroupNCCLWithUCC : public ProcessGroup {
   uint64_t getSequenceNumberForGroup() override;
 
 private:
+  c10::intrusive_ptr<Options> options_;
   at::DynamicLibrary libucc;
   c10::intrusive_ptr<ProcessGroup> pg_ucc;
   c10::intrusive_ptr<ProcessGroup> pg_nccl;
