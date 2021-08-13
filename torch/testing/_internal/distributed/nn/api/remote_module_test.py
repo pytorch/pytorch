@@ -624,7 +624,7 @@ class CudaRemoteModuleTest(CommonRemoteModuleTest):
                 )
             )
 
-        with self.assertRaisesRegex(RuntimeError, r"Invalid device string: 'cpu2'"):
+        with self.assertRaisesRegex(RuntimeError, r"Expected one of.*at start of device string: cpu2"):
             list(
                 m.forward()
                 for m in self._create_remote_module_iter(

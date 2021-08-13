@@ -68,7 +68,15 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
     device_name = device_string.substr(0, colon_pos);
     const std::string device_index_str = device_string.substr(colon_pos + 1);
     try {
-      index_ = c10::stoi(device_index_str);
+      size_t next_valid_pos = 0;
+      index_ = c10::stoi(device_index_str, &next_valid_pos);
+
+      // Ensure that the entire string was consumed.
+      TORCH_CHECK(
+          next_valid_pos == device_index_str.size(),
+          "Invalid device string: '",
+          device_string,
+          "' which has additional characters after the device index");
     } catch (const std::exception&) {
       TORCH_CHECK(
           false,
