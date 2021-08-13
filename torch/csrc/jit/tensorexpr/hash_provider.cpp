@@ -291,7 +291,7 @@ void HashProvider::visit(TermPtr v) {
   v->scalar()->accept(this);
 
   SimplifierHashType hash = hash_combine("term", hashOf(v->scalar()));
-  for (auto* c : v->variables()) {
+  for (auto c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -304,7 +304,7 @@ void HashProvider::visit(PolynomialPtr v) {
   v->scalar()->accept(this);
 
   SimplifierHashType hash = hash_combine("term", hashOf(v->scalar()));
-  for (auto* c : v->variables()) {
+  for (auto c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -320,7 +320,7 @@ void HashProvider::visit(MaxTermPtr v) {
     hash = hash_combine(hash, hashOf(v->scalar()));
   }
 
-  for (auto* c : v->variables()) {
+  for (auto c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }
@@ -336,7 +336,7 @@ void HashProvider::visit(MinTermPtr v) {
     hash = hash_combine(hash, hashOf(v->scalar()));
   }
 
-  for (auto* c : v->variables()) {
+  for (auto c : v->variables()) {
     c->accept(this);
     hash = hash_combine(hash, hashOf(c));
   }

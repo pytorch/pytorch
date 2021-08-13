@@ -9,53 +9,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Add;
-class Sub;
-class Mul;
-class Div;
-class Mod;
-class Max;
-class Min;
-class And;
-class Or;
-class Xor;
-class Lshift;
-class Rshift;
-class CompareSelect;
-
-#define IMM_DECLARE(Type, Name) class Name##Imm;
-AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_DECLARE);
-#undef IMM_DECLARE
-
-class Cast;
-class BitCast;
-class Var;
-class Buf;
-class Ramp;
-class Load;
-class For;
-class Block;
-class Store;
-class Broadcast;
-class IfThenElse;
-class ExprHandle;
-class Expr;
-class Intrinsics;
-class Allocate;
-class Free;
-class Let;
-class Cond;
-class Stmt;
-class Term;
-class Polynomial;
-class RoundOff;
-class MaxTerm;
-class MinTerm;
-class ReduceOp;
-class AtomicAdd;
-class SyncThreads;
-class ExternalCall;
-
 class TORCH_API IRCloner : public IRMutator {
  public:
   ~IRCloner() override = default;
@@ -72,7 +25,7 @@ class TORCH_API IRCloner : public IRMutator {
   ExprPtr mutate(LshiftPtr v) override;
   ExprPtr mutate(RshiftPtr v) override;
   ExprPtr mutate(CompareSelectPtr v) override;
-#define IMM_MUTATE_DECLARE(Type, Name) ExprPtr mutate(Name##Imm* v) override;
+#define IMM_MUTATE_DECLARE(Type, Name) ExprPtr mutate(Name##ImmPtr v) override;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, IMM_MUTATE_DECLARE);
 #undef IMM_MUTATE_DECLARE
   ExprPtr mutate(CastPtr v) override;
@@ -96,7 +49,7 @@ class TORCH_API IRCloner : public IRMutator {
   StmtPtr mutate(ForPtr v) override;
   StmtPtr mutate(BlockPtr v) override;
   StmtPtr mutate(StorePtr v) override;
-  StmtPtr mutate(AtomicAdd* v) override;
+  StmtPtr mutate(AtomicAddPtr v) override;
   StmtPtr mutate(SyncThreadsPtr v) override;
   StmtPtr mutate(ExternalCallPtr v) override;
 

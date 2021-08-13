@@ -62,7 +62,7 @@ const std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
   std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
-  for (auto* buf : bufs) {
+  for (auto buf : bufs) {
     if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
       result.insert(buf);
     }
@@ -294,7 +294,7 @@ class Vectorizer : public IRMutator {
 
     std::vector<ExprPtr> inputs = {v->body()};
 
-    auto* out = try_vectorize(v, inputs, [&]() {
+    auto out = try_vectorize(v, inputs, [&]() {
       return ExprHandle(
           alloc<ReduceOp>(inputs[0], v->reduce_args(), v->reducer()));
     });
@@ -429,7 +429,7 @@ bool LoopNest::vectorize(ForPtr f) {
 
   // Can't vectorize reduction axes.
   auto reductions = NodeFinder<ReduceOp>::find(f);
-  for (auto* r : reductions) {
+  for (auto r : reductions) {
     if (std::find(r->reduce_args().begin(), r->reduce_args().end(), f->var()) !=
         r->reduce_args().end()) {
       return false;
@@ -476,7 +476,7 @@ void LoopNest::initialize(
     }
     // Flatten initializers.
     if (BlockPtr block = to<Block>(loop)) {
-      for (auto* s : block->stmts()) {
+      for (auto s : block->stmts()) {
         block->remove_stmt(s);
         loops.push_back(s);
       }
@@ -494,7 +494,7 @@ class FunctionInliner : public IRMutator {
       : buf_(producer->buf()),
         producer_(producer),
         outputs_(std::move(outputs)) {
-    for (auto* i : producer->indices()) {
+    for (auto i : producer->indices()) {
       if (auto index_var = to<Var>(i)) {
         index_vars_.insert(index_var);
         producer_index_vars_.push_back(index_var);
@@ -550,11 +550,11 @@ class FunctionInliner : public IRMutator {
         "ComputeInline: After rewriting body: ", std::to_string(result));
 
     // Remove the mappings we created for this function parameters.
-    for (auto* v : index_vars) {
+    for (auto v : index_vars) {
       for (auto& pair : random_bindings_) {
         if (pair.second.erase(v)) {
           ExprPtr inlined = inline_mapping_[v];
-          for (auto* nv : VarFinder::find(inlined)) {
+          for (auto nv : VarFinder::find(inlined)) {
             pair.second.insert(nv);
           }
         }
@@ -596,7 +596,7 @@ class FunctionInliner : public IRMutator {
       return IRMutator::mutate(v);
     }
 
-    // Create a alloc<Let> Statment for the random variable, which we can refer
+    // Create a new Let Statment for the random variable, which we can refer
     // to multiple times and resolve the same value (ie. store it in a scalar
     // rather than the Tensor).
     const std::string& name = buf_->name_hint();
@@ -657,7 +657,7 @@ class FunctionInliner : public IRMutator {
       }
     }
 
-    for (auto* l : bindings_this_loop) {
+    for (auto l : bindings_this_loop) {
       res->body()->prepend_stmt(l);
       random_bindings_.erase(l);
     }
@@ -681,7 +681,7 @@ class FunctionInliner : public IRMutator {
 };
 
 bool LoopNest::computeInline(StmtPtr s) {
-  auto* s_store = to<Store>(s);
+  auto s_store = to<Store>(s);
   if (s_store == nullptr) {
     throw std::logic_error("Could not find buffer producer to inline");
   }
@@ -701,7 +701,7 @@ bool LoopNest::computeInline(BufPtr b) {
   // Find producers.
   StorePtr relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
-  for (auto* s : stores) {
+  for (auto s : stores) {
     if (s->buf() == b) {
       auto reductions = NodeFinder<ReduceOp>::find(s);
       if (!reductions.empty()) {
@@ -925,7 +925,7 @@ class StmtDeleter : public IRMutator {
   StmtPtr mutate(BlockPtr v) override {
     std::vector<StmtPtr> stmts;
 
-    for (auto* s : v->stmts()) {
+    for (auto s : v->stmts()) {
       if (targets_.count(s) == 0) {
         StmtPtr ns = s->accept_mutator(this);
         if (ns) {
@@ -947,7 +947,7 @@ void LoopNest::eliminateDeadStores() {
 
   std::unordered_set<StmtPtr> deadStores;
   std::vector<std::shared_ptr<AccessInfo>> outputAccesses;
-  for (auto* o : getOutputBufs()) {
+  for (auto o : getOutputBufs()) {
     outputAccesses.push_back(checker.output(o));
   }
 
@@ -1562,7 +1562,7 @@ bool areEqual(ExprPtr expr1, ExprPtr expr2) {
 bool doesExprContainAnyVar(
     ExprPtr expr,
     const std::unordered_set<VarPtr>& vars) {
-  for (auto* v : VarFinder::find(expr)) {
+  for (auto v : VarFinder::find(expr)) {
     if (vars.count(v)) {
       return true;
     }
@@ -1888,7 +1888,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   // When reordering loop i and j we need to ensure that Statement A and C are
   // still both executed with the loop extents of i, and that the three
   // statements are not reordered (as much as possible).
-  for (auto* loop : internal_axes) {
+  for (auto loop : internal_axes) {
     // If the inner loop had a component after the loop we must wrap it in a For
     // loop matching this level of the tree.
     if (after != nullptr) {
@@ -1930,7 +1930,7 @@ void LoopNest::reorderAxis(ForPtr a, ForPtr b) {
   std::swap(internal_axes.front(), internal_axes.back());
 
   // Create the reordered internals:
-  for (auto* loop : internal_axes) {
+  for (auto loop : internal_axes) {
     newInner = loop->cloneWithNewBody(newInner);
   }
 
@@ -2378,7 +2378,7 @@ std::vector<ForPtr> LoopNest::getLoopStmtsFor(StmtPtr s) const {
   std::vector<ForPtr> result;
 
   while (s) {
-    if (auto* loop = to<For>(s)) {
+    if (auto loop = to<For>(s)) {
       result.push_back(loop);
     }
     s = s->get_parent();
@@ -2405,7 +2405,7 @@ StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
   }
 
   StmtPtr res = nullptr;
-  for (auto* s : writes) {
+  for (auto s : writes) {
     if (!res) {
       res = s;
       continue;
@@ -2586,7 +2586,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
     StmtPtr consumer) {
   ReduceOpPtr reduceOp{nullptr};
   auto stores = NodeFinder<Store>::find(consumer);
-  for (auto* store : stores) {
+  for (auto store : stores) {
     if (auto ro = to<ReduceOp>(store->value())) {
       if (store->buf() != producer) {
         continue;
@@ -2662,7 +2662,7 @@ LoopNest::AccessResult LoopNest::cacheAccesses(
   // If there's a reduction and we are operating on the reduce axis, we need to
   // initialize the cache with 0s. Also, we can't just write the result straight
   // back to the original buffer, since after parallelism the writes will race.
-  // Instead we need to create a alloc<ReduceOp>.
+  // Instead we need to create a new ReduceOp.
   bool on_reduce_axis = false;
   if (reduceOp) {
     std::set<VarPtr> reduce_args(
@@ -2969,7 +2969,7 @@ class RfactorStoreRewriter : public IRMutator {
     ExprPtr body_new = v->body()->accept_mutator(this);
 
     std::vector<VarPtr> new_reduce_args;
-    for (auto* r : v->reduce_args()) {
+    for (auto r : v->reduce_args()) {
       if (r != reduction_var_) {
         new_reduce_args.push_back(r);
       }
