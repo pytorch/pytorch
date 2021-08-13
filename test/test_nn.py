@@ -13355,6 +13355,57 @@ class TestNNDeviceType(NNTestCase):
             unfold = torch.nn.Unfold(kernel_size=(2, 3)).to(device)
             unfold(inp)
 
+    @onlyOnCPUAndCUDA
+    def test_MaxPool_zero_batch_dim(self, device):
+        inp = torch.randn(0, 16, 50, device=device)
+        mod = torch.nn.MaxPool1d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        # 1D is supposed to be okay with 0 numel() inputs so dont test
+        # error raising for that case.
+
+        inp = torch.randn(0, 16, 50, 32, device=device)
+        mod = torch.nn.MaxPool2d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+        inp = torch.ones(0, 16, 50, 44, 31, device=device)
+        mod = torch.nn.MaxPool3d(3, stride=2).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.ones(1, 0, 50, 44, 31, device=device)
+            mod(inp)
+
+    @onlyOnCPUAndCUDA
+    def test_AdaptiveMaxPool_zero_batch_dim(self, device):
+        inp = torch.randn(0, 16, 50, device=device)
+        mod = torch.nn.AdaptiveMaxPool1d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, device=device)
+            mod(inp)
+
+        inp = torch.randn(0, 16, 50, 32, device=device)
+        mod = torch.nn.AdaptiveMaxPool2d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.randn(1, 0, 50, 32, device=device)
+            mod(inp)
+
+        inp = torch.ones(0, 16, 50, 44, 31, device=device)
+        mod = torch.nn.AdaptiveMaxPool3d(3).to(device)
+        self._test_module_empty_input(mod, inp, check_size=False)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected"):
+            inp = torch.ones(1, 0, 50, 44, 31, device=device)
+            mod(inp)
+
     @onlyCUDA
     @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
@@ -13852,8 +13903,8 @@ class TestNNDeviceType(NNTestCase):
                 model(torch.tensor(x, device=device, dtype=dtype))
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
-        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check(0, (1,), "Expected 2D or 3D input tensor, but got")
+        check([], (1,), "Expected 2D or 3D input tensor, but got")
         check([[]], (1, 0), "stride must be greater than zero, but got 0")
         check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
         check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
