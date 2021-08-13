@@ -295,6 +295,10 @@ test_vulkan() {
 }
 
 test_distributed() {
+  echo "Testing distributed python tests"
+  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  assert_git_not_dirty
+
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -318,11 +322,6 @@ test_distributed() {
     "$TORCH_BIN_DIR"/ProcessGroupNCCLTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLTest.xml
     "$TORCH_BIN_DIR"/ProcessGroupNCCLErrorsTest --gtest_output=xml:$TEST_REPORTS_DIR/ProcessGroupNCCLErrorsTest.xml
   fi
-
-  echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-
 }
 
 test_rpc() {
