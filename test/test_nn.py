@@ -8957,9 +8957,9 @@ class TestNN(NNTestCase):
             self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
             self.assertEqual(input.grad, ref_input.grad)
 
-        helper(self, (4, 17, 10, 10))
+        helper(self, (4, 8, 10, 10))
         helper(self, (4, 1, 9, 9))
-        helper(self, (4, 17, 1, 1))
+        helper(self, (4, 9, 1, 1))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
