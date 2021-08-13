@@ -4141,12 +4141,12 @@ class TestLinalg(TestCase):
         # test float and tensor variants
         for tol_value in [0.5, torch.tensor(0.5, device=device)]:
             # using rtol (relative tolerance) takes into account the largest singular value (0.9 in this case)
-            atol = 0.0 if isinstance(tol_value, float) else None # float overload doesn't support default values
+            atol = 0.0 if isinstance(tol_value, float) else None  # float overload doesn't support default values
             result = torch.linalg.matrix_rank(a, atol=atol, rtol=tol_value)
             self.assertEqual(result, 5)  # there are 5 singular values above 0.9*0.5=0.45
 
             # atol is used directly to compare with singular values
-            rtol = 0.0 if isinstance(tol_value, float) else None # float overload doesn't support default values
+            rtol = 0.0 if isinstance(tol_value, float) else None  # float overload doesn't support default values
             result = torch.linalg.matrix_rank(a, atol=tol_value, rtol=rtol)
             self.assertEqual(result, 4)  # there are 4 singular values above 0.5
 
