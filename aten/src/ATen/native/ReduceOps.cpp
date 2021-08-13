@@ -33,7 +33,7 @@ namespace native {
 
 inline ScalarType get_dtype_from_self(
     const Tensor& self,
-    optional<ScalarType> dtype,
+    const optional<ScalarType>& dtype,
     bool promote_integers) {
   if (dtype.has_value()) {
     return dtype.value();
@@ -48,6 +48,41 @@ inline ScalarType get_dtype_from_self(
 } // namespace native
 
 namespace meta {
+
+void resize_reduction(
+    impl::MetaBase& meta,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    ScalarType out_dtype) {
+  DimVector dims_(dims);
+  maybe_wrap_dims(dims_, self.dim());
+  auto shape = get_reduction_shape(self, dims_, keepdim);
+  meta.set_output(shape, self.options().dtype(out_dtype));
+  namedinference::propagate_names_for_reduction(
+      meta.maybe_get_output(), self, dims_, keepdim);
+}
+
+ScalarType infer_dtype_from_optional(
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    const optional<ScalarType>& opt_dtype,
+    const Tensor& result) {
+  // 'opt_dtype' has the priority for both cases.
+  if (result.defined()) {
+    // Otherwise, get the result type, if defined.
+    return opt_dtype.value_or(result.scalar_type());
+  } else {
+    // Last case is to get the self type.
+    // If the self type is an integer, we promote it to kLong.
+    return at::native::get_dtype_from_self(self, opt_dtype, true);
+  }
+}
+
+IntArrayRef optional_to_arrayref(const c10::optional<int64_t>& opt) {
+  return opt.has_value() ? opt.value() : IntArrayRef{};
+}
 
 ScalarType check_allany_and_get_output_dtype(
     const char* name,
@@ -81,57 +116,40 @@ ScalarType check_allany_and_get_output_dtype(
   return out_dtype;
 }
 
-void check_allany_for_meta(
-    impl::MetaBase& meta,
-    const char* name,
-    const Tensor& self,
-    int64_t dim,
-    bool keepdim) {
-  dim = maybe_wrap_dim(dim, self.dim());
-  const auto& result = meta.maybe_get_output();
-  auto out_dtype = check_allany_and_get_output_dtype(name, self, result, keepdim);
-  auto shape = get_reduction_shape(self, dim, keepdim);
-  meta.set_output(shape, self.options().dtype(out_dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
-}
-
 TORCH_META_FUNC2(all, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_allany_for_meta(*this, "all", self, dim, keepdim);
+  auto out_dtype = check_allany_and_get_output_dtype("all", self, maybe_get_output(), keepdim);
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(any, dim)(const Tensor& self, int64_t dim, bool keepdim) {
-  check_allany_for_meta(*this, "any", self, dim, keepdim);
+  auto out_dtype = check_allany_and_get_output_dtype("any", self, maybe_get_output(), keepdim);
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 void check_argmax_argmin(
-    impl::MetaBase& meta,
     const char* name,
     const Tensor& self,
-    c10::optional<int64_t> dim,
-    bool keepdim) {
-  DimVector shape;
-
+    const c10::optional<int64_t>& dim) {
   if (dim.has_value()) {
-    auto _dim = maybe_wrap_dim(dim.value(), self.dim());
-    native::zero_numel_check_dims(self, _dim, name);
-    shape = get_reduction_shape(self, _dim, keepdim);
+    auto dim_ = maybe_wrap_dim(dim.value(), self.dim());
+    native::zero_numel_check_dims(self, dim_, name);
   } else {
     TORCH_CHECK_INDEX(
         self.numel() != 0,
         name, ": Expected reduction dim to be specified for input.numel() == 0.");
   }
-
-  meta.set_output(shape, self.options().dtype(kLong));
 }
 
 TORCH_META_FUNC(argmax)
 (const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  check_argmax_argmin(*this, "argmax", self, dim, keepdim);
+  check_argmax_argmin("argmax()", self, dim);
+  resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
 TORCH_META_FUNC(argmin)
 (const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
-  check_argmax_argmin(*this, "argmin", self, dim, keepdim);
+  check_argmax_argmin("argmin()", self, dim);
+  resize_reduction(*this, self, optional_to_arrayref(dim), keepdim, kLong);
 }
 
 void meta_func_cum_ops(
@@ -175,21 +193,17 @@ TORCH_META_FUNC(cumprod)
 
 TORCH_META_FUNC2(sum, dim_IntList)
 (const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  ScalarType dtype;
-  const auto& result = maybe_get_output();
+  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
+}
 
-  if (result.defined()) {
-    dtype = opt_dtype.value_or(result.scalar_type());
-  } else {
-    dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
-  }
-
-  DimVector dims(dim);
-  maybe_wrap_dims(dims, self.dim());
-
-  auto shape = get_reduction_shape(self, dims, keepdim);
-  set_output(shape, self.options().dtype(dtype));
-  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
+TORCH_META_FUNC2(prod, dim_int)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ c10::optional<ScalarType> dtype) {
+  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, dtype, maybe_get_output());
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(mean, dim)
@@ -199,22 +213,8 @@ TORCH_META_FUNC2(mean, dim)
       at::isFloatingType(self_dtype) || at::isComplexType(self_dtype),
       "Can only calculate the mean of floating types. Got ",
       toString(self_dtype), " instead.");
-
-  ScalarType dtype;
-  const auto& result = maybe_get_output();
-
-  if (result.defined()) {
-    dtype = opt_dtype.value_or(result.scalar_type());
-  } else {
-    dtype = at::native::get_dtype_from_self(self, opt_dtype, true);
-  }
-
-  DimVector dims(dim);
-  maybe_wrap_dims(dims, self.dim());
-
-  DimVector shape = get_reduction_shape(self, dims, keepdim);
-  set_output(shape, self.options().dtype(dtype));
-  namedinference::propagate_names_for_reduction(result, self, dim, keepdim);
+  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
+  resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
 } // namespace meta
@@ -1055,21 +1055,35 @@ Tensor trace_cpu(const Tensor& self) {
   return result;
 }
 
-Tensor prod(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
-  Tensor result = create_reduction_result(self, dim, keepdim, dtype);
-  native::prod_out_impl(result, self, dim, keepdim, dtype);
-  return result;
+void impl_func_prod(
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim,
+    c10::optional<ScalarType> dtype,
+    const Tensor& result) {
+  auto iter = meta::make_reduction_from_out_ty(self, result, dims, keepdim, result.scalar_type());
+  if (iter.numel() == 0) {
+    result.fill_(1);
+  } else {
+    prod_stub(iter.device_type(), iter);
+  }
+}
+
+TORCH_IMPL_FUNC(prod_out)
+(const Tensor& self,
+ int64_t dim,
+ bool keepdim,
+ c10::optional<ScalarType> dtype,
+ const Tensor& result) {
+  impl_func_prod(self, dim, keepdim, dtype, result);
 }
 
 Tensor prod(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_self(self, opt_dtype, true);
-  Tensor result = create_reduction_result(self, {}, false, dtype);
-  return at::native::prod_out_impl(result, self, {}, false, dtype);
-}
-
-Tensor& prod_out(const Tensor& self, int64_t dim, bool keepdim, c10::optional<ScalarType> dtype, Tensor& result) {
-  return at::native::prod_out_impl(result, self, dim, keepdim, dtype);
+  auto dtype = get_dtype_from_self(self, opt_dtype, true);
+  auto shape = meta::get_reduction_shape(self, {}, false);
+  Tensor result = at::empty(shape, self.options().dtype(dtype));
+  impl_func_prod(self, {}, false, dtype, result);
+  return result;
 }
 
 Tensor prod(const Tensor& self, Dimname dim, bool keepdim, c10::optional<ScalarType> dtype) {
